@@ -3,10 +3,7 @@
 use super::{
     Camera,
     collapse::Aggregate,
-    layout::{
-        CHIP_HEIGHT, COMPACT_HEADER, COMPACT_ROW, Card, CardDetail, Chip, CompactRole, RowValue,
-        WIDTH,
-    },
+    layout::{CHIP_HEIGHT, COMPACT_HEADER, Card, CardDetail, Chip, CompactRole, RowValue, WIDTH},
     routing::Routed,
 };
 use crate::{icons::Icon, theme, widgets::paint_label as label};
@@ -247,7 +244,7 @@ pub fn continuation_mark(painter: &Painter, mark: &super::shape::Mark, camera: C
     const WIDEST: f32 = 160.0;
     const PADDING: f32 = 6.0;
     let rect = camera.rect(mark.rect);
-    let font = FontId::proportional((12.0 * camera.zoom).max(9.0));
+    let font = FontId::proportional((12.0 * camera.zoom).max(LINE_MIN));
     let mut job = egui::text::LayoutJob::simple_singleline(mark.text.clone(), font, theme::MUTED);
     job.wrap = egui::text::TextWrapping::truncate_at_width(WIDEST - 2.0 * PADDING);
     let galley = painter.layout_job(job);
@@ -275,21 +272,181 @@ pub fn continuation_mark(painter: &Painter, mark: &super::shape::Mark, camera: C
     );
 }
 
-/// The border of a step one of whose checks failed: red, 2 px at every
-/// zoom, while the band keeps the step's own result (Q15 = A). On a
-/// selected card it runs inside the selection's border, so both show.
-fn failed_check_border(painter: &Painter, rect: Rect, radius: f32, selected: bool) {
+/// The smallest text a card writes on screen, in points, by what it says
+/// (LAY-09): a name, a step number and a line.
+pub const NAME_MIN: f32 = 11.0;
+// LAY-07's badge writes the number; until then only the tests read these.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const NUMBER_MIN: f32 = 9.0;
+pub const LINE_MIN: f32 = 9.0;
+/// The sizes at 100 %: a card's name and a line.
+const NAME_TEXT: f32 = 16.0;
+const LINE_TEXT: f32 = 12.0;
+/// Below this zoom a card is its band, its border and its badge; its name
+/// is written only where it fits (LAY-09).
+const LABELS_FROM: f32 = 0.25;
+
+/// A text's size on screen at `zoom`, never under `min`: the one rule every
+/// card kind follows at every level, so no text gets smaller when zooming in.
+pub fn min_on_screen(size: f32, zoom: f32, min: f32) -> f32 {
+    (size * zoom).max(min)
+}
+
+/// What a text on a card says, for the minimum sizes (LAY-09).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextKind {
+    Name,
+    /// A step number (LAY-07).
+    #[cfg_attr(not(test), allow(dead_code))]
+    Number,
+    /// The execution line, the checks line or the checks pill.
+    Result,
+    Subtitle,
+    /// Any other line: an input, an output, a caption.
+    Line,
+}
+
+/// A text a card drew: what it says, its size on screen and its colour.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DrawnText {
+    pub kind: TextKind,
+    pub size: f32,
+    pub color: Color32,
+    pub text: String,
+}
+
+/// What a card drew in a frame, which only a test build collects.
+#[derive(Clone, Debug, Default)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct Drawn {
+    /// The lines of a compact card, in order.
+    pub lines: Vec<String>,
+    pub texts: Vec<DrawnText>,
+    /// The 2 px border of a failed or blocked card.
+    pub signal: Option<Color32>,
+    /// The band's colour.
+    pub band: Option<Color32>,
+}
+
+impl Drawn {
+    /// Draws a text in `rect` and notes it.
+    #[allow(clippy::too_many_arguments)]
+    fn label(
+        &mut self,
+        painter: &Painter,
+        rect: Rect,
+        text: &str,
+        kind: TextKind,
+        font: FontId,
+        color: Color32,
+        align: egui::Align,
+    ) {
+        #[cfg(test)]
+        self.texts.push(DrawnText {
+            kind,
+            size: font.size,
+            color,
+            text: text.to_owned(),
+        });
+        #[cfg(not(test))]
+        let _ = kind;
+        label(painter, rect, text, font, color, align);
+    }
+}
+
+/// The colour of a card's signal border: red for a step that failed or one
+/// of whose checks failed, amber for a blocked one (Q15 = A).
+fn signal(step: Option<&StepResult>, aggregate: Option<&Aggregate>) -> Option<Color32> {
+    match step.map(|step| step.status) {
+        Some(StepStatus::Failed | StepStatus::Error) => Some(theme::DANGER),
+        _ if aggregate.is_some_and(Aggregate::failed) => Some(theme::DANGER),
+        Some(StepStatus::Blocked) => Some(theme::WARNING),
+        _ => None,
+    }
+}
+
+/// The execution line of a step that ran: `HTTP 200 · 12 ms` for a request
+/// that has a status, `Passed · 3 ms` for another step.
+fn execution(step: &StepResult) -> (String, Color32) {
+    let what = match step
+        .outputs
+        .get("status")
+        .and_then(serde_json::Value::as_u64)
+    {
+        Some(code) if step.kind == NodeKind::Request => format!("HTTP {code}"),
+        _ => step.status.label().to_owned(),
+    };
+    (
+        format!("{what} · {} ms", step.duration_ms),
+        status_color(step.status),
+    )
+}
+
+/// The checks pill under a card's name at Overview (Q5 = A): what became of
+/// the step's checks, red when one failed. Drawn only where it fits.
+fn pill(
+    painter: &Painter,
+    drawn: &mut Drawn,
+    card: Rect,
+    top: f32,
+    // Under a centred name, or at the left under a name at the left.
+    centred: bool,
+    zoom: f32,
+    aggregate: &Aggregate,
+) {
+    let text = aggregate.text();
+    if text.is_empty() || zoom < LABELS_FROM {
+        return;
+    }
+    let font = FontId::proportional(min_on_screen(LINE_TEXT, zoom, LINE_MIN));
+    let color = if aggregate.failed() {
+        theme::DANGER
+    } else {
+        theme::MUTED
+    };
+    let size = painter
+        .layout_no_wrap(text.clone(), font.clone(), color)
+        .size();
+    let width = (size.x + 10.0).min(card.width() - 10.0);
+    let left = if centred {
+        card.center().x - width / 2.0
+    } else {
+        card.left() + 5.0
+    };
+    let rect = Rect::from_min_size(pos2(left, top), vec2(width, size.y + 2.0));
+    if rect.bottom() > card.bottom() - 1.0 || rect.width() < 12.0 {
+        return;
+    }
+    painter.rect_filled(
+        rect,
+        rect.height() / 2.0,
+        if aggregate.failed() {
+            theme::DANGER.gamma_multiply(0.12)
+        } else {
+            theme::FIELD
+        },
+    );
+    drawn.label(
+        painter,
+        rect.shrink2(vec2(5.0, 0.0)),
+        &text,
+        TextKind::Result,
+        font,
+        color,
+        egui::Align::Min,
+    );
+}
+
+/// The border of a failed or blocked step: 2 px at every zoom, while the
+/// band keeps the step's own result (Q15 = A). On a selected card it runs
+/// inside the selection's border, so both show.
+fn signal_border(painter: &Painter, rect: Rect, radius: f32, selected: bool, color: Color32) {
     let (rect, radius) = if selected {
         (rect.shrink(2.0), (radius - 2.0).max(1.0))
     } else {
         (rect, radius)
     };
-    painter.rect_stroke(
-        rect,
-        radius,
-        Stroke::new(2.0, theme::DANGER),
-        StrokeKind::Inside,
-    );
+    painter.rect_stroke(rect, radius, Stroke::new(2.0, color), StrokeKind::Inside);
 }
 
 fn wire_color(selected: bool, control: bool, branch: Option<Branch>) -> Color32 {
@@ -439,10 +596,12 @@ pub fn card(
     step: Option<&StepResult>,
     // What became of the checks that read the step (LAY-11).
     aggregate: Option<&Aggregate>,
-) {
+) -> Drawn {
     use super::layout::CARD_PADDING;
+    let mut drawn = Drawn::default();
     let failed_check = aggregate.is_some_and(Aggregate::failed);
     let z = camera.zoom;
+    let line = |size: f32| min_on_screen(size, z, LINE_MIN);
     let detail = CardDetail::at_zoom(z);
     let rect = camera.rect(card.rect());
     let local = |x: f32, y: f32| camera.to_screen(card.origin + vec2(x, y));
@@ -469,28 +628,52 @@ pub fn card(
         Stroke::new(if selected || related { 1.7 } else { 1.0 }, border_color),
         StrokeKind::Inside,
     );
-    if failed_check {
-        failed_check_border(painter, rect, radius, selected);
-    }
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
     let color = theme::block_color(card.block);
+    let name_font = FontId::new(min_on_screen(NAME_TEXT, z, NAME_MIN), theme::bold_family());
 
     if detail == CardDetail::Overview {
-        // At 25% this is a small diagram tile, not a miniature form. Its one
-        // readable title has the whole tile to itself; values live in Inspector.
+        // A small diagram tile, not a miniature form. Its one readable title
+        // has the tile to itself, the checks pill under it (Q5 = A); values
+        // live in the Inspector.
         let accent = Rect::from_min_max(
             rect.left_top() + vec2(4.0, 4.0),
             rect.right_top() + vec2(-4.0, 6.0),
         );
         clipped.rect_filled(accent, 1.0, color.gamma_multiply(0.65));
-        label(
-            &clipped,
-            rect.shrink2(vec2(5.0, 10.0)),
-            &card.name,
-            FontId::new((16.0 * z).max(7.5), theme::bold_family()),
-            theme::TEXT,
-            egui::Align::Center,
-        );
+        let height = clipped
+            .layout_no_wrap(card.name.clone(), name_font.clone(), theme::TEXT)
+            .size()
+            .y;
+        let pill_height = aggregate.map_or(0.0, |_| line(LINE_TEXT) * 1.4);
+        let area = rect.shrink2(vec2(5.0, 8.0));
+        // Below 25 % only where the tile holds the name, two letters wide.
+        if z >= LABELS_FROM || (area.height() >= height && area.width() >= 2.0 * NAME_MIN) {
+            let name = Rect::from_center_size(
+                area.center() - vec2(0.0, pill_height / 2.0),
+                vec2(area.width(), height),
+            );
+            drawn.label(
+                &clipped,
+                name,
+                &card.name,
+                TextKind::Name,
+                name_font,
+                theme::TEXT,
+                egui::Align::Center,
+            );
+            if let Some(aggregate) = aggregate {
+                pill(
+                    &clipped,
+                    &mut drawn,
+                    rect,
+                    name.bottom() + 1.0,
+                    true,
+                    z,
+                    aggregate,
+                );
+            }
+        }
     } else {
         let full = detail == CardDetail::Full;
         let icon = Rect::from_min_size(local(CARD_PADDING, 16.0), Vec2::splat(28.0 * z));
@@ -506,16 +689,17 @@ pub fn card(
                 &clipped,
                 cell(56.0, 12.0, title_right, 28.0),
                 &card.caption,
-                FontId::proportional(10.5 * z),
+                FontId::proportional(line(10.5)),
                 theme::MUTED,
                 egui::Align::Min,
             );
         }
-        label(
+        drawn.label(
             &clipped,
             cell(56.0, if full { 28.0 } else { 14.0 }, title_right, 56.0),
             &card.name,
-            FontId::new(16.0 * z, theme::bold_family()),
+            TextKind::Name,
+            name_font.clone(),
             theme::TEXT,
             egui::Align::Min,
         );
@@ -524,11 +708,12 @@ pub fn card(
             Icon::ExternalLink.paint(&clipped, button.shrink(6.0 * z), theme::MUTED);
         }
         if let Some(subtitle) = &card.subtitle {
-            label(
+            drawn.label(
                 &clipped,
                 cell(CARD_PADDING, 64.0, WIDTH - CARD_PADDING, 88.0),
                 subtitle,
-                FontId::proportional(12.0 * z),
+                TextKind::Subtitle,
+                FontId::proportional(line(12.0)),
                 theme::LINK,
                 egui::Align::Min,
             );
@@ -545,7 +730,7 @@ pub fn card(
                     &clipped,
                     cell(CARD_PADDING, top, WIDTH - CARD_PADDING, top + 18.0),
                     &name,
-                    FontId::proportional(12.0 * z),
+                    FontId::proportional(line(12.0)),
                     theme::MUTED,
                     egui::Align::Min,
                 );
@@ -579,7 +764,7 @@ pub fn card(
                     &clipped,
                     field.shrink2(vec2(8.0 * z, 2.0 * z)),
                     &text,
-                    FontId::proportional(13.0 * z),
+                    FontId::proportional(line(13.0)),
                     text_color,
                     egui::Align::Min,
                 );
@@ -599,7 +784,7 @@ pub fn card(
                 clipped
                     .layout_no_wrap(
                         row.type_label.clone(),
-                        FontId::proportional(11.0 * z),
+                        FontId::proportional(line(11.0)),
                         theme::MUTED,
                     )
                     .size()
@@ -614,7 +799,7 @@ pub fn card(
                     &clipped,
                     cell(right - type_width / z, y - 12.0, right, y + 12.0),
                     &row.type_label,
-                    FontId::proportional(11.0 * z),
+                    FontId::proportional(line(11.0)),
                     theme::MUTED,
                     egui::Align::Max,
                 );
@@ -628,7 +813,7 @@ pub fn card(
                     y + 12.0,
                 ),
                 &row.label,
-                FontId::proportional(12.0 * z),
+                FontId::proportional(line(12.0)),
                 theme::TEXT,
                 egui::Align::Max,
             );
@@ -638,18 +823,23 @@ pub fn card(
             [footer.left_top(), footer.right_top()],
             Stroke::new(0.75, theme::BORDER),
         );
-        if full {
-            let action = camera.rect(card.action_button());
-            let status_rect = Rect::from_min_max(
-                footer.left_top() + vec2(CARD_PADDING * z, 0.0),
-                egui::pos2(action.left() - 8.0 * z, footer.bottom()),
-            );
-            let (mut status, mut color) = step.map_or(("Ready".to_owned(), theme::MUTED), |s| {
-                (
-                    format!("{} · {} ms", s.status.label(), s.duration_ms),
-                    status_color(s.status),
-                )
-            });
+        // The result line, at Medium and Full alike: no text gets smaller
+        // when zooming in (LAY-09).
+        let action = camera.rect(card.action_button());
+        let status_rect = Rect::from_min_max(
+            footer.left_top() + vec2(CARD_PADDING * z, 0.0),
+            egui::pos2(
+                if full {
+                    action.left() - 8.0 * z
+                } else {
+                    footer.right() - CARD_PADDING * z
+                },
+                footer.bottom(),
+            ),
+        );
+        {
+            let (mut status, mut color) =
+                step.map_or(("Ready".to_owned(), theme::MUTED), execution);
             // The checks' result is a second statement after the step's own.
             if let Some(aggregate) = aggregate {
                 status = format!("{status} · {}", aggregate.text());
@@ -657,14 +847,17 @@ pub fn card(
                     color = theme::DANGER;
                 }
             }
-            label(
+            drawn.label(
                 &clipped,
                 status_rect,
                 &status,
-                FontId::proportional(11.0 * z),
+                TextKind::Result,
+                FontId::proportional(line(11.0)),
                 color,
                 egui::Align::Min,
             );
+        }
+        if full {
             Icon::Plus.paint(&clipped, action.shrink(5.0 * z), theme::MUTED);
             for (index, (port, text)) in card.controls.iter().enumerate() {
                 let button = camera.rect(card.control_button(index));
@@ -680,18 +873,17 @@ pub fn card(
                         button.max - vec2(24.0 * z, 2.0 * z),
                     ),
                     text.trim_end_matches(" →"),
-                    FontId::proportional(11.0 * z),
+                    FontId::proportional(line(11.0)),
                     color,
                     egui::Align::Center,
                 );
             }
-        } else if let Some(step) = step {
-            clipped.circle_filled(
-                footer.left_center() + vec2(CARD_PADDING * z, 0.0),
-                2.0,
-                status_color(step.status),
-            );
         }
+    }
+    // Over everything the card wrote, so a label yields to it (LAY-09).
+    drawn.signal = signal(step, aggregate);
+    if let Some(color) = drawn.signal {
+        signal_border(painter, rect, radius, selected, color);
     }
 
     // Connections remain visible and usable at every detail level.
@@ -711,6 +903,7 @@ pub fn card(
     if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
         socket(painter, camera.to_screen(anchor), true, z);
     }
+    drawn
 }
 
 /// A request card at the compact density (LAY-16): the band, the name, one
@@ -726,13 +919,15 @@ pub fn compact_card(
     step: Option<&StepResult>,
     // What became of the checks that read the step (LAY-11).
     aggregate: Option<&Aggregate>,
-) -> Vec<String> {
+) -> Drawn {
+    let mut drawn = Drawn::default();
     let Some(compact) = &card.compact else {
-        return Vec::new();
+        return drawn;
     };
     let failed_check = aggregate.is_some_and(Aggregate::failed);
     let z = camera.zoom;
-    let full = CardDetail::at_zoom(z) == CardDetail::Full;
+    let detail = CardDetail::at_zoom(z);
+    let full = detail == CardDetail::Full;
     let rect = camera.rect(card.rect());
     let radius = (10.0 * z).max(3.0);
     painter.rect_filled(
@@ -764,6 +959,9 @@ pub fn compact_card(
         pos2(rect.right(), rect.top() + (5.0 * z).max(3.0)),
     );
     let corner = radius as u8;
+    let band_color = step.map_or(Color32::from_rgb(214, 214, 214), |step| {
+        status_color(step.status)
+    });
     clipped.rect_filled(
         band,
         egui::CornerRadius {
@@ -772,39 +970,68 @@ pub fn compact_card(
             sw: 0,
             se: 0,
         },
-        step.map_or(Color32::from_rgb(214, 214, 214), |step| {
-            status_color(step.status)
-        }),
+        band_color,
     );
+    drawn.band = Some(band_color);
     let color = theme::block_color(card.block);
     let icon = Rect::from_min_size(local(12.0, 10.0), Vec2::splat(22.0 * z));
     clipped.rect_filled(icon, 5.0 * z, color.gamma_multiply(0.10));
     theme::block_icon(&clipped, icon, card.block, color);
     let call = card.kind == NodeKind::Component;
-    label(
-        &clipped,
-        cell(
-            42.0,
-            6.0,
-            if call { WIDTH - 40.0 } else { WIDTH - 12.0 },
-            COMPACT_HEADER,
-        ),
-        &card.name,
-        // The floor scales as the Overview title's does, so it fits its cell at 25%.
-        FontId::new((16.0 * z).max(7.5), theme::bold_family()),
-        theme::TEXT,
-        egui::Align::Min,
-    );
+    // The rows are written from Medium on; at Overview the card is its band,
+    // its name and its checks pill (LAY-09).
+    let legible = detail != CardDetail::Overview;
+    let name_font = FontId::new(min_on_screen(NAME_TEXT, z, NAME_MIN), theme::bold_family());
+    let right = if call && legible {
+        WIDTH - 40.0
+    } else {
+        WIDTH - 12.0
+    };
+    let name = if legible {
+        Some(cell(42.0, 6.0, right, COMPACT_HEADER))
+    } else {
+        // As tall as the name needs, under the band; below 25 % only where
+        // the card holds it.
+        let height = clipped
+            .layout_no_wrap(card.name.clone(), name_font.clone(), theme::TEXT)
+            .size()
+            .y;
+        let name = Rect::from_min_max(
+            pos2(local(42.0, 0.0).x, band.bottom()),
+            pos2(local(right, 0.0).x, band.bottom() + height),
+        );
+        (z >= LABELS_FROM
+            || (name.bottom() <= rect.bottom() - 1.0 && name.width() >= 2.0 * NAME_MIN))
+            .then_some(name)
+    };
+    if let Some(name) = name {
+        drawn.label(
+            &clipped,
+            name,
+            &card.name,
+            TextKind::Name,
+            name_font,
+            theme::TEXT,
+            egui::Align::Min,
+        );
+        if !legible && let Some(aggregate) = aggregate {
+            pill(
+                &clipped,
+                &mut drawn,
+                rect,
+                name.bottom() + 1.0,
+                false,
+                z,
+                aggregate,
+            );
+        }
+    }
 
-    let small = (12.0 * z).max(9.0);
-    let legible = COMPACT_ROW * z >= 11.0;
+    let small = min_on_screen(LINE_TEXT, z, LINE_MIN);
     if call && legible {
         let button = camera.rect(card.open_button());
         Icon::ExternalLink.paint(&clipped, button.shrink(5.0 * z), theme::MUTED);
     }
-    // Only the tests read the lines back; the window collects nothing.
-    #[cfg_attr(not(test), allow(unused_mut))]
-    let mut written = Vec::new();
     for row in &compact.rows {
         let area = cell(14.0, row.top, WIDTH - 14.0, row.top + row.height);
         let text = if full { &row.full_text } else { &row.text };
@@ -816,10 +1043,11 @@ pub fn compact_card(
                 }
                 let x = card.control_x(index);
                 let text = text.trim_end_matches(" →");
-                label(
+                drawn.label(
                     &clipped,
                     cell(x - 60.0, row.top, x + 60.0, row.top + row.height),
                     text,
+                    TextKind::Line,
                     FontId::proportional(small),
                     match *port {
                         apiforge_core::graph::TRUE_PORT => theme::BRANCH_YES,
@@ -829,7 +1057,7 @@ pub fn compact_card(
                     egui::Align::Center,
                 );
                 #[cfg(test)]
-                written.push(text.to_owned());
+                drawn.lines.push(text.to_owned());
             }
             continue;
         }
@@ -879,12 +1107,7 @@ pub fn compact_card(
                     [pos2(rect.left(), top), pos2(rect.right(), top)],
                     Stroke::new(0.75, theme::BORDER),
                 );
-                let (text, color) = step.map_or(("Not run".to_owned(), theme::MUTED), |step| {
-                    (
-                        format!("{} · {} ms", step.status.label(), step.duration_ms),
-                        status_color(step.status),
-                    )
-                });
+                let (text, color) = step.map_or(("Not run".to_owned(), theme::MUTED), execution);
                 (
                     Cow::Owned(text),
                     FontId::proportional(small),
@@ -918,13 +1141,20 @@ pub fn compact_card(
             }
         };
         if legible {
-            label(&clipped, area, &text, font, color, align);
+            let kind = match row.role {
+                CompactRole::Result | CompactRole::Checks(_) => TextKind::Result,
+                CompactRole::Subtitle => TextKind::Subtitle,
+                _ => TextKind::Line,
+            };
+            drawn.label(&clipped, area, &text, kind, font, color, align);
             #[cfg(test)]
-            written.push(text.into_owned());
+            drawn.lines.push(text.into_owned());
         }
     }
-    if failed_check {
-        failed_check_border(painter, rect, radius, selected);
+    // Over the band and every line, at every zoom (Q15 = A).
+    drawn.signal = signal(step, aggregate);
+    if let Some(color) = drawn.signal {
+        signal_border(painter, rect, radius, selected, color);
     }
 
     for index in 0..card.inputs.len() {
@@ -945,16 +1175,16 @@ pub fn compact_card(
     if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
         socket(painter, camera.to_screen(anchor), true, z);
     }
-    written
+    drawn
 }
 
 /// The trays beside a compact card (decision 2 = D): its hidden inputs on the
 /// left, its hidden outputs on the right, each labelled with its socket.
 pub fn trays(painter: &Painter, card: &Card, camera: Camera, inputs: bool, outputs: bool) {
     let z = camera.zoom;
-    let small = (11.0 * z).max(8.0);
+    let small = min_on_screen(11.0, z, LINE_MIN);
     // A tray row is as tall as a card's, so its labels share the card's gate.
-    let legible = COMPACT_ROW * z >= 11.0;
+    let legible = CardDetail::at_zoom(z) != CardDetail::Overview;
     let frame = |rect: Rect| {
         let rect = camera.rect(rect);
         painter.rect_filled(
@@ -1278,7 +1508,9 @@ mod tests {
                         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1200.0))),
                         ..Default::default()
                     },
-                    |ui| super::card(ui.painter(), &card, camera, true, false, None, None),
+                    |ui| {
+                        super::card(ui.painter(), &card, camera, true, false, None, None);
+                    },
                 );
                 let mut labels = 0;
                 for shape in &output.shapes {
@@ -1395,7 +1627,7 @@ mod tests {
                     }
                 }
                 assert!(labels > 0);
-                if COMPACT_ROW * zoom < 11.0 {
+                if CardDetail::at_zoom(zoom) == CardDetail::Overview {
                     assert_eq!(labels, 1, "only the title is drawn at {zoom}");
                 }
                 output.textures_delta.clear();
