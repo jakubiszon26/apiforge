@@ -14,7 +14,10 @@ use super::{
 };
 use crate::{
     format::{Binding, Component, Graph, Node, OrderEdge, Position, Project, ProxySource},
-    graph::{component_definition, create_node, output_ports},
+    graph::{
+        BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, component_definition, create_node,
+        is_request_argument, output_ports,
+    },
     handle::unique_handle,
     js,
     model::{NodeKind, ValueType},
@@ -199,6 +202,94 @@ pub fn unkept_outputs(extraction: &Extraction<'_>, draft: &ComponentDraft) -> Ve
     unkept
 }
 
+/// Whether `binding` reads an output of the selection that no kept output
+/// provides.
+fn reads_unkept(extraction: &Extraction<'_>, draft: &ComponentDraft, binding: &Binding) -> bool {
+    binding.references().iter().any(|reference| {
+        extraction.selected.contains(reference.node_id)
+            && kept_output(draft, reference.node_id, reference.port, reference.path).is_none()
+    })
+}
+
+/// The later requests that read an output no kept output provides, by name,
+/// with where they use it: `URL`, `headers`, `query` or `body` (UX-37,
+/// option B). A request cannot lose such a value and still be the request
+/// the person wrote, so these readers are never left unconnected.
+pub fn template_readers(
+    extraction: &Extraction<'_>,
+    draft: &ComponentDraft,
+) -> Vec<(String, &'static str)> {
+    let mut uses: Vec<(String, &'static str)> = Vec::new();
+    for node in extraction.readers() {
+        if node.kind != NodeKind::Request {
+            continue;
+        }
+        for (name, binding) in &node.inputs {
+            if !reads_unkept(extraction, draft, binding) {
+                continue;
+            }
+            // An argument is read by the URL, headers, query or body that
+            // names it; the first of them says where it is used.
+            // An argument nothing reads can lose its value and stay valid.
+            let user = |argument: &str| {
+                node.inputs
+                    .iter()
+                    .find(|(_, other)| {
+                        other.leaves().iter().any(|(_, leaf)| {
+                            matches!(leaf, Binding::Argument { name: used, .. } if used == argument)
+                        })
+                    })
+                    .map(|(other, _)| other.as_str())
+            };
+            let mut place = name.as_str();
+            // Arguments may read one another; their order is acyclic.
+            for _ in 0..node.inputs.len() {
+                if !is_request_argument(place) {
+                    break;
+                }
+                match user(place) {
+                    Some(next) => place = next,
+                    None => break,
+                }
+            }
+            if place == name.as_str() && is_request_argument(place) {
+                continue;
+            }
+            let place = match place {
+                HEADERS_INPUT => "headers",
+                QUERY_INPUT => "query",
+                BODY_INPUT => "body",
+                URL_INPUT => "URL",
+                // Read by another argument that nothing reads in turn.
+                _ => "arguments",
+            };
+            let used = (node.display_name().to_owned(), place);
+            if !uses.contains(&used) {
+                uses.push(used);
+            }
+        }
+    }
+    uses
+}
+
+/// The steps after the selection that read an output no kept output
+/// provides, by name, in reading order: those [`replace_with_call_unconnecting`]
+/// leaves unconnected (UX-37).
+pub fn unkept_readers(extraction: &Extraction<'_>, draft: &ComponentDraft) -> Vec<String> {
+    let mut readers: Vec<String> = Vec::new();
+    for node in extraction.readers() {
+        let reads = node
+            .inputs
+            .values()
+            .any(|binding| reads_unkept(extraction, draft, binding));
+        let name = node.display_name().to_owned();
+        if reads && !readers.contains(&name) {
+            readers.push(name);
+        }
+    }
+    readers
+}
+
 /// Whether an IF/ELSE branch leads from inside the selection to outside it,
 /// which one call cannot carry.
 pub fn branch_leaves(extraction: &Extraction<'_>) -> bool {
@@ -247,11 +338,32 @@ pub fn replace_with_call(
     draft: &ComponentDraft,
     component: &Component,
 ) -> Result<Replaced, EditError> {
+    replace(extraction, draft, component, false)
+}
+
+/// [`replace_with_call`] that, instead of refusing, leaves unconnected every
+/// slot of a later step that reads an output the draft does not keep, so
+/// the step shows its ordinary diagnostic until it is wired by hand
+/// (UX-37). Nothing else of the later steps changes.
+pub fn replace_with_call_unconnecting(
+    extraction: &Extraction<'_>,
+    draft: &ComponentDraft,
+    component: &Component,
+) -> Result<Replaced, EditError> {
+    replace(extraction, draft, component, true)
+}
+
+fn replace(
+    extraction: &Extraction<'_>,
+    draft: &ComponentDraft,
+    component: &Component,
+    unconnect: bool,
+) -> Result<Replaced, EditError> {
     let Extraction {
         graph, selected, ..
     } = *extraction;
     let unkept = unkept_outputs(extraction, draft);
-    if let Some(output) = unkept.into_iter().next() {
+    if let Some(output) = unkept.into_iter().next().filter(|_| !unconnect) {
         return Err(EditError::OutputNotKept(output));
     }
     if branch_leaves(extraction) {
@@ -303,32 +415,32 @@ pub fn replace_with_call(
             .insert(js::trim(&row.name).to_owned(), original.clone());
     }
 
-    // A reader of a kept output reads the call's output of that name.
+    // A reader of a kept output reads the call's output of that name; a
+    // reader of a dropped one, when asked, loses that slot (`None`).
     let call_id = call.id.clone();
-    let redirect = |binding: &Binding| -> Binding {
-        binding
-            .map_leaves(&mut |leaf, _| {
-                Some(match leaf {
-                    Binding::Reference {
-                        node_id,
-                        port,
-                        path,
-                    } if selected.contains(node_id.as_str()) => {
-                        kept_output(draft, node_id, port, path).map_or_else(
-                            || leaf.clone(),
-                            |(name, rest)| Binding::reference(&call_id, name, rest),
-                        )
-                    }
-                    other => other.clone(),
-                })
-            })
-            .unwrap_or_else(|| binding.clone())
+    let redirect = |binding: &Binding| -> Option<Binding> {
+        binding.map_leaves(&mut |leaf, _| match leaf {
+            Binding::Reference {
+                node_id,
+                port,
+                path,
+            } if selected.contains(node_id.as_str()) => {
+                match kept_output(draft, node_id, port, path) {
+                    Some((name, rest)) => Some(Binding::reference(&call_id, name, rest)),
+                    None if unconnect => None,
+                    None => Some(leaf.clone()),
+                }
+            }
+            other => Some(other.clone()),
+        })
     };
     let redirect_node = |node: &Node| -> Node {
         let mut node = node.clone();
-        for binding in node.inputs.values_mut() {
-            *binding = redirect(binding);
-        }
+        node.inputs = node
+            .inputs
+            .iter()
+            .filter_map(|(name, binding)| Some((name.clone(), redirect(binding)?)))
+            .collect();
         node
     };
 
@@ -537,6 +649,66 @@ mod tests {
         draft.outputs[0].path = String::new();
         assert!(unkept_outputs(&extraction, &draft).is_empty());
         assert!(!branch_leaves(&extraction));
+    }
+
+    /// UX-37: a request that uses a dropped value as a URL argument is named
+    /// with where it uses it; a check that reads one loses only that slot.
+    #[test]
+    fn a_template_reader_is_named_and_a_check_reader_is_unconnected() {
+        let (project, scenario) = shop();
+        let later = [&scenario.cleanup];
+        let selected: HashSet<&str> = ["cart", "price"].into();
+        let extraction = Extraction {
+            graph: &scenario.graph,
+            reference: &scenario.graph,
+            later: &later,
+            selected: &selected,
+        };
+        let mut draft = propose_extraction(&extraction, &project, "Check".into());
+        draft.outputs[0].enabled = false;
+        draft.outputs[1].enabled = true;
+        assert_eq!(unkept_readers(&extraction, &draft), vec!["Delete cart"]);
+        assert_eq!(
+            template_readers(&extraction, &draft),
+            vec![("Delete cart".to_owned(), "URL")]
+        );
+        // An argument the URL no longer names can be left unconnected.
+        let mut unused = scenario.cleanup.clone();
+        unused.nodes[0].inputs.insert(
+            "url".into(),
+            Binding::literal(serde_json::json!("/carts/1")),
+        );
+        let unused_later = [&unused];
+        let extraction_unused = Extraction {
+            later: &unused_later,
+            ..extraction
+        };
+        assert!(template_readers(&extraction_unused, &draft).is_empty());
+
+        // In Cleanup, *Cart was deleted* reads the status of *Delete cart*.
+        let selected: HashSet<&str> = ["delete-cart"].into();
+        let extraction = Extraction {
+            graph: &scenario.cleanup,
+            reference: &scenario.graph,
+            later: &[],
+            selected: &selected,
+        };
+        let mut draft = propose_extraction(&extraction, &project, "Delete".into());
+        for row in &mut draft.outputs {
+            row.enabled = row.port != "status";
+        }
+        assert!(template_readers(&extraction, &draft).is_empty());
+        let component = extraction_component(&extraction, &draft).unwrap();
+        assert!(replace_with_call(&extraction, &draft, &component).is_err());
+        let replaced = replace_with_call_unconnecting(&extraction, &draft, &component).unwrap();
+        let check = replaced
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "verify-cleanup")
+            .unwrap();
+        assert!(!check.inputs.contains_key("actual"));
+        assert!(check.inputs.contains_key("expected"));
     }
 
     #[test]

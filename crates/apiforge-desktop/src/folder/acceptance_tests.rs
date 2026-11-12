@@ -29,6 +29,8 @@ mod ktlo33;
 mod lay02;
 #[path = "acceptance_tests/lay21.rs"]
 mod lay21;
+#[path = "acceptance_tests/ux37.rs"]
+mod ux37;
 
 /// The accessible name of a document's editor, which is its registry path.
 fn editor(harness: &FolderHarness, document_id: &str) -> String {
