@@ -134,10 +134,10 @@ fn review_lay04() {
             .join(format!("{name}.afs"));
         fs::read_to_string(path).unwrap()
     };
-    for (source, expanded, label) in [
-        (None, false, "lay04-demo-1600"),
-        (Some("shop-30"), false, "lay04-shop-30-1600-collapsed"),
-        (Some("order-flow"), false, "lay04-order-flow-1600"),
+    for (source, label) in [
+        (None, "lay04-demo-1600"),
+        (Some("shop-30"), "lay04-shop-30-1600-collapsed"),
+        (Some("order-flow"), "lay04-order-flow-1600"),
     ] {
         let project = crate::testing::shop_project();
         if let Some(name) = source {
@@ -145,9 +145,6 @@ fn review_lay04() {
             fs::remove_file(project.path().join(".apiforge/diagram.json")).unwrap();
         }
         let mut harness = crate::testing::folder_harness_in(project.path(), WIDE, Mode::Diagram);
-        if expanded {
-            app(&mut harness).debug_draw_checks();
-        }
         app(&mut harness).review_open(SCENARIO, None);
         settle(&mut harness);
         let id = only(&harness, DocumentKind::Scenario);
@@ -163,8 +160,8 @@ fn review_lay04() {
             canvas
                 .debug_cards()
                 .iter()
-                .any(|(_, rect)| focus.contains_rect(*rect)),
-            "{label}: a card is in view"
+                .all(|(_, rect)| focus.contains_rect(*rect)),
+            "{label}: every card is in view"
         );
         crate::testing::capture(&mut harness, label, None);
     }
