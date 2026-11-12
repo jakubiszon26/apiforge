@@ -367,3 +367,60 @@ fn lay09_criterion_8_fit_shows_every_card() {
         );
     }
 }
+
+/// Whether a whole card is in the board's view, as every capture of a board
+/// asserts (R4).
+fn assert_a_card_in_view(harness: &FolderHarness, context: &str) {
+    let board = canvas(harness);
+    let view = board.debug_focus().expand(0.5);
+    assert!(
+        board
+            .debug_cards()
+            .iter()
+            .any(|(_, card)| view.contains_rect(*card)),
+        "{context}: a whole card is in the view"
+    );
+}
+
+/// `shop-30` after a failed simulation at Fit (Overview, checks collapsed)
+/// at both sizes, `shop-50` at Fit at 960 × 540, and `shop-30` at Medium and
+/// at Full around the failed check's subject.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay09_zoom() {
+    for (source, size, name) in [
+        (failing_30(), WIDE, "lay09-shop-30-fit-1600"),
+        (
+            failing_30(),
+            crate::testing::MINIMUM,
+            "lay09-shop-30-fit-960",
+        ),
+        (
+            failing_50(),
+            crate::testing::MINIMUM,
+            "lay09-shop-50-fit-960",
+        ),
+    ] {
+        let (_project, mut harness) = open(&source, size);
+        simulate(&mut harness);
+        if size == crate::testing::MINIMUM {
+            harness.get_by_label("Run results").click();
+            settle(&mut harness);
+        }
+        harness.get_by_label("Fit the view").click();
+        settle(&mut harness);
+        harness.step();
+        assert_a_card_in_view(&harness, name);
+        crate::testing::capture(&mut harness, name, None);
+    }
+    let (_project, mut harness) = open(&failing_30(), WIDE);
+    simulate(&mut harness);
+    for (zoom, name) in [
+        (0.6, "lay09-checkout-medium-60-1600"),
+        (1.0, "lay09-checkout-full-100-1600"),
+    ] {
+        show(&mut harness, "checkout", zoom);
+        assert_a_card_in_view(&harness, name);
+        crate::testing::capture(&mut harness, name, None);
+    }
+}
