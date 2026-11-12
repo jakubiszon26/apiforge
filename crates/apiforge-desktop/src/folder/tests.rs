@@ -2393,6 +2393,31 @@ fn recent_project_switching_writes_recovery_and_returns_exact_unsaved_work() {
     assert_eq!(app.navigation.recent.entries[0].name, "Navigation Alpha");
 }
 
+/// The switched-to session's placer holds the handle the switch loaded it
+/// with, so *Compact cards* toggled afterwards reaches its placement (LAY-02).
+#[test]
+fn a_project_switch_keeps_the_density_handle_its_placer_holds() {
+    let (alpha, _) = named_folder("Density Alpha");
+    let (beta, _) = named_folder("Density Beta");
+    let (context, mut app) = open(alpha.path());
+    let held = app.card_density.clone();
+    app.request_switch(beta.path().into());
+    wait_storage(&mut app, &context);
+    frame(&mut app, &context, vec![]);
+    assert_eq!(
+        app.session.as_ref().unwrap().manifest().name,
+        "Density Beta"
+    );
+    assert_eq!(held.get(), app.density());
+    let other = match app.density() {
+        canvas::CardDensity::Compact => canvas::CardDensity::Full,
+        canvas::CardDensity::Full => canvas::CardDensity::Compact,
+    };
+    app.switch_density(other);
+    assert_eq!(held.get(), other);
+    assert_eq!(app.density(), other);
+}
+
 #[test]
 fn failed_switch_recovery_preserves_the_current_project_and_recent_active_path() {
     let (alpha, id) = named_folder("Navigation failure Alpha");
