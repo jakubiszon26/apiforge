@@ -987,7 +987,7 @@ impl Canvas {
         // Folded checks are not drawn, are no obstacle and take no part in
         // the camera; their subjects' footers sum them up (LAY-11).
         let folded = self.fold(input.graph, input.later, &mut cards, &mut chips);
-        let aggregates = collapse::aggregates(input.graph, input.steps);
+        let aggregates = collapse::aggregates(input.graph, input.later, input.steps);
         #[cfg(test)]
         {
             self.hidden = folded.keys().cloned().collect();

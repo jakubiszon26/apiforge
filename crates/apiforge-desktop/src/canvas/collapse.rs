@@ -12,7 +12,7 @@
 
 use apiforge_core::{
     format::{Graph, Node},
-    graph::{check_subjects, sequence},
+    graph::{check_subjects, check_subjects_in, sequence},
     model::NodeKind,
     run::{StepResult, StepStatus},
 };
@@ -157,8 +157,15 @@ fn plural(count: usize, one: &str) -> String {
 }
 
 /// The aggregate of every subject on the board, by the subject's node id. A
-/// check with several subjects is counted under each (Q6 = A).
-pub fn aggregates(graph: &Graph, steps: Option<&[StepResult]>) -> HashMap<String, Aggregate> {
+/// check with several subjects is counted under each (Q6 = A). `later` is as
+/// in [`collapsible`]: a *Data condition* a step there reads is a gate.
+pub fn aggregates(
+    graph: &Graph,
+    later: Option<&Graph>,
+    steps: Option<&[StepResult]>,
+) -> HashMap<String, Aggregate> {
+    let mut graphs = vec![graph];
+    graphs.extend(later);
     let mut result: HashMap<String, Aggregate> = HashMap::new();
     for check in graph.nodes.iter().filter(|node| is_check(node)) {
         let status = steps.and_then(|steps| {
@@ -167,7 +174,7 @@ pub fn aggregates(graph: &Graph, steps: Option<&[StepResult]>) -> HashMap<String
                 .find(|step| step.node_id == check.id)
                 .map(|step| step.status)
         });
-        for subject in check_subjects(graph, check).subjects {
+        for subject in check_subjects_in(&graphs, check).subjects {
             let aggregate = result.entry(subject.step.to_owned()).or_default();
             aggregate.run = steps.is_some();
             if subject.gate {
