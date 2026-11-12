@@ -47,6 +47,21 @@ pub struct Config {
     /// Every wire that is not near becomes a chip, whatever the count (the
     /// distance-only rule).
     pub every_far_wire: bool,
+    /// Which ordering wires are left out, for the measurements of the
+    /// other ways to cut lines.
+    pub order: Order,
+    /// Several wires from one port into one card are drawn once.
+    pub merge_parallel: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Order {
+    #[default]
+    All,
+    /// Without an `@after` whose target reads its source's data anyway.
+    WithoutImplied,
+    /// Without an ordering wire into the next step of the spine.
+    WithoutNext,
 }
 
 impl Default for Config {
@@ -56,6 +71,8 @@ impl Default for Config {
             min_readers: 3,
             keep_near: true,
             every_far_wire: false,
+            order: Order::All,
+            merge_parallel: false,
         }
     }
 }
@@ -192,6 +209,7 @@ pub fn plan(
     wires: Vec<BoardWire>,
     selection: &HashSet<&str>,
 ) -> Plan {
+    let wires = thinned(config, graph, cards, wires);
     if config.mode == Mode::Off {
         return Plan {
             routed: wires,
@@ -529,4 +547,74 @@ pub struct Drawn {
     pub buses: Vec<Vec<Vec<Pos2>>>,
     pub tags: Vec<(Pos2, String)>,
     pub hidden: usize,
+}
+
+/// The other ways to cut lines, measured beside the three directions.
+fn thinned(
+    config: &Config,
+    graph: &Graph,
+    cards: &[Card],
+    wires: Vec<BoardWire>,
+) -> Vec<BoardWire> {
+    use apiforge_core::graph::{WireKind, wires as document_wires};
+    let mut reads: HashMap<String, Vec<String>> = HashMap::new();
+    for wire in document_wires(graph) {
+        if wire.kind == WireKind::Data {
+            reads.entry(wire.target).or_default().push(wire.source);
+        }
+    }
+    let depends = |target: &str, source: &str| {
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut open = vec![target];
+        while let Some(id) = open.pop() {
+            for next in reads.get(id).into_iter().flatten() {
+                if next == source {
+                    return true;
+                }
+                if seen.insert(next) {
+                    open.push(next);
+                }
+            }
+        }
+        false
+    };
+    let plan = super::shape::plan(graph, None).unwrap_or_default();
+    let column = |id: &str| -> Option<usize> {
+        let index = graph.nodes.iter().position(|node| node.id == id)?;
+        plan.spine.iter().position(|at| *at == index).or_else(|| {
+            plan.satellites
+                .iter()
+                .find(|(at, _)| *at == index)
+                .map(|(_, under)| *under)
+        })
+    };
+    let mut seen: HashSet<(String, usize)> = HashSet::new();
+    wires
+        .into_iter()
+        .filter(|wire| {
+            if wire.control {
+                let target = &cards[wire.target].id;
+                let source = graph
+                    .edges
+                    .iter()
+                    .find(|edge| edge.id == wire.id)
+                    .map(|edge| edge.source.clone());
+                let Some(source) = source else { return true };
+                return match config.order {
+                    Order::All => true,
+                    Order::WithoutImplied => !depends(target, &source),
+                    Order::WithoutNext => {
+                        let on_spine = plan.spine.iter().any(|at| graph.nodes[*at].id == *target);
+                        !(on_spine
+                            && wire.branch.is_none()
+                            && matches!(
+                                (column(&source), column(target)),
+                                (Some(from), Some(to)) if to == from + 1
+                            ))
+                    }
+                };
+            }
+            !config.merge_parallel || seen.insert((format!("{:?}", wire.start), wire.target))
+        })
+        .collect()
 }

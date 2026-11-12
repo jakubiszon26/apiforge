@@ -5,7 +5,7 @@
 //! close and coincident pairs, straight wires, and the length of what is
 //! drawn.
 use super::*;
-use crate::canvas::lay23::{Config, Drawn, Mode as Wires};
+use crate::canvas::lay23::{Config, Drawn, Mode as Wires, Order};
 use egui::Pos2;
 use std::fmt::Write as _;
 
@@ -255,6 +255,8 @@ fn count(mode: Wires, min_readers: usize, keep_near: bool) -> Config {
         min_readers,
         keep_near,
         every_far_wire: false,
+        order: Order::All,
+        merge_parallel: false,
     }
 }
 
@@ -281,11 +283,63 @@ fn options() -> Vec<(&'static str, Config)> {
                 min_readers: 1,
                 keep_near: true,
                 every_far_wire: true,
+                order: Order::All,
+                merge_parallel: false,
             },
         ),
         ("B bus, 3+ readers, near kept", count(Wires::Bus, 3, true)),
         ("B bus, 3+ readers, all", count(Wires::Bus, 3, false)),
         ("C on demand", count(Wires::OnDemand, 3, true)),
+        (
+            "today, without @after the data implies",
+            Config {
+                order: Order::WithoutImplied,
+                ..Config::default()
+            },
+        ),
+        (
+            "today, without order wires into the next step",
+            Config {
+                order: Order::WithoutNext,
+                ..Config::default()
+            },
+        ),
+        (
+            "today, one wire per port and card",
+            Config {
+                merge_parallel: true,
+                ..Config::default()
+            },
+        ),
+        (
+            "A + one wire per port and card",
+            Config {
+                merge_parallel: true,
+                ..count(Wires::Chips, 3, true)
+            },
+        ),
+        (
+            "A + without order wires into the next step",
+            Config {
+                order: Order::WithoutNext,
+                ..count(Wires::Chips, 3, true)
+            },
+        ),
+        (
+            "A + both",
+            Config {
+                order: Order::WithoutNext,
+                merge_parallel: true,
+                ..count(Wires::Chips, 3, true)
+            },
+        ),
+        (
+            "C + without order wires into the next step",
+            Config {
+                order: Order::WithoutNext,
+                ..count(Wires::OnDemand, 3, true)
+            },
+        ),
     ]
 }
 
@@ -376,6 +430,14 @@ fn review_lay23_captures() {
             ("a-chips", chips, vec![]),
             ("a-chips-reader-selected", chips, vec![reader]),
             ("a-chips-source-selected", chips, vec![source]),
+            (
+                "a-chips-no-next-rails",
+                Config {
+                    order: Order::WithoutNext,
+                    ..chips
+                },
+                vec![],
+            ),
             ("b-bus", count(Wires::Bus, 3, true), vec![]),
             ("c-on-demand", count(Wires::OnDemand, 3, true), vec![]),
             (
