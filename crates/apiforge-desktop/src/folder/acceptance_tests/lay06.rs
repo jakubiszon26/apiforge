@@ -6,7 +6,7 @@
 //! the demo shop's scenario without positions, collapsed (the default) and
 //! expanded.
 use super::*;
-use crate::canvas::Command;
+use crate::canvas::{Command, WireMode};
 use apiforge_core::{
     format::{Graph, Node},
     graph::{check_subjects, sequence},
@@ -22,7 +22,7 @@ const FIT: &str = "Fit the view";
 const BOARDS: &str = "../apiforge-layout/examples/support/boards.txt";
 /// Writing it again instead of comparing: `APIFORGE_WRITE_BOARDS=1`.
 const WRITE: &str = "APIFORGE_WRITE_BOARDS";
-const REFERENCE: [&str; 3] = ["order-flow", "shop-30", "shop-50"];
+const REFERENCE: [&str; 4] = ["order-flow", "shop-30", "shop-50", "fan-out"];
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -42,15 +42,27 @@ enum Checks {
 
 /// The reference scenario `name` opened at `size` without positions, its
 /// checks as `checks` says, tidied up once more with nothing selected.
+/// Every wire is drawn (*All wires*): these criteria measure the wires of
+/// shape D as LAY-06 accepted them, before LAY-23's chips.
 fn tidied(
     name: &str,
     size: egui::Vec2,
     checks: Checks,
 ) -> (tempfile::TempDir, FolderHarness, String) {
+    tidied_with(name, size, checks, WireMode::All)
+}
+
+fn tidied_with(
+    name: &str,
+    size: egui::Vec2,
+    checks: Checks,
+    wires: WireMode,
+) -> (tempfile::TempDir, FolderHarness, String) {
     let project = crate::testing::shop_project();
     fs::write(project.path().join(SCENARIO), fixture(name)).unwrap();
     fs::remove_file(project.path().join(DIAGRAM)).unwrap();
     let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
+    app(&mut harness).debug_wires(wires);
     if checks == Checks::Expanded {
         app(&mut harness).debug_draw_checks();
     }
@@ -540,7 +552,8 @@ fn side(side: apiforge_layout::Side) -> &'static str {
 
 /// The board file of criterion 10: each reference scenario tidied at both
 /// densities, with its checks collapsed and expanded, as the board gives it
-/// to the router.
+/// to the router; at the compact density also with LAY-23's chips, whose
+/// wires the router is not given.
 fn board_file() -> String {
     let mut text = String::from(
         "# The reference scenarios of fixtures/scenarios/lay/ as the desktop tidies them\n\
@@ -550,66 +563,77 @@ fn board_file() -> String {
          # lay06_criterion_10_quality_on_real_card_sizes with APIFORGE_WRITE_BOARDS=1;\n\
          # do not edit by hand.\n",
     );
-    for name in REFERENCE {
-        for density in ["compact", "full"] {
-            for checks in [Checks::Collapsed, Checks::Expanded] {
-                let (_project, mut harness, id) = tidied(name, WIDE, checks);
-                if density == "full" {
-                    app(&mut harness).active_board_command(Command::SetCompactCards(false));
-                    settle(&mut harness);
-                    choose(&mut harness, TIDY);
-                    harness.step();
-                }
-                let graph = main_graph(&harness, &id);
-                let canvas = board(&harness, &id);
-                let (rectangles, wires) = canvas.debug_geometry();
-                let names: Vec<String> = canvas
-                    .debug_cards()
-                    .iter()
-                    .map(|(card, _)| handle_of(&graph, card))
-                    .collect();
-                let checks = match checks {
-                    Checks::Collapsed => "collapsed",
-                    Checks::Expanded => "expanded",
-                };
-                text.push_str(&format!(
-                    "board {name} {density} {checks} {}\n",
-                    graph.nodes.len()
-                ));
-                for (index, rect) in rectangles.iter().enumerate() {
-                    let kind = if index < names.len() { "card" } else { "chip" };
-                    text.push_str(&format!(
-                        "{kind} {} {} {} {} {}\n",
-                        rect.min.x,
-                        rect.min.y,
-                        rect.width(),
-                        rect.height(),
-                        names.get(index).map_or("-", String::as_str)
-                    ));
-                }
-                for wire in wires {
-                    text.push_str(&format!(
-                        "wire {} {} {} {} {} {}\n",
-                        wire.from.block,
-                        side(wire.from.side),
-                        wire.from.offset,
-                        wire.to.block,
-                        side(wire.to.side),
-                        wire.to.offset
-                    ));
-                }
-                for mark in canvas.debug_marks() {
-                    text.push_str(&format!(
-                        "mark {} {} {} {}\n",
-                        mark.rect.min.x,
-                        mark.rect.min.y,
-                        mark.rect.width(),
-                        mark.rect.height()
-                    ));
-                }
-                text.push_str("end\n");
-            }
+    let boards = REFERENCE.into_iter().flat_map(|name| {
+        [
+            ("compact", Checks::Collapsed, WireMode::All),
+            ("compact", Checks::Expanded, WireMode::All),
+            ("full", Checks::Collapsed, WireMode::All),
+            ("full", Checks::Expanded, WireMode::All),
+            ("compact", Checks::Collapsed, WireMode::Chips),
+            ("compact", Checks::Expanded, WireMode::Chips),
+        ]
+        .map(|(density, checks, wires)| (name, density, checks, wires))
+    });
+    for (name, density, checks, mode) in boards {
+        let (_project, mut harness, id) = tidied_with(name, WIDE, checks, mode);
+        if density == "full" {
+            app(&mut harness).active_board_command(Command::SetCompactCards(false));
+            settle(&mut harness);
+            choose(&mut harness, TIDY);
+            harness.step();
         }
+        let graph = main_graph(&harness, &id);
+        let canvas = board(&harness, &id);
+        let (rectangles, wires) = canvas.debug_geometry();
+        let names: Vec<String> = canvas
+            .debug_cards()
+            .iter()
+            .map(|(card, _)| handle_of(&graph, card))
+            .collect();
+        let checks = match checks {
+            Checks::Collapsed => "collapsed",
+            Checks::Expanded => "expanded",
+        };
+        let mode = match mode {
+            WireMode::All => "all",
+            WireMode::Chips => "chips",
+        };
+        text.push_str(&format!(
+            "board {name} {density} {checks} {} {mode}\n",
+            graph.nodes.len()
+        ));
+        for (index, rect) in rectangles.iter().enumerate() {
+            let kind = if index < names.len() { "card" } else { "chip" };
+            text.push_str(&format!(
+                "{kind} {} {} {} {} {}\n",
+                rect.min.x,
+                rect.min.y,
+                rect.width(),
+                rect.height(),
+                names.get(index).map_or("-", String::as_str)
+            ));
+        }
+        for wire in wires {
+            text.push_str(&format!(
+                "wire {} {} {} {} {} {}\n",
+                wire.from.block,
+                side(wire.from.side),
+                wire.from.offset,
+                wire.to.block,
+                side(wire.to.side),
+                wire.to.offset
+            ));
+        }
+        for mark in canvas.debug_marks() {
+            text.push_str(&format!(
+                "mark {} {} {} {}\n",
+                mark.rect.min.x,
+                mark.rect.min.y,
+                mark.rect.width(),
+                mark.rect.height()
+            ));
+        }
+        text.push_str("end\n");
     }
     text
 }
