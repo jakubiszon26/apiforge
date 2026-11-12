@@ -87,11 +87,30 @@ fn positions(harness: &FolderHarness, id: &str) -> BTreeMap<String, (i64, i64)> 
         .collect()
 }
 
-/// The layer of each block, by the shared layout's longest path.
-fn layers(graph: &Graph) -> Vec<usize> {
-    let index_of = |id: &str| graph.nodes.iter().position(|node| node.id == id);
-    let blocks: Vec<apiforge_layout::Block> = graph
-        .nodes
+/// The checks the main board hangs off a subject (LAY-11): hidden while
+/// *Checks* is collapsed, as it is by default, and placed by Tidy up after
+/// the other cards. Each by node id, with the id of the subject it hangs under.
+fn hung(harness: &FolderHarness, id: &str) -> BTreeMap<String, String> {
+    let model = model(harness, id);
+    crate::canvas::collapsible(graph_of(&model, false), Some(graph_of(&model, true)))
+        .into_iter()
+        .map(|candidate| (candidate.check, candidate.anchor))
+        .collect()
+}
+
+/// The layer of each block Tidy up lays out first, by the shared layout's
+/// longest path; a wire to or from a hung check counts as its subject's, as
+/// Tidy up counts it. `None` for a hung check.
+fn layers(graph: &Graph, hung: &BTreeMap<String, String>) -> Vec<Option<usize>> {
+    let rest: Vec<usize> = (0..graph.nodes.len())
+        .filter(|index| !hung.contains_key(&graph.nodes[*index].id))
+        .collect();
+    let local = |id: &str| {
+        let id = hung.get(id).map_or(id, String::as_str);
+        let index = graph.nodes.iter().position(|node| node.id == id)?;
+        rest.iter().position(|kept| *kept == index)
+    };
+    let blocks: Vec<apiforge_layout::Block> = rest
         .iter()
         .map(|_| {
             apiforge_layout::Block::new(
@@ -103,13 +122,18 @@ fn layers(graph: &Graph) -> Vec<usize> {
     let edges: Vec<apiforge_layout::Edge> = apiforge_core::graph::wires(graph)
         .iter()
         .filter_map(|wire| {
-            Some(apiforge_layout::Edge::new(
-                index_of(&wire.source)?,
-                index_of(&wire.target)?,
-            ))
+            let (source, target) = (local(&wire.source)?, local(&wire.target)?);
+            (source != target).then(|| apiforge_layout::Edge::new(source, target))
         })
         .collect();
-    apiforge_layout::layers_of(&apiforge_layout::Graph::new(&blocks, &edges))
+    let of_rest = apiforge_layout::layers_of(&apiforge_layout::Graph::new(&blocks, &edges));
+    (0..graph.nodes.len())
+        .map(|index| {
+            rest.iter()
+                .position(|kept| *kept == index)
+                .map(|local| of_rest[local])
+        })
+        .collect()
 }
 
 /// The cards of the last frame, on screen.
@@ -136,14 +160,22 @@ fn separation(a: egui::Rect, b: egui::Rect) -> f32 {
 }
 
 /// Criterion 3: `order-flow` opens with one column per layer, the layers
-/// left to right, and no card on another.
+/// left to right, and no card on another. Its checks are collapsed, as by
+/// default (LAY-11): a check hung off its subject is hidden and stands in
+/// no column; every other card is drawn in its layer's column.
 #[test]
 fn lay02_criterion_3_order_flow_opens_in_layers() {
     let (_project, harness, id) = open("order-flow", WIDE);
     let graph = main_graph(&harness, &id);
-    let layers = layers(&graph);
+    let hung = hung(&harness, &id);
+    assert!(!hung.is_empty(), "order-flow has checks to hang");
+    let layers = layers(&graph, &hung);
     let cards = cards_on_screen(&harness, &id);
-    assert_eq!(cards.len(), graph.nodes.len(), "every card is drawn");
+    assert_eq!(
+        cards.len(),
+        graph.nodes.len() - hung.len(),
+        "every card but the hung checks is drawn"
+    );
     let centre = |node: &Node| {
         cards
             .iter()
@@ -153,10 +185,11 @@ fn lay02_criterion_3_order_flow_opens_in_layers() {
             .center()
             .x
     };
-    let depth = layers.iter().max().map_or(0, |max| max + 1);
+    let depth = layers.iter().flatten().max().map_or(0, |max| max + 1);
     assert!(depth > 3, "order-flow is a flow of several layers");
     let mut columns: Vec<Option<f32>> = vec![None; depth];
     for (node, layer) in graph.nodes.iter().zip(&layers) {
+        let Some(layer) = layer else { continue };
         let x = centre(node);
         match columns[*layer] {
             Some(column) => assert!(

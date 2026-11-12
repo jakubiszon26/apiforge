@@ -66,12 +66,47 @@ impl Placer for CardPlacer {
         let density = self.density.get();
         let fresh: HashSet<&str> = fresh.iter().map(String::as_str).collect();
         let parameters = super::parameters_of(document);
+        // A graph whose blocks are all fresh, a scenario opened from code, is
+        // laid out by the window's own Tidy up (LAY-02), foldable checks hung
+        // off their subjects as it hangs them (LAY-11), so a Tidy up right
+        // after opening has nothing to move.
+        let boards = match document {
+            Document::Scenario(_) => [false, true].as_slice(),
+            Document::Component(_) => [false].as_slice(),
+        };
+        let tidied: Vec<Option<Graph>> = boards
+            .iter()
+            .map(|&cleanup| {
+                let graph = super::graph_of(document, cleanup);
+                let whole = graph
+                    .nodes
+                    .iter()
+                    .all(|node| fresh.contains(node.id.as_str()));
+                if !whole {
+                    return None;
+                }
+                let reference = super::reference_of(document, cleanup);
+                crate::board_edit::Board {
+                    graph,
+                    reference: &reference,
+                    project: context,
+                    parameters: &parameters,
+                    sibling: super::sibling_of(document, cleanup),
+                    density,
+                    satellites: true,
+                }
+                .tidy_up(&[])
+            })
+            .collect();
         let graphs = match document {
             Document::Scenario(scenario) => vec![&mut scenario.graph, &mut scenario.cleanup],
             Document::Component(component) => vec![&mut component.graph],
         };
-        for graph in graphs {
-            place_graph(graph, &fresh, context, &parameters, density);
+        for (graph, tidied) in graphs.into_iter().zip(tidied) {
+            match tidied {
+                Some(tidied) => *graph = tidied,
+                None => place_graph(graph, &fresh, context, &parameters, density),
+            }
         }
     }
 }
