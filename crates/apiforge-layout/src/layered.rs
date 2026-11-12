@@ -407,11 +407,13 @@ fn acyclic(count: usize, edges: &[Edge]) -> Vec<Edge> {
         .enumerate()
         .map(|(position, edge)| {
             if back[position] {
+                // A reversed edge runs against its ports, so it has none.
                 Edge {
                     source: edge.target,
                     target: edge.source,
                     source_offset: edge.target_offset,
                     target_offset: edge.source_offset,
+                    ports: false,
                 }
             } else {
                 *edge
@@ -435,6 +437,8 @@ struct Order {
     layers: Vec<Vec<Slot>>,
     /// Chains of slots, one per edge, from its source layer to its target layer.
     chains: Vec<Vec<(usize, Slot)>>,
+    /// The edge of each chain, back edges reversed, for its ports.
+    edges: Vec<Edge>,
 }
 
 impl Order {
@@ -443,6 +447,20 @@ impl Order {
             .get(layer)?
             .iter()
             .position(|candidate| *candidate == slot)
+    }
+
+    /// The port of chain `chain` at its link `at`: the source port at the
+    /// first link and the target port at the last, when the edge has ports;
+    /// a dummy in between has none.
+    fn port(&self, chain: usize, at: usize) -> Option<f32> {
+        let edge = self.edges.get(chain)?;
+        let length = self.chains.get(chain)?.len();
+        match () {
+            () if !edge.ports => None,
+            () if at == 0 => Some(edge.source_offset),
+            () if at + 1 == length => Some(edge.target_offset),
+            () => None,
+        }
     }
 }
 
@@ -453,6 +471,7 @@ fn order_within_layers(count: usize, edges: &[Edge], layers: &[usize]) -> Order 
     let mut order = Order {
         layers: vec![Vec::new(); depth],
         chains: vec![Vec::new(); forward.len()],
+        edges: forward.clone(),
     };
     for (index, layer) in layers.iter().enumerate() {
         order.layers[*layer].push(Slot::Block(index));
@@ -472,28 +491,31 @@ fn order_within_layers(count: usize, edges: &[Edge], layers: &[usize]) -> Order 
         order.chains[position] = chain;
     }
 
-    let neighbours = |order: &Order, layer: usize, slot: Slot, previous: bool| -> Vec<f32> {
-        let mut rows = Vec::new();
-        for chain in &order.chains {
-            let Some(at) = chain
-                .iter()
-                .position(|(level, link)| *level == layer && *link == slot)
-            else {
-                continue;
-            };
-            let other = if previous {
-                at.checked_sub(1).map(|index| chain[index])
-            } else {
-                chain.get(at + 1).copied()
-            };
-            if let Some((level, link)) = other
-                && let Some(row) = order.position(level, link)
-            {
-                rows.push(row as f32);
+    // The rows of a slot's neighbours in the adjacent layer, each with the
+    // port the wire leaves or enters that neighbour by, when it has one.
+    let neighbours =
+        |order: &Order, layer: usize, slot: Slot, previous: bool| -> Vec<(f32, Option<f32>)> {
+            let mut rows = Vec::new();
+            for (number, chain) in order.chains.iter().enumerate() {
+                let Some(at) = chain
+                    .iter()
+                    .position(|(level, link)| *level == layer && *link == slot)
+                else {
+                    continue;
+                };
+                let other = if previous {
+                    at.checked_sub(1)
+                } else {
+                    (at + 1 < chain.len()).then_some(at + 1)
+                };
+                if let Some(other) = other
+                    && let Some(row) = order.position(chain[other].0, chain[other].1)
+                {
+                    rows.push((row as f32, order.port(number, other)));
+                }
             }
-        }
-        rows
-    };
+            rows
+        };
 
     let mut best = order.clone();
     let mut fewest = crossings(&order);
@@ -505,7 +527,7 @@ fn order_within_layers(count: usize, edges: &[Edge], layers: &[usize]) -> Order 
             (0..depth.saturating_sub(1)).rev().collect()
         };
         for layer in range {
-            let mut keyed: Vec<(f32, usize, Slot)> = order.layers[layer]
+            let mut keyed: Vec<(f32, Option<f32>, usize, Slot)> = order.layers[layer]
                 .iter()
                 .enumerate()
                 .map(|(row, slot)| {
@@ -513,14 +535,23 @@ fn order_within_layers(count: usize, edges: &[Edge], layers: &[usize]) -> Order 
                     let barycentre = if rows.is_empty() {
                         row as f32
                     } else {
-                        rows.iter().sum::<f32>() / rows.len() as f32
+                        rows.iter().map(|(row, _)| row).sum::<f32>() / rows.len() as f32
                     };
-                    (barycentre, row, *slot)
+                    // Two slots fed by the same neighbours tie; the ports they
+                    // are wired to there break the tie (LAY-04), so that two
+                    // wires leaving one card do not cross right after it.
+                    let ports: Vec<f32> = rows.iter().filter_map(|(_, port)| *port).collect();
+                    let port =
+                        (!ports.is_empty()).then(|| ports.iter().sum::<f32>() / ports.len() as f32);
+                    (barycentre, port, row, *slot)
                 })
                 .collect();
-            keyed
-                .sort_by(|left, right| compare(left.0, right.0).then_with(|| left.1.cmp(&right.1)));
-            order.layers[layer] = keyed.into_iter().map(|(_, _, slot)| slot).collect();
+            keyed.sort_by(|left, right| {
+                compare(left.0, right.0)
+                    .then_with(|| by_port(left.1, right.1))
+                    .then_with(|| left.2.cmp(&right.2))
+            });
+            order.layers[layer] = keyed.into_iter().map(|(_, _, _, slot)| slot).collect();
         }
         let count = crossings(&order);
         if count < fewest {
@@ -534,28 +565,60 @@ fn order_within_layers(count: usize, edges: &[Edge], layers: &[usize]) -> Order 
     best
 }
 
+/// Two ports on one card in their order down its side; a missing one ties.
+fn by_port(left: Option<f32>, right: Option<f32>) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(a), Some(b)) => compare(a, b),
+        _ => std::cmp::Ordering::Equal,
+    }
+}
+
 /// Edge crossings between adjacent layers, counted on the chain links so that a long
 /// edge crosses once per layer it actually passes through.
+///
+/// Two links that share an end are ordered there by their ports (LAY-04): two
+/// wires leaving one card cross when the upper port feeds the lower target.
 fn crossings(order: &Order) -> usize {
-    let mut links: Vec<(usize, usize, usize)> = Vec::new();
-    for chain in &order.chains {
-        for pair in chain.windows(2) {
+    struct Link {
+        layer: usize,
+        from: usize,
+        to: usize,
+        from_port: Option<f32>,
+        to_port: Option<f32>,
+    }
+    let mut links: Vec<Link> = Vec::new();
+    for (number, chain) in order.chains.iter().enumerate() {
+        for (at, pair) in chain.windows(2).enumerate() {
             let [(from_layer, from_slot), (_, to_slot)] = [pair[0], pair[1]];
             if let (Some(from), Some(to)) = (
                 order.position(from_layer, from_slot),
                 order.position(from_layer + 1, to_slot),
             ) {
-                links.push((from_layer, from, to));
+                links.push(Link {
+                    layer: from_layer,
+                    from,
+                    to,
+                    from_port: order.port(number, at),
+                    to_port: order.port(number, at + 1),
+                });
             }
         }
     }
     let mut total = 0;
     for (index, left) in links.iter().enumerate() {
         for right in &links[index + 1..] {
-            if left.0 == right.0
-                && ((left.1 < right.1 && left.2 > right.2)
-                    || (left.1 > right.1 && left.2 < right.2))
-            {
+            if left.layer != right.layer {
+                continue;
+            }
+            let start = left
+                .from
+                .cmp(&right.from)
+                .then_with(|| by_port(left.from_port, right.from_port));
+            let end = left
+                .to
+                .cmp(&right.to)
+                .then_with(|| by_port(left.to_port, right.to_port));
+            if start.is_ne() && end.is_ne() && start != end {
                 total += 1;
             }
         }
@@ -567,8 +630,9 @@ fn crossings(order: &Order) -> usize {
 ///
 /// Layers are columns: each starts after the widest card of the previous one plus
 /// the layer gap. Within a layer the cards keep the order found above, separated by
-/// the row gap, and each is then pulled towards the average row of its neighbours
-/// (the balanced step of Brandes–Köpf) without ever reordering or overlapping.
+/// at least the row gap. The ports decide the rows (LAY-04): a card sits where a
+/// wire from the previous column meets its input port level with the output port
+/// feeding it, so that the wire runs straight.
 fn coordinates(graph: &Graph<'_>, layers: &[usize], order: &Order) -> Vec<Point> {
     let depth = order.layers.len();
     let mut positions = vec![Point::default(); graph.blocks.len()];
@@ -584,68 +648,264 @@ fn coordinates(graph: &Graph<'_>, layers: &[usize], order: &Order) -> Vec<Point>
         left += width + graph.spacing.layer_gap;
     }
 
-    // Rows first, in order, then one balancing pass per layer from the second
-    // column onwards: a card moves to the average row of the cards feeding it, as
-    // far as the gap to its neighbours above and below allows.
-    let mut rows: Vec<Vec<usize>> = vec![Vec::new(); depth];
+    // Layer by layer from the left: the first column stacks, and each later
+    // one is placed by `place_layer`, from the cards feeding it.
     for (layer, slots) in order.layers.iter().enumerate() {
-        for slot in slots {
-            if let Slot::Block(index) = slot {
-                rows[layer].push(*index);
-            }
-        }
-    }
-    for (layer, blocks) in rows.iter().enumerate() {
-        let mut top = 0.0;
-        for index in blocks {
+        let blocks: Vec<usize> = slots
+            .iter()
+            .filter_map(|slot| match slot {
+                Slot::Block(index) => Some(*index),
+                Slot::Dummy(_) => None,
+            })
+            .collect();
+        let tops = if layer == 0 {
+            stacked(graph, &blocks)
+        } else {
+            place_layer(graph, order, &positions, layer, &blocks)
+        };
+        for (index, top) in blocks.iter().zip(tops) {
             positions[*index] = Point::new(columns[layer], top);
-            top += graph.blocks[*index].size.height + graph.spacing.row_gap;
         }
     }
-    for (layer, blocks) in rows.iter().enumerate().skip(1) {
-        for (row, &index) in blocks.iter().enumerate() {
-            let sources: Vec<f32> = order
-                .chains
-                .iter()
-                .filter_map(|chain| {
-                    let (level, slot) = *chain.last()?;
-                    (level == layer && slot == Slot::Block(index))
-                        .then(|| chain.first().copied())
-                        .flatten()
-                })
-                .filter_map(|(_, slot)| match slot {
-                    Slot::Block(source) => {
-                        Some(positions[source].y + graph.blocks[source].size.height * 0.5)
-                    }
-                    Slot::Dummy(_) => None,
-                })
-                .collect();
-            if sources.is_empty() {
-                continue;
-            }
-            let wanted = sources.iter().sum::<f32>() / sources.len() as f32
-                - graph.blocks[index].size.height * 0.5;
-            let lower = match row.checked_sub(1).and_then(|above| blocks.get(above)) {
-                Some(above) => {
-                    positions[*above].y + graph.blocks[*above].size.height + graph.spacing.row_gap
-                }
-                None => f32::NEG_INFINITY,
-            };
-            let upper = match blocks.get(row + 1) {
-                Some(below) => {
-                    positions[*below].y - graph.spacing.row_gap - graph.blocks[index].size.height
-                }
-                None => f32::INFINITY,
-            };
-            positions[index].y = wanted.clamp(lower.min(upper), upper.max(lower));
-        }
-    }
+    straighten_backwards(graph, order, &mut positions);
     // Centre each card in its column so that layers of mixed widths stay readable.
     for (index, block) in graph.blocks.iter().enumerate() {
         let layer = layers[index];
         positions[index].x = columns[layer] + (widths[layer] - block.size.width) * 0.5;
     }
     positions
+}
+
+/// The wires between neighbouring columns that carry ports, as (source,
+/// target, source port, target port).
+fn short_wires(order: &Order) -> Vec<(usize, usize, f32, f32)> {
+    order
+        .chains
+        .iter()
+        .zip(&order.edges)
+        .filter(|(chain, edge)| chain.len() == 2 && edge.ports)
+        .map(|(_, edge)| {
+            (
+                edge.source,
+                edge.target,
+                edge.source_offset,
+                edge.target_offset,
+            )
+        })
+        .collect()
+}
+
+/// The second pass of LAY-04, right to left: a card none of whose wires to a
+/// neighbouring column runs straight moves, within the room its column
+/// leaves it, to where a wire to the next column does, if that wire's target
+/// has no straight wire in yet. The first column, which nothing feeds, gains
+/// the most.
+fn straighten_backwards(graph: &Graph<'_>, order: &Order, positions: &mut [Point]) {
+    let wires = short_wires(order);
+    let level = |positions: &[Point], wire: &(usize, usize, f32, f32)| {
+        ((positions[wire.0].y + wire.2) - (positions[wire.1].y + wire.3)).abs() < 0.5
+    };
+    let gap = graph.spacing.row_gap;
+    for slots in order.layers.iter().rev().skip(1) {
+        let blocks: Vec<usize> = slots
+            .iter()
+            .filter_map(|slot| match slot {
+                Slot::Block(index) => Some(*index),
+                Slot::Dummy(_) => None,
+            })
+            .collect();
+        for (row, &index) in blocks.iter().enumerate() {
+            if wires
+                .iter()
+                .any(|wire| (wire.0 == index || wire.1 == index) && level(positions, wire))
+            {
+                continue;
+            }
+            let lower = row.checked_sub(1).map_or(f32::NEG_INFINITY, |above| {
+                let above = blocks[above];
+                positions[above].y + graph.blocks[above].size.height + gap
+            });
+            let upper = blocks.get(row + 1).map_or(f32::INFINITY, |below| {
+                positions[*below].y - gap - graph.blocks[index].size.height
+            });
+            let wanted = wires
+                .iter()
+                .filter(|wire| {
+                    wire.0 == index
+                        && !wires
+                            .iter()
+                            .any(|other| other.1 == wire.1 && level(positions, other))
+                })
+                .map(|wire| positions[wire.1].y + wire.3 - wire.2)
+                .filter(|top| *top >= lower && *top <= upper)
+                .min_by(|left, right| {
+                    compare(
+                        (left - positions[index].y).abs(),
+                        (right - positions[index].y).abs(),
+                    )
+                });
+            if let Some(top) = wanted {
+                positions[index].y = top;
+            }
+        }
+    }
+}
+
+/// The tops of `blocks` stacked from zero, one row gap apart.
+fn stacked(graph: &Graph<'_>, blocks: &[usize]) -> Vec<f32> {
+    let mut top = 0.0;
+    blocks
+        .iter()
+        .map(|index| {
+            let at = top;
+            top += graph.blocks[*index].size.height + graph.spacing.row_gap;
+            at
+        })
+        .collect()
+}
+
+/// What a card of a later column asks for (LAY-04): the rows that make a wire
+/// from the previous column with ports straight, and the row level with the
+/// centre of its feeders.
+#[derive(Clone, Debug, Default)]
+struct Wanted {
+    /// The tops at which a wire from the previous column runs straight.
+    straight: Vec<f32>,
+    /// The top that puts the card's centre at the mean of its feeders'
+    /// centres, `None` for a card nothing feeds.
+    centre: Option<f32>,
+}
+
+impl Wanted {
+    fn of(
+        graph: &Graph<'_>,
+        order: &Order,
+        positions: &[Point],
+        layer: usize,
+        index: usize,
+    ) -> Self {
+        let height = graph.blocks[index].size.height;
+        let mut straight = Vec::new();
+        let mut centres = Vec::new();
+        for (chain, edge) in order.chains.iter().zip(&order.edges) {
+            let (Some(&(level, last)), Some(&(_, Slot::Block(source)))) =
+                (chain.last(), chain.first())
+            else {
+                continue;
+            };
+            if level != layer || last != Slot::Block(index) || source == index {
+                continue;
+            }
+            let top = positions[source].y;
+            centres.push(top + graph.blocks[source].size.height * 0.5 - height * 0.5);
+            if edge.ports && chain.len() == 2 {
+                straight.push(top + edge.source_offset - edge.target_offset);
+            }
+        }
+        let centre =
+            (!centres.is_empty()).then(|| centres.iter().sum::<f32>() / centres.len() as f32);
+        Self { straight, centre }
+    }
+
+    /// How many wires the best row makes straight.
+    fn strength(&self) -> usize {
+        self.straight
+            .iter()
+            .map(|value| agreeing(&self.straight, *value))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The top to take between `lower` and `upper`: of the straight rows
+    /// that fit there the one the most of them agree with, then the one
+    /// nearest the centre row, then the higher; without one that fits, the
+    /// centre row, held between the bounds.
+    fn top(&self, lower: f32, upper: f32) -> Option<f32> {
+        let fits = |value: f32| value >= lower - 0.5 && value <= upper + 0.5;
+        let mean = self.centre.unwrap_or(0.0);
+        let best = self
+            .straight
+            .iter()
+            .copied()
+            .filter(|value| fits(*value))
+            .min_by(|left, right| {
+                agreeing(&self.straight, *right)
+                    .cmp(&agreeing(&self.straight, *left))
+                    .then_with(|| compare((left - mean).abs(), (right - mean).abs()))
+                    .then_with(|| compare(*left, *right))
+            });
+        best.or(self.centre)
+            .map(|value| value.clamp(lower, upper.max(lower)))
+    }
+}
+
+/// How many of `values` are within half a pixel of `value`.
+fn agreeing(values: &[f32], value: f32) -> usize {
+    values
+        .iter()
+        .filter(|other| (**other - value).abs() < 0.5)
+        .count()
+}
+
+/// The tops of the cards of a later column, in the order found above (LAY-04).
+///
+/// The ports decide the rows: a card whose wire from the previous column can
+/// run straight is placed first, the card that straightens the most wires
+/// before the others, each where its wire is straight as far as the cards
+/// placed before it leave room, keeping the order and the row gap with
+/// space for the cards still to come between them. The others follow, at
+/// the row their feeders ask for within the room left.
+fn place_layer(
+    graph: &Graph<'_>,
+    order: &Order,
+    positions: &[Point],
+    layer: usize,
+    blocks: &[usize],
+) -> Vec<f32> {
+    let gap = graph.spacing.row_gap;
+    let height = |row: usize| graph.blocks[blocks[row]].size.height;
+    let wanted: Vec<Wanted> = blocks
+        .iter()
+        .map(|index| Wanted::of(graph, order, positions, layer, *index))
+        .collect();
+    let mut turn: Vec<usize> = (0..blocks.len()).collect();
+    turn.sort_by(|left, right| {
+        wanted[*right]
+            .strength()
+            .cmp(&wanted[*left].strength())
+            .then_with(|| left.cmp(right))
+    });
+    let mut tops: Vec<Option<f32>> = vec![None; blocks.len()];
+    for row in turn {
+        // The room between the nearest placed card above and below, with the
+        // unplaced cards between them stacked tight.
+        let lower = (0..row)
+            .rev()
+            .find_map(|above| tops[above].map(|top| (above, top)))
+            .map_or(f32::NEG_INFINITY, |(above, top)| {
+                top + (above..row)
+                    .map(|between| height(between) + gap)
+                    .sum::<f32>()
+            });
+        let upper = (row + 1..blocks.len())
+            .find_map(|below| tops[below].map(|top| (below, top)))
+            .map_or(f32::INFINITY, |(below, top)| {
+                top - (row..below)
+                    .map(|between| height(between) + gap)
+                    .sum::<f32>()
+            });
+        let top = wanted[row]
+            .top(lower, upper)
+            .unwrap_or(if lower.is_finite() {
+                lower
+            } else if upper.is_finite() {
+                upper
+            } else {
+                0.0
+            });
+        tops[row] = Some(top);
+    }
+    tops.into_iter().map(|top| top.unwrap_or(0.0)).collect()
 }
 
 /// The geometry of shape D (LAY-06): a spine in rows, satellites under it.
@@ -663,6 +923,12 @@ pub struct Rows {
     /// Free space between the lowest card of a row and the next row, which
     /// holds the rail the next row's ordering wires run on.
     pub row_gap: f32,
+    /// The height a board may reach, as a share of its width, by rows grown
+    /// to run a wire between two spine steps straight (LAY-04): the shape of
+    /// the view a fit fills, so that growing never lowers the fit zoom. The
+    /// default is the board's view in the folder window at 1600 × 1000,
+    /// 1134 × 760 px.
+    pub aspect: f32,
 }
 
 impl Default for Rows {
@@ -675,6 +941,7 @@ impl Default for Rows {
             column_gap,
             stack_gap: 24.0,
             row_gap: 96.0,
+            aspect: 760.0 / 1134.0,
         }
     }
 }
@@ -701,6 +968,11 @@ pub struct Hanging<'a> {
     /// Each satellite with the index in `spine` of the block it hangs under,
     /// in the order they stack.
     pub satellites: &'a [(usize, usize)],
+    /// The wires (LAY-04). A spine block moves down its row so that a wire
+    /// with ports into it from the column before runs straight; one at
+    /// either end of a wire without ports, an ordering wire on the rail
+    /// above the row, stays at the row's top.
+    pub edges: &'a [Edge],
     pub rows: Rows,
 }
 
@@ -711,16 +983,22 @@ pub struct Row {
     pub spine: Vec<usize>,
     /// The top of the row, where its spine blocks start.
     pub top: f32,
-    /// The tallest stack of the row: a spine block and its satellites.
+    /// The tallest stack of the row from the row's top: a spine block and
+    /// its satellites, and how far the ports dropped them (LAY-04).
     pub height: f32,
 }
 
 /// Shape D: one position per block, and the rows. A block that is neither
 /// on the spine nor a satellite keeps its position.
 ///
-/// A row is as tall as its tallest stack and the next row starts
-/// [`Rows::row_gap`] below it. The result is anchored like [`tidy`]'s: the
-/// top-left corner of the blocks laid out stays where it is.
+/// The ports decide where a stack starts in its row (LAY-04, [`drops`]):
+/// the first stack of a row at the row's top, every other one as far down
+/// as makes a wire from the column before into its spine block straight,
+/// within the room the row has under it, or, for a wire from the spine block
+/// before, as far as the board's [`Rows::aspect`] lets the rows grow. A row
+/// is as tall as its tallest stack from the row's top, and the next row
+/// starts [`Rows::row_gap`] below it. The result is anchored like
+/// [`tidy`]'s: the top-left corner of the blocks laid out stays where it is.
 pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
     let blocks = hanging.blocks;
     let mut positions: Vec<Point> = blocks.iter().map(|block| block.position).collect();
@@ -745,25 +1023,61 @@ pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
     let rows = hanging.rows;
     let per = rows.columns();
     let pitch = rows.column_width + rows.column_gap;
-    let mut laid = Vec::new();
-    let mut top = 0.0;
-    for (number, chunk) in stacks.chunks(per).enumerate() {
-        let mut height: f32 = 0.0;
-        for (column, stack) in chunk.iter().enumerate() {
-            let left = column as f32 * pitch;
-            let mut y = top;
+    // Each block's offset from the top of its stack, and each stack's height.
+    let mut offsets = vec![0.0f32; blocks.len()];
+    let heights: Vec<f32> = stacks
+        .iter()
+        .map(|stack| {
+            let mut y = 0.0;
             for (place, &block) in stack.iter().enumerate() {
                 if place > 0 {
                     y += rows.stack_gap;
                 }
-                let size = blocks[block].size;
-                positions[block] = Point::new(left + (rows.column_width - size.width) * 0.5, y);
-                y += size.height;
+                offsets[block] = y;
+                y += blocks[block].size.height;
             }
-            height = height.max(y - top);
+            y
+        })
+        .collect();
+    // What the rows may grow by in all, for straight wires between spine
+    // steps: up to the height the board's width allows at `aspect`.
+    let tallest: Vec<f32> = heights
+        .chunks(per)
+        .map(|chunk| chunk.iter().copied().fold(0.0, f32::max))
+        .collect();
+    let natural = tallest.iter().sum::<f32>() + (tallest.len() - 1) as f32 * rows.row_gap;
+    let wide = per.min(stacks.len()) as f32 * pitch - rows.column_gap;
+    let mut budget = (wide * rows.aspect - natural).max(0.0);
+    let mut laid = Vec::new();
+    let mut top = 0.0;
+    for (number, chunk) in stacks.chunks(per).enumerate() {
+        let first = number * per;
+        let heights = &heights[first..first + chunk.len()];
+        let drops = drops(
+            chunk,
+            &offsets,
+            heights,
+            (tallest[number], budget),
+            hanging.edges,
+        );
+        let height = heights
+            .iter()
+            .zip(&drops)
+            .map(|(height, drop)| height + drop)
+            .fold(0.0, f32::max);
+        budget = (budget - (height - tallest[number])).max(0.0);
+        for (column, stack) in chunk.iter().enumerate() {
+            let left = column as f32 * pitch;
+            for &block in stack {
+                let size = blocks[block].size;
+                positions[block] = Point::new(
+                    left + (rows.column_width - size.width) * 0.5,
+                    top + drops[column] + offsets[block],
+                );
+            }
         }
         laid.push(Row {
-            spine: spine[number * per..(number * per + chunk.len())].to_vec(),
+            spine: spine[first..first + chunk.len()].to_vec(),
             top,
             height,
         });
@@ -790,6 +1104,79 @@ pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
         row.top += shift.y;
     }
     (positions, laid)
+}
+
+/// How far each stack of a row of shape D starts below the row's top (LAY-04).
+///
+/// A stack whose spine block is fed by a wire with ports from the stack
+/// before it drops so that the wire runs straight: the drop of the stack
+/// before plus the wire's misalignment, never above the row's top. Of
+/// several such wires the one whose drop fits is taken, then the one the
+/// most agree with, then the smallest drop. A drop fits when the stack stays
+/// within the row as tall as it is, `tallest` at first; a wire from the spine
+/// block before may also grow the row by up to `growth` in all. A stack keeps
+/// to the row's top when nothing feeds it from the column before, when no
+/// drop fits, and when its spine block is at either end of a wire without
+/// ports, an ordering wire on the rail above the row (LAY-06), so that the
+/// rail meets it there. The first stack of a row stays at the top.
+/// `offsets` are the blocks' tops within their stacks.
+fn drops(
+    stacks: &[Vec<usize>],
+    offsets: &[f32],
+    heights: &[f32],
+    (tallest, growth): (f32, f32),
+    edges: &[Edge],
+) -> Vec<f32> {
+    let mut drops = vec![0.0f32; stacks.len()];
+    let mut height = tallest;
+    let railed = |block: usize| {
+        edges
+            .iter()
+            .any(|edge| !edge.ports && (edge.source == block || edge.target == block))
+    };
+    for column in 1..stacks.len() {
+        let spine = stacks[column][0];
+        if railed(spine) {
+            continue;
+        }
+        let before = &stacks[column - 1];
+        // Each wire's misalignment, and whether it comes from the spine block.
+        let wires: Vec<(f32, bool)> = edges
+            .iter()
+            .filter(|edge| edge.ports && edge.target == spine && before.contains(&edge.source))
+            .map(|edge| {
+                (
+                    offsets[edge.source] + edge.source_offset - edge.target_offset,
+                    edge.source == before[0],
+                )
+            })
+            .collect();
+        let misalignments: Vec<f32> = wires
+            .iter()
+            .map(|(misalignment, _)| *misalignment)
+            .collect();
+        let fits = |(misalignment, from_spine): (f32, bool)| {
+            let drop = drops[column - 1] + misalignment;
+            let limit = if from_spine { tallest + growth } else { height };
+            drop >= -0.5 && drop + heights[column] <= limit.max(height) + 0.5
+        };
+        let Some(wire) = wires.iter().copied().min_by(|left, right| {
+            fits(*right)
+                .cmp(&fits(*left))
+                .then_with(|| {
+                    agreeing(&misalignments, right.0).cmp(&agreeing(&misalignments, left.0))
+                })
+                .then_with(|| compare(left.0.abs(), right.0.abs()))
+                .then_with(|| compare(left.0, right.0))
+        }) else {
+            continue;
+        };
+        if fits(wire) {
+            drops[column] = (drops[column - 1] + wire.0).max(0.0);
+            height = height.max(drops[column] + heights[column]);
+        }
+    }
+    drops
 }
 
 /// Layers of a graph, for callers that need the columns without the coordinates.
@@ -1116,6 +1503,7 @@ mod tests {
             blocks: &blocks,
             spine: &spine,
             satellites: &[],
+            edges: &[],
             rows,
         });
         assert_eq!(laid.len(), 3);
@@ -1135,6 +1523,7 @@ mod tests {
             blocks: &blocks,
             spine: &spine,
             satellites: &[],
+            edges: &[],
             rows: narrow,
         });
         assert_eq!(laid.len(), 4);
@@ -1157,6 +1546,7 @@ mod tests {
             blocks: &blocks,
             spine: &spine,
             satellites: &satellites,
+            edges: &[],
             rows,
         });
         assert_eq!(positions[6].x, positions[1].x);
@@ -1183,6 +1573,7 @@ mod tests {
             blocks: &blocks,
             spine: &spine,
             satellites: &satellites,
+            edges: &[],
             rows: Rows::default(),
         };
         let (first, _) = hang(&hanging);
@@ -1221,5 +1612,198 @@ mod tests {
             positions[2].x - positions[1].x >= 600.0 + spacing.layer_gap - 1.0,
             "{positions:?}"
         );
+    }
+
+    /// The wires of `edges` routed on the cards where `positions` put them,
+    /// each from its port on the right side of its source to its port on
+    /// the left side of its target.
+    fn routed(blocks: &[Block], positions: &[Point], edges: &[Edge]) -> Vec<crate::Route> {
+        use crate::{Port, Routing, Side, Wire, route};
+        let rectangles: Vec<Rect> = positions
+            .iter()
+            .zip(blocks)
+            .map(|(position, block)| Rect::from_size(*position, block.size))
+            .collect();
+        let wires: Vec<Wire> = edges
+            .iter()
+            .map(|edge| {
+                Wire::new(
+                    Port::new(edge.source, Side::Right, edge.source_offset),
+                    Port::new(edge.target, Side::Left, edge.target_offset),
+                )
+            })
+            .collect();
+        route(&rectangles, &wires, &Routing::default())
+    }
+
+    /// LAY-04 criterion 1: a chain of five cards, each consuming the
+    /// previous card's output into its first input, tidies so that every
+    /// wire has zero bends. The cards differ in height and in where their
+    /// ports are, as a board's do, and start anywhere.
+    #[test]
+    fn lay04_criterion_1_a_chain_of_five_runs_straight() {
+        let heights = [132.0, 190.0, 166.0, 214.0, 142.0];
+        let outputs = [98.0, 122.0, 98.0, 146.0, 98.0];
+        let inputs = [52.0, 74.0, 51.0, 74.0, 52.0];
+        let blocks: Vec<Block> = heights
+            .iter()
+            .enumerate()
+            .map(|(index, height)| {
+                Block::new(
+                    Size::new(280.0, *height),
+                    Point::new(index as f32 * 37.0, 300.0 - index as f32 * 53.0),
+                )
+            })
+            .collect();
+        let edges: Vec<Edge> = (0..4)
+            .map(|index| {
+                Edge::new(index, index + 1).with_offsets(outputs[index], inputs[index + 1])
+            })
+            .collect();
+        let positions = tidy(&Graph::new(&blocks, &edges));
+        assert!(!any_overlap(&positions, &blocks));
+        for (edge, route) in edges.iter().zip(routed(&blocks, &positions, &edges)) {
+            assert_eq!(
+                route.bends(),
+                0,
+                "{} -> {} runs straight: {:?}",
+                edge.source,
+                edge.target,
+                route.points
+            );
+        }
+    }
+
+    /// LAY-04 criterion 2: two wires leave one card from different ports.
+    /// Their targets tie on the barycentre, and the ports break the tie: the
+    /// target of the upper port stands above, so the wires do not cross
+    /// right after the card.
+    #[test]
+    fn lay04_criterion_2_ports_break_ties() {
+        let blocks = blocks(3);
+        // Card 0 feeds card 1 from its lower port and card 2 from its upper.
+        let edges = [
+            Edge::new(0, 1).with_offsets(100.0, 60.0),
+            Edge::new(0, 2).with_offsets(40.0, 60.0),
+        ];
+        let graph = Graph::new(&blocks, &edges);
+        assert_eq!(rows_of(&graph)[1], [2, 1], "the upper port's target first");
+        let positions = tidy(&graph);
+        assert!(positions[2].y < positions[1].y, "{positions:?}");
+        for route in routed(&blocks, &positions, &edges) {
+            assert!(route.bridges.is_empty(), "no crossing: {:?}", route.points);
+        }
+    }
+
+    /// A spine of five whose each step feeds the next from port 98 into port
+    /// 74, so that each must stand 24 px below the one before to be straight.
+    fn chain_of_five() -> (Vec<Block>, Vec<Edge>, [usize; 5]) {
+        let blocks = spine_blocks(5, 120.0);
+        let edges = (0..4)
+            .map(|index| Edge::new(index, index + 1).with_offsets(98.0, 74.0))
+            .collect();
+        (blocks, edges, [0, 1, 2, 3, 4])
+    }
+
+    /// LAY-04 in shape D: where the row has room under its spine, a tall
+    /// satellite here, every step drops to run the wire from the step before
+    /// straight, the row's first step stays at its top and the row does not
+    /// grow.
+    #[test]
+    fn lay04_a_row_of_shape_d_runs_its_spine_straight_in_its_room() {
+        let (mut blocks, edges, spine) = chain_of_five();
+        blocks.push(Block::new(Size::new(280.0, 400.0), Point::default()));
+        let rows = Rows {
+            aspect: 0.0,
+            ..Rows::default()
+        };
+        let (positions, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &[(5, 0)],
+            edges: &edges,
+            rows,
+        });
+        assert_eq!(positions[0].y, laid[0].top);
+        for edge in &edges {
+            assert_eq!(
+                positions[edge.source].y + edge.source_offset,
+                positions[edge.target].y + edge.target_offset,
+                "{} -> {} is straight",
+                edge.source,
+                edge.target
+            );
+        }
+        assert_eq!(laid[0].height, 120.0 + rows.stack_gap + 400.0);
+        assert!(!any_overlap(&positions, &blocks));
+    }
+
+    /// LAY-04 in shape D: a row grows for a straight wire between two spine
+    /// steps only while the board stays within its aspect, so the fit zoom
+    /// never drops; a wire from a satellite never grows it.
+    #[test]
+    fn lay04_a_row_grows_only_within_the_aspect() {
+        let (blocks, edges, spine) = chain_of_five();
+        let level = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &[],
+            edges: &edges,
+            rows: Rows {
+                aspect: 0.0,
+                ..Rows::default()
+            },
+        });
+        assert!(
+            level.0.iter().all(|position| position.y == 0.0),
+            "no room, no growth: {:?}",
+            level.0
+        );
+        let rows = Rows::default();
+        let (positions, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &[],
+            edges: &edges,
+            rows,
+        });
+        for (step, position) in positions.iter().enumerate() {
+            assert_eq!(position.y, step as f32 * 24.0, "step {step}");
+        }
+        assert_eq!(laid[0].height, 120.0 + 4.0 * 24.0);
+        assert!(laid[0].height <= rows.width * rows.aspect);
+        // A wire from a satellite into the next step does not grow the row.
+        let mut blocks = spine_blocks(3, 120.0);
+        blocks.push(Block::new(Size::new(280.0, 60.0), Point::default()));
+        let edges = [Edge::new(3, 1).with_offsets(30.0, 74.0)];
+        let (positions, laid) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &[0, 1, 2],
+            satellites: &[(3, 0)],
+            edges: &edges,
+            rows,
+        });
+        assert_eq!(laid[0].height, 120.0 + rows.stack_gap + 60.0);
+        assert_eq!(positions[1].y, 0.0, "the drop would not fit: {positions:?}");
+    }
+
+    /// LAY-04 and LAY-06: a spine step at either end of an ordering wire,
+    /// which runs on the rail above the row, stays at the row's top, and so
+    /// does the step after it when its wire cannot be made straight.
+    #[test]
+    fn lay04_an_ordering_wire_keeps_its_ends_at_the_top() {
+        let (blocks, mut edges, spine) = chain_of_five();
+        edges.push(Edge::new(1, 3));
+        let (positions, _) = hang(&Hanging {
+            blocks: &blocks,
+            spine: &spine,
+            satellites: &[],
+            edges: &edges,
+            rows: Rows::default(),
+        });
+        assert_eq!(positions[1].y, 0.0, "{positions:?}");
+        assert_eq!(positions[3].y, 0.0, "{positions:?}");
+        assert_eq!(positions[2].y, 24.0, "{positions:?}");
+        assert_eq!(positions[4].y, 24.0, "{positions:?}");
     }
 }

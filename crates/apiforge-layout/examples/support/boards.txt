@@ -7,15 +7,15 @@
 board order-flow compact collapsed 14
 card 0 0 280 132 begin
 card 376 0 280 190 login
-card 752 0 280 166 products
-card 752 190 280 70 first
-card 752 284 280 70 second
-card 752 378 280 70 total
+card 752 24 280 166 products
+card 752 214 280 70 first
+card 752 308 280 70 second
+card 752 402 280 70 total
 card 1128 0 280 190 cart
 card 1504 0 280 214 order
-card 0 544 280 94 created
-card 376 544 280 166 receipt
-card 0 662 280 96 failed
+card 0 568 280 94 created
+card 376 568 280 166 receipt
+card 0 686 280 96 failed
 wire 0 top 140 1 top 140
 wire 6 top 140 7 top 140
 wire 8 top 70 9 top 140
@@ -40,17 +40,17 @@ board order-flow compact expanded 14
 card 0 0 280 132 begin
 card 376 0 280 190 login
 card 376 214 280 96 logged_in
-card 752 0 280 166 products
-card 752 190 280 70 first
-card 752 284 280 70 second
-card 752 378 280 70 total
+card 752 24 280 166 products
+card 752 214 280 70 first
+card 752 308 280 70 second
+card 752 402 280 70 total
 card 1128 0 280 190 cart
 card 1128 214 280 96 cart_total
 card 1504 0 280 214 order
-card 0 544 280 94 created
-card 376 544 280 166 receipt
-card 376 734 280 96 receipt_total
-card 0 662 280 96 failed
+card 0 568 280 94 created
+card 376 568 280 166 receipt
+card 376 758 280 96 receipt_total
+card 0 686 280 96 failed
 wire 0 top 140 1 top 140
 wire 8 top 140 9 top 140
 wire 10 top 70 11 top 140
@@ -84,7 +84,7 @@ card 752 0 280 476 products
 card 752 500 280 236 first
 card 752 760 280 236 second
 card 752 1020 280 288 total
-card 1128 0 280 424 cart
+card 1128 434 280 424 cart
 card 1504 0 280 424 order
 card 0 1404 280 316 created
 card 376 1404 280 424 receipt
@@ -117,8 +117,8 @@ card 752 0 280 476 products
 card 752 500 280 236 first
 card 752 760 280 236 second
 card 752 1020 280 288 total
-card 1128 0 280 424 cart
-card 1128 448 280 316 cart_total
+card 1128 434 280 424 cart
+card 1128 882 280 316 cart_total
 card 1504 0 280 424 order
 card 0 1404 280 316 created
 card 376 1404 280 424 receipt
@@ -156,15 +156,15 @@ card 376 0 280 190 login
 card 752 0 280 190 catalogue
 card 752 334 280 70 first
 card 752 428 280 70 second
-card 1128 0 280 142 product
+card 1128 312 280 142 product
 card 1504 0 280 142 promoted
 card 1504 166 280 70 expected_total
 card 0 594 280 214 cart
-card 376 594 280 190 cart_view
-card 376 808 280 96 valid_cart
+card 376 665 280 190 cart_view
+card 376 879 280 96 valid_cart
 card 752 594 280 142 address
 card 1128 594 280 214 checkout
-card 1504 594 280 190 order
+card 1504 665 280 190 order
 card 0 1264 280 94 paid
 card 376 1264 280 166 payment
 card 752 1264 280 166 receipt
@@ -214,7 +214,7 @@ wire 13 right 122 18 left 51
 wire 1 right 98 18 left 74
 wire 1 right 98 19 left 74
 mark 1792 20 72 24
-mark 1792 614 72 24
+mark 1792 685 72 24
 end
 board shop-30 compact expanded 30
 card 0 0 280 132 begin
@@ -225,20 +225,20 @@ card 752 0 280 190 catalogue
 card 752 214 280 96 listed
 card 752 334 280 70 first
 card 752 428 280 70 second
-card 1128 0 280 142 product
+card 1128 312 280 142 product
 card 1504 0 280 142 promoted
 card 1504 166 280 70 expected_total
 card 0 594 280 214 cart
 card 0 832 280 96 cart_created
 card 0 952 280 96 cart_total
-card 376 594 280 190 cart_view
-card 376 808 280 96 valid_cart
+card 376 665 280 190 cart_view
+card 376 879 280 96 valid_cart
 card 752 594 280 142 address
 card 1128 594 280 214 checkout
 card 1128 832 280 96 checkout_total
 card 1128 952 280 96 checkout_status
 card 1128 1072 280 96 checkout_created
-card 1504 594 280 190 order
+card 1504 665 280 190 order
 card 0 1264 280 94 paid
 card 376 1264 280 166 payment
 card 752 1264 280 166 receipt
@@ -305,7 +305,7 @@ wire 27 right 98 28 left 48
 wire 10 right 52 28 left 56
 wire 1 right 98 29 left 74
 mark 1792 20 72 24
-mark 1792 614 72 24
+mark 1792 685 72 24
 end
 board shop-30 full collapsed 30
 card 0 0 280 132 begin
@@ -313,15 +313,15 @@ card 376 0 280 372 login
 card 752 0 280 476 catalogue
 card 752 788 280 236 first
 card 752 1048 280 236 second
-card 1128 0 280 212 product
+card 1128 850 280 212 product
 card 1504 0 280 212 promoted
 card 1504 236 280 288 expected_total
 card 0 1380 280 424 cart
-card 376 1380 280 424 cart_view
-card 376 1828 280 472 valid_cart
+card 376 1522 280 424 cart_view
+card 376 1970 280 472 valid_cart
 card 752 1380 280 424 address
 card 1128 1380 280 424 checkout
-card 1504 1380 280 476 order
+card 1504 1522 280 476 order
 card 0 2920 280 316 paid
 card 376 2920 280 424 payment
 card 752 2920 280 424 receipt
@@ -371,7 +371,7 @@ wire 13 right 312 18 left 118
 wire 1 right 208 18 left 170
 wire 1 right 208 19 left 170
 mark 1792 20 72 24
-mark 1792 1400 72 24
+mark 1792 1542 72 24
 end
 board shop-30 full expanded 30
 card 0 0 280 132 begin
@@ -382,20 +382,20 @@ card 752 0 280 476 catalogue
 card 752 500 280 264 listed
 card 752 788 280 236 first
 card 752 1048 280 236 second
-card 1128 0 280 212 product
+card 1128 850 280 212 product
 card 1504 0 280 212 promoted
 card 1504 236 280 288 expected_total
 card 0 1380 280 424 cart
 card 0 1828 280 316 cart_created
 card 0 2168 280 316 cart_total
-card 376 1380 280 424 cart_view
-card 376 1828 280 472 valid_cart
+card 376 1522 280 424 cart_view
+card 376 1970 280 472 valid_cart
 card 752 1380 280 424 address
 card 1128 1380 280 424 checkout
 card 1128 1828 280 316 checkout_total
 card 1128 2168 280 316 checkout_status
 card 1128 2508 280 316 checkout_created
-card 1504 1380 280 476 order
+card 1504 1522 280 476 order
 card 0 2920 280 316 paid
 card 376 2920 280 424 payment
 card 752 2920 280 424 receipt
@@ -462,7 +462,7 @@ wire 27 right 260 28 left 118
 wire 10 right 208 28 left 170
 wire 1 right 208 29 left 170
 mark 1792 20 72 24
-mark 1792 1400 72 24
+mark 1792 1542 72 24
 end
 board shop-50 compact collapsed 56
 card 0 0 280 132 begin
@@ -475,8 +475,8 @@ card 1504 0 280 190 search
 card 1504 334 280 70 third
 card 0 594 280 166 stock
 card 376 594 280 142 product
-card 752 594 280 142 promoted
-card 752 760 280 70 expected_total
+card 752 618 280 142 promoted
+card 752 784 280 70 expected_total
 card 1128 594 280 214 cart
 card 1504 594 280 190 cart_view
 card 1504 1048 280 96 valid_cart
@@ -597,8 +597,8 @@ card 0 594 280 166 stock
 card 0 784 280 96 in_stock
 card 0 904 280 96 same_product
 card 376 594 280 142 product
-card 752 594 280 142 promoted
-card 752 760 280 70 expected_total
+card 752 618 280 142 promoted
+card 752 784 280 70 expected_total
 card 1128 594 280 214 cart
 card 1128 832 280 96 cart_created
 card 1128 952 280 96 cart_total
@@ -762,8 +762,8 @@ card 1504 0 280 476 search
 card 1504 788 280 236 third
 card 0 1380 280 424 stock
 card 376 1380 280 212 product
-card 752 1380 280 212 promoted
-card 752 1616 280 288 expected_total
+card 752 1418 280 212 promoted
+card 752 1654 280 288 expected_total
 card 1128 1380 280 424 cart
 card 1504 1380 280 424 cart_view
 card 1504 2508 280 472 valid_cart
@@ -884,8 +884,8 @@ card 0 1380 280 424 stock
 card 0 1828 280 316 in_stock
 card 0 2168 280 316 same_product
 card 376 1380 280 212 product
-card 752 1380 280 212 promoted
-card 752 1616 280 288 expected_total
+card 752 1418 280 212 promoted
+card 752 1654 280 288 expected_total
 card 1128 1380 280 424 cart
 card 1128 1828 280 316 cart_created
 card 1128 2168 280 316 cart_total

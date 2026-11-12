@@ -2,8 +2,9 @@
 
 - Status: accepted and implemented, with the deviations recorded under
   *As implemented*
-- Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn) and
-  2026-11-12 (LAY-06, shape D and the rail)
+- Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn),
+  2026-11-12 (LAY-06, shape D and the rail) and 2026-11-12 (LAY-04, the ports
+  decide the rows)
 - Scope: new crate `apiforge-layout`, the desktop board
 - Plan: [scenario code and canvas](../roadmap.md)
 
@@ -141,7 +142,8 @@ spine and satellites:
    step the engine reaches just before it.
 3. **Rows.** A row is as tall as its tallest stack, at the heights the board
    draws its cards; the next row starts 96 px lower. Folded checks keep
-   their places, so showing them moves nothing.
+   their places, so showing them moves nothing. Since LAY-04 a stack may
+   start below the row's top, where its ports put it (*As implemented*).
 4. **The rail.** An ordering wire leaves the top of its source, above its
    control socket, and enters the top of its target, so it runs on the rail
    above the row instead of through the gap between two cards where the data
@@ -160,11 +162,39 @@ layered layout above. Tidy up ends with the camera fitted to the board.
 
 The decisions above hold, with these corrections found while building it:
 
-- **Coordinates.** Brandes–Köpf's four alignments were not needed: rows are
-  assigned in the order crossing reduction produced and then pulled towards the
-  average row of the cards feeding them, within the gap to their neighbours. The
-  result is deterministic and keeps the row order; the balancing is what the
-  method's last step does. A layer's cards are centred in its column.
+- **Coordinates: the ports decide the rows (LAY-04).** Brandes–Köpf's four
+  alignments were not needed. The layout reads the ports the board draws: an
+  edge carries the offset of its output down the right side of the source and
+  of its input down the left side of the target, from the cards' tops
+  (`Edge::with_offsets`; an ordering edge has none). The first column stacks.
+  In each later column a card asks for the top at which a wire from the
+  previous column with ports runs straight; of several, the one that
+  straightens the most, then the one nearest the centre of its feeders. The
+  cards that straighten the most wires are placed first, each as near its
+  straight row as the cards already placed leave room, keeping the order
+  crossing reduction gave and the 48 px row gap; the others follow at the
+  mean of their feeders' centres. A pass from the right then moves a card none
+  of whose wires runs straight to straighten a wire into the next column, when
+  that card's target has no straight wire yet and the column leaves room. The
+  result is deterministic. A layer's cards are centred in its column.
+  Crossing reduction breaks barycentre ties by these ports, and counts two
+  wires that meet at one card as crossing when their ports there are in the
+  opposite order to their other ends, so two wires leaving one card do not
+  cross right after it.
+- **Shape D and the ports (LAY-04).** The spine of a row is no longer level:
+  a stack starts as far below the row's top as makes a wire with ports from
+  the stack before into its spine step straight, the drop of the stack before
+  plus the wire's misalignment. Within the room the row already has under the
+  stack any such wire may decide; a wire from the spine step before may also
+  grow the row, as long as the board stays no taller than its width times
+  `Rows::aspect`, the shape of the view a fit fills (1134 × 760 px at
+  1600 × 1000), so growing never lowers the fit zoom. The first stack of a row
+  stays at the top, and so does a spine step at either end of an ordering
+  wire, so the rail meets it there; a drop that cannot make the wire straight
+  is not taken. A row is as tall as its tallest stack from the row's top. On
+  the reference scenarios few wires join two neighbouring columns, so few
+  become straight; the generated data-only boards, laid out in layers, are
+  where the rule shows.
 - **Dummy nodes.** They exist for crossing counting, as decided, and they do not
   reserve space in the coordinate phase. A long edge is routed around the cards
   anyway, so a reserved channel bought nothing.

@@ -226,10 +226,18 @@ impl Block {
 pub struct Edge {
     pub source: usize,
     pub target: usize,
-    /// Offset of the source port along its side, used to order cards within a layer
-    /// so that wires leaving one card do not cross each other needlessly.
+    /// Offset of the source port down the right side of its card, from the
+    /// card's top, and of the target port down the left side of its card
+    /// (LAY-04). Crossing reduction breaks ties with them, so that wires
+    /// leaving one card do not cross each other needlessly, and the layout
+    /// sets a card's row so that a wire from the previous column runs
+    /// straight. Meaningful only when [`Edge::ports`] is set.
     pub source_offset: f32,
     pub target_offset: f32,
+    /// Whether the offsets are the wire's ports. An ordering edge, or one whose
+    /// anchors the caller does not know, has none: the layout then reads the
+    /// card's centre, as it did before ports were passed.
+    pub ports: bool,
 }
 
 impl Edge {
@@ -239,13 +247,18 @@ impl Edge {
             target,
             source_offset: 0.0,
             target_offset: 0.0,
+            ports: false,
         }
     }
 
+    /// The edge with its ports: `source` down the right side of the source
+    /// card and `target` down the left side of the target card, both from
+    /// the card's top.
     #[must_use]
     pub const fn with_offsets(mut self, source: f32, target: f32) -> Self {
         self.source_offset = source;
         self.target_offset = target;
+        self.ports = true;
         self
     }
 }
