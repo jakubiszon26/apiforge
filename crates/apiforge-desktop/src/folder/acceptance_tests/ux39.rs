@@ -124,8 +124,19 @@ fn any_marker(harness: &FolderHarness, document: &str) -> bool {
 /// The demo shop with *Active promotion* copied from the scenario and pasted
 /// into `add-to-cart.afs`, which has no step `product`, shown at `size`.
 fn pasted_into_cart(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    pasted_into_cart_at(size, CardDensity::Compact)
+}
+
+/// As [`pasted_into_cart`], the boards drawn at `density` before the paste,
+/// so the copy is placed clear of the cards at that density.
+fn pasted_into_cart_at(
+    size: egui::Vec2,
+    density: CardDensity,
+) -> (tempfile::TempDir, FolderHarness, String) {
     let project = crate::testing::shop_project();
     let (mut harness, scenario) = window(project.path(), size, SCENARIO, "Diagram");
+    app(&mut harness).switch_density(density);
+    settle(&mut harness);
     select(&mut harness, &scenario, &["active_promotion"]);
     copy(&mut harness);
     let cart = by_path(&harness, CART);
@@ -407,8 +418,14 @@ fn review_ux39_marker() {
     let around = region(&harness);
     crate::testing::capture(&mut harness, "ux39-compact-100-1600", around);
     crate::testing::capture(&mut harness, "ux39-compact-window-1600", None);
-    app(&mut harness).switch_density(CardDensity::Full);
-    settle(&mut harness);
+    drop(harness);
+
+    let (_project, mut harness, cart) = pasted_into_cart_at(WIDE, CardDensity::Full);
+    let region = |harness: &FolderHarness| {
+        canvas(harness, &cart)
+            .debug_card_rect(&id_of(harness, &cart, "active_promotion"))
+            .map(|rect| rect.expand(160.0))
+    };
     show(&mut harness, &cart, "active_promotion", 1.0);
     assert_card_in_view(&harness, &cart, "active_promotion");
     let around = region(&harness);
