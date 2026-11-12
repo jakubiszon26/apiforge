@@ -9,7 +9,7 @@ use crate::canvas;
 use apiforge_core::{
     block::Block,
     edit,
-    format::{Binding, Graph, Node, Position, Project},
+    format::{Binding, Graph, Node, Position, Project, Proxy, ProxySource},
     graph::delete_nodes,
 };
 use eframe::egui;
@@ -88,36 +88,74 @@ impl Board<'_> {
         if self.graph.nodes.iter().filter(|node| moving(node)).count() < 2 {
             return None;
         }
-        if self.satellites && selection.is_empty() {
-            return Some(self.tidy_with_satellites());
-        }
-        let blocks: Vec<apiforge_layout::Block> = self
-            .graph
+        // A chip goes with its first reader (LAY-02): the chips of the blocks
+        // that move are placed again after them, the others stay obstacles.
+        let follows = |proxy: &Proxy| {
+            first_reader(self.graph, &proxy.source)
+                .is_some_and(|reader| moving(&self.graph.nodes[reader.node]))
+        };
+        let staying = Graph {
+            proxies: self
+                .graph
+                .proxies
+                .iter()
+                .filter(|proxy| !follows(proxy))
+                .cloned()
+                .collect(),
+            ..Graph::default()
+        };
+        // Satellites hang foldable checks off their subjects (LAY-11) only
+        // when the whole board is laid out; the chips then follow as below.
+        let mut tidied = if self.satellites && selection.is_empty() {
+            self.tidy_with_satellites(&staying.proxies)
+        } else {
+            let blocks: Vec<apiforge_layout::Block> = self
+                .graph
+                .nodes
+                .iter()
+                .map(|node| {
+                    let block = self.card_block(node);
+                    if moving(node) { block } else { block.pinned() }
+                })
+                // The chips come after the blocks, so a block keeps its index and the
+                // laid-out positions still line up with the nodes.
+                .chain(self.chip_obstacles_of(&staying.proxies, self.graph))
+                .collect();
+            let placed = apiforge_layout::tidy(&apiforge_layout::Graph::new(
+                &blocks,
+                &layout_edges(self.graph),
+            ));
+            let mut tidied = self.graph.clone();
+            for (node, position) in tidied.nodes.iter_mut().zip(placed) {
+                if !moving(node) {
+                    continue;
+                }
+                node.position = Position {
+                    x: f64::from(position.x),
+                    y: f64::from(position.y),
+                };
+                node.auto_placed = true;
+            }
+            tidied
+        };
+        // A Tidy up of the whole board lays out every chip with its reader,
+        // however far it was left (LAY-02 criterion 5). A Tidy up of a
+        // selection takes along only the chips of the readers it moved.
+        let moved: HashSet<String> = tidied
             .nodes
             .iter()
-            .map(|node| {
-                let block = self.card_block(node);
-                if moving(node) { block } else { block.pinned() }
-            })
-            // The chips come after the blocks, so a block keeps its index and the
-            // laid-out positions still line up with the nodes.
-            .chain(self.chip_obstacles(self.graph))
+            .zip(&self.graph.nodes)
+            .filter(|(after, before)| selection.is_empty() || after.position != before.position)
+            .map(|(node, _)| node.id.clone())
             .collect();
-        let placed = apiforge_layout::tidy(&apiforge_layout::Graph::new(
-            &blocks,
-            &layout_edges(self.graph),
-        ));
-        let mut tidied = self.graph.clone();
-        for (node, position) in tidied.nodes.iter_mut().zip(placed) {
-            if !moving(node) {
-                continue;
-            }
-            node.position = Position {
-                x: f64::from(position.x),
-                y: f64::from(position.y),
-            };
-            node.auto_placed = true;
-        }
+        chips_beside_their_readers(
+            &mut tidied,
+            self.reference,
+            self.project,
+            self.parameters,
+            self.density,
+            |id| moved.contains(id),
+        );
         Some(tidied)
     }
 
@@ -128,7 +166,7 @@ impl Board<'_> {
     /// (`layered::place`), which moves nothing laid out before it. Folded or
     /// not, the checks get the same places, so the board shown with its
     /// checks is the board Tidy up gives with them.
-    fn tidy_with_satellites(&self) -> Graph {
+    fn tidy_with_satellites(&self, staying: &[Proxy]) -> Graph {
         let hung = canvas::collapsible(self.graph, self.sibling);
         let anchor: HashMap<&str, &str> = hung
             .iter()
@@ -151,7 +189,7 @@ impl Board<'_> {
         let blocks: Vec<apiforge_layout::Block> = rest
             .iter()
             .map(|index| self.card_block(&self.graph.nodes[*index]))
-            .chain(self.chip_obstacles(self.graph))
+            .chain(self.chip_obstacles_of(staying, self.graph))
             .collect();
         let placed = apiforge_layout::tidy(&apiforge_layout::Graph::new(&blocks, &edges));
         let mut tidied = self.graph.clone();
@@ -183,7 +221,7 @@ impl Board<'_> {
                     block.pinned()
                 }
             })
-            .chain(self.chip_obstacles(&tidied))
+            .chain(self.chip_obstacles_of(staying, &tidied))
             .collect();
         let placed = apiforge_layout::place(
             &apiforge_layout::Graph::new(&blocks, &layout_edges(&tidied)),
@@ -484,8 +522,12 @@ impl Board<'_> {
     /// The proxies of a graph as pinned obstacles, so that automatic placement
     /// keeps clear of the chips the user put on the board.
     fn chip_obstacles(&self, graph: &Graph) -> Vec<apiforge_layout::Block> {
-        graph
-            .proxies
+        self.chip_obstacles_of(&graph.proxies, graph)
+    }
+
+    /// `proxies` of `graph` as pinned obstacles.
+    fn chip_obstacles_of(&self, proxies: &[Proxy], graph: &Graph) -> Vec<apiforge_layout::Block> {
+        proxies
             .iter()
             .map(|proxy| {
                 let rect = canvas::Chip::build(proxy, graph, self.project, self.parameters).rect();
@@ -496,6 +538,154 @@ impl Board<'_> {
                 .pinned()
             })
             .collect()
+    }
+}
+
+/// The block that first reads what a proxy stands for, in document order, and
+/// the input row it reads it in.
+pub(crate) struct Reader {
+    pub node: usize,
+    pub input: String,
+    pub path: Vec<String>,
+}
+
+/// The first block of `graph`, in document order, with an input that reads
+/// what `source` stands for, a field of it included.
+pub(crate) fn first_reader(graph: &Graph, source: &ProxySource) -> Option<Reader> {
+    let reads = |leaf: &Binding| match (source, leaf) {
+        (ProxySource::Variable { node_id }, Binding::Reference { node_id: read, .. }) => {
+            read == node_id
+        }
+        (ProxySource::Parameter { name }, Binding::Parameter { name: read, .. })
+        | (ProxySource::Environment { name }, Binding::Environment { name: read }) => read == name,
+        _ => false,
+    };
+    graph.nodes.iter().enumerate().find_map(|(node, block)| {
+        block.inputs.iter().find_map(|(input, binding)| {
+            let mut found = None;
+            binding.for_each_leaf(&mut |leaf, path| {
+                if found.is_none() && reads(leaf) {
+                    found = Some(path.to_vec());
+                }
+            });
+            found.map(|path| Reader {
+                node,
+                input: input.clone(),
+                path,
+            })
+        })
+    })
+}
+
+/// The space a chip placed beside its reader keeps from every card and chip.
+const CHIP_CLEARANCE: f32 = 12.0;
+/// How far from its reader's input a chip is looked for before it stays put.
+const CHIP_SEARCH: f32 = 720.0;
+
+/// Places each proxy whose first reader `moved` says has moved beside that
+/// reader (LAY-02, #168): left of the input that reads it, level with that
+/// input, or at the nearest place around it clear of every card and chip.
+/// A proxy that stays but now lies on a card, its reader's or another's, is
+/// moved the least that clears it: beside its reader when it has one. Every
+/// other proxy stays where it is and is kept clear of.
+pub(crate) fn chips_beside_their_readers(
+    graph: &mut Graph,
+    reference: &Graph,
+    project: &Project,
+    parameters: &[String],
+    density: canvas::CardDensity,
+    moved: impl Fn(&str) -> bool,
+) {
+    if graph.proxies.is_empty() {
+        return;
+    }
+    let cards: Vec<canvas::Card> = graph
+        .nodes
+        .iter()
+        .map(|node| canvas::Card::build(node, reference, project, density))
+        .collect();
+    let chips: Vec<egui::Rect> = graph
+        .proxies
+        .iter()
+        .map(|proxy| canvas::Chip::build(proxy, graph, project, parameters).rect())
+        .collect();
+    let on_a_card = |chip: &egui::Rect| {
+        cards
+            .iter()
+            .any(|card| chip.intersects(card.rect()) && chip.intersect(card.rect()).area() > 0.0)
+    };
+    // Where each proxy that moves should go, before it is kept clear.
+    let wanted: Vec<Option<egui::Pos2>> = graph
+        .proxies
+        .iter()
+        .zip(&chips)
+        .map(|(proxy, chip)| {
+            let reader = first_reader(graph, &proxy.source);
+            let follows = reader
+                .as_ref()
+                .is_some_and(|reader| moved(&graph.nodes[reader.node].id));
+            if !follows && !on_a_card(chip) {
+                return None;
+            }
+            Some(match reader {
+                Some(reader) => {
+                    let card = &cards[reader.node];
+                    let level = card
+                        .input_anchor(&reader.input, &reader.path)
+                        .map_or(card.rect().center().y, |anchor| anchor.y);
+                    egui::pos2(
+                        card.rect().min.x - 2.0 * CHIP_CLEARANCE - chip.width(),
+                        level - chip.height() / 2.0,
+                    )
+                }
+                None => chip.min,
+            })
+        })
+        .collect();
+    if wanted.iter().all(Option::is_none) {
+        return;
+    }
+    let mut obstacles: Vec<egui::Rect> = cards
+        .iter()
+        .map(canvas::Card::rect)
+        .chain(
+            chips
+                .iter()
+                .zip(&wanted)
+                .filter(|(_, wanted)| wanted.is_none())
+                .map(|(chip, _)| *chip),
+        )
+        .collect();
+    // Candidate offsets on a grid, nearest first, built once for every chip.
+    let step = CHIP_CLEARANCE;
+    let reach = (CHIP_SEARCH / step) as i32;
+    let mut offsets: Vec<(i32, i32)> = (-reach..=reach)
+        .flat_map(|x| (-reach..=reach).map(move |y| (x, y)))
+        .collect();
+    offsets.sort_by_key(|(x, y)| (x * x + y * y, x.abs(), *y));
+    for (index, wanted) in wanted.iter().enumerate() {
+        let Some(wanted) = *wanted else { continue };
+        let size = chips[index].size();
+        let clear = |at: egui::Pos2| {
+            let chip = egui::Rect::from_min_size(at, size).expand(CHIP_CLEARANCE);
+            obstacles
+                .iter()
+                .all(|other| !chip.intersects(*other) || chip.intersect(*other).area() == 0.0)
+        };
+        let Some(at) = offsets
+            .iter()
+            .map(|(x, y)| wanted + egui::vec2(*x as f32 * step, *y as f32 * step))
+            .find(|at| clear(*at))
+        else {
+            obstacles.push(chips[index]);
+            continue;
+        };
+        let proxy = &mut graph.proxies[index];
+        proxy.position = Position {
+            x: f64::from(at.x).round(),
+            y: f64::from(at.y).round(),
+        };
+        obstacles.push(egui::Rect::from_min_size(at, size));
     }
 }
 

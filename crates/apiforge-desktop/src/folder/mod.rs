@@ -70,6 +70,15 @@ use explorer::ExplorerState;
 use file_prompts::{ImportRow, Picked};
 use notices::{Notice, Notices};
 use placement::CardPlacer;
+
+/// The density *Compact cards* asks the boards to draw at.
+fn density_of(preferences: &Preferences) -> canvas::CardDensity {
+    if preferences.compact_cards {
+        canvas::CardDensity::Compact
+    } else {
+        canvas::CardDensity::Full
+    }
+}
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -331,6 +340,9 @@ pub struct FolderApp {
     /// The last *Compact cards* switch and the document its Tidy up left, so
     /// Undo and Redo of that Tidy up switch the density with it (LAY-16).
     density_switch: Option<DensitySwitch>,
+    /// The density shared with the placer, so that a scenario opened from
+    /// code is laid out at the size its cards are drawn (LAY-02).
+    card_density: placement::DensityHandle,
     runs: runs::Runs,
     navigation: navigation::Navigation,
     storage: storage::Storage,
@@ -527,6 +539,7 @@ impl FolderApp {
             close_error: None,
             close_requested: false,
             preferences: Preferences::default(),
+            card_density: placement::DensityHandle::new(density_of(&Preferences::default())),
             density_switch: None,
             runs: runs::Runs::default(),
             navigation: navigation::Navigation::default(),
@@ -725,6 +738,7 @@ impl FolderApp {
     /// Draws every board at `density` and remembers it as *Compact cards*.
     fn switch_density(&mut self, density: canvas::CardDensity) {
         self.preferences.compact_cards = density == canvas::CardDensity::Compact;
+        self.card_density.set(density);
         let preferences = self.preferences.clone();
         self.storage_io(
             "Saving preferences…",
@@ -738,11 +752,7 @@ impl FolderApp {
 
     /// The sizes the boards draw their cards at, from *Compact cards*.
     fn density(&self) -> canvas::CardDensity {
-        if self.preferences.compact_cards {
-            canvas::CardDensity::Compact
-        } else {
-            canvas::CardDensity::Full
-        }
+        density_of(&self.preferences)
     }
 
     /// The input the Inspector last scrolled to for a double-click (LAY-16).
@@ -1248,12 +1258,18 @@ impl FolderApp {
         self.open_generation += 1;
         self.opening = true;
         let generation = self.open_generation;
+        let density = self.card_density.clone();
         let root = self.root.clone();
         let name = self.new_name.trim().to_owned();
         self.storage_io(
             "Creating project…",
             move || {
-                ProjectSession::initialise_with(&root, &name, &registrations, Arc::new(CardPlacer))
+                ProjectSession::initialise_with(
+                    &root,
+                    &name,
+                    &registrations,
+                    Arc::new(CardPlacer::new(density)),
+                )
             },
             move |app, result| {
                 if app.open_generation != generation {

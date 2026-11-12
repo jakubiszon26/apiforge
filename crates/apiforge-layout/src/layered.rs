@@ -94,8 +94,6 @@ pub fn tidy(graph: &Graph<'_>) -> Vec<Point> {
     }
     let edges = graph.usable_edges();
     let layers = layer_assignment(graph.blocks.len(), &edges);
-    let order = order_within_layers(graph.blocks.len(), &edges, &layers);
-    let mut positions = coordinates(graph, &layers, &order);
     // Pinned blocks take no part in the result: they are where the user put them.
     let moving: Vec<usize> = (0..graph.blocks.len())
         .filter(|index| !graph.blocks[*index].pinned)
@@ -103,21 +101,7 @@ pub fn tidy(graph: &Graph<'_>) -> Vec<Point> {
     if moving.is_empty() {
         return graph.blocks.iter().map(|block| block.position).collect();
     }
-    let anchor = Rect::bounding(moving.iter().map(|index| graph.blocks[*index].rect()))
-        .map(|bounds| bounds.min)
-        .unwrap_or_default();
-    let laid_out = Rect::bounding(
-        moving
-            .iter()
-            .map(|index| Rect::from_size(positions[*index], graph.blocks[*index].size)),
-    )
-    .map(|bounds| bounds.min)
-    .unwrap_or_default();
-    let shift = Point::new(anchor.x - laid_out.x, anchor.y - laid_out.y);
-    for index in &moving {
-        positions[*index].x += shift.x;
-        positions[*index].y += shift.y;
-    }
+    let mut positions = layered_positions(graph, &edges, &layers, &moving);
     let mut obstacles: Vec<Rect> = graph
         .blocks
         .iter()
@@ -154,12 +138,25 @@ pub fn tidy(graph: &Graph<'_>) -> Vec<Point> {
 /// nearest its neighbours: the search starts at the average position of the cards it
 /// is connected to and walks outwards in [`Spacing::slot_step`] steps, so a card
 /// lands beside what it is wired to and never on top of another card. Cards placed
-/// in the same call are obstacles for the ones after them, in the order given.
+/// in the same call are obstacles for the ones after them, in the order given, and
+/// count as neighbours of the ones after them; a layer that no placed card has yet
+/// takes its column from the first fresh card placed in it.
+///
+/// When nothing is placed yet, as for a scenario opened from code, there is no
+/// board to fit into: the fresh cards are laid out as [`tidy`] lays them out.
 pub fn place(graph: &Graph<'_>, fresh: &[usize]) -> Vec<Point> {
     let edges = graph.usable_edges();
     let layers = layer_assignment(graph.blocks.len(), &edges);
     // Where each layer sits now, taken from the cards that are already placed.
-    let columns = existing_columns(graph, &layers, fresh);
+    let mut columns = existing_columns(graph, &layers, fresh);
+    let layered = columns.iter().all(Option::is_none).then(|| {
+        let moving: Vec<usize> = fresh
+            .iter()
+            .copied()
+            .filter(|index| *index < graph.blocks.len())
+            .collect();
+        layered_positions(graph, &edges, &layers, &moving)
+    });
     let mut obstacles: Vec<Rect> = graph
         .blocks
         .iter()
@@ -167,6 +164,8 @@ pub fn place(graph: &Graph<'_>, fresh: &[usize]) -> Vec<Point> {
         .filter(|(index, _)| !fresh.contains(index))
         .map(|(_, block)| block.rect().inflate(graph.spacing.clearance))
         .collect();
+    // The fresh cards already placed by this call, by block index.
+    let mut settled: Vec<Option<Point>> = vec![None; graph.blocks.len()];
     let mut placed = Vec::with_capacity(fresh.len());
     for &index in fresh {
         let Some(block) = graph.blocks.get(index) else {
@@ -174,23 +173,69 @@ pub fn place(graph: &Graph<'_>, fresh: &[usize]) -> Vec<Point> {
             continue;
         };
         let layer = layers.get(index).copied().unwrap_or(0);
-        let neighbours: Vec<Point> = edges
-            .iter()
-            .filter_map(|edge| match () {
-                () if edge.target == index => Some(edge.source),
-                () if edge.source == index => Some(edge.target),
-                () => None,
-            })
-            .filter(|neighbour| !fresh.contains(neighbour))
-            .filter_map(|neighbour| graph.blocks.get(neighbour))
-            .map(|neighbour| neighbour.rect().center())
-            .collect();
-        let start = start_position(block, layer, &layers, &columns, &neighbours, graph);
+        let start = match &layered {
+            Some(positions) => positions[index],
+            None => {
+                let neighbours: Vec<Point> = edges
+                    .iter()
+                    .filter_map(|edge| match () {
+                        () if edge.target == index => Some(edge.source),
+                        () if edge.source == index => Some(edge.target),
+                        () => None,
+                    })
+                    .filter_map(|neighbour| {
+                        let other = graph.blocks.get(neighbour)?;
+                        if fresh.contains(&neighbour) {
+                            settled[neighbour]
+                                .map(|position| Rect::from_size(position, other.size).center())
+                        } else {
+                            Some(other.rect().center())
+                        }
+                    })
+                    .collect();
+                start_position(block, layer, &layers, &columns, &neighbours, graph)
+            }
+        };
         let position = free_slot(start, block.size, &obstacles, graph.spacing.slot_step);
         obstacles.push(Rect::from_size(position, block.size).inflate(graph.spacing.clearance));
+        settled[index] = Some(position);
+        if layered.is_none()
+            && let Some(column) = columns.get_mut(layer)
+            && column.is_none()
+        {
+            *column = Some(position.x);
+        }
         placed.push(position);
     }
     placed
+}
+
+/// The layered layout of the whole graph, shifted so that the top-left corner of
+/// the `moving` blocks stays where it is now.
+fn layered_positions(
+    graph: &Graph<'_>,
+    edges: &[Edge],
+    layers: &[usize],
+    moving: &[usize],
+) -> Vec<Point> {
+    let order = order_within_layers(graph.blocks.len(), edges, layers);
+    let mut positions = coordinates(graph, layers, &order);
+    let anchor = Rect::bounding(moving.iter().map(|index| graph.blocks[*index].rect()))
+        .map(|bounds| bounds.min)
+        .unwrap_or_default();
+    let laid_out = Rect::bounding(
+        moving
+            .iter()
+            .map(|index| Rect::from_size(positions[*index], graph.blocks[*index].size)),
+    )
+    .map(|bounds| bounds.min)
+    .unwrap_or_default();
+    let shift = Point::new(anchor.x - laid_out.x, anchor.y - laid_out.y);
+    for index in moving {
+        positions[*index].x += shift.x;
+        positions[*index].y += shift.y;
+    }
+    positions
 }
 
 /// The left edge of every layer that already holds a placed card.
@@ -817,6 +862,81 @@ mod tests {
                 assert!(!left.overlaps(right), "{left:?} and {right:?} overlap");
             }
         }
+    }
+
+    /// LAY-02 criterion 1: a scenario opened from code has no positions, so
+    /// every block is fresh. `place` then lays it out in the columns of
+    /// `tidy`, and no two cards overlap or come closer than the row gap.
+    #[test]
+    fn place_with_every_block_fresh_gives_the_columns_of_tidy() {
+        // The shape of a small scenario: a start, a request with its check, two
+        // requests reading it, and a last step reading both; heights differ.
+        let heights = [64.0, 220.0, 120.0, 300.0, 180.0, 120.0, 260.0];
+        let blocks: Vec<Block> = heights
+            .iter()
+            .map(|height| Block::new(Size::new(280.0, *height), Point::default()))
+            .collect();
+        let edges = [
+            Edge::new(0, 1),
+            Edge::new(1, 2),
+            Edge::new(1, 3),
+            Edge::new(1, 4),
+            Edge::new(3, 6),
+            Edge::new(4, 6),
+            Edge::new(6, 5),
+        ];
+        let graph = Graph::new(&blocks, &edges);
+        let fresh: Vec<usize> = (0..blocks.len()).collect();
+        let placed = place(&graph, &fresh);
+        let tidied = tidy(&graph);
+        assert_eq!(columns_of(&placed), columns_of(&tidied));
+        let layers = layers_of(&graph);
+        for (index, position) in placed.iter().enumerate() {
+            assert_eq!(
+                position.x.round(),
+                tidied[index].x.round(),
+                "block {index} is in its layer's column"
+            );
+            for (other, at) in placed.iter().enumerate().skip(index + 1) {
+                if layers[other] != layers[index] {
+                    continue;
+                }
+                let (upper, lower) = if position.y <= at.y {
+                    (index, other)
+                } else {
+                    (other, index)
+                };
+                let gap = placed[lower].y - (placed[upper].y + blocks[upper].size.height);
+                assert!(
+                    gap >= Spacing::default().row_gap - 0.5,
+                    "blocks {upper} and {lower} are {gap} apart: {placed:?}"
+                );
+            }
+        }
+        assert!(!any_overlap(&placed, &blocks));
+        assert!(
+            columns_of(&placed).len() > 1,
+            "the flow is laid out, not stacked: {placed:?}"
+        );
+    }
+
+    /// LAY-02 criterion 2: one fresh block among placed ones is placed as
+    /// before: in the column after its source's, level with it.
+    #[test]
+    fn place_with_one_fresh_block_is_unchanged() {
+        let mut blocks = blocks(3);
+        blocks[0].position = Point::new(0.0, 0.0);
+        blocks[0].pinned = true;
+        blocks[1].position = Point::new(400.0, 200.0);
+        blocks[1].pinned = true;
+        blocks[2].position = Point::new(0.0, 0.0);
+        let edges = [Edge::new(0, 1), Edge::new(1, 2)];
+        let placed = place(&Graph::new(&blocks, &edges), &[2]);
+        let spacing = Spacing::default();
+        assert_eq!(
+            placed,
+            [Point::new(400.0 + 280.0 + spacing.layer_gap, 200.0)]
+        );
     }
 
     #[test]

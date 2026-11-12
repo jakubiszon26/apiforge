@@ -297,9 +297,10 @@ impl FolderApp {
         self.opening = true;
         let generation = self.open_generation;
         let requested = root.clone();
+        let density = self.card_density.clone();
         self.storage_io(
             "Opening folder…",
-            move || super::opening::load(root),
+            move || super::opening::load(root, &density),
             move |app, result| {
                 if app.open_generation != generation {
                     return;
@@ -373,6 +374,8 @@ impl FolderApp {
         inspector::drafts::restore_entries(&self.ui_context, Vec::new());
         let mut next = Self::shell(&self.ui_context, destination.root.clone());
         next.preferences = self.preferences.clone();
+        // The switched-to session's placer holds this handle (LAY-02).
+        next.card_density = self.card_density.clone();
         next.navigation.recent = self.navigation.recent.clone();
         next.install_destination(destination);
         *self = next;

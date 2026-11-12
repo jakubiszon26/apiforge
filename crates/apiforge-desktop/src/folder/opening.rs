@@ -10,13 +10,16 @@ pub(super) struct Destination {
     pub holder: Option<apiforge_storage::project::Holder>,
 }
 
-pub(super) fn load(root: PathBuf) -> apiforge_project::Result<Destination> {
+pub(super) fn load(
+    root: PathBuf,
+    density: &placement::DensityHandle,
+) -> apiforge_project::Result<Destination> {
     let root = std::path::absolute(root).map_err(|error| apiforge_project::ProjectError::Io {
         path: PathBuf::from("."),
         source: error,
     })?;
     let holder = apiforge_storage::project::Holder::window();
-    match ProjectSession::open_with_as(&root, Arc::new(CardPlacer), &holder) {
+    match ProjectSession::open_with_as(&root, Arc::new(CardPlacer::new(density.clone())), &holder) {
         Ok(mut session) => {
             // A read-only window says who holds the project from its first
             // frame; the watcher keeps the answer current.
@@ -82,13 +85,18 @@ impl FolderApp {
         self.opening = true;
         let generation = self.open_generation;
         let root = self.root.clone();
+        let density = self.card_density.clone();
         self.storage_io(
             "Opening project…",
             move || {
+                // The layout made on open uses the density the board will
+                // draw, so the preferences are read first (LAY-02).
+                let preferences = Preferences::load();
+                density.set(density_of(&preferences));
                 (
-                    Preferences::load(),
+                    preferences,
                     navigation::RecentProjects::default(),
-                    load(root),
+                    load(root, &density),
                 )
             },
             move |app, result| {

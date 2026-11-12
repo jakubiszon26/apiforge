@@ -157,18 +157,21 @@ pub fn decide(data: &Path) -> Start {
 
 /// Resolves the data directory to one open project, migrating or creating one
 /// if that is what it holds. Runs on the storage worker.
-pub(super) fn activate(data: &Path) -> apiforge_project::Result<Activated> {
+pub(super) fn activate(
+    data: &Path,
+    density: &placement::DensityHandle,
+) -> apiforge_project::Result<Activated> {
     if let Some(catalogue) = ProjectCatalogue::load(data)? {
         if let Some(root) = preferred_root(&catalogue, data) {
             return Ok(Activated {
-                destination: opening::load(root)?,
+                destination: opening::load(root, density)?,
                 outcome: Outcome::Opened,
                 known: known_projects(&catalogue),
             });
         }
         // A catalogue without a usable project is not a reason to refuse to
         // start; the data directory still needs one project to open.
-        return create(data).map(|destination| Activated {
+        return create(data, density).map(|destination| Activated {
             destination,
             outcome: Outcome::Created,
             known: known_projects(&catalogue),
@@ -182,12 +185,12 @@ pub(super) fn activate(data: &Path) -> apiforge_project::Result<Activated> {
         // last resort, not the answer to every start.
         if let Some(root) = last_project(data) {
             return Ok(Activated {
-                destination: opening::load(root)?,
+                destination: opening::load(root, density)?,
                 outcome: Outcome::Opened,
                 known: Vec::new(),
             });
         }
-        return create(data).map(|destination| Activated {
+        return create(data, density).map(|destination| Activated {
             destination,
             outcome: Outcome::Created,
             known: Vec::new(),
@@ -209,7 +212,7 @@ pub(super) fn activate(data: &Path) -> apiforge_project::Result<Activated> {
     let catalogue = outcome.catalogue;
     let root = preferred_root(&catalogue, data).ok_or(apiforge_project::Error::NotAProject)?;
     Ok(Activated {
-        destination: opening::load(root)?,
+        destination: opening::load(root, density)?,
         outcome: Outcome::Migrated {
             original,
             projects: data.join(apiforge_project::PROJECTS_DIRECTORY),
@@ -285,7 +288,10 @@ fn preferred_root(catalogue: &ProjectCatalogue, data: &Path) -> Option<PathBuf> 
 /// look at rather than an empty board, so it holds the demo the legacy window
 /// shows on a first run; a managed project is a folder project like any other
 /// and can be renamed, edited or replaced.
-fn create(data: &Path) -> apiforge_project::Result<opening::Destination> {
+fn create(
+    data: &Path,
+    density: &placement::DensityHandle,
+) -> apiforge_project::Result<opening::Destination> {
     let project = apiforge_core::demos::shop_project();
     let projects = data.join(apiforge_project::PROJECTS_DIRECTORY);
     // Migration names a destination after its project, so creation does too.
@@ -303,7 +309,7 @@ fn create(data: &Path) -> apiforge_project::Result<opening::Destination> {
         source,
     })?;
     prepare_project(&root, &project)?;
-    opening::load(root)
+    opening::load(root, density)
 }
 
 impl FolderApp {
@@ -321,13 +327,18 @@ impl FolderApp {
         self.open_generation += 1;
         self.opening = true;
         let generation = self.open_generation;
+        let density = self.card_density.clone();
         self.storage_io(
             "Starting…",
             move || {
+                // The layout made on open uses the density the board will
+                // draw, so the preferences are read first (LAY-02).
+                let preferences = Preferences::load();
+                density.set(density_of(&preferences));
                 (
-                    Preferences::load(),
+                    preferences,
                     navigation::RecentProjects::at(&data),
-                    activate(&data),
+                    activate(&data, &density),
                 )
             },
             move |app, result| {
