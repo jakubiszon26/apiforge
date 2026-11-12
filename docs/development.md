@@ -92,11 +92,21 @@ only and rejects foreign hosts and origins. Tests can run it in-process with
 Every change passes these commands before it is merged:
 
 ```bash
-cargo fmt --all -- --check
+cargo fmt --all -- --check crates/apiforge-desktop/src/folder/acceptance_tests/*.rs
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 cargo run -p apiforge-convert-v1 --locked -- --fixtures --check
 ```
+
+A ticket's window tests go in a file of their own,
+`crates/apiforge-desktop/src/folder/acceptance_tests/<ticket>.rs` (for example
+`lay21.rs`), a child module of `folder/acceptance_tests.rs` that can use its
+helpers through `use super::*;`. The desktop's build script declares one module
+per file of that directory, so a new file needs no other edit. Because those
+declarations are included from the build output, `cargo fmt --all` alone does
+not reach the files: the formatting command above names them, and
+`cargo fmt --all -- crates/apiforge-desktop/src/folder/acceptance_tests/*.rs`
+formats them.
 
 Changes to the layout or the wire router also run the budgets of
 [ADR 0006](decisions/0006-layout-and-wire-routing.md), in release mode:

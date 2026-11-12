@@ -108,8 +108,11 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 -I packaging/test_release.py
 
+      # KTLO-44 (#325): the tickets' window tests are declared from the build
+      # output, which cargo fmt does not follow, so they are named here.
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        shell: bash
+        run: cargo fmt --all -- --check crates/apiforge-desktop/src/folder/acceptance_tests/*.rs
 
       - name: Run Clippy lints
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
