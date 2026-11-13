@@ -1940,6 +1940,8 @@ impl Canvas {
             self.menu = None;
             self.inline = None;
             self.shown_port = None;
+            // A wire of a chip brought back is a wire like any other here.
+            drawn.extend(drawn_revealed.iter().cloned());
             let hit = pointer.and_then(|pointer| hit_wire(&drawn, camera, pointer));
             match hit {
                 Some(wire) => {
@@ -1978,6 +1980,8 @@ impl Canvas {
                 &mut commands,
             );
             self.handle_keys(ui, input, &mut commands);
+        } else {
+            self.handle_escape(ui, input, &mut commands);
         }
 
         let summary = paint::steps_summary(input.graph);
@@ -2988,6 +2992,27 @@ impl Canvas {
         }
     }
 
+    /// Esc closes what is open first; on a quiet board it clears the
+    /// selection, and the wires it brought back return to chips (LAY-23).
+    /// A read-only board takes it too: it selects and reveals as well.
+    fn handle_escape(&mut self, ui: &egui::Ui, input: &Input<'_>, commands: &mut Vec<Command>) {
+        if ui.ctx().egui_wants_keyboard_input()
+            || ui.ctx().memory(|memory| memory.top_modal_layer().is_some())
+            || !ui.input(|state| state.key_pressed(Key::Escape))
+        {
+            return;
+        }
+        if self.menu.is_none() && self.drag.is_none() {
+            self.shown_port = None;
+            self.selected_wires.clear();
+            if !input.selection.is_empty() {
+                commands.push(Command::Select(Vec::new()));
+            }
+        }
+        self.menu = None;
+        self.drag = None;
+    }
+
     fn handle_keys(&mut self, ui: &egui::Ui, input: &Input<'_>, commands: &mut Vec<Command>) {
         // Keys belong to text fields while one has focus.
         if ui.ctx().egui_wants_keyboard_input()
@@ -2995,20 +3020,7 @@ impl Canvas {
         {
             return;
         }
-        if ui.input(|state| state.key_pressed(Key::Escape)) {
-            // Esc closes what is open first; on a quiet board it clears the
-            // selection, and the wires it brought back return to chips
-            // (LAY-23).
-            if self.menu.is_none() && self.drag.is_none() {
-                self.shown_port = None;
-                self.selected_wires.clear();
-                if !input.selection.is_empty() {
-                    commands.push(Command::Select(Vec::new()));
-                }
-            }
-            self.menu = None;
-            self.drag = None;
-        }
+        self.handle_escape(ui, input, commands);
         if ui.input_mut(|state| {
             state.consume_shortcut(&egui::KeyboardShortcut::new(
                 Modifiers::COMMAND | Modifiers::SHIFT,
