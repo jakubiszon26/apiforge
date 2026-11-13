@@ -412,18 +412,43 @@ fn lay23_criterion_3_pointing_at_a_chip_draws_its_wire() {
     assert!(revealed(&harness, &id).is_empty());
 }
 
+/// The camera after each step of criterion 4's selections (a reader, the
+/// source, Esc) with every wire drawn, from the camera Fit gives with
+/// chips: selecting a card the Inspector covers pans it into view (UX-18)
+/// whatever the board draws.
+fn camera_with_all_wires() -> Vec<(egui::Vec2, f32)> {
+    let (_project, mut harness, id) = tidied("fan-out", WIDE, Checks::Collapsed);
+    choose(&mut harness, FIT);
+    harness.step();
+    app(&mut harness).debug_wires(WireMode::All);
+    settle(&mut harness);
+    harness.step();
+    let mut cameras = Vec::new();
+    select(&mut harness, &id, &["checkout"]);
+    cameras.push(board(&harness, &id).debug_camera());
+    select(&mut harness, &id, &["cartId"]);
+    cameras.push(board(&harness, &id).debug_camera());
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    harness.step();
+    cameras.push(board(&harness, &id).debug_camera());
+    cameras
+}
+
 /// Criterion 4: selecting a reader draws the wires of all its chips;
 /// selecting the source, or clicking the mark at its port, draws every
 /// wire of the port; Esc or a click on the board returns to chips. No card
 /// and no camera moves, the wires that were drawn keep their routes, and
-/// the document is not marked changed.
+/// the document is not marked changed. The camera is what the same
+/// selections give with every wire drawn: bringing wires back moves it no
+/// further than UX-18 pans a card the Inspector covers.
 #[test]
 fn lay23_criterion_4_selection_brings_the_wires_back() {
+    let mut reference = camera_with_all_wires().into_iter();
     let (_project, mut harness, id) = tidied("fan-out", WIDE, Checks::Collapsed);
     choose(&mut harness, FIT);
     harness.step();
     let cards = positions(&harness, &id);
-    let camera = board(&harness, &id).debug_camera();
     let before = routes(&harness, &id);
     let dirty = folder(&harness).debug_dirty(&id);
     let tags = board(&harness, &id).debug_tags().to_vec();
@@ -443,12 +468,13 @@ fn lay23_criterion_4_selection_brings_the_wires_back() {
         .flat_map(|tag| tag.tag.wires.clone())
         .collect();
 
-    let unchanged = |harness: &FolderHarness, context: &str| {
+    let mut unchanged = |harness: &FolderHarness, context: &str| {
         assert_eq!(positions(harness, &id), cards, "{context}: no card moves");
-        assert_eq!(
-            board(harness, &id).debug_camera(),
-            camera,
-            "{context}: the camera stays"
+        let (pan, zoom) = board(harness, &id).debug_camera();
+        let (expected_pan, expected_zoom) = reference.next().expect("a reference camera");
+        assert!(
+            (pan - expected_pan).length() <= 0.5 && (zoom - expected_zoom).abs() < 1e-4,
+            "{context}: the camera is where All wires puts it: {pan:?} {zoom} against {expected_pan:?} {expected_zoom}"
         );
         assert_eq!(
             routes(harness, &id),
