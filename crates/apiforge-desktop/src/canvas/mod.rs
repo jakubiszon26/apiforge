@@ -8,6 +8,7 @@ mod collapse;
 mod layout;
 mod menu;
 mod paint;
+mod readers;
 mod routing;
 pub mod shape;
 mod strip;
@@ -16,6 +17,7 @@ pub use collapse::collapsible;
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
 pub(crate) use paint::{DrawnText, NUMBER_MIN, TextKind};
+pub use readers::WireMode;
 pub use routing::WireStyle;
 pub use strip::Pill as InputView;
 
@@ -128,6 +130,9 @@ pub enum Command {
     TidyUp(Vec<String>),
     /// Change how wires are drawn. A user setting, not a document edit.
     SetWireStyle(WireStyle),
+    /// *Wires* (LAY-23): every data wire, or chips at the readers of a value
+    /// many steps read. A user setting that moves no card and no camera.
+    SetWires(WireMode),
     SetBridges(bool),
     /// Switch *Compact cards* (LAY-16): a user setting, which the board
     /// follows with a Tidy up.
@@ -436,6 +441,14 @@ pub struct Canvas {
     inline: Option<InlineEdit>,
     error: Option<String>,
     router: routing::Router,
+    /// Routes the wires of chips brought back by pointing or selecting, apart
+    /// from the others, so that the wires drawn keep their routes (LAY-23).
+    revealed_router: routing::Router,
+    /// Which data wires are drawn, from the user's settings (LAY-23).
+    wire_mode: WireMode,
+    /// The port whose count was clicked: every wire of it is drawn until Esc
+    /// or a click on the board (LAY-23).
+    shown_port: Option<(String, String)>,
     /// How wires are drawn, from the user's settings.
     pub wire_style: WireStyle,
     /// Whether a crossing is drawn as a bridge, from the user's settings.
@@ -478,6 +491,14 @@ pub struct Canvas {
     /// The wires the last frame drew.
     #[cfg(test)]
     wires: Vec<DrawnWire>,
+    /// The chips and the reader counts the last frame drew, and the
+    /// statement it showed for a pointed chip or input (LAY-23).
+    #[cfg(test)]
+    tags: Vec<DrawnTag>,
+    #[cfg(test)]
+    counts: Vec<DrawnCount>,
+    #[cfg(test)]
+    statement: Option<String>,
     /// The continuation marks the last frame drew (LAY-06).
     #[cfg(test)]
     marks: Vec<shape::Mark>,
@@ -505,6 +526,30 @@ pub(crate) struct DrawnWire {
     pub points: Vec<Pos2>,
     /// The crossings of wires drawn before it, where it draws a bridge.
     pub bridges: usize,
+    /// A wire of a chip, drawn because its chip or input is pointed at or
+    /// its reader or source is selected (LAY-23).
+    pub revealed: bool,
+}
+
+/// A chip at a reader as the last frame drew it (LAY-23).
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(crate) struct DrawnTag {
+    pub tag: readers::Tag,
+    /// What it said at this zoom.
+    pub shown: String,
+    /// Its box on screen and on the board, and its text size on screen.
+    pub rect: Rect,
+    pub world: Rect,
+    pub font: f32,
+}
+
+/// The count at a source's port as the last frame drew it (LAY-23).
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(crate) struct DrawnCount {
+    pub count: readers::Count,
+    pub world: Rect,
 }
 
 impl Default for Canvas {
@@ -529,6 +574,9 @@ impl Default for Canvas {
             last_focus: None,
             last_viewport: Rect::NOTHING,
             router: routing::Router::default(),
+            revealed_router: routing::Router::default(),
+            wire_mode: WireMode::All,
+            shown_port: None,
             wire_style: WireStyle::default(),
             bridges: true,
             density: CardDensity::default(),
@@ -558,6 +606,12 @@ impl Default for Canvas {
             aggregates: Vec::new(),
             #[cfg(test)]
             wires: Vec::new(),
+            #[cfg(test)]
+            tags: Vec::new(),
+            #[cfg(test)]
+            counts: Vec::new(),
+            #[cfg(test)]
+            statement: None,
             #[cfg(test)]
             marks: Vec::new(),
             #[cfg(test)]
@@ -767,6 +821,33 @@ impl Canvas {
         &self.wires
     }
 
+    /// The chips the last frame drew at the readers (LAY-23).
+    #[cfg(test)]
+    pub(crate) fn debug_tags(&self) -> &[DrawnTag] {
+        &self.tags
+    }
+
+    /// The reader counts the last frame drew at the sources' ports.
+    #[cfg(test)]
+    pub(crate) fn debug_counts(&self) -> &[DrawnCount] {
+        &self.counts
+    }
+
+    /// The statement the last frame showed for a pointed chip or input.
+    #[cfg(test)]
+    pub(crate) fn debug_statement(&self) -> Option<String> {
+        self.statement.clone()
+    }
+
+    /// The tray of hidden inputs of the card `id`, on the board.
+    #[cfg(test)]
+    pub(crate) fn debug_input_tray(&self, id: &str) -> Option<Rect> {
+        self.cards
+            .iter()
+            .find(|card| card.id == id)
+            .and_then(Card::input_tray)
+    }
+
     /// The continuation marks the last frame drew (LAY-06).
     #[cfg(test)]
     pub(crate) fn debug_marks(&self) -> &[shape::Mark] {
@@ -798,6 +879,22 @@ impl Canvas {
         let mut ids: Vec<String> = self.expanded_here.iter().cloned().collect();
         ids.sort();
         ids
+    }
+
+    /// Which data wires the board draws (LAY-23).
+    #[cfg(test)]
+    pub(crate) fn wire_mode(&self) -> WireMode {
+        self.wire_mode
+    }
+
+    /// Draws every data wire, or chips at the readers of a value many steps
+    /// read. Nothing moves: the cards keep their places and the camera stays,
+    /// although the chips change what Fit shows (LAY-23, criterion 8). The
+    /// camera is not taken as moved by the person either, so a later
+    /// selection or resize places it as it would have in the other mode.
+    pub fn set_wire_mode(&mut self, mode: WireMode) {
+        self.wire_mode = mode;
+        self.shown_port = None;
     }
 
     /// Fits the camera to the board in the next frame: Tidy up ends with the
@@ -1062,6 +1159,7 @@ impl Canvas {
             self.menu = None;
             self.inline = None;
             self.selected_wires.clear();
+            self.shown_port = None;
             self.error = None;
         }
         let viewport = Self::viewport(ui);
@@ -1154,6 +1252,30 @@ impl Canvas {
         {
             self.marks = marks.clone();
         }
+        // Which data wires are chips is decided on the cards where they rest,
+        // before a drag moves them: a card being dragged turns no wire into a
+        // chip or back until it is dropped (LAY-23).
+        let chipped = match self.wire_mode {
+            WireMode::All => HashSet::new(),
+            WireMode::Chips => readers::chipped(
+                input.graph,
+                &cards,
+                &folded_wires(input.graph, &cards, &chips, &folded).0,
+            ),
+        };
+        let rest_plan = (!chipped.is_empty()).then(|| {
+            readers::plan(
+                input.graph,
+                &cards,
+                &folded_wires(input.graph, &cards, &chips, &folded).0,
+                &chipped,
+            )
+        });
+        // Fit shows the chips and the counts whole, the first column's too.
+        let mut extents = mark_rects.clone();
+        if let Some((tags, counts)) = &rest_plan {
+            extents.extend(readers::bounds(tags, counts));
+        }
 
         let pasted = std::mem::take(&mut self.pasted_pending);
         if let Some(group) = cards
@@ -1187,7 +1309,7 @@ impl Canvas {
             viewport,
             overlays.focus,
             rearranged,
-            shapes(&cards, &chips, &mark_rects),
+            shapes(&cards, &chips, &extents),
         );
         self.keep_selection_in_view(
             viewport,
@@ -1259,6 +1381,91 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &folded);
+        // The chips of the wires decided above, at the cards as they are drawn
+        // now; a wire with no chip stays a wire (LAY-23).
+        let (tags, counts) = match rest_plan {
+            Some(_) if self.drag.is_some() => {
+                readers::plan(input.graph, &cards, &board_wires, &chipped)
+            }
+            Some(plan) => plan,
+            None => (Vec::new(), Vec::new()),
+        };
+        let tagged: HashSet<&str> = tags
+            .iter()
+            .flat_map(|tag| tag.wires.iter().map(String::as_str))
+            .collect();
+        let hover = ui
+            .input(|state| state.pointer.hover_pos())
+            .filter(|pointer| overlays.board.contains(*pointer));
+        // A tray of hidden inputs or outputs, shown beside a selected card,
+        // takes the gap: the chips and the count there give way to it, and
+        // their wires are drawn anyway.
+        let shown_tags: Vec<readers::Tag> = tags
+            .iter()
+            .filter(|tag| {
+                !(selection.contains(tag.reader.as_str()) && cards[tag.card].input_tray().is_some())
+            })
+            .cloned()
+            .collect();
+        let shown_counts: Vec<&readers::Count> = counts
+            .iter()
+            .filter(|count| {
+                !(selection.contains(count.source.as_str())
+                    && cards[count.card].output_tray().is_some())
+            })
+            .collect();
+        let laid_tags = readers::lay_tags(&painter, &shown_tags, camera);
+        let mark_screens: Vec<Rect> = marks.iter().map(|mark| camera.rect(mark.rect)).collect();
+        let laid_counts: Vec<readers::Laid> = shown_counts
+            .iter()
+            .map(|count| readers::lay_count(&painter, count, camera, &mark_screens))
+            .collect();
+        // Pointing at a chip, or at the input it stands at, shows its
+        // statement and draws its wire.
+        let pointed_tag = hover.and_then(|pointer| {
+            laid_tags
+                .iter()
+                .position(|laid| laid.rect.contains(pointer))
+        });
+        let pointed_input = hover.and_then(|pointer| {
+            tags.iter().find_map(|tag| {
+                let card = &cards[tag.card];
+                let index = card.inputs.iter().position(|row| row.name == tag.input)?;
+                let row = card.input_row(index);
+                (row != Rect::NOTHING && camera.rect(row).contains(pointer))
+                    .then(|| (tag.reader.clone(), tag.input.clone(), camera.rect(row)))
+            })
+        });
+        let statement: Option<(String, Rect)> = match (pointed_tag, &pointed_input) {
+            (Some(index), _) => Some((shown_tags[index].statement.clone(), laid_tags[index].rect)),
+            (None, Some((reader, name, row))) => Some((
+                tags.iter()
+                    .filter(|tag| &tag.reader == reader && &tag.input == name)
+                    .map(|tag| tag.statement.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                *row,
+            )),
+            (None, None) => None,
+        };
+        let revealed: HashSet<String> = tags
+            .iter()
+            .filter(|tag| {
+                selection.contains(tag.reader.as_str())
+                    || selection.contains(tag.source.as_str())
+                    || self.shown_port.as_ref() == Some(&(tag.source.clone(), tag.port.clone()))
+                    || pointed_tag.is_some_and(|index| shown_tags[index] == **tag)
+                    || pointed_input.as_ref().is_some_and(|(reader, name, _)| {
+                        &tag.reader == reader && &tag.input == name
+                    })
+            })
+            .flat_map(|tag| tag.wires.iter().cloned())
+            .collect();
+        let (revealed_wires, board_wires): (Vec<routing::BoardWire>, Vec<routing::BoardWire>) =
+            board_wires
+                .into_iter()
+                .filter(|wire| !tagged.contains(wire.id.as_str()) || revealed.contains(&wire.id))
+                .partition(|wire| tagged.contains(wire.id.as_str()));
         let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
         // The input selected in the strip has no shape on the board: the
         // steps that read it are ringed (UX-31).
@@ -1313,10 +1520,67 @@ impl Canvas {
                 bridged.insert(wire.id.clone(), wire.bridges.len());
             }
         }
+        // The wires of chips brought back, over the others and apart from
+        // them: their routes leave the routes drawn as they were.
+        let mut drawn_revealed: Vec<(String, Vec<Pos2>)> = Vec::new();
+        if !revealed_wires.is_empty() {
+            let request = routing::Request {
+                cards: &cards,
+                chips: &chips,
+                wires: &revealed_wires,
+                moving: &moving,
+                style: self.wire_style,
+                bridges: self.bridges,
+            };
+            for wire in self.revealed_router.routes(&request) {
+                paint::routed_wire(&board_painter, wire, camera, true);
+                drawn_revealed.push((wire.id.clone(), wire.points.clone()));
+                #[cfg(test)]
+                bridged.insert(wire.id.clone(), wire.bridges.len());
+            }
+        }
+        for (tag, laid) in shown_tags.iter().zip(&laid_tags) {
+            let lit = tag.wires.iter().all(|wire| revealed.contains(wire));
+            readers::paint(&board_painter, laid, lit);
+        }
+        for (count, laid) in shown_counts.iter().zip(&laid_counts) {
+            let lit = count.wires.iter().any(|wire| revealed.contains(wire));
+            readers::paint(&board_painter, laid, lit);
+        }
+        #[cfg(test)]
+        {
+            self.tags = shown_tags
+                .iter()
+                .zip(&laid_tags)
+                .map(|(tag, laid)| DrawnTag {
+                    tag: tag.clone(),
+                    shown: laid.shown.clone(),
+                    rect: laid.rect,
+                    world: Rect::from_min_max(
+                        camera.to_world(laid.rect.min),
+                        camera.to_world(laid.rect.max),
+                    ),
+                    font: laid.font,
+                })
+                .collect();
+            self.counts = shown_counts
+                .iter()
+                .zip(&laid_counts)
+                .map(|(count, laid)| DrawnCount {
+                    count: (*count).clone(),
+                    world: Rect::from_min_max(
+                        camera.to_world(laid.rect.min),
+                        camera.to_world(laid.rect.max),
+                    ),
+                })
+                .collect();
+            self.statement = statement.as_ref().map(|(text, _)| text.clone());
+        }
         #[cfg(test)]
         {
             self.wires = board_wires
                 .iter()
+                .chain(&revealed_wires)
                 .map(|wire| DrawnWire {
                     id: wire.id.clone(),
                     source: match &wire.start {
@@ -1328,10 +1592,12 @@ impl Canvas {
                     dashed: wire.control,
                     points: drawn
                         .iter()
+                        .chain(&drawn_revealed)
                         .find(|(id, _)| *id == wire.id)
                         .map(|(_, points)| points.clone())
                         .unwrap_or_default(),
                     bridges: bridged.get(&wire.id).copied().unwrap_or_default(),
+                    revealed: revealed.contains(&wire.id),
                 })
                 .collect();
         }
@@ -1612,11 +1878,59 @@ impl Canvas {
             self.chip_controls(&mut board_ui, chip, camera, !input.read_only, &mut commands);
         }
 
+        // The chips and counts, found by their names: pointing at a chip
+        // draws its wire, a click on a count draws every wire of its port.
+        for (tag, laid) in shown_tags.iter().zip(&laid_tags) {
+            if !laid.rect.intersects(overlays.board) {
+                continue;
+            }
+            let name = tag.statement.clone();
+            board_ui
+                .interact(
+                    laid.rect.intersect(overlays.board),
+                    board_ui
+                        .id()
+                        .with(("reader-chip", &tag.reader, &tag.statement)),
+                    Sense::hover(),
+                )
+                .widget_info(move || {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &name)
+                });
+        }
+        for (count, laid) in shown_counts.iter().zip(&laid_counts) {
+            if !laid.rect.intersects(overlays.board) {
+                continue;
+            }
+            let name = count.label.clone();
+            let response = board_ui
+                .interact(
+                    laid.rect.intersect(overlays.board),
+                    board_ui
+                        .id()
+                        .with(("reader-count", &count.source, &count.port)),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text("Draw every wire of this value");
+            response.widget_info(move || {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+            });
+            if response.clicked() {
+                clicked_card = true;
+                self.menu = None;
+                let port = (count.source.clone(), count.port.clone());
+                self.shown_port = (self.shown_port.as_ref() != Some(&port)).then_some(port);
+            }
+        }
+        if let Some((text, near)) = &statement {
+            readers::paint_statement(&painter, *near, text);
+        }
+
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(
             &board_ui,
             &background,
-            shapes(&cards, &chips, &mark_rects),
+            shapes(&cards, &chips, &extents),
             camera,
             input,
             &mut commands,
@@ -1625,6 +1939,9 @@ impl Canvas {
         if background.clicked() && !clicked_card {
             self.menu = None;
             self.inline = None;
+            self.shown_port = None;
+            // A wire of a chip brought back is a wire like any other here.
+            drawn.extend(drawn_revealed.iter().cloned());
             let hit = pointer.and_then(|pointer| hit_wire(&drawn, camera, pointer));
             match hit {
                 Some(wire) => {
@@ -1663,6 +1980,8 @@ impl Canvas {
                 &mut commands,
             );
             self.handle_keys(ui, input, &mut commands);
+        } else {
+            self.handle_escape(ui, input, &mut commands);
         }
 
         let summary = paint::steps_summary(input.graph);
@@ -1676,12 +1995,12 @@ impl Canvas {
                 .on_hover_text(paint::mode_line_text(input.graph))
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &summary));
         }
-        self.zoom_controls(ui, viewport, &overlays, shapes(&cards, &chips, &mark_rects));
+        self.zoom_controls(ui, viewport, &overlays, shapes(&cards, &chips, &extents));
         if let Some((mm_inner, bounds, scale)) = paint::minimap(
             &painter,
             overlays.minimap,
             overlays.board,
-            shapes(&cards, &chips, &mark_rects),
+            shapes(&cards, &chips, &extents),
             camera,
             &selection,
         ) && let Some(mm_rect) = overlays.minimap
@@ -2673,6 +2992,27 @@ impl Canvas {
         }
     }
 
+    /// Esc closes what is open first; on a quiet board it clears the
+    /// selection, and the wires it brought back return to chips (LAY-23).
+    /// A read-only board takes it too: it selects and reveals as well.
+    fn handle_escape(&mut self, ui: &egui::Ui, input: &Input<'_>, commands: &mut Vec<Command>) {
+        if ui.ctx().egui_wants_keyboard_input()
+            || ui.ctx().memory(|memory| memory.top_modal_layer().is_some())
+            || !ui.input(|state| state.key_pressed(Key::Escape))
+        {
+            return;
+        }
+        if self.menu.is_none() && self.drag.is_none() {
+            self.shown_port = None;
+            self.selected_wires.clear();
+            if !input.selection.is_empty() {
+                commands.push(Command::Select(Vec::new()));
+            }
+        }
+        self.menu = None;
+        self.drag = None;
+    }
+
     fn handle_keys(&mut self, ui: &egui::Ui, input: &Input<'_>, commands: &mut Vec<Command>) {
         // Keys belong to text fields while one has focus.
         if ui.ctx().egui_wants_keyboard_input()
@@ -2680,10 +3020,7 @@ impl Canvas {
         {
             return;
         }
-        if ui.input(|state| state.key_pressed(Key::Escape)) {
-            self.menu = None;
-            self.drag = None;
-        }
+        self.handle_escape(ui, input, commands);
         if ui.input_mut(|state| {
             state.consume_shortcut(&egui::KeyboardShortcut::new(
                 Modifiers::COMMAND | Modifiers::SHIFT,
@@ -2884,6 +3221,39 @@ impl Canvas {
                                             commands
                                                 .push(Command::SetChecksCollapsed(!self.collapsed));
                                             ui.close();
+                                        }
+                                        // Which data wires are drawn (LAY-23).
+                                        ui.separator();
+                                        for (mode, label, hover) in [
+                                            (
+                                                WireMode::All,
+                                                "All wires",
+                                                "Draw every data wire",
+                                            ),
+                                            (
+                                                WireMode::Chips,
+                                                "Chips for shared values",
+                                                "A value three or more steps read is named at each far reader instead of a long wire; point at it or select a step to draw the wire",
+                                            ),
+                                        ] {
+                                            if ui
+                                                .add(
+                                                    widgets::action(
+                                                        if self.wire_mode == mode {
+                                                            Icon::Check
+                                                        } else {
+                                                            Icon::Wire
+                                                        },
+                                                        label,
+                                                    )
+                                                    .quiet(),
+                                                )
+                                                .on_hover_text(hover)
+                                                .clicked()
+                                            {
+                                                commands.push(Command::SetWires(mode));
+                                                ui.close();
+                                            }
                                         }
                                     }
                                 },
