@@ -445,9 +445,10 @@ Stage 1, option A. Tests in
    `lay23_criterion_3_pointing_at_a_chip_draws_its_wire`.
 4. Selecting a reader draws the wires of all its chips; selecting the
    source, or clicking the mark at its port, draws every wire of the port;
-   Esc or a click on the board returns to chips. No card and no camera
-   moves, the wires that were drawn keep their routes, and the document is
-   not marked changed. Test: `lay23_criterion_4_selection_brings_the_wires_back`.
+   Esc or a click on the board returns to chips. No card moves, the
+   camera is where the same selections leave it with *All wires* (UX-18
+   still pans a card the Inspector covers), the wires that were drawn keep
+   their routes, and the document is not marked changed. Test: `lay23_criterion_4_selection_brings_the_wires_back`.
 5. Nothing is written: after Tidy up, hovering and selecting, the scenario
    file and `diagram.json` are byte for byte what they were, and the
    document has no new proxy. Test: `lay23_criterion_5_nothing_is_written`.
