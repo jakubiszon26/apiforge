@@ -701,7 +701,41 @@ impl FolderApp {
         canvas.bridges = self.preferences.bridges;
         canvas.set_density(self.density());
         canvas.set_collapsed(self.preferences.checks_collapsed);
+        canvas.set_wire_mode(self.preferences.wires);
         canvas
+    }
+
+    /// Draws the data wires of every board as *Wires* says and remembers it
+    /// (LAY-23): nothing moves and nothing is written to the project.
+    fn switch_wires(&mut self, mode: canvas::WireMode) {
+        self.preferences.wires = mode;
+        let preferences = self.preferences.clone();
+        self.storage_io(
+            "Saving preferences…",
+            move || preferences.save(crate::preferences::Preference::Wires),
+            |_, _| {},
+        );
+        for canvas in self.canvases.values_mut() {
+            canvas.set_wire_mode(mode);
+        }
+    }
+
+    /// Draws the data wires as `mode` says, for tests that measure them:
+    /// neither saved nor a camera change (LAY-23).
+    #[cfg(test)]
+    pub(crate) fn debug_wires(&mut self, mode: canvas::WireMode) {
+        self.preferences.wires = mode;
+        for canvas in self.canvases.values_mut() {
+            canvas.set_wire_mode(mode);
+        }
+    }
+
+    /// Whether the document `id` has changes not saved, of its text or of
+    /// its layout.
+    #[cfg(test)]
+    pub(crate) fn debug_dirty(&self, id: &str) -> bool {
+        self.snapshot(id)
+            .is_some_and(|snapshot| snapshot.dirty || snapshot.layout_dirty)
     }
 
     /// Folds the checks of every board into their subjects, or shows them

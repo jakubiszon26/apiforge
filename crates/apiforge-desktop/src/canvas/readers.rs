@@ -17,7 +17,7 @@
 
 use super::{
     Camera,
-    layout::{self, Card, Chip},
+    layout::{self, Card},
     paint,
     routing::{BoardWire, Start},
     shape::on_spine,
@@ -27,7 +27,7 @@ use apiforge_core::{
     format::{Binding, Graph},
     graph::{WireKind, wires as document_wires},
 };
-use eframe::egui::{FontId, Painter, Pos2, Rect, Stroke, StrokeKind, galley::Galley, pos2, vec2};
+use eframe::egui::{FontId, Galley, Painter, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
@@ -79,7 +79,7 @@ pub struct Tag {
     pub wires: Vec<String>,
     /// The input's socket, in board coordinates.
     pub anchor: Pos2,
-    /// Its place among the chips of one socket, counted upwards.
+    /// Its place among the chips of its reader, counted down the card.
     pub slot: usize,
 }
 
@@ -177,7 +177,7 @@ fn fields(binding: Option<&Binding>, path: &[String]) -> Vec<String> {
         if matches!(binding, Binding::Object { .. }) {
             fields.push(segment.clone());
         }
-        at = binding.child(segment);
+        at = binding.at(std::slice::from_ref(segment));
     }
     fields
 }
@@ -230,11 +230,9 @@ fn texts(graph: &Graph, wire: &BoardWire, reader: &str, source: &str) -> (String
 pub fn plan(
     graph: &Graph,
     cards: &[Card],
-    chips: &[Chip],
     wires: &[BoardWire],
     chipped: &HashSet<String>,
 ) -> (Vec<Tag>, Vec<Count>) {
-    let _ = chips;
     let readers = readers_by_port(graph);
     let mut tags: Vec<Tag> = Vec::new();
     let mut counts: Vec<Count> = Vec::new();
@@ -256,7 +254,6 @@ pub fn plan(
         {
             tag.wires.push(wire.id.clone());
         } else {
-            let slot = tags.iter().filter(|tag| tag.anchor == anchor).count();
             tags.push(Tag {
                 reader: reader.id.clone(),
                 card: wire.target,
@@ -269,7 +266,7 @@ pub fn plan(
                 statement,
                 wires: vec![wire.id.clone()],
                 anchor,
-                slot,
+                slot: 0,
             });
         }
         if let Some(count) = counts
@@ -281,14 +278,11 @@ pub fn plan(
             let number = readers
                 .get(&(source.id.clone(), port.clone()))
                 .map_or(0, BTreeSet::len);
-            let name = if graph
-                .nodes
-                .iter()
-                .any(|node| node.id == source.id && node.is_variable())
-            {
-                source.name.clone()
-            } else {
-                format!("{}.{port}", source.name)
+            let node = graph.nodes.iter().find(|node| node.id == source.id);
+            let name = match node {
+                Some(node) if node.is_variable() => node.handle.clone(),
+                Some(node) => format!("{}.{port}", node.handle),
+                None => format!("{}.{port}", source.name),
             };
             counts.push(Count {
                 source: source.id.clone(),
@@ -301,6 +295,19 @@ pub fn plan(
             });
         }
     }
+    // The chips of one card stand in order down its left edge.
+    tags.sort_by(|a, b| a.card.cmp(&b.card).then(a.anchor.y.total_cmp(&b.anchor.y)));
+    let mut previous = None;
+    let mut slot = 0;
+    for tag in &mut tags {
+        slot = if previous == Some(tag.card) {
+            slot + 1
+        } else {
+            0
+        };
+        tag.slot = slot;
+        previous = Some(tag.card);
+    }
     (tags, counts)
 }
 
@@ -311,11 +318,8 @@ pub fn bounds(tags: &[Tag], counts: &[Count]) -> Vec<Rect> {
     tags.iter()
         .map(|tag| {
             Rect::from_min_max(
-                pos2(
-                    tag.anchor.x - GAP,
-                    tag.anchor.y - ROW * (tag.slot as f32 + 0.5),
-                ),
-                pos2(tag.anchor.x, tag.anchor.y + ROW / 2.0),
+                pos2(tag.anchor.x - GAP, tag.anchor.y - ROW / 2.0),
+                pos2(tag.anchor.x, tag.anchor.y + ROW * (tag.slot as f32 + 0.5)),
             )
         })
         .chain(counts.iter().map(|count| {
@@ -331,14 +335,18 @@ pub fn bounds(tags: &[Tag], counts: &[Count]) -> Vec<Rect> {
 #[derive(Clone)]
 pub struct Laid {
     pub galley: Arc<Galley>,
-    /// The text the chip shows at this zoom.
+    /// The text the chip shows at this zoom, and its size on screen.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub shown: String,
     pub rect: Rect,
+    #[cfg_attr(not(test), allow(dead_code))]
     pub font: f32,
     /// The stub from the box to the socket.
     pub stub: [Pos2; 2],
     /// Where a stacked chip's stub bends down to the socket.
     pub bend: Option<Pos2>,
+    /// The socket or port the stub ends at, on screen.
+    pub socket: Pos2,
 }
 
 fn stub_length(zoom: f32) -> f32 {
@@ -358,49 +366,64 @@ fn fitting(painter: &Painter, texts: &[String], font: &FontId, room: f32) -> (St
     last.expect("a text to lay out")
 }
 
-/// A chip left of its socket, in the gap between two columns; its text
-/// keeps a legible size at any zoom and shortens to the source step, then
-/// to the arrow, where the gap has no room for it.
-pub fn lay_tag(painter: &Painter, tag: &Tag, camera: Camera) -> Laid {
-    let anchor = camera.to_screen(tag.anchor);
+/// The chips of `tags` left of their sockets, in the gap between two
+/// columns; their text keeps a legible size at any zoom and shortens to the
+/// source step, then to the arrow, where the gap has no room for it. The
+/// chips of one card stand one under the other: a chip that would cover the
+/// one above it moves down and its stub bends to its socket.
+pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera) -> Vec<Laid> {
     let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
     let font_id = FontId::proportional(font);
     let stub = stub_length(camera.zoom);
     let room = GAP * camera.zoom - stub - 2.0;
-    let (shown, galley) = fitting(
-        painter,
-        &[
-            format!("← {}", tag.text),
-            format!("← {}", tag.short),
-            "←".to_owned(),
-        ],
-        &font_id,
-        room,
-    );
-    let size = galley.size() + vec2(8.0, 3.0);
-    let centre = anchor.y - tag.slot as f32 * (size.y + 2.0);
-    let rect = Rect::from_min_size(pos2(anchor.x - stub - size.x, centre - size.y / 2.0), size);
-    let (stub, bend) = if tag.slot == 0 {
-        ([pos2(rect.right(), anchor.y), anchor], None)
-    } else {
-        let x = rect.right() + stub / 2.0;
-        (
-            [pos2(rect.right(), centre), pos2(x, centre)],
-            Some(pos2(x, anchor.y)),
-        )
-    };
-    Laid {
-        galley,
-        shown,
-        rect,
-        font,
-        stub,
-        bend,
+    let mut laid: Vec<Laid> = Vec::with_capacity(tags.len());
+    let mut below: Option<(usize, f32)> = None;
+    for tag in tags {
+        let anchor = camera.to_screen(tag.anchor);
+        let (shown, galley) = fitting(
+            painter,
+            &[
+                format!("← {}", tag.text),
+                format!("← {}", tag.short),
+                "←".to_owned(),
+            ],
+            &font_id,
+            room,
+        );
+        let size = galley.size() + vec2(8.0, 3.0);
+        let free = match below {
+            Some((card, bottom)) if card == tag.card => bottom + 2.0,
+            _ => f32::MIN,
+        };
+        let centre = anchor.y.max(free + size.y / 2.0);
+        let rect = Rect::from_min_size(pos2(anchor.x - stub - size.x, centre - size.y / 2.0), size);
+        below = Some((tag.card, rect.bottom()));
+        let (stub, bend) = if (centre - anchor.y).abs() < 0.5 {
+            ([pos2(rect.right(), anchor.y), anchor], None)
+        } else {
+            let x = rect.right() + stub / 2.0;
+            (
+                [pos2(rect.right(), centre), pos2(x, centre)],
+                Some(pos2(x, anchor.y)),
+            )
+        };
+        laid.push(Laid {
+            galley,
+            shown,
+            rect,
+            font,
+            stub,
+            bend,
+            socket: anchor,
+        });
     }
+    laid
 }
 
-/// The count at a source's port, right of it in the gap.
-pub fn lay_count(painter: &Painter, count: &Count, camera: Camera) -> Laid {
+/// The count at a source's port, right of it in the gap. Where it would
+/// cover something in `avoid` (a continuation mark, on screen) it stands
+/// under it and its stub bends up to the port.
+pub fn lay_count(painter: &Painter, count: &Count, camera: Camera, avoid: &[Rect]) -> Laid {
     let anchor = camera.to_screen(count.anchor);
     let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
     let font_id = FontId::proportional(font);
@@ -411,19 +434,36 @@ pub fn lay_count(painter: &Painter, count: &Count, camera: Camera) -> Laid {
         &[
             format!("→ {} readers", count.readers),
             format!("→ {}", count.readers),
+            "→".to_owned(),
         ],
         &font_id,
         room,
     );
     let size = galley.size() + vec2(8.0, 3.0);
-    let rect = Rect::from_min_size(pos2(anchor.x + stub, anchor.y - size.y / 2.0), size);
+    let mut rect = Rect::from_min_size(pos2(anchor.x + stub, anchor.y - size.y / 2.0), size);
+    for _ in 0..avoid.len() {
+        let Some(over) = avoid.iter().find(|other| other.intersects(rect)) else {
+            break;
+        };
+        rect = rect.translate(vec2(0.0, over.bottom() + 2.0 - rect.top()));
+    }
+    let (stub, bend) = if (rect.center().y - anchor.y).abs() < 0.5 {
+        ([anchor, pos2(rect.left(), anchor.y)], None)
+    } else {
+        let x = anchor.x + stub / 2.0;
+        (
+            [pos2(rect.left(), rect.center().y), pos2(x, rect.center().y)],
+            Some(pos2(x, anchor.y)),
+        )
+    };
     Laid {
         galley,
         shown,
         rect,
         font,
-        stub: [anchor, pos2(rect.left(), anchor.y)],
-        bend: None,
+        stub,
+        bend,
+        socket: anchor,
     }
 }
 
@@ -439,6 +479,7 @@ pub fn paint(painter: &Painter, laid: &Laid, lit: bool) {
     painter.line_segment(laid.stub, line);
     if let Some(bend) = laid.bend {
         painter.line_segment([laid.stub[1], bend], line);
+        painter.line_segment([bend, laid.socket], line);
     }
     painter.rect(
         laid.rect,
