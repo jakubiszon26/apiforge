@@ -889,11 +889,10 @@ impl Canvas {
 
     /// Draws every data wire, or chips at the readers of a value many steps
     /// read. Nothing moves: the cards keep their places and the camera stays,
-    /// although the chips change what Fit shows (LAY-23, criterion 8).
+    /// although the chips change what Fit shows (LAY-23, criterion 8). The
+    /// camera is not taken as moved by the person either, so a later
+    /// selection or resize places it as it would have in the other mode.
     pub fn set_wire_mode(&mut self, mode: WireMode) {
-        if mode != self.wire_mode && !self.fit_pending {
-            self.camera_moved_by_user = true;
-        }
         self.wire_mode = mode;
         self.shown_port = None;
     }
