@@ -797,8 +797,7 @@ impl FolderApp {
     /// place of the steps. A refusal reopens the dialog with its reason.
     fn save_component(&mut self, mut dialog: Box<SaveComponent>, request: Request) {
         if request.publish
-            && dialog.leave_unconnected
-            && let Err(reason) = self.check_unconnected(&dialog, &request.component)
+            && let Err(reason) = self.check_call(&dialog, &request.component)
         {
             dialog.error = Some(reason);
             self.prompt = Some(Prompt::SaveComponent(dialog));
@@ -948,29 +947,40 @@ impl FolderApp {
         }
     }
 
-    /// With *Save anyway* ticked, whether the scenario that would result,
-    /// calling `component` and with the readers unconnected, is valid: asked
-    /// before anything is written or published (UX-37, criterion 5).
-    fn check_unconnected(
-        &self,
-        dialog: &SaveComponent,
-        component: &Component,
-    ) -> Result<(), String> {
-        const REFUSED: &str = "Saving would leave the scenario invalid, so nothing was saved. \
-                               Keep the output instead.";
-        let session = self.session.as_ref().ok_or(REFUSED)?;
+    /// Whether the scenario that would result, calling `component` in place
+    /// of the steps, is valid: asked before anything is written or published,
+    /// so that a refused edit leaves no component file and no revision behind
+    /// (#322). With *Save anyway* ticked, the readers of a dropped output are
+    /// left unconnected (UX-37, criterion 5).
+    fn check_call(&self, dialog: &SaveComponent, component: &Component) -> Result<(), String> {
+        const UNCONNECTED: &str = "Saving would leave the scenario invalid, so nothing was saved. \
+                                   Keep the output instead.";
+        const INVALID: &str = "Calling the component here would leave the scenario invalid, \
+                               so nothing was saved.";
+        let refused = if dialog.leave_unconnected {
+            UNCONNECTED
+        } else {
+            INVALID
+        };
+        let session = self.session.as_ref().ok_or(refused)?;
         let model = session
             .document(&dialog.document_id)
             .and_then(|document| document.model().cloned())
-            .ok_or(REFUSED)?;
-        let (next, _) = replaced_model(dialog, &model, component).map_err(|_| REFUSED)?;
+            .ok_or(refused)?;
+        let (next, _) = replaced_model(dialog, &model, component).map_err(|error| {
+            if dialog.leave_unconnected {
+                UNCONNECTED.to_owned()
+            } else {
+                format!("{error} The call cannot replace the steps, so nothing was saved.")
+            }
+        })?;
         let mut project = (**session.context()).clone();
         project.components.push(component.clone());
         apiforge_script::validate_document_model(
             &next,
             &apiforge_script::LowerContext::folder(&project),
         )
-        .map_err(|_| REFUSED.to_owned())
+        .map_err(|_| refused.to_owned())
     }
 }
 
