@@ -238,7 +238,8 @@ fn lay09_criterion_3_compact_shows_the_configured_inputs_and_two_lines() {
         .collect();
     assert_eq!(results.len(), 2, "two result lines: {before:?}");
     assert!(results.iter().all(|text| text.color == theme::MUTED));
-    assert!(results.iter().any(|text| text.text == "2 checks"));
+    // The numbers of the folded checks first (LAY-27).
+    assert!(results.iter().any(|text| text.text == "3–4 · 2 checks"));
     assert!(
         results
             .iter()
@@ -251,7 +252,10 @@ fn lay09_criterion_3_compact_shows_the_configured_inputs_and_two_lines() {
     let after = texts(&harness, "login");
     let execution = result_text(&after, "HTTP 200").expect("login's execution line");
     assert_eq!(execution.color, theme::SUCCESS);
-    assert!(result_text(&after, "✓ 2 checks").is_some(), "{after:?}");
+    assert!(
+        result_text(&after, "3–4 · ✓ 2 checks").is_some(),
+        "{after:?}"
+    );
 }
 
 /// Criterion 4: a successful request with a failed check reads its HTTP
@@ -275,9 +279,17 @@ fn lay09_criterion_4_a_failed_check_on_a_green_request() {
             "the band keeps the HTTP colour at {zoom}"
         );
         let texts = texts(&harness, "checkout");
-        let failed = result_text(&texts, "✕ 1/3 failed")
+        // The numbers of the folded checks first; at Overview, where the
+        // pill has no room, they stand alone on the name's row (LAY-27).
+        let failed = result_text(&texts, "19–21")
             .unwrap_or_else(|| panic!("the checks line at {zoom}: {texts:?}"));
         assert_eq!(failed.color, theme::DANGER, "red at {zoom}");
+        if zoom >= 0.6 {
+            assert!(
+                failed.text.starts_with("19–21 · ✕ 1/3 failed"),
+                "at {zoom}: {failed:?}"
+            );
+        }
         if zoom >= 0.6 {
             let execution = result_text(&texts, "HTTP 201")
                 .unwrap_or_else(|| panic!("the execution line at {zoom}: {texts:?}"));

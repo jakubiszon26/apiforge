@@ -1363,7 +1363,6 @@ impl Canvas {
         // Folded checks are not drawn, are no obstacle and take no part in
         // the camera; their subjects' footers sum them up (LAY-11).
         let folded = self.fold(input.graph, input.later, &mut cards, &mut chips);
-        let aggregates = collapse::aggregates(input.graph, input.later, input.steps);
         // Every step's place in the engine's order, the number of its row
         // in Run results (LAY-07, Q2 = A); a pure function of the graph.
         let numbers: HashMap<&str, usize> = sequence(input.graph)
@@ -1371,6 +1370,15 @@ impl Canvas {
             .enumerate()
             .map(|(index, id)| (id, index + 1))
             .collect();
+        // A folded check has no badge; its subjects' lines carry its number
+        // (LAY-27).
+        let aggregates = collapse::aggregates(
+            input.graph,
+            input.later,
+            input.steps,
+            &folded.keys().map(String::as_str).collect(),
+            &numbers,
+        );
         #[cfg(test)]
         {
             self.hidden = folded.keys().cloned().collect();
