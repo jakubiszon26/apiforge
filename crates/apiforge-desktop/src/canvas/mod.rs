@@ -1370,6 +1370,7 @@ impl Canvas {
         let rest_plan = (!chipped.is_empty()).then(|| {
             readers::plan(
                 input.graph,
+                input.project,
                 &cards,
                 &folded_wires(input.graph, &cards, &chips, &folded).0,
                 &chipped,
@@ -1489,7 +1490,7 @@ impl Canvas {
         // now; a wire with no chip stays a wire (LAY-23).
         let (tags, counts) = match rest_plan {
             Some(_) if self.drag.is_some() => {
-                readers::plan(input.graph, &cards, &board_wires, &chipped)
+                readers::plan(input.graph, input.project, &cards, &board_wires, &chipped)
             }
             Some(plan) => plan,
             None => (Vec::new(), Vec::new()),

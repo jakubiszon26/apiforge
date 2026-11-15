@@ -24,8 +24,8 @@ use super::{
 };
 use crate::theme;
 use apiforge_core::{
-    format::{Binding, Graph},
-    graph::{WireKind, wires as document_wires},
+    format::{Binding, Graph, Project},
+    graph::{self, WireKind, wires as document_wires},
 };
 use eframe::egui::{FontId, Galley, Painter, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
 use std::{
@@ -195,7 +195,13 @@ fn fields(binding: Option<&Binding>, path: &[String]) -> Vec<String> {
 }
 
 /// What a chip says, its source step, and the reference written whole.
-fn texts(graph: &Graph, wire: &BoardWire, reader: &str, source: &str) -> (String, String, String) {
+fn texts(
+    graph: &Graph,
+    project: &Project,
+    wire: &BoardWire,
+    reader: &str,
+    source: &str,
+) -> (String, String, String) {
     let reader = graph.nodes.iter().find(|node| node.id == reader);
     let source_node = graph.nodes.iter().find(|node| node.id == source);
     let (Some(reader), Some(source_node)) = (reader, source_node) else {
@@ -217,7 +223,14 @@ fn texts(graph: &Graph, wire: &BoardWire, reader: &str, source: &str) -> (String
     } else {
         let last = field.rsplit('.').next().filter(|last| !last.is_empty());
         let text = format!("{}.{}", source_node.handle, last.unwrap_or(&port));
-        let whole = [source_node.handle.as_str(), port.as_str(), field.as_str()]
+        // As the code writes it: a step with one output port is named
+        // without it (`cart.cart.id`, not `cart.<port>.cart.id`).
+        let port = if graph::output_ports(source_node, project).len() == 1 {
+            ""
+        } else {
+            port.as_str()
+        };
+        let whole = [source_node.handle.as_str(), port, field.as_str()]
             .into_iter()
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
@@ -241,6 +254,7 @@ fn texts(graph: &Graph, wire: &BoardWire, reader: &str, source: &str) -> (String
 /// it is not drawn either way.
 pub fn plan(
     graph: &Graph,
+    project: &Project,
     cards: &[Card],
     wires: &[BoardWire],
     chipped: &HashSet<String>,
@@ -258,7 +272,7 @@ pub fn plan(
         let Some(anchor) = reader.input_anchor(&wire.input, &wire.operand_path) else {
             continue;
         };
-        let (text, short, statement) = texts(graph, wire, &reader.id, &source.id);
+        let (text, short, statement) = texts(graph, project, wire, &reader.id, &source.id);
         // One chip per value at a socket: a second read of it adds nothing.
         if let Some(tag) = tags
             .iter_mut()
