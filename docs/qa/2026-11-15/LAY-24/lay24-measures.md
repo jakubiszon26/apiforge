@@ -5,8 +5,8 @@ on the boards the desktop tidies at 1600 × 1000, compact cards: lines drawn ·
 crossings (the router's bridges) · coincident pairs · ink (board px), as
 `quality` and LAY-23's criterion 7 count them. *Rails* is every `@after` and
 branch wire drawn; *into next* is how many of them enter the next step of
-the spine. The three options leave out the same rails, so one column
-stands for all of them.
+the spine. Every option rendered left out the same rails, so the last
+column is the board with the mark the owner chose.
 
 | Board | Checks | Wires | Rails | Into next | Today | Without the rails into the next step |
 | --- | --- | --- | --- | --- | --- | --- |
