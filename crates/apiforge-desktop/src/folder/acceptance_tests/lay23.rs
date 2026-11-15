@@ -162,11 +162,13 @@ fn wires(harness: &FolderHarness, id: &str) -> BTreeSet<(String, String)> {
         .collect()
 }
 
+/// The data wires brought back; the rails into the next step a selected
+/// card brings back too (LAY-24) are not chips'.
 fn revealed(harness: &FolderHarness, id: &str) -> BTreeSet<String> {
     board(harness, id)
         .debug_wires()
         .iter()
-        .filter(|wire| wire.revealed)
+        .filter(|wire| wire.revealed && !wire.dashed)
         .map(|wire| wire.id.clone())
         .collect()
 }
@@ -800,7 +802,16 @@ fn lay23_criterion_8_the_setting_moves_nothing_and_restores_every_wire() {
         .iter()
         .flat_map(|tag| tag.tag.wires.clone())
         .collect();
-    let at_rest: BTreeSet<String> = routes(&harness, &id).into_keys().collect();
+    // The rails into the next step are arrows in this mode (LAY-24).
+    let at_rest: BTreeSet<String> = routes(&harness, &id)
+        .into_keys()
+        .chain(
+            board(&harness, &id)
+                .debug_arrows()
+                .iter()
+                .flat_map(|arrow| arrow.wires.clone()),
+        )
+        .collect();
     assert!(!chipped.is_empty(), "shop-30 draws chips");
 
     switch_wires(&mut harness, ALL_WIRES);

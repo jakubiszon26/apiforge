@@ -12,15 +12,17 @@
 //! `support/boards.txt`: each at the compact and the full density, with its checks
 //! collapsed and expanded, every card at the size the board draws it and every wire
 //! between the ports the board gives the router (LAY-06), and at the compact density
-//! once more with LAY-23's chips, whose wires the router is not given. The desktop's acceptance
+//! once more with LAY-23's chips, whose wires the router is not given, nor the `@after`
+//! rails into the next step that LAY-24 draws as an arrow at the step. The desktop's acceptance
 //! test `lay06_criterion_10_quality_on_real_card_sizes` writes that file and fails
 //! when it is out of date. The numbers are deterministic. `--dump` prints one
 //! generated board's rectangles and routes, for reading a case by hand.
 //!
 //! The columns:
 //!
-//! - `drawn`: which data wires the board draws, `all` or `chips` at the readers of a
-//!   value three or more steps read (LAY-23);
+//! - `drawn`: which wires the board draws, `all` or `chips` at the readers of a
+//!   value three or more steps read (LAY-23) and arrows for the rails into the next
+//!   step (LAY-24);
 //! - `wires`, `crossings` (the router's bridges), `bends`, `straight` (wires without
 //!   a bend), `incomplete` (routes that found no way around the cards);
 //! - `close`: pairs of parallel segments of different wires within 8 px of each
