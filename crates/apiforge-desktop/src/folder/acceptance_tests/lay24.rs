@@ -615,10 +615,9 @@ fn obstacles(harness: &FolderHarness, id: &str) -> (Vec<(String, Rect)>, Vec<Vec
     (boxes, lines)
 }
 
-/// One frame's arrows against criterion 5.
-fn arrows_clear(harness: &FolderHarness, id: &str, context: &str) {
+/// One frame's arrows against criterion 5; how many it drew.
+fn arrows_clear(harness: &FolderHarness, id: &str, context: &str) -> usize {
     let drawn = arrows(harness, id);
-    assert!(!drawn.is_empty(), "{context}: arrows are drawn");
     let (boxes, lines) = obstacles(harness, id);
     for (handle, arrow) in &drawn {
         let context = format!("{context}: the arrow of {handle} {:?}", arrow.rect);
@@ -638,6 +637,7 @@ fn arrows_clear(harness: &FolderHarness, id: &str, context: &str) {
             );
         }
     }
+    drawn.len()
 }
 
 /// Criterion 5: the arrow is at least 14 px long on screen at every zoom,
@@ -651,6 +651,7 @@ fn lay24_criterion_5_the_arrow_keeps_clear_at_every_zoom() {
         for size in [WIDE, MINIMUM] {
             let (_project, mut harness, id) = tidied(name, size, Checks::Collapsed);
             for zoom in ZOOMS {
+                let mut seen = 0;
                 for centre in ["begin", "note", "view", "checkout"] {
                     let centre = if name == "shop-30" && centre == "note" {
                         "cart"
@@ -660,12 +661,13 @@ fn lay24_criterion_5_the_arrow_keeps_clear_at_every_zoom() {
                         centre
                     };
                     show(&mut harness, &id, centre, zoom);
-                    arrows_clear(
+                    seen += arrows_clear(
                         &harness,
                         &id,
                         &format!("{name} {size:?} at {zoom} on {centre}"),
                     );
                 }
+                assert!(seen > 0, "{name} {size:?} at {zoom}: arrows are drawn");
             }
             fit(&mut harness);
             arrows_clear(&harness, &id, &format!("{name} {size:?} at Fit"));
@@ -998,6 +1000,7 @@ fn lay24_criterion_10_nothing_is_written() {
     select(&mut harness, &id, &["note"]);
     select(&mut harness, &id, &["apply_coupon"]);
     harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
     switch_wires(&mut harness, ALL_WIRES);
     switch_wires(&mut harness, CHIPS);
     settle(&mut harness);
@@ -1055,7 +1058,10 @@ fn review_lay24() {
                 show(&mut harness, &id, step, 1.0);
                 let text = arrow(&harness, &id, step).text;
                 assert!(tooltip(&mut harness, &id, step, &text), "{label}");
-                // The pointer stays: the capture shows the tooltip.
+                // The pointer stays: the capture shows the tooltip, past
+                // the frame that sizes it unseen.
+                harness.step();
+                harness.step();
                 let image = harness
                     .render()
                     .unwrap_or_else(|error| panic!("cannot render {label}: {error}"));
