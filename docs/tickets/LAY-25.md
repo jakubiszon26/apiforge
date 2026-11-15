@@ -41,7 +41,7 @@ read directly by nine steps, a session value read by two):
 | **The drop**: a wire from a port, or a field dragged from the response tree, released on an input that is not beside its source | Values as they are connected on the board | 1 (Enter) · 1 | Yes, asked (decision 1) |
 | Typing a reference in an Inspector field or in code | — | — | No proposal while typing; code gets a warning afterwards ([LAY-26](LAY-26.md)) |
 | **The port**: a mark `+ var` under the count `→ 10`; its menu lists the fields, one row each | Boards that exist, scenarios written in code or by an agent | 2 (mark, row) · 1 | Yes (decision 3) |
-| **The board's menu**: *Save shared values as variables* | Every shared value of the scenario at once | 1 · 1 | Yes (decision 4) |
+| **The board's right-click menu**: *Save shared values as variables* | Every shared value of the scenario at once | 1 · 1 | Yes (decision 4) |
 
 "Far" on the board is LAY-23's rule turned round: the reader is not in the
 source's row in its own or the next column. The count does not matter at
@@ -91,7 +91,8 @@ nothing creates them, nothing removes them.
 ## What the owner will see
 
 - New: the choice at the drop of a far value; the mark `+ var` and its menu
-  at a port; *Save shared values as variables* in the *Board view* menu;
+  at a port; *Save shared values as variables* in the board's right-click
+  menu;
   *Read directly again* on a variable; a paragraph in the language
   reference.
 - Changed: a variable's far readers are chips whatever the count.
@@ -117,11 +118,11 @@ was opened and asserts a card in view.
 | 3 | [the port mark and its menu, 60 %](https://raw.githubusercontent.com/jakubiszon26/apiforge/91fc2d9cb752748e677188ce08ca5e09f4cfc2a5/docs/qa/2026-11-15/LAY-25/lay25-3-port-suggestion-60.png), [on `shop-30`](https://raw.githubusercontent.com/jakubiszon26/apiforge/91fc2d9cb752748e677188ce08ca5e09f4cfc2a5/docs/qa/2026-11-15/LAY-25/lay25-3b-port-suggestion-shop-30-60.png) | `+ var` under `→ 10`; one row per field. On `shop-30` a second mark stands on the next output's row, which criterion 4 forbids |
 | 4 | [after saving, Fit](https://raw.githubusercontent.com/jakubiszon26/apiforge/91fc2d9cb752748e677188ce08ca5e09f4cfc2a5/docs/qa/2026-11-15/LAY-25/lay25-4-after-saving-fit.png), [60 %](https://raw.githubusercontent.com/jakubiszon26/apiforge/91fc2d9cb752748e677188ce08ca5e09f4cfc2a5/docs/qa/2026-11-15/LAY-25/lay25-4b-after-saving-60.png) | Three variables under their sources, `← cartId` at the readers, no long wire, 26 steps. The third chip of a card has no room at this zoom and is an arrow |
 | 5 | [the choice at 960 × 540](https://raw.githubusercontent.com/jakubiszon26/apiforge/91fc2d9cb752748e677188ce08ca5e09f4cfc2a5/docs/qa/2026-11-15/LAY-25/lay25-5-connect-offer-960.png) | It fits the minimum window; in the mock-up it runs over the Library panel, which criterion 1 forbids |
-| 6 | [the menu entry on `shop-30`](https://raw.githubusercontent.com/jakubiszon26/apiforge/2cff2411ea43be64df53fd8b51f665fd504f3f7d/docs/qa/2026-11-15/LAY-25/lay25-6-bulk-menu-shop-30.png), [nothing to save](https://raw.githubusercontent.com/jakubiszon26/apiforge/2cff2411ea43be64df53fd8b51f665fd504f3f7d/docs/qa/2026-11-15/LAY-25/lay25-6b-bulk-menu-nothing.png) | *Save shared values as variables (3)* last in *Board view*, after a separator; with nothing to save it is grey and says `(0)`. The board it leaves is capture 4's kind |
+| 6 | [the menu entry on `shop-30`](https://raw.githubusercontent.com/jakubiszon26/apiforge/2cff2411ea43be64df53fd8b51f665fd504f3f7d/docs/qa/2026-11-15/LAY-25/lay25-6-bulk-menu-shop-30.png), [nothing to save](https://raw.githubusercontent.com/jakubiszon26/apiforge/2cff2411ea43be64df53fd8b51f665fd504f3f7d/docs/qa/2026-11-15/LAY-25/lay25-6b-bulk-menu-nothing.png) | The entry's text and its two states: *Save shared values as variables (3)*, and grey with `(0)` when there is nothing to save. The mock-up drew it in *Board view*; it goes in the right-click menu instead (decision 7), where no new capture was asked for |
 
 A capture has no pointer and no drag: the gestures are named in the
 criteria. Captures 1 to 5 were decided on; capture 6 came with decision 4
-and its place in the menu is still to be seen by the owner.
+and its place was decided after it (decision 7).
 
 ## Owner decisions (2026-11-15)
 
@@ -141,6 +142,9 @@ One quiz round on the analysis (issue #335).
    MCP `check`.
 6. **Outside MCP a warning, with a fix**, in the Code view and in
    `apiforge check`, at every far read: [LAY-26](LAY-26.md).
+7. **The scenario-wide entry is in the board's right-click menu**, the one
+   that opens on the empty board, not in *Board view*, which stays view
+   settings only.
 
 ## Acceptance criteria
 
@@ -163,7 +167,11 @@ Tests in `folder/acceptance_tests/lay25.rs`, on `far-value.afs` and
    under its count; the mark covers no card text and no port. Its menu has
    one row per such field with the line it writes and the number of steps;
    a row does the edit of criterion 1.
-5. *Save shared values as variables* in *Board view* saves, in one edit,
+5. *Save shared values as variables (N)* stands in the menu a right-click
+   on the empty board opens: a row of its own at the bottom, under a
+   separator, below the list of steps and the Variables and Operators
+   sections and outside their scrolling, so it is in sight whatever is
+   searched; it is absent when the menu is opened from a port. It saves, in one edit,
    exactly the values that have a row in a `+ var` menu, in Main and
    Cleanup together. On `shop-30`: `token` (ten steps), `cartId` and
    `orderId` (three each); the text gains three `var` lines, each after its
@@ -176,8 +184,8 @@ Tests in `folder/acceptance_tests/lay25.rs`, on `far-value.afs` and
    the steps still reading it directly move to the one there. Names follow
    criterion 8, a clash between two values of one run settled in document
    order. No card moves; the new variables are selected.
-7. With nothing to save the entry is shown, disabled, with `(0)` and the
-   reason on hover; on a board that cannot be edited it is disabled too.
+7. With nothing to save the entry is shown there, disabled, with `(0)` and
+   the reason on hover; on a board that cannot be edited it is disabled too.
    Nothing is written.
 8. The name follows the rule in *Consequences*: `cart.cart.id` → `cartId`,
    `login.body.token` → `token`, a taken name gets the step, then a number.
@@ -192,7 +200,7 @@ Tests in `folder/acceptance_tests/lay25.rs`, on `far-value.afs` and
 12. After a simulation the variable has its row in Run results and the
     badges equal the rows (LAY-07).
 13. The language reference, *Values and var*, says when to save a value;
-    `review_lay25` renders the choice, the port menu, the board's menu and
+    `review_lay25` renders the choice, the port menu, the right-click menu and
     the saved board at both sizes and asserts a card in view.
 
 ## Not in scope
@@ -206,8 +214,8 @@ across scenarios; rewriting the demo scenarios.
 ## Estimate
 
 **M · 35 min · `visible UI`, `default`.** Complexity: one edit in the core
-taking one value or many, and its inverse; two small popups, one menu
-entry and one predicate in the canvas. Uncertainty: low for the edit; the
+taking one value or many, and its inverse; two small popups, one entry
+in the right-click menu and one predicate in the canvas. Uncertainty: low for the edit; the
 drop has two sources (a port, a response field) and neither may be missed.
 Regression potential: the tests that drop a wire on a far input (LAY-23
 criterion 9) now meet the choice; LAY-23's criterion 1 is reworded for

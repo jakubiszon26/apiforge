@@ -1,7 +1,8 @@
 # LAY-26: Code and the command line warn where a far value is read directly
 
 - Size: S–M · Owner review: 15 min · Risk: `visible UI`
-- State: Analysis, decided by the owner on 2026-11-15 (issue #335); split
+- State: Decided by the owner on 2026-11-15 (issues #335, #341), the
+  definition of far included; split
   from [LAY-25](LAY-25.md), starts after it merges · issue #341
 - Analysis model: Fable · Implementation model: —
 
