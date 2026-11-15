@@ -45,8 +45,17 @@ fn tidied(
     size: egui::Vec2,
     checks: Checks,
 ) -> (tempfile::TempDir, FolderHarness, String) {
+    tidied_text(&fixture(name), size, checks)
+}
+
+/// As [`tidied`], with the scenario's text given.
+fn tidied_text(
+    text: &str,
+    size: egui::Vec2,
+    checks: Checks,
+) -> (tempfile::TempDir, FolderHarness, String) {
     let project = crate::testing::shop_project();
-    fs::write(project.path().join(SCENARIO), fixture(name)).unwrap();
+    fs::write(project.path().join(SCENARIO), text).unwrap();
     fs::remove_file(project.path().join(DIAGRAM)).unwrap();
     let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
     if checks == Checks::Expanded {
@@ -935,6 +944,38 @@ fn lay23_criterion_4_a_selected_wire_stays_drawn() {
     settle(&mut harness);
     harness.step();
     assert!(revealed(&harness, &id).is_empty(), "Esc returns to chips");
+}
+
+/// #340: a chip of a component's output states the reference as the code
+/// writes it: `cart.cart.id`, the call's one output port left out, never
+/// `cart.cart.cart.id`.
+#[test]
+fn lay23_a_component_output_is_stated_as_written() {
+    let text = fixture("fan-out")
+        .replace("  var cartId = cart.cart.id\n", "")
+        .replace("{{cartId}}", "{{cart.cart.id}}")
+        .replace("cartId: cartId", "cartId: cart.cart.id")
+        .replace("cart: cartId", "cart: cart.cart.id");
+    assert!(!text.contains("var cartId"));
+    let (_project, harness, id) = tidied_text(&text, WIDE, Checks::Collapsed);
+    let cart = id_of(&harness, &id, "cart");
+    let statements: Vec<String> = board(&harness, &id)
+        .debug_tags()
+        .iter()
+        .filter(|tag| tag.tag.source == cart)
+        .map(|tag| tag.tag.statement.clone())
+        .collect();
+    assert!(
+        statements.len() >= 3,
+        "cart.cart.id is read far by several steps: {statements:?}"
+    );
+    for statement in &statements {
+        assert!(
+            statement.starts_with("cart.cart.id → ")
+                || statement.starts_with("cart.cart.productId → "),
+            "stated as the code writes it: {statement}"
+        );
+    }
 }
 
 /// Criterion 10: the review views, each asserting a card in view.
