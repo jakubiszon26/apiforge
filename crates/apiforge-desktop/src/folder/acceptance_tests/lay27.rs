@@ -895,7 +895,11 @@ fn review_lay27() {
         let (_project, mut harness) = tidied("far-value", size);
         fit(&mut harness);
         let zoom = canvas(&harness).debug_zoom();
-        eprintln!("lay27 {suffix}: Fit at {zoom}");
+        assert_eq!(
+            zoom < 0.45,
+            size == crate::testing::MINIMUM,
+            "Fit at {zoom}"
+        );
         card_in_view(&harness, "before");
         crate::testing::capture(&mut harness, &format!("lay27-before-{suffix}"), None);
         simulate(&mut harness);
@@ -906,7 +910,7 @@ fn review_lay27() {
         }
         fit(&mut harness);
         let after = canvas(&harness).debug_zoom();
-        eprintln!("lay27 {suffix} after the run: Fit at {after}");
+        assert!((after - zoom).abs() < 0.05, "Fit at {after} after the run");
         card_in_view(&harness, "after");
         crate::testing::capture(&mut harness, &format!("lay27-after-{suffix}"), None);
     }
