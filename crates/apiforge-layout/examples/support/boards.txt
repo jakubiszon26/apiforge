@@ -162,8 +162,6 @@ card 1504 0 280 214 order
 card 0 544 280 94 created
 card 376 544 280 166 receipt
 card 0 662 280 96 failed
-wire 0 top 140 1 top 140
-wire 6 top 140 7 top 140
 wire 8 top 70 9 top 140
 wire 8 bottom 210 10 top 140
 wire 1 right 98 2 left 74
@@ -194,8 +192,6 @@ card 0 544 280 94 created
 card 376 544 280 166 receipt
 card 376 734 280 96 receipt_total
 card 0 662 280 96 failed
-wire 0 top 140 1 top 140
-wire 8 top 140 9 top 140
 wire 10 top 70 11 top 140
 wire 10 top 70 12 top 140
 wire 10 bottom 210 13 top 140
@@ -551,14 +547,11 @@ card 752 1264 280 166 receipt
 card 0 1382 280 96 not_created
 card 1128 1264 280 166 refund
 card 1504 1264 280 118 logout
-wire 0 top 140 1 top 140
 wire 8 top 140 11 top 140
-wire 11 top 140 12 top 140
 wire 14 top 70 15 top 140
 wire 14 top 70 16 top 140
 wire 14 bottom 210 17 top 140
 wire 14 top 70 18 top 140
-wire 18 top 140 19 top 140
 wire 1 right 98 2 left 74
 wire 2 right 122 3 left 52
 wire 2 right 122 4 left 52
@@ -607,15 +600,12 @@ card 0 1382 280 96 not_created
 card 1128 1264 280 166 refund
 card 1128 1454 280 96 refund_amount
 card 1504 1264 280 118 logout
-wire 0 top 140 1 top 140
 wire 13 top 140 16 top 140
-wire 16 top 140 17 top 140
 wire 22 top 70 23 top 140
 wire 22 top 70 24 top 140
 wire 22 top 70 25 top 140
 wire 22 bottom 210 26 top 140
 wire 22 top 70 27 top 140
-wire 28 top 140 29 top 140
 wire 1 right 122 2 left 52
 wire 1 right 98 3 left 52
 wire 1 right 98 4 left 74
@@ -1254,10 +1244,7 @@ card 0 2576 280 166 refund
 card 376 2576 280 166 refunded_order
 card 752 2576 280 118 logout
 card 1128 2576 280 166 logged_out
-wire 0 top 140 1 top 140
-wire 1 top 140 2 top 140
 wire 16 top 70 17 top 140
-wire 21 top 140 22 top 140
 wire 24 top 70 25 top 140
 wire 24 top 70 26 top 140
 wire 24 top 70 27 top 140
@@ -1265,10 +1252,7 @@ wire 24 top 70 28 top 140
 wire 24 bottom 210 29 top 140
 wire 26 top 140 30 top 140
 wire 30 top 140 32 top 140
-wire 32 top 140 33 top 140
 wire 32 top 140 34 top 140
-wire 33 top 140 34 top 140
-wire 34 top 140 35 top 140
 wire 3 right 122 4 left 52
 wire 3 right 122 5 left 52
 wire 6 right 122 7 left 52
@@ -1349,12 +1333,9 @@ card 376 2766 280 96 refunded
 card 752 2576 280 118 logout
 card 1128 2576 280 166 logged_out
 card 1128 2766 280 96 rejected
-wire 0 top 140 1 top 140
-wire 2 top 140 3 top 140
 wire 25 top 70 26 top 140
 wire 25 top 70 27 top 140
 wire 25 top 210 28 top 140
-wire 32 top 140 33 top 140
 wire 37 top 70 38 top 140
 wire 37 top 70 39 top 140
 wire 37 top 70 40 top 140
@@ -1364,10 +1345,7 @@ wire 37 top 210 43 top 140
 wire 37 bottom 210 44 top 140
 wire 40 top 140 45 top 140
 wire 46 top 140 49 top 140
-wire 49 top 140 51 top 140
 wire 50 top 140 53 top 140
-wire 52 top 140 53 top 140
-wire 53 top 140 54 top 140
 wire 1 right 122 2 left 52
 wire 4 right 122 5 left 52
 wire 4 right 122 6 left 52
@@ -1686,16 +1664,6 @@ card 0 832 280 142 view
 card 376 832 280 190 checkout
 card 376 1166 280 70 orderNumber
 card 752 832 280 190 lookup
-wire 0 top 140 1 top 140
-wire 4 top 140 7 top 140
-wire 7 top 140 8 top 140
-wire 8 top 140 9 top 140
-wire 9 top 140 10 top 140
-wire 10 top 140 11 top 140
-wire 11 top 140 12 top 140
-wire 12 top 140 13 top 140
-wire 13 top 140 14 top 140
-wire 14 top 140 16 top 140
 wire 1 right 98 2 left 52
 wire 2 right 52 3 left 74
 wire 3 right 98 4 left 74
@@ -1735,16 +1703,6 @@ card 376 1046 280 96 checkout_ok
 card 376 1166 280 70 orderNumber
 card 752 832 280 190 lookup
 card 752 1046 280 96 lookup_ok
-wire 0 top 140 1 top 140
-wire 4 top 140 7 top 140
-wire 8 top 140 9 top 140
-wire 10 top 140 11 top 140
-wire 12 top 140 13 top 140
-wire 14 top 140 15 top 140
-wire 16 top 140 17 top 140
-wire 18 top 140 19 top 140
-wire 20 top 140 21 top 140
-wire 22 top 140 24 top 140
 wire 1 right 98 2 left 52
 wire 2 right 52 3 left 74
 wire 3 right 98 4 left 74

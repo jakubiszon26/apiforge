@@ -130,9 +130,9 @@ long edges and incomplete routes for generated boards of 6, 12, 25 and 50 cards
 with and without an ordering chain, then the same for the reference scenarios of
 `fixtures/scenarios/lay/` as the desktop tidies them, at the compact and the full
 density, with their checks collapsed and expanded, at the compact density once more
-with chips for shared values (LAY-23), with their board size, fit zoom
-at 1600 × 1000 and 960 × 540, card and chip collisions and 12 px clearance
-violations. Two runs print the same; the example's header defines each column.
+with chips for shared values (LAY-23) and arrows for the rails into the next step
+(LAY-24), with their board size, fit zoom at 1600 × 1000 and 960 × 540, card and
+chip collisions and 12 px clearance violations. Two runs print the same; the example's header defines each column.
 `--dump` prints one generated board's rectangles and routes.
 
 The reference boards come from the desktop: its acceptance test
