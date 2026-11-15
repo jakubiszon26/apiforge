@@ -206,8 +206,53 @@ pub fn routed_wire(painter: &Painter, routed: &Routed, camera: Camera, selected:
 /// The name on an `@after` drawn from a folded check's subject (LAY-11):
 /// `after cart_total`, on a light ground halfway along the wire.
 pub fn wire_label(painter: &Painter, routed: &Routed, camera: Camera, text: &str) {
+    if let Some((rect, galley)) = label_at(painter, routed, camera, text, 0.5) {
+        draw_label(painter, rect, galley);
+    }
+}
+
+/// The name on a rail brought back (LAY-24): as [`wire_label`], at the
+/// place nearest the middle of the rail where none of `others`, lines on
+/// screen, passes through the words; halfway where there is none. Returns
+/// its box on screen.
+pub fn wire_label_clear(
+    painter: &Painter,
+    routed: &Routed,
+    camera: Camera,
+    text: &str,
+    others: &[Vec<Pos2>],
+) -> Option<Rect> {
+    let clear = |rect: Rect| {
+        others
+            .iter()
+            .all(|line| !super::after::crosses(line, rect.expand(1.0)))
+    };
+    let (rect, galley) = (0..=16)
+        .map(|step| {
+            let away = (step as f32 / 2.0).ceil() / 20.0;
+            if step % 2 == 0 {
+                0.5 + away
+            } else {
+                0.5 - away
+            }
+        })
+        .filter_map(|fraction| label_at(painter, routed, camera, text, fraction))
+        .find(|(rect, _)| clear(*rect))
+        .or_else(|| label_at(painter, routed, camera, text, 0.5))?;
+    draw_label(painter, rect, galley);
+    Some(rect)
+}
+
+/// A wire's label laid out at `fraction` of its length, on screen.
+fn label_at(
+    painter: &Painter,
+    routed: &Routed,
+    camera: Camera,
+    text: &str,
+    fraction: f32,
+) -> Option<(Rect, std::sync::Arc<egui::Galley>)> {
     if routed.points.len() < 2 {
-        return;
+        return None;
     }
     let line: Vec<Pos2> = routed
         .points
@@ -215,12 +260,12 @@ pub fn wire_label(painter: &Painter, routed: &Routed, camera: Camera, text: &str
         .map(|point| camera.to_screen(*point))
         .collect();
     let length: f32 = line.windows(2).map(|pair| pair[0].distance(pair[1])).sum();
-    let mut left = length / 2.0;
-    let mut middle = line[0];
+    let mut left = length * fraction;
+    let mut at = line[0];
     for pair in line.windows(2) {
         let piece = pair[0].distance(pair[1]);
         if piece >= left {
-            middle = pair[0] + (pair[1] - pair[0]) * (left / piece.max(f32::EPSILON));
+            at = pair[0] + (pair[1] - pair[0]) * (left / piece.max(f32::EPSILON));
             break;
         }
         left -= piece;
@@ -230,7 +275,13 @@ pub fn wire_label(painter: &Painter, routed: &Routed, camera: Camera, text: &str
         FontId::proportional((11.0 * camera.zoom).max(8.0)),
         theme::MUTED,
     );
-    let rect = Rect::from_center_size(middle, galley.size() + vec2(6.0, 2.0));
+    Some((
+        Rect::from_center_size(at, galley.size() + vec2(6.0, 2.0)),
+        galley,
+    ))
+}
+
+fn draw_label(painter: &Painter, rect: Rect, galley: std::sync::Arc<egui::Galley>) {
     painter.rect_filled(rect, 3.0, theme::WHITE.gamma_multiply(0.9));
     painter.galley(rect.min + vec2(3.0, 1.0), galley, theme::MUTED);
 }
