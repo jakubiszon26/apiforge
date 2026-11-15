@@ -545,6 +545,74 @@ impl Board<'_> {
         graph
     }
 
+    /// Places new variables under the steps whose values they hold (LAY-25),
+    /// one under the other, each moved to the nearest free slot when that
+    /// place is not clear of the other cards and chips. Nothing else moves.
+    pub fn place_under_sources(&self, mut graph: Graph, ids: &[String]) -> Graph {
+        /// The space between a step and the variable under it, and the
+        /// least room it keeps from the other cards.
+        const GAP: f64 = 12.0;
+        const CLEARANCE: f32 = 8.0;
+        let mut bottoms: HashMap<String, f64> = HashMap::new();
+        for id in ids {
+            let Some(source) = graph
+                .nodes
+                .iter()
+                .find(|node| &node.id == id)
+                .and_then(|node| node.inputs.get(apiforge_core::graph::VALUE_INPUT))
+                .and_then(|binding| match binding {
+                    Binding::Reference { node_id, .. } => Some(node_id.clone()),
+                    _ => None,
+                })
+                .and_then(|source| graph.nodes.iter().find(|node| node.id == source))
+                .cloned()
+            else {
+                continue;
+            };
+            let card = |node: &Node| {
+                canvas::Card::build(node, self.reference, self.project, self.density).rect()
+            };
+            let top = bottoms
+                .get(&source.id)
+                .copied()
+                .unwrap_or_else(|| f64::from(card(&source).bottom()))
+                + GAP;
+            if let Some(node) = graph.nodes.iter_mut().find(|node| &node.id == id) {
+                node.position = Position {
+                    x: source.position.x,
+                    y: top.round(),
+                };
+            }
+            let clear = graph
+                .nodes
+                .iter()
+                .find(|node| &node.id == id)
+                .is_some_and(|placed| {
+                    let rect = card(placed).expand(CLEARANCE);
+                    graph
+                        .nodes
+                        .iter()
+                        .filter(|node| &node.id != id)
+                        .map(card)
+                        .chain(self.chip_obstacles(&graph).iter().map(|chip| {
+                            let rect = chip.rect();
+                            egui::Rect::from_min_max(
+                                egui::pos2(rect.min.x, rect.min.y),
+                                egui::pos2(rect.max.x, rect.max.y),
+                            )
+                        }))
+                        .all(|other| !rect.intersects(other))
+                });
+            if !clear {
+                graph = self.free_slot_for(graph, id);
+            }
+            if let Some(node) = graph.nodes.iter().find(|node| &node.id == id) {
+                bottoms.insert(source.id.clone(), f64::from(card(node).bottom()));
+            }
+        }
+        graph
+    }
+
     fn card_block(&self, node: &Node) -> apiforge_layout::Block {
         let rect = canvas::Card::build(node, self.reference, self.project, self.density).rect();
         apiforge_layout::Block::new(

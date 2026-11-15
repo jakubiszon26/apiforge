@@ -307,11 +307,7 @@ impl FolderApp {
                     Some(&mut saved.main)
                 };
                 if let Some(graph) = on_board {
-                    for id in &saved.created {
-                        if graph.nodes.iter().any(|node| &node.id == id) {
-                            *graph = board.free_slot_for(std::mem::take(graph), id);
-                        }
-                    }
+                    *graph = board.place_under_sources(std::mem::take(graph), &saved.created);
                 }
                 let selection = if only_new {
                     saved.created.clone()
