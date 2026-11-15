@@ -1,10 +1,10 @@
 # LAY-27: A collapsed check line carries the checks' numbers (7 · 1 check)
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Analysis · the shape decided by the owner on 2026-11-15
-  ([decision](#owner-decision-2026-11-15)); one question open, captured and
-  posted to the issue ([Q1](#open-question-q1)) · issue #344 · LAY sprint, after
-  LAY-25 (merged, #339)
+- State: Decided by the owner on 2026-11-15: the shape
+  ([decision](#owner-decision-2026-11-15)) and Q1 = A
+  ([below 45 %](#below-45--decided-q1--a)); mock-up approved with it ·
+  issue #344 · LAY sprint, after LAY-25 (merged, #339)
 - Analysis model: Fable (alias; version not confirmed — owner allowed this
   once on 2026-11-15) · Implementation model: Opus
 
@@ -64,44 +64,36 @@ Looked at in the merged captures of LAY-25
   board there.
 - Removed or hidden, migrated, default behaviour: nothing.
 
-## Open question (Q1)
+## Below 45 % (decided, Q1 = A)
 
 Below 45 % a compact card has no room for the pill under its name, so at
-960 × 540 the board would still read 6, 8, 10. Where do the numbers of the
-folded checks go there? Three answers, captured on `far-value.afs` at
-960 × 540 after *Fit the view* (the frames below):
+960 × 540 the board would still read 6, 8, 10. Asked on the issue with
+three captured answers (the name's row, a second badge, nothing), the
+owner chose **A: the numbers, muted, at the right end of the name's row**,
+and confirmed that a check with two subjects shows its number under both
+cards.
 
-- **B (recommended, after the captures): a second, outlined badge** on the
-  card's bottom-left corner with the numbers (`7`, `21, 23`). Every name
-  keeps its width and the numbers read as what they are, step numbers. It
-  is a new mark; in the frame it meets no chip, port or label, and
-  criterion 7 holds it to that.
-- **A: on the name's row, at its right end** — `quantity 7`, muted, 9 px.
-  Nothing new on the card, but the names pay: `checkout` becomes `ch…`
-  beside `21, 23`, `remove_coupon` `remo…`, `shipping` `shipp…`. The
-  analysis recommended A before the frames; they speak against it.
-- **C: nothing there.** The numbers appear from 45 % up; at 960 × 540 the
-  gaps stay. The smallest change.
-
-Found while capturing: Fit at 960 × 540 puts this board a hair under 25 %
-(the control shows 25 %), where LAY-09 writes a name only where it fits and
-no pill. So A and B follow the name, not the 25 % line: the numbers are
-written wherever the card writes its name. Criterion 7 is written for B and
-is reworded by the answer. Everything else in this ticket follows from the
-decision above and waits for nothing.
+- The numbers are always whole and the name gives way to them, cut with an
+  ellipsis: `ch… 21, 23`. The name keeps at least **22 px on screen**, two
+  letters at the 11 px minimum, before its ellipsis.
+- Where whole numbers and that minimum do not both fit, the list is
+  shortened from its end, number by number, and ends with `…` (`21, …`);
+  a digit is never cut and the first number is always written.
+- The numbers follow the name, not the 25 % line: Fit at 960 × 540 puts
+  `far-value` a hair under 25 %, where LAY-09 writes a name only where it
+  fits. A card that writes its name writes the numbers; a card that does
+  not gets nothing.
 
 ## Mock-up
 
 `mock/lay-27-overview` at `fa51466`, view `review_lay27`, fixture
 `far-value.afs`, rendered by the real board; each frame asserts a card in
-view. The mock draws A and B on compact cards only and is not for merge.
+view. Approved with the answer on 2026-11-15. The mock is not for merge.
 
 | # | Capture | Shows |
 | --- | --- | --- |
-| 1 | [the line, 1600 × 1000, Fit (56 %)](../qa/2026-11-15/LAY-27/lay27-line-1600.png) | The decided part: `7 · 1 check` under `quantity`, `21, 23 · 2 checks` under `checkout`, `23 · 1 check` under `lookup`. `cart` reads `19 · 1 check`: `same_item` compares `view` with `cart`'s product, so 19 stands under both. The frame is the same for A, B and C |
-| 2 | [A, 960 × 540, Fit](../qa/2026-11-15/LAY-27/lay27-a-name-row-960.png) | The numbers at the right end of the name's row; `ch…  21, 23`, `remo…  17`, `apply_…  9`, `shipp…  15` |
-| 3 | [B, 960 × 540, Fit](../qa/2026-11-15/LAY-27/lay27-b-second-badge-960.png) | An outlined badge on each card's bottom-left corner: 7, 9, 11, 13, 15, 17, 19, `21, 23`, 23, and 19 under `cart`; names as today |
-| 4 | [C, 960 × 540, Fit](../qa/2026-11-15/LAY-27/lay27-c-nothing-960.png) | Today's board: badges 6, 8, 10 … and no word about checks |
+| 1 | [the line, 1600 × 1000, Fit (56 %)](../qa/2026-11-15/LAY-27/lay27-line-1600.png) | `7 · 1 check` under `quantity`, `21, 23 · 2 checks` under `checkout`, `23 · 1 check` under `lookup`. `cart` reads `19 · 1 check`: `same_item` compares `view` with `cart`'s product, so 19 stands under both |
+| 2 | [the name's row, 960 × 540, Fit](../qa/2026-11-15/LAY-27/lay27-a-name-row-960.png) | The numbers at the right end of the name's row: `quantity 7`, `ch… 21, 23`, `remo… 17`, `apply_… 9`, `shipp… 15` |
 
 ## Acceptance criteria
 
@@ -133,14 +125,16 @@ quotes them.
 6. A component call is one step with one number, and the steps inside it
    take none: on `far-value.afs` `product` and `cart` are 4 and 5, and the
    numbers on the board end at the number of the scenario's steps.
-7. *(Q1, written for B.)* Below 45 %, at 960 × 540 and at 1600 × 1000, a
-   card that writes its name and whose pill has no room carries the
-   numbers in an outlined badge on its bottom-left corner, at least 9 px
-   high, over no badge, chip, port, wire label or other card; a pill that
-   fits reads the numbers before the words, and the numbers alone when
-   the text is wider than the card. Every number of `far-value.afs` is on
-   the board at 960 × 540 after *Fit the view*. A card that writes no
-   name gets nothing.
+7. Below 45 %, at 960 × 540 and at 1600 × 1000, a card that writes its
+   name and whose pill has no room writes the numbers at the right end of
+   the name's row, muted (red where a check failed), at least 9 px high,
+   over no badge, chip or port. The numbers are whole: no digit is cut;
+   the name is cut with an ellipsis and keeps at least 22 px before it;
+   where both do not fit the list loses numbers from its end and ends
+   with `…`, the first number kept. A pill that fits reads the numbers
+   before the words, and the numbers alone when the text is wider than
+   the card. Every number of `far-value.afs` is on the board at 960 × 540
+   after *Fit the view*. A card that writes no name gets nothing.
 8. No text is smaller after zooming in across 0.45 and 0.75, and zooming
    moves no card (LAY-09, criteria 2 and 5, still hold with the numbers).
 9. With *Collapse checks* off, and for a step with *Expand checks here*,
@@ -164,7 +158,7 @@ tooltip on the line.
 
 **S · 15 min · `visible UI`.** Complexity: one formatter, one list of
 numbers on the aggregate, the short form in the pill. Uncertainty: low
-above 45 %; Q1 for the rest. Regression potential: tests that quote the
+above 45 %; below it the widths of the name's row. Regression potential: tests that quote the
 collapsed line (`3 checks` in LAY-11 criterion 2, `2 checks` in LAY-09
 criterion 3, LAY-21's rows) are reworded in the acceptance-test commit;
 the width of a compact *Checks* row. Verification: window tests and the
@@ -182,8 +176,8 @@ review view. Under 300 changed lines.
   above `aggregates`.
 - `canvas/paint.rs`: `pill` chooses the short form by width; the footer of
   a full card (about line 1050) and the compact *Checks* row (about line
-  1357) take `text()` as they do. For Q1 the Overview paths (about lines 850
-  and 1236) add the mark; the mock's `second_badge` is its sketch.
+  1357) take `text()` as they do. Below 45 % the Overview paths (about lines
+  850 and 1236) share the name's row; the mock's variant 1 is its sketch.
 - `canvas/layout.rs` line 921 writes the row's placeholder text
   (`1 check`), which `paint` replaces; the row's size does not depend on
   it.
