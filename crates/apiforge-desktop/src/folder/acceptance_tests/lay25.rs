@@ -10,6 +10,7 @@ use super::*;
 use crate::dnd::Payload;
 use apiforge_core::format::{Binding, Graph, Node};
 use egui::{Pos2, Rect, pos2};
+use egui_kittest::kittest::NodeT;
 use std::collections::BTreeSet;
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
@@ -182,7 +183,7 @@ fn drag_wire(
     let card = board(harness, id)
         .debug_card_rect(&id_of(harness, id, target))
         .unwrap_or_else(|| panic!("{target} is drawn"));
-    let near = pos2(card.left() - 30.0, card.center().y);
+    let near = pos2(card.left() - 12.0, card.center().y);
     press(harness, from);
     move_to(harness, from, near);
     let socket = centre(harness, &format!("Input {input} of {target}"));
@@ -212,7 +213,7 @@ fn drop_field(
             binding,
         },
     );
-    let near = pos2(card.left() - 30.0, card.center().y);
+    let near = pos2(card.left() - 12.0, card.center().y);
     harness.hover_at(near);
     harness.step();
     harness.hover_at(card.center());
@@ -229,27 +230,34 @@ fn cart_id(harness: &FolderHarness, id: &str) -> Binding {
     Binding::reference(id_of(harness, id, "cart"), "cart", "cart.id")
 }
 
-/// A point of the empty board: no card, chip or count within 40 px.
+/// A point of the empty board, in the part the camera fits: no card, chip
+/// or count within 40 px.
 fn empty_point(harness: &FolderHarness, id: &str) -> Pos2 {
     let canvas = board(harness, id);
-    let viewport = canvas.debug_viewport().shrink(60.0);
+    let focus = canvas.debug_focus().shrink(20.0);
     let cards: Vec<Rect> = canvas.debug_cards().iter().map(|(_, rect)| *rect).collect();
     let tags: Vec<Rect> = canvas.debug_tags().iter().map(|tag| tag.rect).collect();
-    let mut y = viewport.bottom();
-    while y > viewport.top() {
-        let mut x = viewport.right();
-        while x > viewport.left() {
+    let counts: Vec<Rect> = canvas
+        .debug_counts()
+        .iter()
+        .map(|count| canvas.debug_to_screen(count.world))
+        .collect();
+    let mut y = focus.top();
+    while y < focus.bottom() {
+        let mut x = focus.left();
+        while x < focus.right() {
             let at = pos2(x, y);
             if cards
                 .iter()
                 .chain(&tags)
+                .chain(&counts)
                 .all(|rect| !rect.expand(40.0).contains(at))
             {
                 return at;
             }
-            x -= 20.0;
+            x += 20.0;
         }
-        y -= 20.0;
+        y += 20.0;
     }
     panic!("the board has an empty place in view");
 }
@@ -789,9 +797,10 @@ fn lay25_criterion_5_the_menu_saves_every_shared_value() {
             changed += 1;
         }
     }
-    // Ten read token, three cart.body.id and three order.body.id in Main;
-    // the Cleanup step `removed` reads token and cart.body.id too.
-    assert_eq!(changed, 17, "the reading steps of Main and Cleanup");
+    // Sixteen reads in Main: ten of token, three of cart.body.id and three
+    // of order.body.id, by ten steps (those that read an id read token
+    // too); the Cleanup step `removed` reads token and cart.body.id.
+    assert_eq!(changed, 11, "the reading steps of Main and Cleanup");
     assert!(
         readers(&harness, &id, "login", "body", "token") == vec!["token".to_owned()],
         "Cleanup reads token too"
@@ -811,7 +820,17 @@ fn lay25_criterion_6_held_values_and_clashes() {
     );
     let (_project, mut harness, id) = tidied_source(&source, WIDE);
     fit(&mut harness);
-    let cards = board(&harness, &id).debug_cards().to_vec();
+    let world = |harness: &FolderHarness| -> Vec<(String, Rect)> {
+        nodes(harness, &id)
+            .iter()
+            .filter_map(|node| {
+                board(harness, &id)
+                    .debug_world(&node.id)
+                    .map(|rect| (node.id.clone(), rect))
+            })
+            .collect()
+    };
+    let cards = world(&harness);
     right_click_board(&mut harness, &id);
     harness.get_by_label(&format!("{SAVE_SHARED} (2)")).click();
     settle(&mut harness);
@@ -824,14 +843,13 @@ fn lay25_criterion_6_held_values_and_clashes() {
         "the readers moved to cartId"
     );
     assert!(after.contains("var productId = cart.cart.productId"));
+    let now = world(&harness);
     let moved: Vec<&String> = cards
         .iter()
         .filter(|(card, rect)| {
-            board(&harness, &id)
-                .debug_cards()
-                .iter()
+            now.iter()
                 .find(|(other, _)| other == card)
-                .is_some_and(|(_, now)| now != rect)
+                .is_some_and(|(_, now)| now.min != rect.min)
         })
         .map(|(card, _)| card)
         .collect();
@@ -1035,12 +1053,12 @@ fn lay25_criterion_9_one_undo() {
     redo(&mut harness);
     assert_eq!(text(&harness, &id), after, "the port: redo");
 
-    // The menu, on shop-30 with its Cleanup.
-    let (_project, mut harness, id) = tidied("shop-30", WIDE);
+    // The menu.
+    let (_project, mut harness, id) = tidied("far-value", WIDE);
     fit(&mut harness);
     let before = text(&harness, &id);
     right_click_board(&mut harness, &id);
-    harness.get_by_label(&format!("{SAVE_SHARED} (3)")).click();
+    harness.get_by_label(&format!("{SAVE_SHARED} (2)")).click();
     settle(&mut harness);
     harness.step();
     let after = text(&harness, &id);
@@ -1049,6 +1067,34 @@ fn lay25_criterion_9_one_undo() {
     assert_eq!(text(&harness, &id), before, "the menu: one undo");
     redo(&mut harness);
     assert_eq!(text(&harness, &id), after, "the menu: redo");
+
+    // The menu on shop-30, Main and Cleanup together. Its text is not the
+    // one the scenario printer writes (`on_error stop` is left out, `refund`
+    // follows its branch with `@after`), so a board edit and its undo
+    // write the printer's text, as every board edit does (ADR 0012): one
+    // undo restores both graphs.
+    let (_project, mut harness, id) = tidied("shop-30", WIDE);
+    fit(&mut harness);
+    // The graphs as sets: the printer orders the statements of the branch.
+    let graphs = |harness: &FolderHarness| {
+        let mut graphs = (main_graph(harness, &id), cleanup_graph(harness, &id));
+        for graph in [&mut graphs.0, &mut graphs.1] {
+            graph.nodes.sort_by(|a, b| a.id.cmp(&b.id));
+            graph.edges.sort_by(|a, b| a.id.cmp(&b.id));
+        }
+        graphs
+    };
+    let before = graphs(&harness);
+    right_click_board(&mut harness, &id);
+    harness.get_by_label(&format!("{SAVE_SHARED} (3)")).click();
+    settle(&mut harness);
+    harness.step();
+    let after = graphs(&harness);
+    assert_ne!(after, before);
+    undo(&mut harness);
+    assert_eq!(graphs(&harness), before, "shop-30: one undo");
+    redo(&mut harness);
+    assert_eq!(graphs(&harness), after, "shop-30: redo");
 }
 
 /// Criterion 10: a variable's far reader is a chip whatever the number of
@@ -1078,16 +1124,29 @@ fn lay25_criterion_10_a_variable_is_read_through_chips() {
             "{reader}: a chip of currency, read by two steps: {chips:?}"
         );
     }
-    let wires: BTreeSet<(String, String)> = canvas
+    // fan-out: `first`, read by one step, and `cartId` keep their wires to
+    // the readers beside them.
+    let (_project, harness, id) = tidied("fan-out", WIDE);
+    let graph = main_graph(&harness, &id);
+    let handle = |id: &str| {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .map_or_else(|| id.to_owned(), |node| node.handle.clone())
+    };
+    let wires: BTreeSet<(String, String)> = board(&harness, &id)
         .debug_wires()
         .iter()
         .filter(|wire| !wire.dashed && !wire.revealed)
         .filter_map(|wire| Some((handle(wire.source.as_deref()?), handle(&wire.target))))
         .collect();
-    assert!(
-        wires.contains(&("cartId".to_owned(), "quantity".to_owned())),
-        "a reader beside the variable keeps its wire: {wires:?}"
-    );
+    for (variable, reader) in [("first", "product"), ("cartId", "quantity")] {
+        assert!(
+            wires.contains(&(variable.to_owned(), reader.to_owned())),
+            "{reader} beside {variable} keeps its wire: {wires:?}"
+        );
+    }
 
     // No gesture adds a proxy.
     let (project, mut harness, id) = tidied("far-value", WIDE);
@@ -1112,11 +1171,22 @@ fn lay25_criterion_10_a_variable_is_read_through_chips() {
     settle(&mut harness);
     assert!(main_graph(&harness, &id).proxies.is_empty(), "no proxy");
     assert!(cleanup_graph(&harness, &id).proxies.is_empty(), "no proxy");
-    let diagram = fs::read_to_string(project.path().join(DIAGRAM)).unwrap();
-    assert!(
-        !diagram.contains("\"proxies\": [{") && !diagram.contains("\"source\""),
-        "diagram.json has no proxy: {diagram}"
-    );
+    let diagram: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.path().join(DIAGRAM)).unwrap()).unwrap();
+    fn proxies(value: &serde_json::Value) -> usize {
+        match value {
+            serde_json::Value::Object(fields) => fields
+                .iter()
+                .map(|(key, value)| match value {
+                    serde_json::Value::Array(items) if key == "proxies" => items.len(),
+                    other => proxies(other),
+                })
+                .sum(),
+            serde_json::Value::Array(items) => items.iter().map(proxies).sum(),
+            _ => 0,
+        }
+    }
+    assert_eq!(proxies(&diagram), 0, "diagram.json has no proxy");
 }
 
 /// Criterion 11: *Read directly again* on `cartId` makes its readers read
@@ -1143,9 +1213,10 @@ fn lay25_criterion_11_read_directly_again() {
         .collect();
     assert_eq!(readers_of_variable.len(), 9);
 
+    let double = id_of(&harness, &id, "double");
     app(&mut harness)
         .selections
-        .insert(id.clone(), vec![id_of(&harness, &id, "double")]);
+        .insert(id.clone(), vec![double]);
     settle(&mut harness);
     harness.step();
     assert!(!has(&harness, READ_DIRECTLY), "absent on a calculation");
@@ -1211,11 +1282,23 @@ fn lay25_criterion_12_the_variable_has_its_row() {
         );
     }
     fit(&mut harness);
+    // A check folded into its step has no card and no badge (LAY-11).
     for (index, step) in rows.iter().enumerate() {
+        if board(&harness, &id).debug_world(step).is_none() {
+            continue;
+        }
         let badge = board(&harness, &id)
             .debug_badge(step)
             .unwrap_or_else(|| panic!("{step} has a badge"));
         assert_eq!(badge.text, (index + 1).to_string(), "{step}: badge = row");
+    }
+    for variable in ["cartId", "productId"] {
+        assert!(
+            board(&harness, &id)
+                .debug_badge(&id_of(&harness, &id, variable))
+                .is_some(),
+            "{variable} has a badge"
+        );
     }
 }
 
@@ -1226,7 +1309,7 @@ fn lay25_criterion_13_the_reference_says_when_to_save_a_value() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/language/reference.md");
     let reference = fs::read_to_string(path).unwrap();
     let start = reference
-        .find("### Values and var")
+        .find("## Values and var")
         .expect("a section Values and var");
     let section = &reference[start..];
     let section = &section[..section[4..]
