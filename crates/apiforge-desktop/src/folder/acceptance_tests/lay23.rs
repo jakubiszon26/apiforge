@@ -887,6 +887,56 @@ fn lay23_criterion_9_editing_follows_the_rule() {
     assert!(chips(&harness, &id).contains(&("quantity".to_owned(), "cartId".to_owned())));
 }
 
+/// Criterion 4, review of #337: a wire brought back and then clicked is
+/// selected and stays drawn until Esc, though the click clears the card
+/// selection and the mark that brought it back.
+#[test]
+fn lay23_criterion_4_a_selected_wire_stays_drawn() {
+    let (_project, mut harness, id) = tidied("fan-out", WIDE, Checks::Collapsed);
+    show(&mut harness, &id, "cartId", 1.0);
+    harness.get_by_label("cartId → 9 readers").click();
+    settle(&mut harness);
+    harness.step();
+    let shown = board(&harness, &id);
+    let (pan, zoom) = shown.debug_camera();
+    let origin = shown.debug_viewport().min;
+    let cards: Vec<Rect> = shown.debug_cards().iter().map(|(_, rect)| *rect).collect();
+    // The middle of a segment of a brought-back wire, clear of every card.
+    let (wire, at) = shown
+        .debug_wires()
+        .iter()
+        .filter(|wire| wire.revealed)
+        .flat_map(|wire| {
+            wire.points.windows(2).map(move |pair| {
+                let world = pair[0] + (pair[1] - pair[0]) * 0.5;
+                (wire.id.clone(), origin + pan + world.to_vec2() * zoom)
+            })
+        })
+        .find(|(_, at)| {
+            shown.debug_viewport().shrink(16.0).contains(*at)
+                && cards.iter().all(|card| !card.expand(12.0).contains(*at))
+        })
+        .expect("a brought-back wire in view, clear of the cards");
+    super::lay16::press(&mut harness, at);
+    super::lay16::release(&mut harness, at);
+    settle(&mut harness);
+    harness.step();
+    harness.step();
+    assert_eq!(
+        board(&harness, &id).debug_selected_wires(),
+        [wire.clone()],
+        "the click selects the wire"
+    );
+    assert!(
+        revealed(&harness, &id).contains(&wire),
+        "the selected wire stays drawn"
+    );
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    harness.step();
+    assert!(revealed(&harness, &id).is_empty(), "Esc returns to chips");
+}
+
 /// Criterion 10: the review views, each asserting a card in view.
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]

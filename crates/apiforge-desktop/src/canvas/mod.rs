@@ -821,6 +821,12 @@ impl Canvas {
         &self.wires
     }
 
+    /// The wires selected on the board.
+    #[cfg(test)]
+    pub(crate) fn debug_selected_wires(&self) -> &[String] {
+        &self.selected_wires
+    }
+
     /// The chips the last frame drew at the readers (LAY-23).
     #[cfg(test)]
     pub(crate) fn debug_tags(&self) -> &[DrawnTag] {
