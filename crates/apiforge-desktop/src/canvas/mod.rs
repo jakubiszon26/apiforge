@@ -1460,6 +1460,10 @@ impl Canvas {
                 selection.contains(tag.reader.as_str())
                     || selection.contains(tag.source.as_str())
                     || self.shown_port.as_ref() == Some(&(tag.source.clone(), tag.port.clone()))
+                    || tag
+                        .wires
+                        .iter()
+                        .any(|wire| self.selected_wires.contains(wire))
                     || pointed_tag.is_some_and(|index| shown_tags[index] == **tag)
                     || pointed_input.as_ref().is_some_and(|(reader, name, _)| {
                         &tag.reader == reader && &tag.input == name

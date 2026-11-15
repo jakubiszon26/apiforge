@@ -924,7 +924,7 @@ fn lay23_criterion_4_a_selected_wire_stays_drawn() {
     harness.step();
     assert_eq!(
         board(&harness, &id).debug_selected_wires(),
-        [wire.clone()],
+        std::slice::from_ref(&wire),
         "the click selects the wire"
     );
     assert!(
