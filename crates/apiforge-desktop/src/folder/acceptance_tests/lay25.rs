@@ -1442,3 +1442,31 @@ fn card_in_view(harness: &FolderHarness, id: &str, label: &str) {
         "{label}: a card is in view"
     );
 }
+
+/// LAY-27 mock (Q1): where the numbers of folded checks go on a card whose
+/// pill has no room, `far-value` at 960 × 540 and 25 %, one frame per
+/// answer, and the line at 1600 × 1000 after Fit.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay27() {
+    use std::sync::atomic::Ordering;
+    for (variant, name) in [(1, "a-name-row"), (2, "b-second-badge"), (0, "c-nothing")] {
+        crate::canvas::LAY27.store(variant, Ordering::Relaxed);
+        let (_project, mut harness, id) = tidied("far-value", crate::testing::MINIMUM);
+        fit(&mut harness);
+        let zoom = board(&harness, &id).debug_zoom();
+        eprintln!("lay27 {name} 960: zoom {zoom}");
+        assert!((zoom - 0.25).abs() <= 0.005, "{name}: 25 %, not {zoom}");
+        card_in_view(&harness, &id, name);
+        crate::testing::capture(&mut harness, &format!("lay27-{name}-960"), None);
+    }
+    for (variant, name) in [(1, "a-name-row"), (2, "b-second-badge")] {
+        crate::canvas::LAY27.store(variant, Ordering::Relaxed);
+        let (_project, mut harness, id) = tidied("far-value", WIDE);
+        fit(&mut harness);
+        eprintln!("lay27 {name} 1600: zoom {}", board(&harness, &id).debug_zoom());
+        card_in_view(&harness, &id, name);
+        crate::testing::capture(&mut harness, &format!("lay27-{name}-1600"), None);
+    }
+    crate::canvas::LAY27.store(0, Ordering::Relaxed);
+}

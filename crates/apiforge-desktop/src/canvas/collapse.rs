@@ -102,6 +102,8 @@ pub struct Aggregate {
     pub gates: usize,
     /// Whether a run's results are known at all.
     pub run: bool,
+    /// The numbers of the checks not drawn as cards (LAY-27 mock).
+    pub numbers: Vec<usize>,
 }
 
 impl Aggregate {
@@ -114,8 +116,33 @@ impl Aggregate {
     /// that did not run; `✓ 2 checks` when every one passed; `✕ 1/3 failed
     /// · 1 skipped` when one failed; else the state of each (`1 ✓ · 1
     /// waiting`). Gates follow, counted apart.
+    /// The numbers of the folded checks: `7`, `7–8`, `7, 9`.
+    pub fn numbers_text(&self) -> String {
+        let mut numbers = self.numbers.clone();
+        numbers.sort_unstable();
+        numbers.dedup();
+        let mut parts: Vec<String> = Vec::new();
+        let mut index = 0;
+        while index < numbers.len() {
+            let mut end = index;
+            while end + 1 < numbers.len() && numbers[end + 1] == numbers[end] + 1 {
+                end += 1;
+            }
+            if end > index {
+                parts.push(format!("{}–{}", numbers[index], numbers[end]));
+            } else {
+                parts.push(numbers[index].to_string());
+            }
+            index = end + 1;
+        }
+        parts.join(", ")
+    }
+
     pub fn text(&self) -> String {
         let mut parts = Vec::new();
+        if !self.numbers.is_empty() {
+            parts.push(self.numbers_text());
+        }
         if self.checks > 0 {
             if !self.run {
                 parts.push(plural(self.checks, "check"));
@@ -163,6 +190,8 @@ pub fn aggregates(
     graph: &Graph,
     later: Option<&Graph>,
     steps: Option<&[StepResult]>,
+    folded: &HashMap<String, (String, String)>,
+    numbers: &HashMap<&str, usize>,
 ) -> HashMap<String, Aggregate> {
     let mut graphs = vec![graph];
     graphs.extend(later);
@@ -182,6 +211,11 @@ pub fn aggregates(
                 continue;
             }
             aggregate.checks += 1;
+            if folded.contains_key(&check.id)
+                && let Some(number) = numbers.get(check.id.as_str())
+            {
+                aggregate.numbers.push(*number);
+            }
             match status {
                 Some(StepStatus::Passed) => aggregate.passed += 1,
                 Some(StepStatus::Failed | StepStatus::Error) => aggregate.failed += 1,
@@ -255,6 +289,7 @@ mod tests {
             waiting: checks - passed - failed - skipped,
             gates: 0,
             run: true,
+            numbers: Vec::new(),
         }
     }
 

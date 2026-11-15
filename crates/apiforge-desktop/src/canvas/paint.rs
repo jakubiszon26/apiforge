@@ -486,6 +486,45 @@ fn execution(step: &StepResult) -> (String, Color32) {
     )
 }
 
+/// LAY-27 mock: where the numbers of folded checks go on a card whose pill
+/// has no room. 0: nowhere (C), 1: the name's row (A), 2: a second badge (B).
+pub static LAY27: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// LAY-27 mock: whether the pill under a name ending at `top` has room.
+fn pill_fits(painter: &Painter, card: Rect, top: f32, zoom: f32) -> bool {
+    let font = FontId::proportional(min_on_screen(LINE_TEXT, zoom, LINE_MIN));
+    let height = painter
+        .layout_no_wrap("7".to_owned(), font, theme::MUTED)
+        .size()
+        .y;
+    zoom >= LABELS_FROM && top + height + 2.0 <= card.bottom() - 1.0
+}
+
+/// LAY-27 mock, answer B: an outlined badge on the card's bottom-left corner
+/// with the numbers of the folded checks.
+fn second_badge(painter: &Painter, card: Rect, zoom: f32, text: &str) {
+    let size = min_on_screen(NUMBER_TEXT, zoom, NUMBER_MIN);
+    let font = FontId::new(size, theme::bold_family());
+    let width = painter
+        .layout_no_wrap(text.to_owned(), font.clone(), theme::MUTED)
+        .size()
+        .x;
+    let height = (BADGE * zoom).max(size + 6.0);
+    let width = height.max(width + 8.0);
+    let rect = Rect::from_min_size(
+        pos2(card.left() - height / 2.0, card.bottom() - height / 2.0),
+        vec2(width, height),
+    );
+    painter.rect_filled(rect, height / 2.0, theme::WHITE);
+    painter.rect_stroke(
+        rect,
+        height / 2.0,
+        Stroke::new(1.2, theme::TEXT),
+        StrokeKind::Inside,
+    );
+    label(painter, rect, text, font, theme::TEXT, egui::Align::Center);
+}
+
 /// The checks pill under a card's name at Overview (Q5 = A): what became of
 /// the step's checks, red when one failed. Drawn only where it fits.
 fn pill(
@@ -498,11 +537,21 @@ fn pill(
     zoom: f32,
     aggregate: &Aggregate,
 ) {
-    let text = aggregate.text();
+    let mut text = aggregate.text();
     if text.is_empty() || zoom < LABELS_FROM {
         return;
     }
     let font = FontId::proportional(min_on_screen(LINE_TEXT, zoom, LINE_MIN));
+    if !aggregate.numbers.is_empty()
+        && painter
+            .layout_no_wrap(text.clone(), font.clone(), theme::MUTED)
+            .size()
+            .x
+            + 10.0
+            > card.width() - 10.0
+    {
+        text = aggregate.numbers_text();
+    }
     let color = if aggregate.failed() {
         theme::DANGER
     } else {
@@ -1230,6 +1279,48 @@ pub fn compact_card(
             || (name.bottom() <= rect.bottom() - 1.0 && name.width() >= 2.0 * NAME_MIN))
             .then_some(name)
     };
+    // LAY-27 mock: the numbers of the folded checks where the pill has no
+    // room, on the name's row (A) or in a second badge (B).
+    let variant = LAY27.load(std::sync::atomic::Ordering::Relaxed);
+    let homeless = aggregate
+        .filter(|aggregate| !legible && !aggregate.numbers.is_empty())
+        .filter(|_| name.is_some_and(|name| !pill_fits(&clipped, rect, name.bottom() + 1.0, z)))
+        .map(Aggregate::numbers_text);
+    let mut name = name;
+    if variant == 1
+        && let (Some(numbers), Some(row)) = (&homeless, name)
+    {
+        let font = FontId::proportional(min_on_screen(LINE_TEXT, z, LINE_MIN));
+        let color = if failed_check {
+            theme::DANGER
+        } else {
+            theme::MUTED
+        };
+        let width = clipped
+            .layout_no_wrap(numbers.clone(), font.clone(), color)
+            .size()
+            .x;
+        let right = rect.right() - 5.0;
+        let place = Rect::from_min_max(pos2(right - width, row.top()), pos2(right, row.bottom()));
+        drawn.label(
+            &clipped,
+            place,
+            numbers,
+            TextKind::Result,
+            font,
+            color,
+            egui::Align::Max,
+        );
+        name = Some(Rect::from_min_max(
+            row.left_top(),
+            pos2(place.left() - 4.0, row.bottom()),
+        ));
+    }
+    if variant == 2
+        && let Some(numbers) = &homeless
+    {
+        second_badge(painter, rect, z, numbers);
+    }
     if let Some(name) = name {
         drawn.label(
             &clipped,

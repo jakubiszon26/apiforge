@@ -17,6 +17,8 @@ mod variables;
 pub use collapse::collapsible;
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
+#[cfg(test)]
+pub(crate) use paint::LAY27;
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
 pub use readers::WireMode;
 pub use routing::WireStyle;
@@ -1325,7 +1327,6 @@ impl Canvas {
         // Folded checks are not drawn, are no obstacle and take no part in
         // the camera; their subjects' footers sum them up (LAY-11).
         let folded = self.fold(input.graph, input.later, &mut cards, &mut chips);
-        let aggregates = collapse::aggregates(input.graph, input.later, input.steps);
         // Every step's place in the engine's order, the number of its row
         // in Run results (LAY-07, Q2 = A); a pure function of the graph.
         let numbers: HashMap<&str, usize> = sequence(input.graph)
@@ -1333,6 +1334,8 @@ impl Canvas {
             .enumerate()
             .map(|(index, id)| (id, index + 1))
             .collect();
+        let aggregates =
+            collapse::aggregates(input.graph, input.later, input.steps, &folded, &numbers);
         #[cfg(test)]
         {
             self.hidden = folded.keys().cloned().collect();
