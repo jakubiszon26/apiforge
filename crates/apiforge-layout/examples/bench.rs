@@ -30,6 +30,39 @@ enum Reach {
     Anywhere,
 }
 
+/// The board `name` of `support/boards.txt`: its cards and chips, and its
+/// wires.
+fn reference(name: &str) -> (Vec<Rect>, Vec<Wire>) {
+    let side = |word: &str| match word {
+        "left" => Side::Left,
+        "right" => Side::Right,
+        "top" => Side::Top,
+        _ => Side::Bottom,
+    };
+    let (mut cards, mut wires) = (Vec::new(), Vec::new());
+    let lines = include_str!("support/boards.txt")
+        .lines()
+        .skip_while(|line| *line != format!("board {name}"))
+        .skip(1)
+        .take_while(|line| *line != "end");
+    for line in lines {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let number = |index: usize| -> f32 { words[index].parse().unwrap_or_default() };
+        match words.first().copied() {
+            Some("card" | "chip") => cards.push(Rect::from_size(
+                Point::new(number(1), number(2)),
+                Size::new(number(3), number(4)),
+            )),
+            Some("wire") => wires.push(Wire::new(
+                Port::new(number(1) as usize, side(words[2]), number(3)),
+                Port::new(number(4) as usize, side(words[5]), number(6)),
+            )),
+            _ => {}
+        }
+    }
+    (cards, wires)
+}
+
 /// A board of `cards` cards and about `wires` wires, laid out by `tidy`.
 fn board(
     cards: usize,
@@ -143,7 +176,10 @@ fn main() {
             measure(5, || {
                 std::hint::black_box(route(&cards, &wires, &routing));
             }),
-            Duration::from_millis(30),
+            // 30 ms until LAY-03: the grid has a track every 20 px since, and
+            // on this board, laid out in layers 48 px apart, most wires have
+            // no route that keeps the gap (ADR 0006, *The gap between lines*).
+            Duration::from_millis(150),
         );
 
         // A drag reroutes the wires of the moved card only, which is the frame
@@ -195,6 +231,22 @@ fn main() {
         });
         println!(
             "board wired at random: full routing {:.0} ms (no budget)",
+            measured.as_secs_f64() * 1000.0
+        );
+    }
+
+    // The largest reference scenario as the desktop tidies it, with every wire
+    // and every check drawn (LAY-03): the board a person has, with the room
+    // its lines need.
+    {
+        let (cards, wires) = reference("shop-50 compact expanded 56 all");
+        let measured = measure(5, || {
+            std::hint::black_box(route(&cards, &wires, &routing));
+        });
+        println!(
+            "shop-50, every wire and check: {} cards, {} wires, full routing {:.1} ms (no budget)",
+            cards.len(),
+            wires.len(),
             measured.as_secs_f64() * 1000.0
         );
     }

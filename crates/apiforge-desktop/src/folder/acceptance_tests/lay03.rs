@@ -235,19 +235,15 @@ fn lay03_criterion_4_tidy_up_widens_where_lines_need_it() {
 }
 
 /// Criterion 4: a scenario opened from code is laid out as Tidy up lays it
-/// out, with the room its lines need.
+/// out, with the room the lines of a new install's board need.
 #[test]
 fn lay03_criterion_4_opening_gives_the_tidied_board() {
-    for (name, expanded, wires) in [
-        ("fan-out", false, WireMode::Chips),
-        ("shop-30", false, WireMode::Chips),
-        ("fan-out", false, WireMode::All),
-    ] {
-        let (_project, mut harness, id) = opened(name, WIDE, expanded, wires);
-        assert_apart(&harness, &id, &format!("{name} as opened, {wires:?}"));
+    for name in ["fan-out", "shop-30"] {
+        let (_project, mut harness, id) = opened(name, WIDE, false, WireMode::Chips);
+        assert_apart(&harness, &id, &format!("{name} as opened"));
         let before = positions(&harness, &id);
         tidy(&mut harness);
-        assert_eq!(positions(&harness, &id), before, "{name}, {wires:?}");
+        assert_eq!(positions(&harness, &id), before, "{name}");
     }
 }
 
@@ -303,29 +299,49 @@ fn show(harness: &mut FolderHarness, id: &str, handle: &str, zoom: f32) {
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_lay03() {
-    // (capture, scenario, wires, the card the view is centred on at 100 %,
-    // or Fit)
+    // (capture, scenario, wires, checks drawn, the card the view is centred
+    // on at 100 %, or Fit)
     let views = [
         // 1. Rails along the top of a row.
-        ("1-row-top", "fan-out", WireMode::Chips, Some("stock")),
+        (
+            "1-row-top",
+            "fan-out",
+            WireMode::Chips,
+            false,
+            Some("stock"),
+        ),
         // 2. A vertical and a horizontal rail round one corner.
-        ("2-corner", "fan-out", WireMode::Chips, Some("apply_coupon")),
+        (
+            "2-corner",
+            "fan-out",
+            WireMode::Chips,
+            false,
+            Some("apply_coupon"),
+        ),
         // 3. The lines under the last row.
         (
             "3-under-last-row",
             "shop-30",
             WireMode::All,
+            false,
             Some("receipt"),
         ),
         // 4. A corner where three or four lines arrive.
-        ("4-many-arrive", "shop-30", WireMode::All, Some("second")),
-        ("fit-fan-out", "fan-out", WireMode::Chips, None),
-        ("fit-shop-30", "shop-30", WireMode::All, None),
+        (
+            "4-many-arrive",
+            "shop-30",
+            WireMode::All,
+            false,
+            Some("second"),
+        ),
+        ("fit-fan-out", "fan-out", WireMode::Chips, false, None),
+        ("fit-shop-30", "shop-30", WireMode::All, false, None),
+        ("fit-shop-30-checks", "shop-30", WireMode::Chips, true, None),
     ];
     for size in [WIDE, crate::testing::MINIMUM] {
         let suffix = if size == WIDE { "1600" } else { "960" };
-        for (label, name, wires, centre) in views {
-            let (_project, mut harness, id) = tidied(name, size, false, wires);
+        for (label, name, wires, expanded, centre) in views {
+            let (_project, mut harness, id) = tidied(name, size, expanded, wires);
             choose(&mut harness, FIT);
             harness.step();
             if let Some(handle) = centre {

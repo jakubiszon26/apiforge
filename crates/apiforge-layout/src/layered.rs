@@ -11,7 +11,9 @@
 //! finds a home for new cards and moves nothing else.
 
 use crate::geometry::{Block, Edge, Point, Rect, Size, compare};
-use std::collections::{BTreeSet, VecDeque};
+use crate::packed::Breach;
+use crate::route::Route;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// Spacing of the layered layout, in pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -667,14 +669,16 @@ pub struct Rows {
 
 impl Default for Rows {
     fn default() -> Self {
+        // A gap of 100 px holds four lines 20 px apart, 20 px from either
+        // card (LAY-03); [`Room`] widens it where a board has more.
         let column_width = 280.0;
-        let column_gap = 96.0;
+        let column_gap = 100.0;
         Self {
             width: 5.0 * column_width + 4.0 * column_gap,
             column_width,
             column_gap,
             stack_gap: 24.0,
-            row_gap: 96.0,
+            row_gap: 100.0,
         }
     }
 }
@@ -722,8 +726,39 @@ pub struct Row {
 /// [`Rows::row_gap`] below it. The result is anchored like [`tidy`]'s: the
 /// top-left corner of the blocks laid out stays where it is.
 pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
+    hang_with(hanging, &Room::default())
+}
+
+/// The room a board in shape D has beyond [`Rows`]' gaps (LAY-03): what its
+/// lines need to run a gap apart. Tidy up finds it with [`widen`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Room {
+    /// After each column of every row, left to right.
+    pub columns: Vec<f32>,
+    /// Under each row, top to bottom.
+    pub rows: Vec<f32>,
+    /// Above a satellite: by the place of its spine block in the spine and
+    /// its own place in the stack, the first satellite being 1.
+    pub stacks: BTreeMap<(usize, usize), f32>,
+}
+
+impl Room {
+    fn column(&self, column: usize) -> f32 {
+        self.columns.get(column).copied().unwrap_or(0.0)
+    }
+
+    fn row(&self, row: usize) -> f32 {
+        self.rows.get(row).copied().unwrap_or(0.0)
+    }
+
+    fn stack(&self, spine: usize, place: usize) -> f32 {
+        self.stacks.get(&(spine, place)).copied().unwrap_or(0.0)
+    }
+}
+
+/// The stacks of a board in shape D: each spine block with its satellites.
+fn stacks_of(hanging: &Hanging<'_>) -> Option<Vec<Vec<usize>>> {
     let blocks = hanging.blocks;
-    let mut positions: Vec<Point> = blocks.iter().map(|block| block.position).collect();
     let spine: Vec<usize> = hanging
         .spine
         .iter()
@@ -731,7 +766,7 @@ pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
         .filter(|index| *index < blocks.len())
         .collect();
     if spine.len() != hanging.spine.len() || spine.is_empty() {
-        return (positions, Vec::new());
+        return None;
     }
     let mut stacks: Vec<Vec<usize>> = spine.iter().map(|index| vec![*index]).collect();
     for &(block, under) in hanging.satellites {
@@ -742,19 +777,285 @@ pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
             stack.push(block);
         }
     }
+    Some(stacks)
+}
+
+/// The cards of a stack the board draws, in pairs one above the other, each
+/// with the lower one's place in the stack.
+fn drawn_pairs(stack: &[usize], hidden: &BTreeSet<usize>) -> Vec<(usize, usize, usize)> {
+    let drawn: Vec<(usize, usize)> = stack
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, block)| !hidden.contains(block))
+        .collect();
+    drawn
+        .windows(2)
+        .map(|pair| (pair[0].1, pair[1].1, pair[1].0))
+        .collect()
+}
+
+/// The most of `spans` that cover one place, each made `pad` longer at both
+/// ends: how many lines side by side a corridor has to hold.
+fn density(mut spans: Vec<(f32, f32)>, pad: f32) -> usize {
+    spans.sort_by(|a, b| compare(a.0, b.0));
+    let mut ends: Vec<f32> = Vec::new();
+    let mut most = 0;
+    for (low, high) in spans {
+        ends.retain(|end| *end > low - pad);
+        ends.push(high + pad);
+        most = most.max(ends.len());
+    }
+    most
+}
+
+/// Gives `room` what the lines of a board ask for (LAY-03). `wanted` are the
+/// routes its wires take when each is routed alone, so they lie on each
+/// other wherever several want the same corridor: between two columns,
+/// under a row, between a card and the satellite under it. A corridor that
+/// `n` of them share gets room for `n` lines `gap` apart, `gap` from the
+/// cards on either side. `positions` and `rows` are what [`hang_with`] gave
+/// for `room`; `hidden` are the blocks the board does not draw, folded
+/// checks, which keep their places and are in no line's way. Returns whether
+/// any gap grew.
+pub fn make_room(
+    hanging: &Hanging<'_>,
+    positions: &[Point],
+    rows: &[Row],
+    wanted: &[Route],
+    hidden: &BTreeSet<usize>,
+    gap: f32,
+    room: &mut Room,
+) -> bool {
+    let Some(stacks) = stacks_of(hanging) else {
+        return false;
+    };
+    let per = hanging.rows.columns();
+    let rect = |block: usize| Rect::from_size(positions[block], hanging.blocks[block].size);
+    let lefts: Vec<f32> = stacks
+        .iter()
+        .take(per)
+        .map(|stack| {
+            let block = stack[0];
+            positions[block].x
+                - (hanging.rows.column_width - hanging.blocks[block].size.width) * 0.5
+        })
+        .collect();
+    let segments: Vec<(Point, Point)> = wanted
+        .iter()
+        .filter(|route| route.complete)
+        .flat_map(Route::segments)
+        .collect();
+    // The upright segments in a strip of the board, as spans along it, and
+    // the level ones.
+    let upright = |left: f32, right: f32| -> Vec<(f32, f32)> {
+        segments
+            .iter()
+            .filter(|(from, to)| (from.x - to.x).abs() < 0.01 && (from.y - to.y).abs() > 0.01)
+            .filter(|(from, _)| from.x > left && from.x < right)
+            .map(|(from, to)| (from.y.min(to.y), from.y.max(to.y)))
+            .collect()
+    };
+    let level = |top: f32, bottom: f32, left: f32, right: f32| -> Vec<(f32, f32)> {
+        segments
+            .iter()
+            .filter(|(from, to)| (from.y - to.y).abs() < 0.01 && (from.x - to.x).abs() > 0.01)
+            .filter(|(from, _)| from.y > top && from.y < bottom)
+            .map(|(from, to)| (from.x.min(to.x), from.x.max(to.x)))
+            .filter(|(low, high)| *low < right && *high > left)
+            .collect()
+    };
+    // What `lines` lines need beyond the `free` they have.
+    let short = |lines: usize, free: f32| {
+        if lines == 0 {
+            0.0
+        } else {
+            ((lines + 1) as f32 * gap - free).max(0.0)
+        }
+    };
+    let pad = gap * 0.5;
+    let mut grew = false;
+    let mut grow = |slot: &mut f32, more: f32| {
+        if more > 0.01 {
+            *slot += more;
+            grew = true;
+        }
+    };
+    for column in 0..lefts.len().saturating_sub(1) {
+        let (left, right) = (lefts[column] + hanging.rows.column_width, lefts[column + 1]);
+        let more = short(density(upright(left, right), pad), right - left);
+        if room.columns.len() <= column {
+            room.columns.resize(column + 1, 0.0);
+        }
+        grow(&mut room.columns[column], more);
+    }
+    for (row, pair) in rows.windows(2).enumerate() {
+        let (top, bottom) = (pair[0].top + pair[0].height, pair[1].top);
+        let more = short(
+            density(level(top, bottom, f32::MIN, f32::MAX), pad),
+            bottom - top,
+        );
+        if room.rows.len() <= row {
+            room.rows.resize(row + 1, 0.0);
+        }
+        grow(&mut room.rows[row], more);
+    }
+    for (spine, stack) in stacks.iter().enumerate() {
+        for (upper, lower, place) in drawn_pairs(stack, hidden) {
+            let (upper, lower) = (rect(upper), rect(lower));
+            // A line squeezed between the two runs on the edge of one.
+            let spans = level(
+                upper.max.y - 0.5,
+                lower.min.y + 0.5,
+                upper.min.x.min(lower.min.x),
+                upper.max.x.max(lower.max.x),
+            );
+            let more = short(density(spans, pad), lower.min.y - upper.max.y);
+            grow(room.stacks.entry((spine, place)).or_default(), more);
+        }
+    }
+    room.stacks.retain(|_, more| *more > 0.0);
+    grew
+}
+
+/// Adds to `room` what `breaches` ask for: each breach widens the gap it
+/// lies in by `step`, once however many breaches lie there. A breach between
+/// two upright segments, or beside a card, widens the gap between two
+/// columns; one between two level segments, or above or under a card, widens
+/// the gap above a satellite or the gap under a row. `positions` and `rows`
+/// are what [`hang_with`] gave for `room`. A breach outside the rows and
+/// columns, where the board is open, widens nothing. `hidden` is as in
+/// [`make_room`]. Returns whether anything was widened.
+pub fn widen(
+    hanging: &Hanging<'_>,
+    positions: &[Point],
+    rows: &[Row],
+    breaches: &[Breach],
+    hidden: &BTreeSet<usize>,
+    step: f32,
+    room: &mut Room,
+) -> bool {
+    let Some(stacks) = stacks_of(hanging) else {
+        return false;
+    };
+    let per = hanging.rows.columns();
+    let rect = |block: usize| Rect::from_size(positions[block], hanging.blocks[block].size);
+    // The columns' left edges, from the first row, which has the most.
+    let lefts: Vec<f32> = stacks
+        .iter()
+        .take(per)
+        .map(|stack| {
+            let block = stack[0];
+            positions[block].x
+                - (hanging.rows.column_width - hanging.blocks[block].size.width) * 0.5
+        })
+        .collect();
+    let mut columns = BTreeSet::new();
+    let mut under = BTreeSet::new();
+    let mut above = BTreeSet::new();
+    for breach in breaches {
+        let centre = breach.area.center();
+        if !breach.horizontal {
+            // Between which two columns: the gap the breach lies in, or the
+            // nearer side of the column it lies in.
+            if lefts.len() < 2 || centre.x < lefts[0] {
+                continue;
+            }
+            let column = lefts
+                .iter()
+                .rposition(|left| *left <= centre.x)
+                .unwrap_or(0);
+            if column + 1 == lefts.len() {
+                if centre.x <= lefts[column] + hanging.rows.column_width * 0.5 {
+                    columns.insert(column - 1);
+                }
+                continue;
+            }
+            let middle = lefts[column] + hanging.rows.column_width * 0.5;
+            columns.insert(if centre.x < middle && column > 0 {
+                column - 1
+            } else {
+                column
+            });
+            continue;
+        }
+        let Some(row) = rows.iter().rposition(|row| row.top <= centre.y) else {
+            continue;
+        };
+        // Between two cards of one stack, where the breach is.
+        let between = stacks
+            .iter()
+            .enumerate()
+            .skip(row * per)
+            .take(per)
+            .find_map(|(spine, stack)| {
+                drawn_pairs(stack, hidden)
+                    .into_iter()
+                    .find_map(|(upper, lower, place)| {
+                        let (upper, lower) = (rect(upper), rect(lower));
+                        let within =
+                            upper.max.y - step <= centre.y && centre.y <= lower.min.y + step;
+                        let across = breach.area.min.x < upper.max.x.max(lower.max.x) + step
+                            && upper.min.x.min(lower.min.x) - step < breach.area.max.x;
+                        (within && across).then_some((spine, place))
+                    })
+            });
+        match between {
+            Some(place) => {
+                above.insert(place);
+            }
+            None if row + 1 < rows.len() => {
+                under.insert(row);
+            }
+            None => {}
+        }
+    }
+    for column in &columns {
+        if room.columns.len() <= *column {
+            room.columns.resize(column + 1, 0.0);
+        }
+        room.columns[*column] += step;
+    }
+    for row in &under {
+        if room.rows.len() <= *row {
+            room.rows.resize(row + 1, 0.0);
+        }
+        room.rows[*row] += step;
+    }
+    for place in &above {
+        *room.stacks.entry(*place).or_default() += step;
+    }
+    !(columns.is_empty() && under.is_empty() && above.is_empty())
+}
+
+/// [`hang`], with `room` added to the gaps.
+pub fn hang_with(hanging: &Hanging<'_>, room: &Room) -> (Vec<Point>, Vec<Row>) {
+    let blocks = hanging.blocks;
+    let mut positions: Vec<Point> = blocks.iter().map(|block| block.position).collect();
+    let Some(stacks) = stacks_of(hanging) else {
+        return (positions, Vec::new());
+    };
+    let spine: Vec<usize> = stacks.iter().map(|stack| stack[0]).collect();
     let rows = hanging.rows;
     let per = rows.columns();
     let pitch = rows.column_width + rows.column_gap;
+    let lefts: Vec<f32> = (0..per)
+        .scan(0.0, |left, column| {
+            let here = *left;
+            *left += pitch + room.column(column);
+            Some(here)
+        })
+        .collect();
     let mut laid = Vec::new();
     let mut top = 0.0;
     for (number, chunk) in stacks.chunks(per).enumerate() {
         let mut height: f32 = 0.0;
         for (column, stack) in chunk.iter().enumerate() {
-            let left = column as f32 * pitch;
+            let left = lefts[column];
             let mut y = top;
             for (place, &block) in stack.iter().enumerate() {
                 if place > 0 {
-                    y += rows.stack_gap;
+                    y += rows.stack_gap + room.stack(number * per + column, place);
                 }
                 let size = blocks[block].size;
                 positions[block] = Point::new(left + (rows.column_width - size.width) * 0.5, y);
@@ -767,7 +1068,7 @@ pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
             top,
             height,
         });
-        top += height + rows.row_gap;
+        top += height + rows.row_gap + room.row(number);
     }
     // The blocks laid out keep their top-left corner where it was.
     let moved: Vec<usize> = stacks.iter().flatten().copied().collect();
@@ -1122,7 +1423,8 @@ mod tests {
         assert_eq!(laid[0].spine, [11, 10, 9, 8, 7]);
         for (place, &block) in spine.iter().enumerate() {
             let (row, column) = (place / 5, place % 5);
-            assert_eq!(positions[block].x, column as f32 * 376.0, "block {block}");
+            let pitch = rows.column_width + rows.column_gap;
+            assert_eq!(positions[block].x, column as f32 * pitch, "block {block}");
             assert_eq!(positions[block].y, laid[row].top, "block {block}");
         }
         // The row width is a parameter: three columns fit 1100 px.

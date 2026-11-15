@@ -13,9 +13,11 @@ mod smooth;
 
 pub use geometry::{Block, Edge, Point, Port, Rect, Side, Size};
 pub use layered::{
-    Graph, Hanging, Row, Rows, Spacing, any_overlap, columns_of, hang, layers_of, place, rows_of,
-    tidy,
+    Graph, Hanging, Room, Row, Rows, Spacing, any_overlap, columns_of, hang, hang_with, layers_of,
+    make_room, place, rows_of, tidy, widen,
 };
 pub use packed::{Breach, GAP, Near, packed};
-pub use route::{Bridge, Route, Routing, Wire, intersection as crossing, route, violations};
+pub use route::{
+    Bridge, Route, Routing, Wire, intersection as crossing, route, route_among, violations,
+};
 pub use smooth::{DEFAULT_RADIUS, Piece, smooth, violations as smooth_violations};

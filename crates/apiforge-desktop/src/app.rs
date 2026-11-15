@@ -2601,6 +2601,7 @@ impl App {
             sibling: self.editor.sibling_graph(),
             density: canvas::CardDensity::Full,
             satellites: false,
+            lines: canvas::Lines::default(),
         })
     }
 

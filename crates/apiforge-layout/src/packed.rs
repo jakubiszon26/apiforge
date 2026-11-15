@@ -7,10 +7,13 @@
 //! room for it, and the `quality` example and the tests count what is left.
 //!
 //! Two things are not breaches. The first and the last stretch of a line, as
-//! long as the gap, are where its ports are: two ports of one card may be
-//! nearer than the gap, and a line has to touch its own card. And wires of
-//! one port share the straight piece out of that port, which they leave one
-//! by one like the teeth of a comb; the same holds for the piece into a port.
+//! long as the gap, are where its ports are: a line has to touch its own
+//! card. And wires of one port share the straight piece out of that port,
+//! which they leave one by one like the teeth of a comb; the same holds for
+//! the piece into a port, and for a rail into a step and the rail out of it,
+//! which use one port. Ports nearer each other than the gap, the operands of
+//! a condition, count as one port in this: the straight pieces into them are
+//! as near each other as the ports are, and part where they turn.
 
 use crate::geometry::{Point, Rect};
 use crate::route::Route;
@@ -124,7 +127,7 @@ pub fn packed(routes: &[Route], cards: &[Rect], gap: f32) -> Vec<Breach> {
     let pieces = pieces(routes, gap);
     let limit = gap - TOLERANCE;
     let mut breaches = Vec::new();
-    let same = |a: Option<Point>, b: Option<Point>| matches!((a, b), (Some(a), Some(b)) if a.orthogonal_distance(b) < TOLERANCE);
+    let beside = |a: Option<Point>, b: Option<Point>| matches!((a, b), (Some(a), Some(b)) if a.distance(b) < limit);
     for (position, a) in pieces.iter().enumerate() {
         for b in &pieces[position + 1..] {
             if a.horizontal != b.horizontal {
@@ -146,9 +149,16 @@ pub fn packed(routes: &[Route], cards: &[Rect], gap: f32) -> Vec<Breach> {
                 if apart >= limit {
                     continue;
                 }
-                // Wires of one port on the straight piece out of it, or into it.
-                let comb = same(a.leaves, b.leaves) || same(a.enters, b.enters);
-                if comb && across < TOLERANCE {
+                // Wires of one port on the straight piece out of it, or into
+                // it; and the pieces of two ports nearer than the gap, which
+                // are as near each other as their ports.
+                let ports = [
+                    (a.leaves, b.leaves),
+                    (a.enters, b.enters),
+                    (a.leaves, b.enters),
+                    (a.enters, b.leaves),
+                ];
+                if ports.into_iter().any(|(a, b)| beside(a, b)) {
                     continue;
                 }
             }
@@ -209,16 +219,10 @@ mod tests {
     #[test]
     fn two_lines_side_by_side_keep_the_gap() {
         let wire = line(&[(0.0, 0.0), (300.0, 0.0)]);
-        assert_eq!(
-            count(&[wire.clone(), line(&[(0.0, 20.0), (300.0, 20.0)])]),
-            0
-        );
-        assert_eq!(
-            count(&[wire.clone(), line(&[(0.0, 19.0), (300.0, 19.0)])]),
-            1
-        );
-        assert_eq!(count(&[wire.clone(), line(&[(0.0, 0.0), (300.0, 0.0)])]), 0);
-        assert_eq!(count(&[wire.clone(), line(&[(1.0, 0.0), (301.0, 0.0)])]), 1);
+        let beside = |y: f32| line(&[(-50.0, y), (350.0, y)]);
+        assert_eq!(count(&[wire.clone(), beside(20.0)]), 0);
+        assert_eq!(count(&[wire.clone(), beside(19.0)]), 1);
+        assert_eq!(count(&[wire.clone(), beside(0.0)]), 1);
         // At right angles two lines cross.
         assert_eq!(count(&[wire, line(&[(150.0, -90.0), (150.0, 90.0)])]), 0);
     }
@@ -235,13 +239,25 @@ mod tests {
 
     #[test]
     fn the_stretch_at_a_port_is_not_judged() {
-        // Two ports 8 px apart: the lines part within their first 20 px.
+        // Two lines out of two cards part within their first 20 px; on one
+        // track they would be end to end.
         let upper = line(&[(0.0, 0.0), (20.0, 0.0), (20.0, -100.0)]);
-        let lower = line(&[(0.0, 8.0), (20.0, 8.0), (20.0, 100.0)]);
+        let lower = line(&[(0.0, 30.0), (20.0, 30.0), (20.0, 130.0)]);
+        assert_eq!(count(&[upper.clone(), lower]), 0);
+        let lower = line(&[(0.0, 30.0), (20.0, 30.0), (20.0, 13.0), (90.0, 13.0)]);
         assert_eq!(count(&[upper, lower]), 1, "end to end on one track");
-        let lower = line(&[(0.0, 8.0), (40.0, 8.0), (40.0, 100.0)]);
-        let upper = line(&[(0.0, 0.0), (20.0, 0.0), (20.0, -100.0)]);
-        assert_eq!(count(&[upper, lower]), 0);
+    }
+
+    #[test]
+    fn ports_nearer_than_the_gap_count_as_one() {
+        // Two ports 8 px apart: the straight pieces out of them run 8 px
+        // apart, and the lines part where they turn.
+        let upper = line(&[(0.0, 0.0), (40.0, 0.0), (40.0, -100.0)]);
+        let lower = line(&[(0.0, 8.0), (60.0, 8.0), (60.0, -100.0)]);
+        assert_eq!(count(&[upper.clone(), lower]), 0);
+        // After the turn they keep the gap like any two lines.
+        let lower = line(&[(0.0, 8.0), (50.0, 8.0), (50.0, -100.0), (300.0, -100.0)]);
+        assert_eq!(count(&[upper, lower]), 1);
     }
 
     #[test]
