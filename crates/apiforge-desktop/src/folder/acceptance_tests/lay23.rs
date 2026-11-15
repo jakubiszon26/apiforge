@@ -1091,3 +1091,123 @@ fn review_lay23() {
         crate::testing::capture(&mut harness, label, None);
     }
 }
+
+/// LAY-24 mock-up (throwaway): a board of `name` with the rails into the
+/// next step drawn as `mode` says.
+fn lay24_board(
+    name: &str,
+    size: egui::Vec2,
+    checks: Checks,
+    wires: &str,
+    mode: crate::canvas::lay24::Mode,
+) -> (tempfile::TempDir, FolderHarness, String) {
+    let (project, mut harness, id) = tidied(name, size, checks);
+    if wires == ALL_WIRES {
+        switch_wires(&mut harness, ALL_WIRES);
+    }
+    board_mut(&mut harness, &id).debug_after_mode(mode);
+    choose(&mut harness, FIT);
+    harness.step();
+    harness.step();
+    (project, harness, id)
+}
+
+/// LAY-24 mock-up: the options, each asserting a card in view.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay24() {
+    use crate::canvas::lay24::Mode as After;
+    let small = crate::testing::MINIMUM;
+    // (scenario, size, capture, option, the step selected at 60 %)
+    for (name, size, label, mode, selected) in [
+        ("fan-out", WIDE, "lay24-today-1600", After::Off, None),
+        ("fan-out", small, "lay24-today-960", After::Off, None),
+        ("fan-out", WIDE, "lay24-a-tab-1600", After::Tab, None),
+        ("fan-out", small, "lay24-a-tab-960", After::Tab, None),
+        ("fan-out", WIDE, "lay24-a-tab-selected-60", After::Tab, Some("note")),
+        ("fan-out", WIDE, "lay24-a2-header-1600", After::Header, None),
+        ("fan-out", WIDE, "lay24-b-glyph-1600", After::Glyph, None),
+        ("fan-out", small, "lay24-b-glyph-960", After::Glyph, None),
+        ("fan-out", WIDE, "lay24-b-glyph-selected-60", After::Glyph, Some("note")),
+        ("fan-out", WIDE, "lay24-c-on-demand-1600", After::OnDemand, None),
+        ("fan-out", small, "lay24-c-on-demand-960", After::OnDemand, None),
+        (
+            "fan-out",
+            WIDE,
+            "lay24-c-on-demand-selected-60",
+            After::OnDemand,
+            Some("note"),
+        ),
+        ("shop-30", WIDE, "lay24-shop-30-today-1600", After::Off, None),
+        ("shop-30", WIDE, "lay24-shop-30-a-tab-1600", After::Tab, None),
+    ] {
+        let (_project, mut harness, id) = lay24_board(name, size, Checks::Collapsed, CHIPS, mode);
+        if let Some(handle) = selected {
+            show(&mut harness, &id, handle, 0.6);
+            select(&mut harness, &id, &[handle]);
+        }
+        let canvas = board(&harness, &id);
+        let focus = canvas.debug_focus();
+        assert!(
+            canvas
+                .debug_cards()
+                .iter()
+                .any(|(_, rect)| focus.contains_rect(*rect)),
+            "{label}: a card is in view"
+        );
+        crate::testing::capture(&mut harness, label, None);
+    }
+}
+
+/// LAY-24 mock-up: what the rails into the next step cost, measured as
+/// `quality` measures (lines, crossings = the router's bridges, coincident
+/// pairs, ink in board px), with every rail and without those rails.
+#[test]
+#[ignore = "design review measurement; run with tools/gui/review.sh"]
+fn review_lay24_measures() {
+    use crate::canvas::lay24::Mode as After;
+    let mut table = String::from(
+        "| board | checks | wires | rails | into next | today: lines · crossings · coincident · ink | without: lines · crossings · coincident · ink |\n| --- | --- | --- | --- | --- | --- | --- |\n",
+    );
+    for name in ["fan-out", "far-value", "shop-30"] {
+        for checks in [Checks::Collapsed, Checks::Expanded] {
+            for wires in [CHIPS, ALL_WIRES] {
+                let mut cells = Vec::new();
+                let mut rails = (0, 0);
+                for mode in [After::Off, After::OnDemand] {
+                    let (_project, harness, id) = lay24_board(name, WIDE, checks, wires, mode);
+                    let (lines, crossings, pairs) = measures(&harness, &id);
+                    let drawn = board(&harness, &id).debug_wires();
+                    let ink: f32 = drawn
+                        .iter()
+                        .filter(|wire| !wire.revealed)
+                        .map(|wire| {
+                            wire.points
+                                .windows(2)
+                                .map(|pair| pair[0].distance(pair[1]))
+                                .sum::<f32>()
+                        })
+                        .sum();
+                    let dashed = drawn.iter().filter(|wire| wire.dashed).count();
+                    if mode == After::Off {
+                        rails.0 = dashed;
+                    } else {
+                        rails.1 = rails.0 - dashed;
+                    }
+                    cells.push(format!(
+                        "{lines} · {crossings} · {pairs} · {}",
+                        (ink / 100.0).round() * 100.0
+                    ));
+                }
+                table.push_str(&format!(
+                    "| `{name}` | {checks:?} | {wires} | {} | {} | {} | {} |\n",
+                    rails.0, rails.1, cells[0], cells[1]
+                ));
+            }
+        }
+    }
+    let path = std::path::Path::new(&std::env::var("APIFORGE_CAPTURE_DIR").unwrap())
+        .join("lay24-measures.md");
+    fs::write(&path, &table).unwrap();
+    println!("{table}");
+}

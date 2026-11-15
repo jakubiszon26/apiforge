@@ -5,6 +5,7 @@
 //! wires being drawn and the camera are view state only.
 
 mod collapse;
+pub mod lay24;
 mod layout;
 mod menu;
 mod paint;
@@ -461,6 +462,8 @@ pub struct Canvas {
     revealed_router: routing::Router,
     /// Which data wires are drawn, from the user's settings (LAY-23).
     wire_mode: WireMode,
+    /// LAY-24 mock-up: what stands for a rail into the next step.
+    after_mode: lay24::Mode,
     /// The port whose count was clicked: every wire of it is drawn until Esc
     /// or a click on the board (LAY-23).
     shown_port: Option<(String, String)>,
@@ -591,6 +594,7 @@ impl Default for Canvas {
             router: routing::Router::default(),
             revealed_router: routing::Router::default(),
             wire_mode: WireMode::All,
+            after_mode: lay24::Mode::Off,
             shown_port: None,
             wire_style: WireStyle::default(),
             bridges: true,
@@ -918,6 +922,12 @@ impl Canvas {
         let mut ids: Vec<String> = self.expanded_here.iter().cloned().collect();
         ids.sort();
         ids
+    }
+
+    /// LAY-24 mock-up: the option to render.
+    #[cfg(test)]
+    pub(crate) fn debug_after_mode(&mut self, mode: lay24::Mode) {
+        self.after_mode = mode;
     }
 
     /// Which data wires the board draws (LAY-23).
@@ -1501,7 +1511,7 @@ impl Canvas {
             )),
             (None, None) => None,
         };
-        let revealed: HashSet<String> = tags
+        let mut revealed: HashSet<String> = tags
             .iter()
             .filter(|tag| {
                 selection.contains(tag.reader.as_str())
@@ -1523,6 +1533,28 @@ impl Canvas {
                 .into_iter()
                 .filter(|wire| !tagged.contains(wire.id.as_str()) || revealed.contains(&wire.id))
                 .partition(|wire| tagged.contains(wire.id.as_str()));
+        // LAY-24 mock-up: a rail into the next step is a mark on its card;
+        // the rail comes back for a selected card at either end.
+        let after_marks = match self.after_mode {
+            lay24::Mode::Off => Vec::new(),
+            _ => lay24::marks(input.graph, &cards, &board_wires, &wire_labels),
+        };
+        let (after_rails, board_wires): (Vec<routing::BoardWire>, Vec<routing::BoardWire>) =
+            board_wires
+                .into_iter()
+                .partition(|wire| after_marks.iter().any(|mark| mark.wire == wire.id));
+        let mut revealed_wires = revealed_wires;
+        for wire in after_rails {
+            let lit = after_marks.iter().any(|mark| {
+                mark.wire == wire.id
+                    && (selection.contains(cards[mark.target].id.as_str())
+                        || selection.contains(mark.source.as_str()))
+            });
+            if lit {
+                revealed.insert(wire.id.clone());
+                revealed_wires.push(wire);
+            }
+        }
         let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
         // The input selected in the strip has no shape on the board: the
         // steps that read it are ringed (UX-31).
@@ -1591,6 +1623,9 @@ impl Canvas {
             };
             for wire in self.revealed_router.routes(&request) {
                 paint::routed_wire(&board_painter, wire, camera, true);
+                if let Some(text) = wire_labels.get(&wire.id) {
+                    paint::wire_label(&board_painter, wire, camera, text);
+                }
                 drawn_revealed.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
                 bridged.insert(wire.id.clone(), wire.bridges.len());
@@ -1878,6 +1913,17 @@ impl Canvas {
             board_ui.scope_builder(
                 egui::UiBuilder::new().id_salt(("card-controls", &card.id)),
                 |ui| self.card_controls(ui, card, camera, input, reveal, &mut commands),
+            );
+        }
+        // LAY-24 mock-up: the marks, over the cards.
+        for mark in &after_marks {
+            lay24::paint(
+                &board_painter,
+                mark,
+                &cards[mark.target],
+                camera,
+                self.after_mode,
+                revealed.contains(&mark.wire),
             );
         }
 
