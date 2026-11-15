@@ -123,6 +123,21 @@ impl FolderApp {
                 .cloned()
                 .collect::<Vec<_>>()
         });
+        // Where a run that is on has got to, and the run before it (LAY-07).
+        let on = run
+            .as_ref()
+            .is_some_and(|run| run.status == apiforge_core::run::RunStatus::Running);
+        let running = run
+            .as_ref()
+            .filter(|_| on)
+            .and_then(|run| run.running.clone());
+        let previous = self.previous_run(document_id).map(|run| {
+            run.steps
+                .iter()
+                .filter(|step| step.phase == phase)
+                .cloned()
+                .collect::<Vec<_>>()
+        });
         let graph = graph_of(&model, cleanup);
         // Built once per model, not every frame (UX-16).
         let combined = cleanup.then(|| self.cleanup_reference(&model));
@@ -200,6 +215,11 @@ impl FolderApp {
                     parameters: &parameters,
                     selection: &selection,
                     steps: steps.as_deref(),
+                    progress: canvas::Progress {
+                        on,
+                        running: running.as_deref(),
+                        previous: previous.as_deref(),
+                    },
                     can_paste,
                     context: &context,
                     library_in_view,

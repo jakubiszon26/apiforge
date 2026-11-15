@@ -275,13 +275,14 @@ pub fn continuation_mark(painter: &Painter, mark: &super::shape::Mark, camera: C
 /// The smallest text a card writes on screen, in points, by what it says
 /// (LAY-09): a name, a step number and a line.
 pub const NAME_MIN: f32 = 11.0;
-// LAY-07's badge writes the number; until then only the tests read these.
-#[cfg_attr(not(test), allow(dead_code))]
 pub const NUMBER_MIN: f32 = 9.0;
 pub const LINE_MIN: f32 = 9.0;
 /// The sizes at 100 %: a card's name and a line.
 const NAME_TEXT: f32 = 16.0;
 const LINE_TEXT: f32 = 12.0;
+/// A step number at 100 %, in a badge 20 px across (LAY-07).
+const NUMBER_TEXT: f32 = 11.0;
+const BADGE: f32 = 20.0;
 /// Below this zoom a card is its band, its border and its badge; its name
 /// is written only where it fits (LAY-09).
 const LABELS_FROM: f32 = 0.25;
@@ -297,7 +298,6 @@ pub fn min_on_screen(size: f32, zoom: f32, min: f32) -> f32 {
 pub enum TextKind {
     Name,
     /// A step number (LAY-07).
-    #[cfg_attr(not(test), allow(dead_code))]
     Number,
     /// The execution line, the checks line or the checks pill.
     Result,
@@ -313,6 +313,88 @@ pub struct DrawnText {
     pub size: f32,
     pub color: Color32,
     pub text: String,
+    /// Where the text is on screen, as far as its cell shows it.
+    pub rect: Rect,
+}
+
+/// What a step's badge says (LAY-07).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BadgeState {
+    /// The step's number in the engine's order.
+    Order,
+    /// The step the runner announced and has not finished: the activity
+    /// glyph in place of the number.
+    Running,
+    /// A run is on and has not reached the step: the number, muted.
+    Pending,
+}
+
+/// A badge as a card drew it, which only a test build collects.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct DrawnBadge {
+    pub text: String,
+    pub state: BadgeState,
+    pub fill: Color32,
+    /// Its box on screen.
+    pub rect: Rect,
+}
+
+/// What the run says of one card (LAY-07): its result, its number and
+/// where the run is.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CardRun<'a> {
+    /// The step's result in the run shown.
+    pub step: Option<&'a StepResult>,
+    /// The step's place in the engine's order, from 1; `None` draws no
+    /// badge.
+    pub number: Option<usize>,
+    /// The runner announced the step and has not finished it.
+    pub running: bool,
+    /// A run is on and has not reached the step.
+    pub pending: bool,
+    /// The step's result in the run before, shown while it is pending.
+    pub previous: Option<&'a StepResult>,
+    /// The chips and counts on screen (LAY-23), which the badge keeps
+    /// clear of.
+    pub clear_of: &'a [Rect],
+}
+
+impl CardRun<'_> {
+    /// The result line: the step's result, *Running…*, the previous run's
+    /// result muted and marked as such, or `idle`.
+    fn line(&self, idle: &str) -> (String, Color32) {
+        if let Some(step) = self.step {
+            return execution(step);
+        }
+        if self.running {
+            return ("Running…".to_owned(), theme::LINK);
+        }
+        if let Some(previous) = self.stale() {
+            let (text, _) = execution(previous);
+            return (format!("Previous run · {text}"), theme::MUTED);
+        }
+        (idle.to_owned(), theme::MUTED)
+    }
+
+    /// The previous run's result while this run has not reached the step.
+    fn stale(&self) -> Option<&StepResult> {
+        if self.pending && !self.running && self.step.is_none() {
+            self.previous
+        } else {
+            None
+        }
+    }
+
+    fn badge(&self) -> BadgeState {
+        if self.running {
+            BadgeState::Running
+        } else if self.pending && self.step.is_none() {
+            BadgeState::Pending
+        } else {
+            BadgeState::Order
+        }
+    }
 }
 
 /// What a card drew in a frame, which only a test build collects.
@@ -326,6 +408,10 @@ pub struct Drawn {
     pub signal: Option<Color32>,
     /// The band's colour.
     pub band: Option<Color32>,
+    /// The step's badge (LAY-07).
+    pub badge: Option<DrawnBadge>,
+    /// The card has the selection's frame.
+    pub selected: bool,
 }
 
 impl Drawn {
@@ -342,12 +428,30 @@ impl Drawn {
         align: egui::Align,
     ) {
         #[cfg(test)]
-        self.texts.push(DrawnText {
-            kind,
-            size: font.size,
-            color,
-            text: text.to_owned(),
-        });
+        {
+            let size = painter
+                .layout_no_wrap(text.to_owned(), font.clone(), color)
+                .size();
+            let width = size.x.min(rect.width());
+            let left = match align {
+                egui::Align::Min => rect.left(),
+                egui::Align::Center => rect.center().x - width / 2.0,
+                egui::Align::Max => rect.right() - width,
+            };
+            let shown = Rect::from_min_size(
+                pos2(left, rect.center().y - size.y / 2.0),
+                vec2(width, size.y),
+            )
+            .intersect(rect)
+            .intersect(painter.clip_rect());
+            self.texts.push(DrawnText {
+                kind,
+                size: font.size,
+                color,
+                text: text.to_owned(),
+                rect: shown,
+            });
+        }
         #[cfg(not(test))]
         let _ = kind;
         label(painter, rect, text, font, color, align);
@@ -577,6 +681,96 @@ fn dashes(painter: &Painter, line: &[Pos2], stroke: Stroke, zoom: f32) {
     }
 }
 
+/// A step's badge at the card's top-left corner (LAY-07): a circle 20 px
+/// across at 100 % centred on the corner, never smaller than its number at
+/// [`NUMBER_MIN`] needs, moved left of the corner rather than over the name
+/// and up rather than over a chip at the card's first input. It holds the number, muted while a run has not reached the step,
+/// or the activity glyph while the step runs, in a colour the selection
+/// does not use.
+#[allow(clippy::too_many_arguments)]
+fn badge(
+    painter: &Painter,
+    drawn: &mut Drawn,
+    card: Rect,
+    name: Option<Rect>,
+    clear_of: &[Rect],
+    zoom: f32,
+    number: usize,
+    state: BadgeState,
+) {
+    let text = number.to_string();
+    let size = min_on_screen(NUMBER_TEXT, zoom, NUMBER_MIN);
+    let font = FontId::new(size, theme::bold_family());
+    let (fill, ink) = match state {
+        BadgeState::Order => (theme::TEXT, theme::WHITE),
+        BadgeState::Running => (theme::LINK, theme::WHITE),
+        BadgeState::Pending => (theme::FIELD, theme::MUTED),
+    };
+    let width = painter
+        .layout_no_wrap(text.clone(), font.clone(), ink)
+        .size()
+        .x;
+    let height = (BADGE * zoom).max(size + 6.0);
+    let width = height.max(width + 6.0);
+    let mut center = card.left_top();
+    if let Some(name) = name
+        && name.top() < center.y + height / 2.0
+        && name.bottom() > center.y - height / 2.0
+    {
+        center.x = center.x.min(name.left() - 2.0 - width / 2.0);
+    }
+    let mut rect = Rect::from_center_size(center, vec2(width, height));
+    // A chip stands beside an input, below the card's top edge; rising
+    // above it leaves the badge on the corner.
+    for chip in clear_of {
+        if rect.intersects(*chip) && chip.top() > card.top() - height {
+            rect = rect.translate(vec2(0.0, chip.top() - 1.0 - rect.bottom()));
+        }
+    }
+    let center = rect.center();
+    painter.rect_filled(rect, height / 2.0, fill);
+    if state == BadgeState::Pending {
+        painter.rect_stroke(
+            rect,
+            height / 2.0,
+            Stroke::new(1.0, theme::BORDER),
+            StrokeKind::Inside,
+        );
+    }
+    if state == BadgeState::Running {
+        // Three quarters of a ring with a dot at its head: a spinner at
+        // rest, so the glyph asks for no frames of its own.
+        let radius = height * 0.26;
+        let stroke = Stroke::new((height * 0.09).max(1.2), ink);
+        let points: Vec<Pos2> = (0..=18)
+            .map(|index| {
+                let angle =
+                    -std::f32::consts::FRAC_PI_2 + index as f32 / 18.0 * 1.5 * std::f32::consts::PI;
+                center + radius * vec2(angle.cos(), angle.sin())
+            })
+            .collect();
+        let head = *points.last().expect("an arc");
+        painter.add(Shape::line(points, stroke));
+        painter.circle_filled(head, stroke.width * 0.9, ink);
+    } else {
+        drawn.label(
+            painter,
+            rect,
+            &text,
+            TextKind::Number,
+            font,
+            ink,
+            egui::Align::Center,
+        );
+    }
+    drawn.badge = Some(DrawnBadge {
+        text,
+        state,
+        fill,
+        rect,
+    });
+}
+
 fn status_color(status: StepStatus) -> Color32 {
     match status {
         StepStatus::Passed => theme::SUCCESS,
@@ -593,12 +787,18 @@ pub fn card(
     selected: bool,
     // Part of what a selected proxy stands for, or reads it.
     related: bool,
-    step: Option<&StepResult>,
+    run: &CardRun<'_>,
     // What became of the checks that read the step (LAY-11).
     aggregate: Option<&Aggregate>,
 ) -> Drawn {
     use super::layout::CARD_PADDING;
-    let mut drawn = Drawn::default();
+    let step = run.step;
+    let mut drawn = Drawn {
+        selected,
+        ..Drawn::default()
+    };
+    // Where the name is written, which the badge keeps clear of.
+    let mut name_rect = None;
     let failed_check = aggregate.is_some_and(Aggregate::failed);
     let z = camera.zoom;
     let line = |size: f32| min_on_screen(size, z, LINE_MIN);
@@ -653,6 +853,7 @@ pub fn card(
                 area.center() - vec2(0.0, pill_height / 2.0),
                 vec2(area.width(), height),
             );
+            name_rect = Some(name);
             drawn.label(
                 &clipped,
                 name,
@@ -694,9 +895,11 @@ pub fn card(
                 egui::Align::Min,
             );
         }
+        let name = cell(56.0, if full { 28.0 } else { 14.0 }, title_right, 56.0);
+        name_rect = Some(name);
         drawn.label(
             &clipped,
-            cell(56.0, if full { 28.0 } else { 14.0 }, title_right, 56.0),
+            name,
             &card.name,
             TextKind::Name,
             name_font.clone(),
@@ -842,8 +1045,7 @@ pub fn card(
             ),
         );
         {
-            let (mut status, mut color) =
-                step.map_or(("Ready".to_owned(), theme::MUTED), execution);
+            let (mut status, mut color) = run.line("Ready");
             // The checks' result is a second statement after the step's own.
             if let Some(aggregate) = aggregate {
                 status = format!("{status} · {}", aggregate.text());
@@ -889,6 +1091,18 @@ pub fn card(
     if let Some(color) = drawn.signal {
         signal_border(painter, rect, radius, selected, color);
     }
+    if let Some(number) = run.number {
+        badge(
+            painter,
+            &mut drawn,
+            rect,
+            name_rect,
+            run.clear_of,
+            z,
+            number,
+            run.badge(),
+        );
+    }
 
     // Connections remain visible and usable at every detail level.
     for index in 0..card.inputs.len() {
@@ -920,11 +1134,15 @@ pub fn compact_card(
     camera: Camera,
     selected: bool,
     related: bool,
-    step: Option<&StepResult>,
+    run: &CardRun<'_>,
     // What became of the checks that read the step (LAY-11).
     aggregate: Option<&Aggregate>,
 ) -> Drawn {
-    let mut drawn = Drawn::default();
+    let step = run.step;
+    let mut drawn = Drawn {
+        selected,
+        ..Drawn::default()
+    };
     let Some(compact) = &card.compact else {
         return drawn;
     };
@@ -963,9 +1181,13 @@ pub fn compact_card(
         pos2(rect.right(), rect.top() + (5.0 * z).max(3.0)),
     );
     let corner = radius as u8;
-    let band_color = step.map_or(Color32::from_rgb(214, 214, 214), |step| {
-        status_color(step.status)
-    });
+    // A previous run's result, shown while this run has not reached the
+    // step, keeps its colour faded (LAY-07).
+    let band_color = match (step, run.stale()) {
+        (Some(step), _) => status_color(step.status),
+        (None, Some(previous)) => status_color(previous.status).gamma_multiply(0.35),
+        (None, None) => Color32::from_rgb(214, 214, 214),
+    };
     clipped.rect_filled(
         band,
         egui::CornerRadius {
@@ -1113,7 +1335,7 @@ pub fn compact_card(
                     [pos2(rect.left(), top), pos2(rect.right(), top)],
                     Stroke::new(0.75, theme::BORDER),
                 );
-                let (text, color) = step.map_or(("Not run".to_owned(), theme::MUTED), execution);
+                let (text, color) = run.line("Not run");
                 (
                     Cow::Owned(text),
                     FontId::proportional(small),
@@ -1161,6 +1383,18 @@ pub fn compact_card(
     drawn.signal = signal(step, aggregate);
     if let Some(color) = drawn.signal {
         signal_border(painter, rect, radius, selected, color);
+    }
+    if let Some(number) = run.number {
+        badge(
+            painter,
+            &mut drawn,
+            rect,
+            name,
+            run.clear_of,
+            z,
+            number,
+            run.badge(),
+        );
     }
 
     for index in 0..card.inputs.len() {
@@ -1515,7 +1749,15 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        super::card(ui.painter(), &card, camera, true, false, None, None);
+                        super::card(
+                            ui.painter(),
+                            &card,
+                            camera,
+                            true,
+                            false,
+                            &super::CardRun::default(),
+                            None,
+                        );
                     },
                 );
                 let mut labels = 0;
@@ -1600,7 +1842,15 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        super::compact_card(ui.painter(), &card, camera, true, false, None, None);
+                        super::compact_card(
+                            ui.painter(),
+                            &card,
+                            camera,
+                            true,
+                            false,
+                            &super::CardRun::default(),
+                            None,
+                        );
                         super::trays(ui.painter(), &card, camera, true, true);
                     },
                 );
