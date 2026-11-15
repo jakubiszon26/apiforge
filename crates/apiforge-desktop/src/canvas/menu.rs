@@ -19,6 +19,22 @@ pub enum Outcome {
     Add(Command),
     /// A Variables or Operators entry, added as the library panel adds it.
     Library(library::Action),
+    /// *Save shared values as variables* (LAY-25).
+    SaveShared,
+}
+
+/// The entry *Save shared values as variables (N)* at the bottom of the
+/// menu opened on the empty board (LAY-25).
+#[derive(Clone, Copy, Debug)]
+pub struct Shared {
+    /// The values it saves.
+    pub values: usize,
+    pub editable: bool,
+}
+
+/// The entry's name, which says how many values it takes.
+pub fn shared_entry(values: usize) -> String {
+    format!("Save shared values as variables ({values})")
 }
 
 pub struct ActionMenu {
@@ -144,7 +160,9 @@ impl ActionMenu {
 
     /// Shows the popup. With `library`, the steps are followed by the block
     /// library's Variables and Operators sections (KTLO-05d). `component`
-    /// offers a component's steps (UX-21).
+    /// offers a component's steps (UX-21). With `shared`, the menu opened on
+    /// the empty board ends with *Save shared values as variables*, outside
+    /// the scrolling list (LAY-25).
     pub fn show(
         &mut self,
         ctx: &egui::Context,
@@ -152,6 +170,7 @@ impl ActionMenu {
         project: &Project,
         library: Option<&library::Context<'_>>,
         component: bool,
+        shared: Option<Shared>,
     ) -> Outcome {
         // The opening click belongs to the toolbar/card, outside the new popup.
         // Preserve this before requesting search focus clears the initial flag.
@@ -299,6 +318,31 @@ impl ActionMenu {
                                     }
                                 }
                             });
+                        if let Some(shared) = shared.filter(|_| self.source.is_none()) {
+                            ui.add_space(4.0);
+                            ui.separator();
+                            let enabled = shared.editable && shared.values > 0;
+                            let entry = ui
+                                .add_enabled(
+                                    enabled,
+                                    crate::widgets::action(
+                                        Icon::Variable,
+                                        &shared_entry(shared.values),
+                                    )
+                                    .quiet(),
+                                )
+                                .on_hover_text(
+                                    "Every value of a request or a component call that three or more steps read, one of them far, is saved in a variable after its step, and those steps read the variable. One undo.",
+                                )
+                                .on_disabled_hover_text(if !shared.editable {
+                                    "The board cannot be edited now."
+                                } else {
+                                    "No value of a request or a component call is read by three or more steps, one of them far, without a variable."
+                                });
+                            if entry.clicked() {
+                                outcome = Outcome::SaveShared;
+                            }
+                        }
                     });
             });
         if ctx.input(|input| input.key_pressed(Key::Escape)) {
@@ -440,7 +484,7 @@ mod tests {
                     }
                     if let Some(menu) = &mut popup
                         && matches!(
-                            menu.show(&context, graph, &project, None, false),
+                            menu.show(&context, graph, &project, None, false, None),
                             Outcome::Close
                         )
                     {

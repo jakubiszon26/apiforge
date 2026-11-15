@@ -15,6 +15,9 @@
 (56) and `fan-out` (26), which the [LAY tickets](../docs/sprints/lay.md) measure
 and test against. `fan-out` is shaped like a board where a component call gives
 two values that almost every later request reads (LAY-23); it has no cleanup.
+`far-value` (23) is the same board with no variable, its cart and session
+values read directly by far steps, and `far-value-saved` (26) the same with
+those values saved in variables (LAY-25).
 A step is a node of the scenario's main graph: the start, every request, value,
 component, check and condition, a branch and both of its arms. The `cleanup`
 block is a second graph, counted apart (two steps in each of the other three).

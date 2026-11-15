@@ -2,8 +2,8 @@
 //! `← cartId` beside each reader's input instead of a long wire.
 //!
 //! A data wire becomes a chip when its output port is read by
-//! [`MIN_READERS`] or more steps of the document and its reader is not
-//! beside the source: in the next column of the source's row, or in the
+//! [`MIN_READERS`] or more steps of the document, or is a variable's
+//! (LAY-25), and its reader is not beside the source: in the next column of the source's row, or in the
 //! source's own column. The source's port says how many steps read it. The
 //! wire comes back while its chip or its input is pointed at and while its
 //! reader or its source is selected.
@@ -69,7 +69,9 @@ pub struct Tag {
     /// What the chip says: the variable's name, or the step and the last
     /// field it reads (`login.token`).
     pub text: String,
-    /// The source step alone, for a zoom where the text has no room.
+    /// The source step alone, for a zoom where the text has no room; for a
+    /// variable, the number of its card's badge (`7`, LAY-07), so that the
+    /// chip still points at it (LAY-25).
     pub short: String,
     /// The whole reference, `cartId → checkout.body.cartId`: the chip's
     /// accessible name and what pointing at it shows.
@@ -144,6 +146,12 @@ fn beside(rows: &[f32], from: Rect, to: Rect) -> bool {
         && (step.abs() < half || (step - pitch).abs() < half)
 }
 
+/// Whether the card `to` is far from the card `from` on the board: not
+/// beside it (LAY-25's drop asks first there).
+pub fn far(cards: &[Card], from: &Card, to: &Card) -> bool {
+    !beside(&rows(cards), from.rect(), to.rect())
+}
+
 /// The wires of `wires` that are chips, decided on `cards` where they rest.
 /// A wire from a proxy the person placed stays a wire: the proxy is there
 /// to shorten it.
@@ -161,7 +169,13 @@ pub fn chipped(graph: &Graph, cards: &[Card], wires: &[BoardWire]) -> HashSet<St
             let count = readers
                 .get(&(source.id.clone(), port.clone()))
                 .map_or(0, BTreeSet::len);
-            (count >= MIN_READERS && !beside(&rows, source.rect(), target.rect()))
+            // A variable's far reader is a chip whatever the count: saving a
+            // value is how a person says "do not wire this" (LAY-25).
+            let saved = graph
+                .nodes
+                .iter()
+                .any(|node| node.id == source.id && node.is_variable());
+            ((count >= MIN_READERS || saved) && !beside(&rows, source.rect(), target.rect()))
                 .then(|| wire.id.clone())
         })
         .collect()
@@ -182,13 +196,15 @@ fn fields(binding: Option<&Binding>, path: &[String]) -> Vec<String> {
     fields
 }
 
-/// What a chip says, its source step, and the reference written whole.
+/// What a chip says, its shorter form, and the reference written whole.
+/// `number` is the source's place in the engine's order, its badge.
 fn texts(
     graph: &Graph,
     project: &Project,
     wire: &BoardWire,
     reader: &str,
     source: &str,
+    number: Option<usize>,
 ) -> (String, String, String) {
     let reader = graph.nodes.iter().find(|node| node.id == reader);
     let source_node = graph.nodes.iter().find(|node| node.id == source);
@@ -201,13 +217,16 @@ fn texts(
         Some(Binding::Reference { port, path, .. }) => (port.clone(), path.clone()),
         _ => (String::new(), String::new()),
     };
-    let (text, whole) = if source_node.is_variable() {
+    let (text, short, whole) = if source_node.is_variable() {
         let whole = if field.is_empty() {
             source_node.handle.clone()
         } else {
             format!("{}.{field}", source_node.handle)
         };
-        (source_node.handle.clone(), whole)
+        // Its name, else the number on its card: never the bare arrow
+        // while a number fits (LAY-25).
+        let short = number.map_or_else(|| source_node.handle.clone(), |n| n.to_string());
+        (source_node.handle.clone(), short, whole)
     } else {
         let last = field.rsplit('.').next().filter(|last| !last.is_empty());
         let text = format!("{}.{}", source_node.handle, last.unwrap_or(&port));
@@ -223,18 +242,14 @@ fn texts(
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
             .join(".");
-        (text, whole)
+        (text, source_node.handle.clone(), whole)
     };
     let target = std::iter::once(reader.handle.clone())
         .chain(std::iter::once(wire.input.clone()))
         .chain(fields(binding, &wire.operand_path))
         .collect::<Vec<_>>()
         .join(".");
-    (
-        text,
-        source_node.handle.clone(),
-        format!("{whole} → {target}"),
-    )
+    (text, short, format!("{whole} → {target}"))
 }
 
 /// The chips and counts of the wires in `chipped`, at the cards as they are
@@ -248,6 +263,11 @@ pub fn plan(
     chipped: &HashSet<String>,
 ) -> (Vec<Tag>, Vec<Count>) {
     let readers = readers_by_port(graph);
+    let numbers: HashMap<&str, usize> = graph::sequence(graph)
+        .into_iter()
+        .enumerate()
+        .map(|(index, id)| (id, index + 1))
+        .collect();
     let mut tags: Vec<Tag> = Vec::new();
     let mut counts: Vec<Count> = Vec::new();
     for wire in wires.iter().filter(|wire| chipped.contains(&wire.id)) {
@@ -260,7 +280,8 @@ pub fn plan(
         let Some(anchor) = reader.input_anchor(&wire.input, &wire.operand_path) else {
             continue;
         };
-        let (text, short, statement) = texts(graph, project, wire, &reader.id, &source.id);
+        let number = numbers.get(source.id.as_str()).copied();
+        let (text, short, statement) = texts(graph, project, wire, &reader.id, &source.id, number);
         // One chip per value at a socket: a second read of it adds nothing.
         if let Some(tag) = tags
             .iter_mut()
@@ -382,7 +403,7 @@ fn fitting(painter: &Painter, texts: &[String], font: &FontId, room: f32) -> (St
 
 /// The chips of `tags` left of their sockets, in the gap between two
 /// columns; their text keeps a legible size at any zoom and shortens to the
-/// source step, then to the arrow, where the gap has no room for it. The
+/// source step (a variable's badge number), then to the arrow, where the gap has no room for it. The
 /// chips of one card stand one under the other: a chip that would cover the
 /// one above it moves down and its stub bends to its socket.
 pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera) -> Vec<Laid> {
@@ -479,6 +500,66 @@ pub fn lay_count(painter: &Painter, count: &Count, camera: Camera, avoid: &[Rect
         bend,
         socket: anchor,
     }
+}
+
+/// The mark `+ var` under a count (LAY-25): the port has values worth a
+/// variable. It stands in the gap under the count, at the count's size, and
+/// moves down past whatever in `avoid` it would cover (a chip, a count,
+/// another mark, the row of another output of the card, on screen); where
+/// the gap has no room for its text it says `+`, and with no room for that
+/// it is not drawn.
+pub fn lay_mark(painter: &Painter, count: &Laid, camera: Camera, avoid: &[Rect]) -> Option<Laid> {
+    let font_id = FontId::proportional(count.font);
+    let stub = stub_length(camera.zoom);
+    let room = GAP * camera.zoom - stub - 2.0;
+    let (shown, galley) = fitting(
+        painter,
+        &["+ var".to_owned(), "+".to_owned()],
+        &font_id,
+        room,
+    );
+    let size = galley.size() + vec2(8.0, 3.0);
+    if size.x > room {
+        return None;
+    }
+    let mut rect = Rect::from_min_size(pos2(count.rect.left(), count.rect.bottom() + 3.0), size);
+    for _ in 0..=avoid.len() {
+        let Some(over) = avoid.iter().find(|other| other.intersects(rect)) else {
+            break;
+        };
+        rect = rect.translate(vec2(0.0, over.bottom() + 2.0 - rect.top()));
+    }
+    Some(Laid {
+        galley,
+        shown,
+        rect,
+        font: count.font,
+        stub: [rect.left_center(), rect.left_center()],
+        bend: None,
+        socket: rect.left_center(),
+    })
+}
+
+/// The mark `+ var`: an action, so in the accent; filled while pointed at
+/// or while its menu is open.
+pub fn paint_mark(painter: &Painter, laid: &Laid, lit: bool) {
+    let fill = if lit {
+        theme::ACCENT_SOFT
+    } else {
+        theme::WHITE
+    };
+    painter.rect(
+        laid.rect,
+        laid.rect.height() / 2.0,
+        fill,
+        Stroke::new(1.0, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    painter.galley(
+        laid.rect.min + vec2(4.0, 1.5),
+        laid.galley.clone(),
+        theme::ACCENT,
+    );
 }
 
 /// A chip or a count: a grey outline and muted text, quieter than a proxy
