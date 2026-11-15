@@ -33,6 +33,28 @@ fn open(
 ) -> (tempfile::TempDir, FolderHarness, Arc<Gate>) {
     let project = crate::testing::shop_project();
     fs::write(project.path().join(SCENARIO), source).unwrap();
+    opened(project, size, checks)
+}
+
+/// The same with the board as *Tidy up* lays it out, nothing selected.
+fn tidied(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, Arc<Gate>) {
+    let project = crate::testing::shop_project();
+    fs::write(project.path().join(SCENARIO), source).unwrap();
+    fs::remove_file(project.path().join(".apiforge/diagram.json")).unwrap();
+    let (project, mut harness, gate) = opened(project, size, false);
+    let document = document(&harness);
+    app(&mut harness).selections.insert(document, Vec::new());
+    settle(&mut harness);
+    choose(&mut harness, "Tidy up");
+    harness.step();
+    (project, harness, gate)
+}
+
+fn opened(
+    project: tempfile::TempDir,
+    size: egui::Vec2,
+    checks: bool,
+) -> (tempfile::TempDir, FolderHarness, Arc<Gate>) {
     let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
     if checks {
         app(&mut harness).debug_draw_checks();
@@ -232,6 +254,7 @@ fn lay07_criterion_2_badges_follow_an_edit() {
     let (_project, mut harness, _gate) = open(&source, WIDE, true);
     show(&mut harness, "catalogue", 0.6);
     assert_eq!(badge(&harness, "catalogue").text, "5", "step 5 before");
+    show(&mut harness, "known_user", 0.6);
     assert_eq!(badge(&harness, "known_user").text, "4");
 
     let anchor = "  catalogue = GET \"/products\" {";
@@ -249,9 +272,11 @@ fn lay07_criterion_2_badges_follow_an_edit() {
         .edit_source(&document, &edited, CODE)
         .unwrap();
     settle(&mut harness);
-    show(&mut harness, "catalogue", 0.6);
+    show(&mut harness, "probe", 0.6);
     assert_eq!(badge(&harness, "probe").text, "5", "the new step is 5");
+    show(&mut harness, "catalogue", 0.6);
     assert_eq!(badge(&harness, "catalogue").text, "6", "step 5 is now 6");
+    show(&mut harness, "known_user", 0.6);
     assert_eq!(
         badge(&harness, "known_user").text,
         "4",
@@ -304,9 +329,11 @@ fn lay07_criterion_3_the_running_step_is_marked_apart_from_the_selection() {
     );
     assert_ne!(running.fill, theme::ACCENT, "nor shares the selection's");
     // A step not reached yet is muted.
+    show_held(&mut harness, "address", 0.6);
     assert_eq!(badge(&harness, "address").state, BadgeState::Pending);
 
     finish(&mut harness, &gate);
+    show(&mut harness, "cart_view", 0.6);
     assert_eq!(badge(&harness, "cart_view").state, BadgeState::Order);
     assert_ne!(result_line(&harness, "cart_view").text, "Running…");
 }
@@ -350,9 +377,16 @@ fn lay07_criterion_4_stale_results_are_told_from_current_ones() {
 /// chip or a count of LAY-23.
 #[test]
 fn lay07_criterion_5_the_badge_has_a_minimum_size() {
-    let (_project, mut harness, _gate) = open(&fixture("shop-30"), WIDE, false);
-    fit(&mut harness);
-    let board = canvas(&harness);
+    let (_project, harness, _gate) = open(&fixture("shop-30"), WIDE, false);
+    let (_tidied_project, tidied_harness, _tidied_gate) = tidied(&fixture("shop-30"), WIDE);
+    for (context, mut harness) in [("as opened", harness), ("tidied", tidied_harness)] {
+        fit(&mut harness);
+        assert_badges_clear(&harness, context);
+    }
+}
+
+fn assert_badges_clear(harness: &FolderHarness, context: &str) {
+    let board = canvas(harness);
     let view = board.debug_focus().expand(0.5);
     let mut two_digits = 0;
     let chips: Vec<Rect> = board
@@ -394,7 +428,7 @@ fn lay07_criterion_5_the_badge_has_a_minimum_size() {
         for name in texts.iter().filter(|text| text.kind == TextKind::Name) {
             assert!(
                 !badge.rect.intersects(name.rect),
-                "{id}: the badge {:?} overlaps the name {:?}",
+                "{context}, {id}: the badge {:?} overlaps the name {:?}",
                 badge.rect,
                 name.rect
             );
@@ -402,12 +436,15 @@ fn lay07_criterion_5_the_badge_has_a_minimum_size() {
         for chip in &chips {
             assert!(
                 !badge.rect.intersects(*chip),
-                "{id}: the badge {:?} overlaps a chip or a count {chip:?}",
+                "{context}, {id}: the badge {:?} overlaps a chip or a count {chip:?}",
                 badge.rect
             );
         }
     }
-    assert!(two_digits >= 10, "two-digit badges in view: {two_digits}");
+    assert!(
+        two_digits >= 10,
+        "{context}: two-digit badges in view: {two_digits}"
+    );
 }
 
 /// Criterion 6, design review: `shop-30` at 60 % during a second run held at
@@ -431,18 +468,20 @@ fn review_lay07() {
         (WIDE, "lay07-running-60-1600"),
         (crate::testing::MINIMUM, "lay07-running-60-960"),
     ] {
-        let (_project, mut harness, gate) = open(&fixture("shop-30"), size, false);
+        let (_project, mut harness, gate) = tidied(&fixture("shop-30"), size);
         simulate(&mut harness, &gate);
         select(&mut harness, &["cart"]);
         settle(&mut harness);
         run_until_started(&mut harness, &gate, "cart_view");
+        // The board as tall as the window lets it be.
+        harness.get_by_label("Run results").click();
         show_held(&mut harness, "cart_view", 0.6);
         assert_a_card_in_view(&harness, name);
         assert_eq!(badge(&harness, "cart_view").state, BadgeState::Running);
         crate::testing::capture(&mut harness, name, None);
         finish(&mut harness, &gate);
     }
-    let (_project, mut harness, _gate) = open(&fixture("shop-30"), WIDE, false);
+    let (_project, mut harness, _gate) = tidied(&fixture("shop-30"), WIDE);
     fit(&mut harness);
     assert_a_card_in_view(&harness, "lay07-fit-1600");
     crate::testing::capture(&mut harness, "lay07-fit-1600", None);
