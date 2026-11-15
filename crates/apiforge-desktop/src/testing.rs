@@ -30,6 +30,43 @@ pub fn shop_project() -> tempfile::TempDir {
     directory
 }
 
+/// The demo shop with every value its scenario reads far saved in a
+/// variable, as the Code view's *Apply fix* saves it (LAY-26): a valid
+/// scenario with no problem at all, for tests whose only marks are the ones
+/// they make.
+pub fn shop_project_without_far_reads() -> tempfile::TempDir {
+    let directory = shop_project();
+    let mut session = apiforge_project::ProjectSession::open(directory.path()).unwrap();
+    let id = session
+        .documents()
+        .iter()
+        .find(|document| document.entry().kind == apiforge_project::DocumentKind::Scenario)
+        .unwrap()
+        .id()
+        .to_owned();
+    loop {
+        let document = session.document(&id).unwrap();
+        let mut text = document.text().to_owned();
+        let tree = apiforge_script::parse(&text);
+        let warnings = apiforge_script::far_read_warnings(
+            &tree,
+            document.model().expect("a valid demo"),
+            session.context(),
+        );
+        let Some(fix) = warnings.into_iter().find_map(|warning| warning.fix) else {
+            break;
+        };
+        text.replace_range(fix.range, &fix.replacement);
+        session
+            .edit_source(&id, &text, apiforge_project::Origin::SESSION)
+            .unwrap();
+        session.settle(&id).unwrap();
+    }
+    session.save(&id).unwrap();
+    drop(session);
+    directory
+}
+
 /// Opens the folder window at `root` and waits until opening has finished.
 pub fn folder_harness(root: &Path, size: egui::Vec2) -> FolderHarness {
     folder_harness_scaled(root, size, 1.0)

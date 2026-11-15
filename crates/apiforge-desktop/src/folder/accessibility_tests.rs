@@ -291,7 +291,8 @@ fn the_inspector_names_the_controls_of_every_demo_block() {
 fn tab_visits_the_window_in_reading_order_with_named_stops() {
     let directory = shop();
     let (context, mut app) = open(directory.path());
-    let visited = tab_order(&mut app, &context, 23);
+    // The demo's two far reads (LAY-26) add their rows and Apply fix.
+    let visited = tab_order(&mut app, &context, 27);
     assert!(
         !visited.iter().any(|name| name == "<unnamed>"),
         "{visited:#?}"

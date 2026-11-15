@@ -158,6 +158,8 @@ pub(crate) fn derive_counted(
         return (diagnostics, omitted, None);
     }
     normalise(&mut document, target);
+    // The host's own warnings (LAY-26), added only to a valid analysis.
+    let advice = placer.advise(&tree, &document, context);
     let checkpoint = checkpoint.filter(|record| {
         record.identity_base.kind() == target.kind
             && record.identity_base.entity_id() == target.entity_id
@@ -169,6 +171,7 @@ pub(crate) fn derive_counted(
         (None, Some(record)) if record.describes(text, &lowered_base, context) => {
             let mut exact = document_of(&record.identity_base);
             normalise(&mut exact, target);
+            apiforge_script::push_warnings(&mut diagnostics, &mut omitted, advice);
             return (diagnostics, omitted, Some((exact, Restored::Checkpoint)));
         }
         (None, Some(record)) => (document_of(&record.identity_base), Restored::Reconciled),
@@ -198,6 +201,7 @@ pub(crate) fn derive_counted(
         );
         return (diagnostics, omitted, None);
     }
+    apiforge_script::push_warnings(&mut diagnostics, &mut omitted, advice);
     (diagnostics, omitted, Some((document, restored)))
 }
 

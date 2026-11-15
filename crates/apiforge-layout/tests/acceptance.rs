@@ -211,3 +211,20 @@ fn lay01_criterion_6_the_fixtures_are_measured() {
         assert_eq!(number(row, "card_hits"), 0.0, "{row:?}");
     }
 }
+
+/// LAY-03 criterion 3: `packed` counts the places where two lines, or a line
+/// and a card, are nearer than 20 px; it is 0 on every reference row.
+#[test]
+fn lay03_criterion_3_no_reference_board_is_packed() {
+    let rows = table(report(), "scenario");
+    assert_eq!(rows.len(), 24);
+    for row in &rows {
+        assert_eq!(number(row, "packed"), 0.0, "{row:?}");
+        assert_eq!(number(row, "incomplete"), 0.0, "{row:?}");
+    }
+    // The generated boards are measured too; Tidy up's widening is the
+    // desktop's, so theirs is a number, not a promise.
+    for row in table(report(), "cards") {
+        assert!(number(&row, "packed") >= 0.0, "{row:?}");
+    }
+}

@@ -126,13 +126,16 @@ cargo run -p apiforge-layout --example quality --release --locked [-- --dump <se
 ```
 
 It prints wires, crossings, bends, straight wires, close and coincident pairs,
-long edges and incomplete routes for generated boards of 6, 12, 25 and 50 cards
+long edges, incomplete routes and `packed`, the places where two lines or a line
+and a card are nearer than the 20 px every line keeps (LAY-03; 0 on every
+reference board), for generated boards of 6, 12, 25 and 50 cards
 with and without an ordering chain, then the same for the reference scenarios of
 `fixtures/scenarios/lay/` as the desktop tidies them, at the compact and the full
 density, with their checks collapsed and expanded, at the compact density once more
-with chips for shared values (LAY-23), with their board size, fit zoom
-at 1600 × 1000 and 960 × 540, card and chip collisions and 12 px clearance
-violations. Two runs print the same; the example's header defines each column.
+with chips for shared values (LAY-23) and arrows for the rails into the next step
+(LAY-24), with their board size, fit zoom at 1600 × 1000 and 960 × 540, card and
+chip collisions and 20 px clearance violations. Two runs print the same; the
+example's header defines each column.
 `--dump` prints one generated board's rectangles and routes.
 
 The reference boards come from the desktop: its acceptance test
@@ -350,7 +353,11 @@ cargo run -p apiforge-cli --locked -- apply --folder /path/to/project --file sce
 cargo run -p apiforge-cli --locked -- run --folder /path/to/project --scenario scenarios/main.afs --json
 ```
 
-`check` optionally selects one registered source with `--file`. `print` emits its
+`check` optionally selects one registered source with `--file`. Besides the
+diagnostics MCP's `check` returns, it warns, as the Code view does, at each place
+where a step two or more steps later, or in Cleanup, reads a value of a request
+or a component call directly ([LAY-26](tickets/LAY-26.md)); a warning never
+changes its exit code. `print` emits its
 canonical definition; `apply` validates and saves the supplied source exactly under
 the exclusive project lock. Neither changes published component revisions. Folder
 calls must name `Handle@revision(...)`. `run` selects a scenario by registered path

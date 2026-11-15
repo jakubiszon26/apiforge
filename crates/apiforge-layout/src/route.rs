@@ -2,9 +2,17 @@
 //!
 //! A wire leaves its port perpendicular to the card side for a short stub, then
 //! travels along the orthogonal visibility graph over the inflated card rectangles
-//! to the other stub. A\* picks the route, paying for length, bends and crossings.
-//! Segments that end up sharing a channel are nudged apart, and the later of two
-//! crossing wires draws a bridge.
+//! to the other stub. A\* picks the route, paying for length, bends and crossings,
+//! and the later of two crossing wires draws a bridge.
+//!
+//! Every line keeps a gap (LAY-03): [`Routing::margin`] from each card, its own
+//! two included, and [`Routing::channel_gap`] from each line routed before it,
+//! side by side and end to end. Travel the same way within the gap of a segment
+//! already routed is priced out of the search; crossing it stays free. Wires of
+//! one port share the straight piece out of that port and leave it one by one.
+//! The grid has a track every gap, so lines that share a corridor stack in it at
+//! that distance, and a line with no room there goes the long way round.
+//! [`crate::packed`] is how tests check it.
 //!
 //! The guarantee the board relies on: a final route never touches a card other than
 //! its own two. Where a port itself lies inside another card — cards can overlap —
@@ -14,7 +22,8 @@
 //! contract; `violations` is how tests check it.
 
 use crate::geometry::{Point, Port, Rect, Side, compare};
-use std::collections::{BTreeMap, BinaryHeap};
+use crate::packed::GAP;
+use std::collections::BinaryHeap;
 
 /// Routing parameters, in pixels and in cost units.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,21 +36,53 @@ pub struct Routing {
     pub bend_cost: f32,
     /// Cost of crossing a wire routed earlier, as a length.
     pub crossing_cost: f32,
-    /// Smallest distance between two wires sharing a channel.
+    /// Smallest distance between two parallel segments of two wires.
     pub channel_gap: f32,
+    /// `None` keeps the gaps: a wire gives one up only when no route keeps it.
+    /// `Some(price)` lets a wire run within the gap of a card or of another
+    /// wire, never through a card, for `price` times the length it runs there:
+    /// a wire routed alone this way shows the corridor it wants, which is how
+    /// Tidy up finds the gaps to widen.
+    pub squeeze: Option<f32>,
 }
 
 impl Default for Routing {
     fn default() -> Self {
         Self {
-            margin: 12.0,
-            stub: 16.0,
+            margin: GAP,
+            stub: GAP,
             bend_cost: 40.0,
             crossing_cost: 120.0,
-            channel_gap: 6.0,
+            channel_gap: GAP,
+            squeeze: None,
         }
     }
 }
+
+impl Routing {
+    /// The routing Tidy up asks a board's lines with, one wire at a time: a
+    /// line may pass within the gap of a card, at a price, where that is the
+    /// shorter way.
+    pub fn sizing() -> Self {
+        Self {
+            squeeze: Some(SQUEEZE),
+            ..Self::default()
+        }
+    }
+}
+
+/// What a pixel within the gap of a card costs while Tidy up asks a board's
+/// lines what room they want, as a length: a line would rather pass between
+/// two cards, 300 px for the price of 75, than go round a stack of them, and
+/// Tidy up then makes that passage wide enough. Measured on the reference
+/// boards: at this price they have a quarter fewer crossings than at 1.
+const SQUEEZE: f32 = 0.25;
+
+/// The same on the board as it is drawn: 20 px beside another line cost as
+/// much as 4000 px of detour, more than the search window holds, so a line
+/// runs within the gap of another only where the window has no other route.
+/// A price instead of a wall keeps that case in the same search.
+const KEPT: f32 = 200.0;
 
 /// How far beyond the two ports the first search looks. A detour around a card or
 /// two fits in this; a wire that needs more gets a wider window.
@@ -120,10 +161,39 @@ impl Route {
 /// first; then longer wires, so the long route picks the open channel and the short
 /// ones adapt.
 pub fn route(cards: &[Rect], wires: &[Wire], settings: &Routing) -> Vec<Route> {
+    route_among(cards, wires, settings, &[])
+}
+
+/// [`route`], among lines that are already on the board and stay as they are:
+/// `fixed` are their routes, as `route` returned them for the same cards. The
+/// new wires keep the gap from them as from each other. The board uses it for
+/// the wires it brings back while a card is selected.
+pub fn route_among(
+    cards: &[Rect],
+    wires: &[Wire],
+    settings: &Routing,
+    fixed: &[Route],
+) -> Vec<Route> {
     let mut routes = vec![Route::default(); wires.len()];
     let order = routing_order(cards, wires);
 
-    let mut routed: Vec<Vec<(Point, Point)>> = Vec::new();
+    let mut routed: Vec<Trace> = fixed
+        .iter()
+        .filter(|route| route.complete && route.points.len() >= 2)
+        .map(|route| Trace::of(&route.points, settings.stub))
+        .collect();
+    let mouths: Vec<Mouth> = wires
+        .iter()
+        .flat_map(|wire| [wire.from, wire.to])
+        .filter_map(|port| {
+            let card = cards.get(port.block)?;
+            Some(Mouth {
+                at: step(port.point_on(card), port.side, settings.stub),
+                horizontal: port.side.is_horizontal(),
+                block: port.block,
+            })
+        })
+        .collect();
     let mut scratch = Scratch::default();
     for index in order {
         let wire = wires[index];
@@ -153,9 +223,25 @@ pub fn route(cards: &[Rect], wires: &[Wire], settings: &Routing) -> Vec<Route> {
         // reaches past whatever buries it: that crossing belongs to the stub, which
         // is the one exception the guarantee makes, and the route proper starts in
         // open space.
-        let attempt = |margin: f32, slack: f32, avoid_own: bool, scratch: &mut Scratch| {
+        let attempt = |rung: Rung, scratch: &mut Scratch| {
+            let Rung {
+                margin,
+                slack,
+                avoid_own,
+            } = rung;
+            // While Tidy up measures, a card keeps a line off itself only; the
+            // clearance around it is room the line pays for.
+            let (margin, zone) = match settings.squeeze {
+                Some(_) => (0.0, margin),
+                None => (margin, 0.0),
+            };
             let mut obstacles: Vec<Rect> =
                 foreign.iter().map(|card| card.inflate(margin)).collect();
+            let mut zones: Vec<Rect> = if zone > 0.0 {
+                foreign.iter().map(|card| card.inflate(zone)).collect()
+            } else {
+                Vec::new()
+            };
             // A stub is measured before the wire's own cards join the obstacles: a
             // port sits on its card's edge, so a clearance around that card would
             // leave it nowhere to start.
@@ -163,6 +249,9 @@ pub fn route(cards: &[Rect], wires: &[Wire], settings: &Routing) -> Vec<Route> {
             let stub_end = clear_stub(end, wire.to.side, &foreign, &obstacles, settings);
             if avoid_own {
                 obstacles.extend(own.iter().map(|card| card.inflate(margin)));
+                if zone > 0.0 {
+                    zones.extend(own.iter().map(|card| card.inflate(zone)));
+                }
             }
             // The search covers a window around the two ports. A card outside it
             // cannot be met by a route inside it, and a wire between neighbours
@@ -182,7 +271,13 @@ pub fn route(cards: &[Rect], wires: &[Wire], settings: &Routing) -> Vec<Route> {
                     from_side: wire.from.side,
                     to_side: wire.to.side,
                     obstacles: &obstacles,
+                    zones: &zones,
                     routed: &routed,
+                    price: settings.squeeze.unwrap_or(KEPT),
+                    mouths: &mouths,
+                    blocks: (wire.from.block, wire.to.block),
+                    origin: start,
+                    target: end,
                     settings,
                     window,
                 },
@@ -196,22 +291,27 @@ pub fn route(cards: &[Rect], wires: &[Wire], settings: &Routing) -> Vec<Route> {
         let whole = Rect::bounding(cards.iter().copied())
             .map(|board| board.width().max(board.height()))
             .unwrap_or(0.0);
-        let mut attempted = attempt(settings.margin, LOCAL_SLACK, true, &mut scratch);
-        for (margin, slack, avoid_own) in [
-            (settings.margin, LOCAL_SLACK * 4.0, true),
-            (settings.margin, whole, true),
-            (0.0, whole, true),
+        let rung = |margin: f32, slack: f32, avoid_own: bool| Rung {
+            margin,
+            slack,
+            avoid_own,
+        };
+        let mut attempted = attempt(rung(settings.margin, LOCAL_SLACK, true), &mut scratch);
+        for next in [
+            rung(settings.margin, LOCAL_SLACK * 4.0, true),
+            rung(settings.margin, whole, true),
+            rung(0.0, whole, true),
             // Cards that leave no way round at all. A wire that has to cross one
             // of its own is still better than none, and its stub says where it
             // begins.
-            (settings.margin, LOCAL_SLACK, false),
-            (settings.margin, whole, false),
-            (0.0, whole, false),
+            rung(settings.margin, LOCAL_SLACK, false),
+            rung(settings.margin, whole, false),
+            rung(0.0, whole, false),
         ] {
             if !attempted.2.is_empty() {
                 break;
             }
-            attempted = attempt(margin, slack, avoid_own, &mut scratch);
+            attempted = attempt(next, &mut scratch);
         }
         let (stub_start, stub_end, path) = attempted;
         let complete = !path.is_empty();
@@ -228,24 +328,104 @@ pub fn route(cards: &[Rect], wires: &[Wire], settings: &Routing) -> Vec<Route> {
         // The search walks the grid cell by cell, so collinear runs arrive split
         // into many small segments; nudging them separately would build a
         // staircase. The corners go first, the stub ends stay.
-        let points = simplify_protecting(points, &[stub_start, stub_end]);
-        routed.push(points.windows(2).map(|pair| (pair[0], pair[1])).collect());
+        let points = simplify(points);
+        if complete {
+            routed.push(Trace::of(&points, settings.stub));
+        }
         routes[index] = Route {
             points,
             bridges: Vec::new(),
             complete,
         };
     }
-
-    // Nudging works on the full polyline, where the stub ends are still the second
-    // and second-to-last points and can be held in place; the redundant corners go
-    // afterwards.
-    nudge(&mut routes, wires, cards, settings);
-    for route in &mut routes {
-        route.points = simplify(std::mem::take(&mut route.points));
-    }
     bridges(&mut routes, wires, cards);
     routes
+}
+
+/// One attempt at a wire: the clearance from cards, how far the search looks,
+/// and whether the wire's own cards are in its way.
+#[derive(Clone, Copy)]
+struct Rung {
+    margin: f32,
+    slack: f32,
+    avoid_own: bool,
+}
+
+/// Where the stub of a port ends, kept free for that port's wires.
+struct Mouth {
+    at: Point,
+    /// Whether the stub runs horizontally.
+    horizontal: bool,
+    /// The card the port is on.
+    block: usize,
+}
+
+/// A line already on the board, as the wires routed after it see it.
+struct Trace {
+    /// Every segment, for the cost of crossing it.
+    segments: Vec<(Point, Point)>,
+    /// The segments that keep others at a distance: all of it but the stretch
+    /// at each port, which is as near its neighbours as the ports are.
+    body: Vec<Body>,
+    from: Point,
+    to: Point,
+}
+
+#[derive(Clone, Copy)]
+struct Body {
+    horizontal: bool,
+    /// `y` of a horizontal segment, `x` of a vertical one.
+    line: f32,
+    low: f32,
+    high: f32,
+    /// The straight piece out of the wire's first port, which wires of the same
+    /// port share; and the one into its last port.
+    exit: bool,
+    entry: bool,
+}
+
+impl Trace {
+    fn of(points: &[Point], stub: f32) -> Self {
+        let segments: Vec<(Point, Point)> =
+            points.windows(2).map(|pair| (pair[0], pair[1])).collect();
+        let last = segments.len().saturating_sub(1);
+        let mut body = Vec::new();
+        for (index, (from, to)) in segments.iter().enumerate() {
+            let horizontal = (from.y - to.y).abs() < 0.01;
+            if horizontal == ((from.x - to.x).abs() < 0.01) {
+                continue;
+            }
+            let (mut start, mut end) = if horizontal {
+                (from.x, to.x)
+            } else {
+                (from.y, to.y)
+            };
+            let direction = (end - start).signum();
+            if index == 0 {
+                start += direction * stub.min((end - start).abs());
+            }
+            if index == last {
+                end -= direction * stub.min((end - start).abs());
+            }
+            if (end - start) * direction <= 0.01 {
+                continue;
+            }
+            body.push(Body {
+                horizontal,
+                line: if horizontal { from.y } else { from.x },
+                low: start.min(end),
+                high: start.max(end),
+                exit: index == 0,
+                entry: index == last,
+            });
+        }
+        Self {
+            segments,
+            body,
+            from: points.first().copied().unwrap_or_default(),
+            to: points.last().copied().unwrap_or_default(),
+        }
+    }
 }
 
 /// The end of the stub leaving `point`.
@@ -400,7 +580,13 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
         from_side,
         to_side,
         obstacles,
+        zones,
         routed,
+        price,
+        mouths,
+        blocks,
+        origin,
+        target,
         settings,
         window,
     } = *problem;
@@ -410,20 +596,57 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
         .filter(|obstacle| obstacle.overlaps(&window))
         .collect();
     let frame = window.inflate(settings.margin + settings.stub);
-    let xs = lines(
-        [start.x, end.x],
-        [frame.min.x, frame.max.x]
-            .into_iter()
-            .chain(nearby.iter().flat_map(|card| [card.min.x, card.max.x]))
-            .filter(|line| *line > frame.min.x && *line < frame.max.x),
-    );
-    let ys = lines(
-        [start.y, end.y],
-        [frame.min.y, frame.max.y]
-            .into_iter()
-            .chain(nearby.iter().flat_map(|card| [card.min.y, card.max.y]))
-            .filter(|line| *line > frame.min.y && *line < frame.max.y),
-    );
+    let near: Vec<Rect> = zones
+        .iter()
+        .copied()
+        .filter(|zone| zone.overlaps(&window))
+        .collect();
+    // The grid: the sides of the cards, at their clearance, and a track every
+    // gap, so that lines sharing a corridor find places a gap apart in it. A
+    // board too large for the tracks is searched on the cards' sides alone.
+    let grid = |tracks: bool| {
+        let gap = settings.channel_gap;
+        let track = move |low: f32, high: f32| {
+            let count = if tracks && gap >= 1.0 {
+                ((high - low) / gap).floor().max(0.0) as usize
+            } else {
+                0
+            };
+            let first = (low / gap).floor() + 1.0;
+            (0..count).map(move |step| (first + step as f32) * gap)
+        };
+        let xs = lines(
+            [start.x, end.x],
+            [frame.min.x, frame.max.x]
+                .into_iter()
+                .chain(
+                    nearby
+                        .iter()
+                        .chain(&near)
+                        .flat_map(|card| [card.min.x, card.max.x]),
+                )
+                .chain(track(frame.min.x, frame.max.x))
+                .filter(|line| *line > frame.min.x && *line < frame.max.x),
+        );
+        let ys = lines(
+            [start.y, end.y],
+            [frame.min.y, frame.max.y]
+                .into_iter()
+                .chain(
+                    nearby
+                        .iter()
+                        .chain(&near)
+                        .flat_map(|card| [card.min.y, card.max.y]),
+                )
+                .chain(track(frame.min.y, frame.max.y))
+                .filter(|line| *line > frame.min.y && *line < frame.max.y),
+        );
+        (xs, ys)
+    };
+    let (mut xs, mut ys) = grid(true);
+    if xs.len() * ys.len() > MAX_CELLS {
+        (xs, ys) = grid(false);
+    }
     let (width, height) = (xs.len(), ys.len());
     if width < 2 || height < 2 || width * height > MAX_CELLS {
         return Vec::new();
@@ -472,8 +695,115 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
             }
         }
     }
+    // Edges within the gap of a card (while Tidy up measures) or of a line
+    // routed earlier: open at a price.
+    let mut tight_h = vec![false; blocked_h.len()];
+    let mut tight_v = vec![false; blocked_v.len()];
+    for zone in &near {
+        for y in inside(&ys, zone.min.y, zone.max.y) {
+            for x in covering(&xs, zone.min.x, zone.max.x) {
+                tight_h[y * (width - 1) + x] = true;
+            }
+        }
+        for x in inside(&xs, zone.min.x, zone.max.x) {
+            for y in covering(&ys, zone.min.y, zone.max.y) {
+                tight_v[y * width + x] = true;
+            }
+        }
+    }
+    let reach = settings.channel_gap - 0.01;
+    let same = |a: Point, b: Point| a.orthogonal_distance(b) < 0.5;
+    for wire in routed.iter().filter(|_| reach > 0.0) {
+        for piece in &wire.body {
+            // Only a line near the window can be met by a route in it.
+            let (low, high) = (piece.low - reach, piece.high + reach);
+            let outside = if piece.horizontal {
+                piece.line + reach < frame.min.y
+                    || piece.line - reach > frame.max.y
+                    || high < frame.min.x
+                    || low > frame.max.x
+            } else {
+                piece.line + reach < frame.min.x
+                    || piece.line - reach > frame.max.x
+                    || high < frame.min.y
+                    || low > frame.max.y
+            };
+            if outside {
+                continue;
+            }
+            // Wires of one port share the straight piece out of it, and into
+            // it; so do wires of ports nearer than the gap, each on its own
+            // port's line, or no line could reach a port among them.
+            let coordinate = |point: Point| if piece.horizontal { point.y } else { point.x };
+            let beside = |port: Point| {
+                [origin, target]
+                    .into_iter()
+                    .filter(|own| own.distance(port) < settings.channel_gap - 0.5)
+                    .map(coordinate)
+                    .collect::<Vec<f32>>()
+            };
+            let mut open: Vec<f32> = Vec::new();
+            if piece.exit {
+                open.extend(beside(wire.from));
+            }
+            if piece.entry {
+                open.extend(beside(wire.to));
+            }
+            let (across, along) = if piece.horizontal {
+                (&ys, &xs)
+            } else {
+                (&xs, &ys)
+            };
+            for line in inside(across, piece.line - reach, piece.line + reach) {
+                if open.iter().any(|own| (across[line] - own).abs() < 0.5) {
+                    continue;
+                }
+                for edge in covering(along, piece.low - reach, piece.high + reach) {
+                    if piece.horizontal {
+                        tight_h[line * (width - 1) + edge] = true;
+                    } else {
+                        tight_v[edge * width + line] = true;
+                    }
+                }
+            }
+        }
+    }
+    // The mouth of every other port: a line may cross in front of it but not
+    // run into it or turn there, or the port's own wire has no way out. A
+    // wire's own two port lines stay open to it, past the mouths of the
+    // ports beside its own.
+    for mouth in mouths.iter().filter(|_| reach > 0.0) {
+        if same(mouth.at, start) || same(mouth.at, end) {
+            continue;
+        }
+        let neighbour = mouth.block == blocks.0 || mouth.block == blocks.1;
+        let (across, along, line, at, own) = if mouth.horizontal {
+            (&ys, &xs, mouth.at.y, mouth.at.x, [start.y, end.y])
+        } else {
+            (&xs, &ys, mouth.at.x, mouth.at.y, [start.x, end.x])
+        };
+        for line in inside(across, line - reach, line + reach) {
+            if neighbour && own.iter().any(|own| (across[line] - own).abs() < 0.5) {
+                continue;
+            }
+            for edge in covering(along, at - reach, at + reach) {
+                if mouth.horizontal {
+                    tight_h[line * (width - 1) + edge] = true;
+                } else {
+                    tight_v[edge * width + line] = true;
+                }
+            }
+        }
+    }
+    // The edge that reaches `value` across a set of lines: the one `value` lies
+    // in, or the one that ends on it. Routes run on the grid's lines, so a
+    // wire is crossed by the edge that arrives on its line.
+    let reaching = |lines: &[f32], value: f32| {
+        let after = lines.partition_point(|line| *line < value - 0.01);
+        (after > 0 && after < lines.len()).then(|| after - 1)
+    };
     for wire in routed.iter().filter(|_| settings.crossing_cost > 0.0) {
-        for (a, b) in wire {
+        for (a, b) in &wire.segments {
             // Only a wire inside the window can be crossed by a route in it.
             let span = Rect::new(
                 Point::new(a.x.min(b.x), a.y.min(b.y)),
@@ -486,21 +816,17 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
             if horizontal {
                 // A horizontal wire crosses the vertical edges under it.
                 let (low, high) = (a.x.min(b.x), a.x.max(b.x));
-                for x in inside(&xs, low, high) {
-                    for y in 0..height.saturating_sub(1) {
-                        if ys[y] < a.y && a.y < ys[y + 1] {
-                            crossing_v[y * width + x] = crossing_v[y * width + x].saturating_add(1);
-                        }
+                if let Some(y) = reaching(&ys, a.y) {
+                    for x in inside(&xs, low, high) {
+                        crossing_v[y * width + x] = crossing_v[y * width + x].saturating_add(1);
                     }
                 }
             } else {
                 let (low, high) = (a.y.min(b.y), a.y.max(b.y));
-                for y in inside(&ys, low, high) {
-                    for x in 0..width.saturating_sub(1) {
-                        if xs[x] < a.x && a.x < xs[x + 1] {
-                            crossing_h[y * (width - 1) + x] =
-                                crossing_h[y * (width - 1) + x].saturating_add(1);
-                        }
+                if let Some(x) = reaching(&xs, a.x) {
+                    for y in inside(&ys, low, high) {
+                        crossing_h[y * (width - 1) + x] =
+                            crossing_h[y * (width - 1) + x].saturating_add(1);
                     }
                 }
             }
@@ -582,6 +908,7 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
                     HORIZONTAL,
                     blocked_h[y * (width - 1) + x - 1],
                     crossing_h[y * (width - 1) + x - 1],
+                    tight_h[y * (width - 1) + x - 1],
                 )
             }),
             (x + 1 < width).then(|| {
@@ -590,6 +917,7 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
                     HORIZONTAL,
                     blocked_h[y * (width - 1) + x],
                     crossing_h[y * (width - 1) + x],
+                    tight_h[y * (width - 1) + x],
                 )
             }),
             (y > 0).then(|| {
@@ -598,6 +926,7 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
                     VERTICAL,
                     blocked_v[(y - 1) * width + x],
                     crossing_v[(y - 1) * width + x],
+                    tight_v[(y - 1) * width + x],
                 )
             }),
             (y + 1 < height).then(|| {
@@ -606,10 +935,11 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
                     VERTICAL,
                     blocked_v[y * width + x],
                     crossing_v[y * width + x],
+                    tight_v[y * width + x],
                 )
             }),
         ];
-        for (next, next_axis, blocked, crossings) in steps.into_iter().flatten() {
+        for (next, next_axis, blocked, crossings, tight) in steps.into_iter().flatten() {
             if blocked {
                 continue;
             }
@@ -623,9 +953,11 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
                 // is a corner like any other.
                 bend += settings.bend_cost;
             }
-            let step = at(here).orthogonal_distance(at(next))
+            let length = at(here).orthogonal_distance(at(next));
+            let step = length
                 + bend
-                + f32::from(crossings) * settings.crossing_cost;
+                + f32::from(crossings) * settings.crossing_cost
+                + if tight { length * price } else { 0.0 };
             let candidate = cost + step;
             let target = next * 2 + next_axis;
             if candidate + 0.01 >= best[target] {
@@ -663,8 +995,20 @@ struct Problem<'a> {
     to_side: Side,
     /// Cards to avoid, already inflated by the clearance in use.
     obstacles: &'a [Rect],
-    /// Segments of the wires routed before this one, for the crossing cost.
-    routed: &'a [Vec<(Point, Point)>],
+    /// The clearance around the cards where it is room a line pays for
+    /// instead of an obstacle; empty unless Tidy up is measuring.
+    zones: &'a [Rect],
+    /// The wires routed before this one: crossing one costs, and running
+    /// within the gap of one costs `price` per pixel.
+    routed: &'a [Trace],
+    price: f32,
+    /// Where the stub of every port on the board ends, and the two cards
+    /// this wire joins.
+    mouths: &'a [Mouth],
+    blocks: (usize, usize),
+    /// The two ports, which tell the wires that share one.
+    origin: Point,
+    target: Point,
     settings: &'a Routing,
     /// The part of the board the search may use.
     window: Rect,
@@ -721,21 +1065,6 @@ fn cell_of(point: Point, xs: &[f32], ys: &[f32]) -> Option<Cell> {
             .map(|(index, _)| index)
     };
     Some((nearest(xs, point.x)?, nearest(ys, point.y)?))
-}
-
-/// Whether an axis-aligned segment enters any obstacle. Touching a border is free,
-/// so a wire may run along the margin of a card.
-pub fn blocked(from: Point, to: Point, obstacles: &[Rect]) -> bool {
-    let segment = Rect::new(
-        Point::new(from.x.min(to.x), from.y.min(to.y)),
-        Point::new(from.x.max(to.x), from.y.max(to.y)),
-    );
-    obstacles.iter().any(|obstacle| {
-        obstacle.min.x < segment.max.x
-            && segment.min.x < obstacle.max.x
-            && obstacle.min.y < segment.max.y
-            && segment.min.y < obstacle.max.y
-    })
 }
 
 /// Removes points that do not turn, so that a route has no redundant corners.
@@ -797,111 +1126,13 @@ pub fn intersection(a1: Point, a2: Point, b1: Point, b2: Point) -> Option<Point>
     crosses.then(|| Point::new(v1.x, h1.y))
 }
 
-/// The segments of a polyline of `points` points that nudging may move.
-fn movable(points: usize) -> std::ops::Range<usize> {
-    // Segment `i` joins points `i` and `i + 1`; points 0, 1 and the last two are
-    // the ports and their stub ends, so `i` runs from 2 to `points - 4`.
-    let last = points.saturating_sub(3);
-    2..last.max(2)
-}
-
-/// Spaces apart wire segments that ended up on the same line.
-///
-/// Wires that share a channel are offset in the order of their position across it,
-/// which keeps them from crossing each other as a result of the nudge. A segment
-/// that would touch a card at its new offset keeps its original line: the guarantee
-/// outranks the appearance.
-fn nudge(routes: &mut [Route], wires: &[Wire], cards: &[Rect], settings: &Routing) {
-    // Every wire keeps its own two cards out of its obstacle set, exactly as the
-    // search did; a nudged segment may end up beside the card it starts from.
-    let obstacles = |wire: &Wire| -> Vec<Rect> {
-        cards
-            .iter()
-            .enumerate()
-            .filter(|(card, _)| *card != wire.from.block && *card != wire.to.block)
-            .map(|(_, card)| card.inflate(settings.margin))
-            .collect()
-    };
-    // Group the interior segments of every route by the line they sit on.
-    let mut channels: BTreeMap<(bool, i64), Vec<(usize, usize)>> = BTreeMap::new();
-    for (index, route) in routes.iter().enumerate() {
-        // A stub end is fixed by its port and its side, so only a segment whose
-        // both ends are free may move: the stubs are the first and last segments,
-        // and their ends are the second and second-to-last points.
-        for segment in movable(route.points.len()) {
-            let (from, to) = (route.points[segment], route.points[segment + 1]);
-            let horizontal = (from.y - to.y).abs() < 0.01;
-            let line = if horizontal { from.y } else { from.x };
-            channels
-                .entry((horizontal, line.round() as i64))
-                .or_default()
-                .push((index, segment));
-        }
-    }
-    for ((horizontal, _), members) in channels {
-        if members.len() < 2 {
-            continue;
-        }
-        // Order the wires across the channel by where they come from, so the
-        // offsets do not introduce crossings.
-        let mut ordered = members.clone();
-        ordered.sort_by(|left, right| {
-            let key = |(index, segment): &(usize, usize)| {
-                let point = routes[*index].points[*segment];
-                if horizontal { point.x } else { point.y }
-            };
-            compare(key(left), key(right)).then_with(|| left.cmp(right))
-        });
-        let count = ordered.len() as f32;
-        for (rank, (index, segment)) in ordered.into_iter().enumerate() {
-            let offset = (rank as f32 - (count - 1.0) * 0.5) * settings.channel_gap;
-            if offset.abs() < 0.01 {
-                continue;
-            }
-            let (before, from, to, after) = {
-                let route = &routes[index];
-                (
-                    route.points[segment - 1],
-                    route.points[segment],
-                    route.points[segment + 1],
-                    route.points.get(segment + 2).copied(),
-                )
-            };
-            let moved = |point: Point| {
-                if horizontal {
-                    Point::new(point.x, point.y + offset)
-                } else {
-                    Point::new(point.x + offset, point.y)
-                }
-            };
-            let (new_from, new_to) = (moved(from), moved(to));
-            let Some(wire) = wires.get(index) else {
-                continue;
-            };
-            let obstacles = obstacles(wire);
-            // The two neighbouring segments stretch to the new line, so all three
-            // have to stay clear of every other card.
-            let safe = ![
-                (before, new_from),
-                (new_from, new_to),
-                (new_to, after.unwrap_or(new_to)),
-            ]
-            .iter()
-            .any(|(start, end)| blocked(*start, *end, &obstacles));
-            if safe {
-                let route = &mut routes[index];
-                route.points[segment] = new_from;
-                route.points[segment + 1] = new_to;
-            }
-        }
-    }
-}
-
 /// The order wires are routed in. A wire between two top ports runs on the
 /// rail above the cards (LAY-06) and goes first, so that a wire routed later
 /// crosses it once, where it drops into its card, rather than twice under
-/// it, between the rail and the cards. Then the longer wires, so the long
-/// route picks the open channel and the short ones adapt.
+/// it, between the rail and the cards. Then the shorter wires first: a wire
+/// between neighbours has one good route and takes it, and a long one has
+/// many to choose from among the lines already there (LAY-03: measured on
+/// the reference boards, a third fewer crossings than the long ones first).
 fn routing_order(cards: &[Rect], wires: &[Wire]) -> Vec<usize> {
     let span = |wire: &Wire| -> f32 {
         let (Some(from), Some(to)) = (cards.get(wire.from.block), cards.get(wire.to.block)) else {
@@ -916,7 +1147,7 @@ fn routing_order(cards: &[Rect], wires: &[Wire]) -> Vec<usize> {
     order.sort_by(|left, right| {
         rail(&wires[*right])
             .cmp(&rail(&wires[*left]))
-            .then_with(|| compare(span(&wires[*right]), span(&wires[*left])))
+            .then_with(|| compare(span(&wires[*left]), span(&wires[*right])))
             .then_with(|| left.cmp(right))
     });
     order

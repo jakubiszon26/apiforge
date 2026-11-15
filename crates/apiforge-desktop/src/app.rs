@@ -137,6 +137,12 @@ struct Printed {
 }
 
 impl App {
+    /// The board of the workspace window.
+    #[cfg(test)]
+    pub(crate) fn debug_canvas(&self) -> &Canvas {
+        &self.canvas
+    }
+
     pub fn new(context: &egui::Context, source: Source) -> Self {
         theme::apply(context);
         let mut notice = None;
@@ -2601,6 +2607,7 @@ impl App {
             sibling: self.editor.sibling_graph(),
             density: canvas::CardDensity::Full,
             satellites: false,
+            lines: canvas::Lines::default(),
         })
     }
 

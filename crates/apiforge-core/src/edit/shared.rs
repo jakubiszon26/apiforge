@@ -240,22 +240,38 @@ fn steps(main: &Graph, cleanup: Option<&Graph>) -> HashMap<String, usize> {
     steps
 }
 
-/// The values worth a variable: each field of a request's or a component
-/// call's output that [`SHARED_READERS`] or more steps of Main and Cleanup
-/// read directly, one of them far, in document order. Far is the engine's
-/// order: the reader's step is two or more steps after the source's, or
-/// the reader is in Cleanup and the source in Main. A value a variable
-/// already holds is listed while steps still read it directly; it is read
-/// through that variable. New names do not clash with one another.
-pub fn shared_values(main: &Graph, cleanup: Option<&Graph>, project: &Project) -> Vec<SharedValue> {
-    let steps = steps(main, cleanup);
-    let in_main: HashSet<&str> = main.nodes.iter().map(|node| node.id.as_str()).collect();
-    let order: HashMap<&str, usize> = all(main, cleanup)
-        .enumerate()
-        .map(|(index, node)| (node.id.as_str(), index))
-        .collect();
-    // Each value with its readers and whether one is far, by first read.
-    let mut found: Vec<(ValueRef, BTreeSet<&str>, bool)> = Vec::new();
+/// The distance rule of LAY-25 and LAY-26, read off the document.
+struct Distance<'a> {
+    steps: HashMap<String, usize>,
+    in_main: HashSet<&'a str>,
+}
+
+impl<'a> Distance<'a> {
+    fn new(main: &'a Graph, cleanup: Option<&Graph>) -> Self {
+        Self {
+            steps: steps(main, cleanup),
+            in_main: main.nodes.iter().map(|node| node.id.as_str()).collect(),
+        }
+    }
+
+    /// Whether `reader` reads a value of `source` from far away: its step
+    /// is two or more steps after the source's, or it is in Cleanup and the
+    /// source in Main.
+    fn far(&self, source: &str, reader: &str) -> bool {
+        let step = |id: &str| self.steps.get(id).copied().unwrap_or_default();
+        (self.in_main.contains(source) && !self.in_main.contains(reader))
+            || step(reader) >= step(source) + 2
+    }
+}
+
+/// Every direct read of a value of `main` and `cleanup`, by reader: each
+/// field of a request's or a component call's output that a step reads,
+/// except a variable's read of the value it holds, in document order of
+/// the reader and then of its inputs. A step that reads a value twice
+/// counts once.
+fn direct_reads<'a>(main: &'a Graph, cleanup: Option<&'a Graph>) -> Vec<(&'a Node, ValueRef)> {
+    let mut reads: Vec<(&Node, ValueRef)> = Vec::new();
+    let mut seen: HashSet<(&str, ValueRef)> = HashSet::new();
     for reader in all(main, cleanup) {
         for binding in reader.inputs.values() {
             for reference in binding.references() {
@@ -266,21 +282,66 @@ pub fn shared_values(main: &Graph, cleanup: Option<&Graph>, project: &Project) -
                     continue;
                 }
                 let value = ValueRef::new(reference.node_id, reference.port, reference.path);
-                if holds(reader, &value) {
+                if holds(reader, &value) || !seen.insert((reader.id.as_str(), value.clone())) {
                     continue;
                 }
-                let far = (in_main.contains(source.id.as_str())
-                    && !in_main.contains(reader.id.as_str()))
-                    || steps.get(&reader.id).copied().unwrap_or_default()
-                        >= steps.get(&source.id).copied().unwrap_or_default() + 2;
-                match found.iter_mut().find(|(known, ..)| *known == value) {
-                    Some((_, readers, any_far)) => {
-                        readers.insert(reader.id.as_str());
-                        *any_far |= far;
-                    }
-                    None => found.push((value, BTreeSet::from([reader.id.as_str()]), far)),
-                }
+                reads.push((reader, value));
             }
+        }
+    }
+    reads
+}
+
+/// A step that reads a value directly from far away (LAY-26).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FarRead {
+    /// The step that reads the value.
+    pub reader: String,
+    pub value: ValueRef,
+}
+
+/// Every far read of the scenario: a step of Main or Cleanup that reads a
+/// field of a request's or a component call's output directly, two or more
+/// steps after the source's step in the engine's order, or from Cleanup a
+/// value of Main. A step's own checks and values, the next step and what
+/// hangs on it are near. A variable's read of the value it holds is not a
+/// read; a read of a variable, a parameter or an environment value never is
+/// far. In document order of the reader. The rule of LAY-25's
+/// [`shared_values`], for every read.
+pub fn far_reads(main: &Graph, cleanup: Option<&Graph>) -> Vec<FarRead> {
+    let distance = Distance::new(main, cleanup);
+    direct_reads(main, cleanup)
+        .into_iter()
+        .filter(|(reader, value)| distance.far(&value.node_id, &reader.id))
+        .map(|(reader, value)| FarRead {
+            reader: reader.id.clone(),
+            value,
+        })
+        .collect()
+}
+
+/// The values worth a variable: each field of a request's or a component
+/// call's output that [`SHARED_READERS`] or more steps of Main and Cleanup
+/// read directly, one of them far ([`far_reads`]), in document order. A
+/// value a variable already holds is listed while steps still read it
+/// directly; it is read through that variable. New names do not clash with
+/// one another.
+pub fn shared_values(main: &Graph, cleanup: Option<&Graph>, project: &Project) -> Vec<SharedValue> {
+    let distance = Distance::new(main, cleanup);
+    let order: HashMap<&str, usize> = all(main, cleanup)
+        .enumerate()
+        .map(|(index, node)| (node.id.as_str(), index))
+        .collect();
+    // Each value with its readers and whether one is far, by first read.
+    let mut found: Vec<(ValueRef, BTreeSet<&str>, bool)> = Vec::new();
+    for (reader, value) in direct_reads(main, cleanup) {
+        let far = distance.far(&value.node_id, &reader.id);
+        match found.iter_mut().find(|(known, ..)| *known == value) {
+            Some((_, readers, any_far)) => {
+                readers.insert(reader.id.as_str());
+                *any_far |= far;
+            }
+            None => found.push((value, BTreeSet::from([reader.id.as_str()]), far)),
         }
     }
     found.retain(|(_, readers, far)| *far && readers.len() >= SHARED_READERS);
@@ -579,6 +640,29 @@ mod tests {
             ]
         );
         assert_eq!(shared[0].line(), "var token = login.body.token");
+    }
+
+    #[test]
+    fn far_reads_are_two_steps_on_or_in_cleanup() {
+        let (main, cleanup) = chain();
+        let far: Vec<(String, String)> = far_reads(&main, Some(&cleanup))
+            .into_iter()
+            .map(|read| (read.reader, read.value.path))
+            .collect();
+        // `a` is the step after `login`; Cleanup's `removed` is far.
+        assert_eq!(
+            far,
+            [
+                ("b", "token"),
+                ("b", "id"),
+                ("c", "token"),
+                ("c", "id"),
+                ("d", "token"),
+                ("d", "id"),
+                ("removed", "token"),
+            ]
+            .map(|(reader, path)| (reader.to_owned(), path.to_owned()))
+        );
     }
 
     #[test]

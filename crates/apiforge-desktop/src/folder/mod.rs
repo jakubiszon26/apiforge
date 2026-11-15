@@ -79,6 +79,15 @@ fn density_of(preferences: &Preferences) -> canvas::CardDensity {
         canvas::CardDensity::Full
     }
 }
+
+/// The lines *Wires* and *Collapse checks* ask the boards to draw, which
+/// Tidy up makes room for (LAY-03).
+fn lines_of(preferences: &Preferences) -> canvas::Lines {
+    canvas::Lines {
+        wires: preferences.wires,
+        folded: preferences.checks_collapsed,
+    }
+}
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -546,7 +555,11 @@ impl FolderApp {
             close_error: None,
             close_requested: false,
             preferences: Preferences::default(),
-            card_density: placement::DensityHandle::new(density_of(&Preferences::default())),
+            card_density: {
+                let handle = placement::DensityHandle::new(density_of(&Preferences::default()));
+                handle.set_lines(lines_of(&Preferences::default()));
+                handle
+            },
             density_switch: None,
             runs: runs::Runs::default(),
             navigation: navigation::Navigation::default(),
@@ -713,6 +726,7 @@ impl FolderApp {
     /// (LAY-23): nothing moves and nothing is written to the project.
     fn switch_wires(&mut self, mode: canvas::WireMode) {
         self.preferences.wires = mode;
+        self.card_density.set_lines(lines_of(&self.preferences));
         let preferences = self.preferences.clone();
         self.storage_io(
             "Saving preferences…",
@@ -729,6 +743,7 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn debug_wires(&mut self, mode: canvas::WireMode) {
         self.preferences.wires = mode;
+        self.card_density.set_lines(lines_of(&self.preferences));
         for canvas in self.canvases.values_mut() {
             canvas.set_wire_mode(mode);
         }
@@ -746,6 +761,7 @@ impl FolderApp {
     /// again, and remembers it as *Collapse checks* (LAY-11).
     fn collapse_checks(&mut self, collapsed: bool) {
         self.preferences.checks_collapsed = collapsed;
+        self.card_density.set_lines(lines_of(&self.preferences));
         let preferences = self.preferences.clone();
         self.storage_io(
             "Saving preferences…",
@@ -762,6 +778,7 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn debug_draw_checks(&mut self) {
         self.preferences.checks_collapsed = false;
+        self.card_density.set_lines(lines_of(&self.preferences));
         for canvas in self.canvases.values_mut() {
             canvas.debug_draw_checks();
         }

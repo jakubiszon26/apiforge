@@ -99,6 +99,11 @@ pub struct Request<'a> {
     pub moving: &'a HashSet<String>,
     pub style: WireStyle,
     pub bridges: bool,
+    /// Lines already on the board that stay as they are, as their routes:
+    /// the wires of this request keep the gap from them too (LAY-03). The
+    /// board gives the lines at rest here when it routes the wires it
+    /// brings back.
+    pub among: &'a [Vec<Pos2>],
 }
 
 impl Request<'_> {
@@ -127,6 +132,7 @@ struct Key {
     wires: Vec<(String, [i32; 4])>,
     style: WireStyle,
     bridges: bool,
+    among: Vec<Vec<[i32; 2]>>,
 }
 
 /// Rounded coordinates: a sub-pixel difference cannot change a route.
@@ -171,6 +177,15 @@ impl Router {
                 .collect(),
             style: request.style,
             bridges: request.bridges,
+            among: request
+                .among
+                .iter()
+                .map(|line| {
+                    line.iter()
+                        .map(|point| [point.x.round() as i32, point.y.round() as i32])
+                        .collect()
+                })
+                .collect(),
         };
         if request.moving.is_empty() {
             if self.key.as_ref() == Some(&key) {
@@ -274,8 +289,7 @@ fn rail_anchor(source: &Card, port: &str, target: &Card) -> Option<Pos2> {
 
 /// What the router is given for a board: the rectangles of its cards and
 /// chips, and its wires as ports on them. The `quality` metric routes the
-/// same (LAY-06 criterion 10).
-#[cfg(test)]
+/// same (LAY-06 criterion 10), and Tidy up measures a board with it (LAY-03).
 pub(super) fn geometry(request: &Request<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
     (
         rectangles(request),
@@ -322,7 +336,18 @@ fn rectangles(request: &Request<'_>) -> Vec<layout::Rect> {
 fn route_all(request: &Request<'_>, prepared: &[Prepared], key: &Key) -> Vec<Routed> {
     let cards = rectangles(request);
     let wires: Vec<layout::Wire> = prepared.iter().map(|wire| wire.wire).collect();
-    let routes = layout::route(&cards, &wires, &layout::Routing::default());
+    let fixed: Vec<layout::Route> = request
+        .among
+        .iter()
+        .map(|line| layout::Route {
+            points: line
+                .iter()
+                .map(|point| layout::Point::new(point.x, point.y))
+                .collect(),
+            ..layout::Route::default()
+        })
+        .collect();
+    let routes = layout::route_among(&cards, &wires, &layout::Routing::default(), &fixed);
     let _ = key;
     prepared
         .iter()
@@ -484,6 +509,7 @@ mod tests {
                         moving: &HashSet::new(),
                         style: WireStyle::Orthogonal,
                         bridges: true,
+                        among: &[],
                     };
                     let first: Vec<(Vec<Pos2>, bool)> = router
                         .routes(&request)

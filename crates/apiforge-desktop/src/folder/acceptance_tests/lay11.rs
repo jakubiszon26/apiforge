@@ -416,7 +416,9 @@ fn lay11_criterion_8_run_results_navigates_to_the_subject() {
 }
 
 /// Criterion 9: Tidy up with checks collapsed places the folded checks, so
-/// showing them needs no second Tidy up.
+/// showing them puts no card on another. Since LAY-03 a Tidy up with the
+/// checks shown makes room for their lines: every card keeps its column and
+/// its place in it, and the gaps grow.
 #[test]
 fn lay11_criterion_9_tidy_up_hangs_hidden_checks() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
@@ -438,10 +440,29 @@ fn lay11_criterion_9_tidy_up_hangs_hidden_checks() {
     harness.get_by_label("Tidy up").click();
     settle(&mut harness);
     harness.step();
+    let tidied = world(&harness);
+    assert_disjoint_cards(&tidied, "tidied with the checks shown");
+    // Each card's column and its place among the cards of that column.
+    let places = |cards: &[(String, Rect)]| -> Vec<(String, usize, usize)> {
+        let mut lefts: Vec<f32> = cards.iter().map(|(_, rect)| rect.left()).collect();
+        lefts.sort_by(f32::total_cmp);
+        lefts.dedup();
+        cards
+            .iter()
+            .map(|(name, rect)| {
+                let column = lefts.iter().position(|left| *left == rect.left()).unwrap();
+                let above = cards
+                    .iter()
+                    .filter(|(_, other)| other.left() == rect.left() && other.top() < rect.top())
+                    .count();
+                (name.clone(), column, above)
+            })
+            .collect()
+    };
     assert_eq!(
-        world(&harness),
-        expanded,
-        "Tidy up with the checks shown moves nothing"
+        places(&tidied),
+        places(&expanded),
+        "Tidy up with the checks shown keeps every card's column and place"
     );
 }
 
