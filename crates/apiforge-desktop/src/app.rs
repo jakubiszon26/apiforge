@@ -2293,6 +2293,12 @@ impl App {
                 }
                 inspector::Action::Error(message) => self.canvas.set_error(message),
                 inspector::Action::ExpandChecksHere(_) => {}
+                inspector::Action::ReadDirectly => {
+                    match edit::read_directly(self.editor.graph(), None, &node.id) {
+                        Ok(read) => self.apply_graph(read.main),
+                        Err(error) => self.canvas.set_error(error.to_string()),
+                    }
+                }
             }
         }
     }
@@ -2379,6 +2385,8 @@ impl App {
                 adding_input: None,
                 settings: None,
                 arrangement: "",
+                scenario: None,
+                shared: &[],
             };
             self.canvas.show(ui, &input)
         };
@@ -2407,7 +2415,10 @@ impl App {
             | Command::ComponentSettings
             | Command::SetCompactCards(_)
             | Command::SetChecksCollapsed(_)
-            | Command::SetWires(_) => {}
+            | Command::SetWires(_)
+            // This window proposes no variable (LAY-25).
+            | Command::SaveValues { .. }
+            | Command::SaveSharedValues => {}
             Command::InspectInput { node, .. } => self.editor.selection = vec![node],
             Command::ShowChecks(node) => {
                 self.editor.selection = vec![node];

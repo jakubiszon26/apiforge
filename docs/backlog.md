@@ -364,6 +364,8 @@ Exit criteria:
 | [#311](https://github.com/jakubiszon26/apiforge/issues/311) | LAY-21 Every other card is compact too; [ticket](tickets/LAY-21.md); from LAY-06, which becomes M · 20 | S–M · 20 · `visible UI`, `default` | part A |
 | [#312](https://github.com/jakubiszon26/apiforge/issues/312) | LAY-22 Runner and core groundwork: the started step, the not-run cause, relations; [ticket](tickets/LAY-22.md) | S–M · 10 | part A |
 | [#333](https://github.com/jakubiszon26/apiforge/issues/333) | LAY-23 A value many steps read: thin the board's lines; [ticket](tickets/LAY-23.md); decided 2026-11-12, stage 1 in implementation | M · 30 · `visible UI`, `default`, `removal` | part A, before the checkpoint |
+| [#335](https://github.com/jakubiszon26/apiforge/issues/335) | LAY-25 A value used far away is saved in a variable, proposed by the board; [ticket](tickets/LAY-25.md); decided 2026-11-15 | M · 35 · `visible UI`, `default` | after LAY-23 stage 1 |
+| [#341](https://github.com/jakubiszon26/apiforge/issues/341) | LAY-26 Code and the command line warn where a far value is read directly; [ticket](tickets/LAY-26.md); decided 2026-11-15, split from LAY-25 | S–M · 15 · `visible UI` | after LAY-25 |
 | [#334](https://github.com/jakubiszon26/apiforge/issues/334) | LAY-24 A mark on the card replaces the `@after` rail into the next step; [ticket](tickets/LAY-24.md); decided 2026-11-15 (the arrow at the badge) | S–M · 20 · `visible UI`, `default`, `removal` | before the checkpoint, after LAY-25 and LAY-26 |
 
 Nine UX-1 tickets joined the sprint on 2026-11-05 at the owner's request,

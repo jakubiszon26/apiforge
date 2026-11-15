@@ -49,6 +49,9 @@ pub enum Action {
     /// *Expand checks here* switched for the selected step: its checks hang
     /// under it on the collapsed board, for this session (LAY-11).
     ExpandChecksHere(bool),
+    /// *Read directly again* on a variable that holds a plain reference: its
+    /// readers read the value and the variable goes (LAY-25).
+    ReadDirectly,
     Error(String),
 }
 
@@ -270,6 +273,16 @@ impl Inspector {
                         search: String::new(),
                         focus_search: true,
                     });
+                }
+                if edit::plain_value(context.node).is_some()
+                    && ui
+                        .add(widgets::action(Icon::Variable, "Read directly again").quiet())
+                        .on_hover_text(
+                            "Every step that reads this variable reads the value it holds, and the variable is removed. One undo.",
+                        )
+                        .clicked()
+                {
+                    actions.push(Action::ReadDirectly);
                 }
                 widgets::hint(
                     ui,
