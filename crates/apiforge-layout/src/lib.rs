@@ -7,6 +7,7 @@
 //! records the algorithms and the guarantees.
 mod geometry;
 mod layered;
+mod packed;
 mod route;
 mod smooth;
 
@@ -15,5 +16,6 @@ pub use layered::{
     Graph, Hanging, Row, Rows, Spacing, any_overlap, columns_of, hang, layers_of, place, rows_of,
     tidy,
 };
+pub use packed::{Breach, GAP, Near, packed};
 pub use route::{Bridge, Route, Routing, Wire, intersection as crossing, route, violations};
 pub use smooth::{DEFAULT_RADIUS, Piece, smooth, violations as smooth_violations};

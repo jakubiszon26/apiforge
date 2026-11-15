@@ -106,9 +106,9 @@ at 1600 × 1000 and 960 × 540, are the QA captures of the pull request.
    20 px of a line at its ports, and the shared straight piece out of (or
    into) one port.
 2. **No shared track.** No two lines lie on each other anywhere, except
-   wires of one port on that port's straight piece. On the demo shop board
-   tidied, the two wires from *Product* are two lines from their turns
-   onwards.
+   wires of one port on that port's straight piece. On `order-flow` with
+   every wire drawn, the two wires from `products` are two lines from
+   their turns onwards; the demo shop board keeps the rule too.
 3. **The metric.** `quality` prints `packed`, the number of breaches of
    criterion 1 on a board; it is 0 on all 24 reference rows. `close` and
    `coincident` stay for comparison.
