@@ -1050,3 +1050,97 @@ fn review_lay23() {
         crate::testing::capture(&mut harness, label, None);
     }
 }
+
+/// LAY-25 mock-up (throwaway): the proposal to save a far value in a
+/// variable, drawn by the real board on synthetic fixtures. Each view
+/// asserts a card in view.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay25() {
+    // (scenario, size, capture, the step shown at 60 %, the offer at that
+    // step, suggestions at the ports)
+    for (name, size, label, shown, offer, suggest) in [
+        ("far-value", WIDE, "lay25-1-before-fit", None, false, false),
+        (
+            "far-value",
+            WIDE,
+            "lay25-2-connect-offer-60",
+            Some("shipping"),
+            true,
+            false,
+        ),
+        (
+            "far-value",
+            WIDE,
+            "lay25-3-port-suggestion-60",
+            Some("cart"),
+            false,
+            true,
+        ),
+        (
+            "shop-30",
+            WIDE,
+            "lay25-3b-port-suggestion-shop-30-60",
+            Some("login"),
+            false,
+            true,
+        ),
+        (
+            "far-value-saved",
+            WIDE,
+            "lay25-4-after-saving-fit",
+            None,
+            false,
+            false,
+        ),
+        (
+            "far-value-saved",
+            WIDE,
+            "lay25-4b-after-saving-60",
+            Some("shipping"),
+            false,
+            false,
+        ),
+        (
+            "far-value",
+            crate::testing::MINIMUM,
+            "lay25-5-connect-offer-960",
+            Some("shipping"),
+            true,
+            false,
+        ),
+    ] {
+        let (_project, mut harness, id) = tidied(name, size, Checks::Collapsed);
+        choose(&mut harness, FIT);
+        harness.step();
+        if let Some(step) = shown {
+            show(&mut harness, &id, step, 0.6);
+        }
+        if offer {
+            let reader = id_of(&harness, &id, shown.expect("a step for the offer"));
+            board_mut(&mut harness, &id).mock.offer =
+                Some((reader, "cartId".into(), "cart.cart.id".into(), 8));
+        }
+        board_mut(&mut harness, &id).mock.suggest = suggest;
+        if suggest {
+            let source = id_of(&harness, &id, shown.expect("a source for the suggestion"));
+            board_mut(&mut harness, &id).mock.open = Some(source);
+        }
+        settle(&mut harness);
+        harness.step();
+        let canvas = board(&harness, &id);
+        let focus = canvas.debug_focus();
+        assert!(
+            canvas
+                .debug_cards()
+                .iter()
+                .any(|(_, rect)| focus.contains_rect(*rect)),
+            "{label}: a card is in view"
+        );
+        assert!(
+            !canvas.debug_tags().is_empty(),
+            "{label}: the board draws chips"
+        );
+        crate::testing::capture(&mut harness, label, None);
+    }
+}

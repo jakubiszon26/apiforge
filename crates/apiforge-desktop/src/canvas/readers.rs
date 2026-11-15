@@ -161,7 +161,13 @@ pub fn chipped(graph: &Graph, cards: &[Card], wires: &[BoardWire]) -> HashSet<St
             let count = readers
                 .get(&(source.id.clone(), port.clone()))
                 .map_or(0, BTreeSet::len);
-            (count >= MIN_READERS && !beside(&rows, source.rect(), target.rect()))
+            // LAY-25 mock-up: a variable's far reader is a chip whatever
+            // the count: saving a value is how a person asks for it.
+            let saved = graph
+                .nodes
+                .iter()
+                .any(|node| node.id == source.id && node.is_variable());
+            ((count >= MIN_READERS || saved) && !beside(&rows, source.rect(), target.rect()))
                 .then(|| wire.id.clone())
         })
         .collect()

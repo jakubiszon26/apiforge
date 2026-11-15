@@ -5,6 +5,8 @@
 //! wires being drawn and the camera are view state only.
 
 mod collapse;
+#[cfg(test)]
+pub mod lay25;
 mod layout;
 mod menu;
 mod paint;
@@ -509,6 +511,9 @@ pub struct Canvas {
     /// border (LAY-09).
     #[cfg(test)]
     drawn: Vec<(String, paint::Drawn)>,
+    /// LAY-25 mock-up: the proposal drawn over the board.
+    #[cfg(test)]
+    pub(crate) mock: lay25::Mock,
 }
 
 /// A wire as the last frame drew it: its id, its source and target cards,
@@ -614,6 +619,8 @@ impl Default for Canvas {
             statement: None,
             #[cfg(test)]
             marks: Vec::new(),
+            #[cfg(test)]
+            mock: lay25::Mock::default(),
             #[cfg(test)]
             geometry: (Vec::new(), Vec::new()),
             #[cfg(test)]
@@ -1558,6 +1565,62 @@ impl Canvas {
             readers::paint(&board_painter, laid, lit);
         }
         #[cfg(test)]
+        if self.mock.suggest {
+            for (count, laid) in shown_counts.iter().zip(&laid_counts) {
+                let variable = input
+                    .graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == count.source && node.is_variable());
+                if variable {
+                    continue;
+                }
+                // One mark per port; its menu lists the fields steps read.
+                let handle = input
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == count.source)
+                    .map_or("", |node| node.handle.as_str());
+                let mut rows: Vec<(String, String, HashSet<&str>)> = Vec::new();
+                for node in &input.graph.nodes {
+                    for reference in node.inputs.values().flat_map(Binding::references) {
+                        if reference.node_id != count.source || reference.port != count.port {
+                            continue;
+                        }
+                        let field = reference.path.rsplit('.').next().unwrap_or_default();
+                        let value = if reference.path.starts_with(count.port.as_str()) {
+                            format!("{handle}.{}", reference.path)
+                        } else {
+                            format!("{handle}.{}.{}", count.port, reference.path)
+                        };
+                        match rows.iter_mut().find(|row| row.1 == value) {
+                            Some(row) => {
+                                row.2.insert(node.id.as_str());
+                            }
+                            None => rows.push((
+                                lay25::proposed_name(&format!("{handle}.{field}")),
+                                value,
+                                HashSet::from([node.id.as_str()]),
+                            )),
+                        }
+                    }
+                }
+                rows.retain(|row| row.2.len() >= readers::MIN_READERS);
+                if rows.is_empty() {
+                    continue;
+                }
+                let mark = lay25::paint_suggestion(&board_painter, laid);
+                if self.mock.open.as_deref() == Some(count.source.as_str()) {
+                    let rows: Vec<(String, String, usize)> = rows
+                        .into_iter()
+                        .map(|(name, value, readers)| (name, value, readers.len()))
+                        .collect();
+                    lay25::show_suggestions(ui.ctx(), mark.left_bottom(), &rows);
+                }
+            }
+        }
+        #[cfg(test)]
         {
             self.tags = shown_tags
                 .iter()
@@ -1934,6 +1997,12 @@ impl Canvas {
         }
         if let Some((text, near)) = &statement {
             readers::paint_statement(&painter, *near, text);
+        }
+        #[cfg(test)]
+        if let Some((reader, name, value, others)) = &self.mock.offer
+            && let Some(tag) = tags.iter().find(|tag| &tag.reader == reader)
+        {
+            lay25::show_offer(ui.ctx(), camera, tag.anchor, name, value, *others);
         }
 
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
