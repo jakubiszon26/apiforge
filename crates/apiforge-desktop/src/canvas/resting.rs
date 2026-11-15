@@ -3,15 +3,16 @@
 //! Tidy up widens the gaps between cards until the lines of the board keep
 //! their distance from each other. Which lines those are depends on what the
 //! window shows: checks folded into their subjects are not drawn and neither
-//! are their wires (LAY-11), and a value read by three or more steps is a
-//! chip at each far reader instead of a wire (LAY-23). [`resting`] gives the
+//! are their wires (LAY-11), a value read by three or more steps is a chip
+//! at each far reader instead of a wire (LAY-23), and a rail into the next
+//! step is an arrow at its badge (LAY-24). [`resting`] gives the
 //! router's input for a graph as the board draws it with nothing selected,
 //! pointed at or dragged, from the same parts the board itself is drawn from.
 
 use super::layout::{Card, CardDensity, Chip};
 use super::readers::{self, WireMode};
 use super::routing::{self, WireStyle};
-use super::{collapsible, folded_wires};
+use super::{after, collapsible, folded_wires};
 use apiforge_core::format::{Graph, Project};
 use apiforge_layout as layout;
 use std::collections::{HashMap, HashSet};
@@ -78,6 +79,11 @@ pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
     }
     let (mut wires, _) = folded_wires(graph, &cards, &chips, &folded);
     if board.lines.wires == WireMode::Chips {
+        // A rail into the next step is an arrow at the step's badge (LAY-24).
+        let arrows: HashSet<String> = after::marks(graph, board.later, &cards, &wires)
+            .into_iter()
+            .flat_map(|mark| mark.wires)
+            .collect();
         let chipped = readers::chipped(graph, &cards, &wires);
         if !chipped.is_empty() {
             let (tags, _) = readers::plan(graph, board.project, &cards, &wires, &chipped);
@@ -87,6 +93,7 @@ pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
                 .collect();
             wires.retain(|wire| !tagged.contains(wire.id.as_str()));
         }
+        wires.retain(|wire| !arrows.contains(&wire.id));
     }
     routing::geometry(&routing::Request {
         cards: &cards,

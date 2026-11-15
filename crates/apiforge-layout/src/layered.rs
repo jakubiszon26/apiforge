@@ -670,7 +670,8 @@ pub struct Rows {
 impl Default for Rows {
     fn default() -> Self {
         // A gap of 100 px holds four lines 20 px apart, 20 px from either
-        // card (LAY-03); [`Room`] widens it where a board has more.
+        // card, and one of 80 px three (LAY-03); [`Room`] widens it where a
+        // board has more.
         let column_width = 280.0;
         let column_gap = 100.0;
         Self {
@@ -678,7 +679,8 @@ impl Default for Rows {
             column_width,
             column_gap,
             stack_gap: 24.0,
-            row_gap: 100.0,
+            // Three lines under a row; most rows need no more.
+            row_gap: 80.0,
         }
     }
 }

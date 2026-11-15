@@ -318,6 +318,22 @@ fn review_lay03() {
             false,
             Some("apply_coupon"),
         ),
+        // The same two with every rail drawn: since LAY-24 the default view
+        // draws an arrow for a rail into the next step.
+        (
+            "1-row-top-all-wires",
+            "fan-out",
+            WireMode::All,
+            false,
+            Some("stock"),
+        ),
+        (
+            "2-corner-all-wires",
+            "fan-out",
+            WireMode::All,
+            false,
+            Some("apply_coupon"),
+        ),
         // 3. The lines under the last row.
         (
             "3-under-last-row",
@@ -337,6 +353,7 @@ fn review_lay03() {
         ("fit-fan-out", "fan-out", WireMode::Chips, false, None),
         ("fit-shop-30", "shop-30", WireMode::All, false, None),
         ("fit-shop-30-checks", "shop-30", WireMode::Chips, true, None),
+        ("fit-fan-out-checks", "fan-out", WireMode::Chips, true, None),
     ];
     for size in [WIDE, crate::testing::MINIMUM] {
         let suffix = if size == WIDE { "1600" } else { "960" };

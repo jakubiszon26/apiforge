@@ -945,8 +945,18 @@ fn lay23_criterion_4_a_selected_wire_stays_drawn() {
             })
         })
         .find(|(_, at)| {
+            // Clear of the chips and counts too: since LAY-03 a line keeps
+            // 20 px from a card, which is where they stand.
             shown.debug_viewport().shrink(16.0).contains(*at)
                 && cards.iter().all(|card| !card.expand(12.0).contains(*at))
+                && shown
+                    .debug_tags()
+                    .iter()
+                    .all(|tag| !tag.rect.expand(4.0).contains(*at))
+                && shown
+                    .debug_counts()
+                    .iter()
+                    .all(|count| !shown.debug_to_screen(count.world).expand(4.0).contains(*at))
         })
         .expect("a brought-back wire in view, clear of the cards");
     super::lay16::press(&mut harness, at);

@@ -84,8 +84,8 @@ is safe, and lines 3 px apart count as two places. Nothing makes room.
   between two rows, or between a card and the card hung under it, in steps
   of 20 px, only where the lines the board draws at that moment need it.
   The board grows and Fit drops ([Measured](#measured)).
-- Changed: after Tidy up the gaps are 100 px between columns and rows
-  (96 today) and wider where lines need it. Showing folded checks or
+- Changed: after Tidy up the gaps are 100 px between columns and 80 px
+  under a row (96 today) and wider where lines need it. Showing folded checks or
   switching to *All wires* moves no card, as today; the added lines keep
   the gap by going the long way round where the board has no room, and a
   second Tidy up makes it (LAY-11 promised that no second Tidy up was
@@ -96,7 +96,8 @@ is safe, and lines 3 px apart count as two places. Nothing makes room.
   widens it.
 - Changed: lines that lay on each other now run side by side, and a line
   leaving the others crosses them. In the default view the crossings stay
-  as they were; with every check or every wire drawn there are more
+  within two or three of what they were; with every check or every wire
+  drawn there are more
   ([Measured](#measured)). The order of lines in a corridor is LAY-05.
 - Removed or hidden: nothing. Migrated: nothing; no file format changes.
 - Default behaviour that changes: the spacing Tidy up gives, as above.
@@ -144,35 +145,45 @@ at 1600 × 1000 and 960 × 540, are the QA captures of the pull request.
 
 ## Measured
 
-`quality` on the boards the desktop tidies, compact cards, before (`main`
-at `40239e9`) → after. `packed` is 0 on all 24 rows, the full density
-included; the default view is the first four rows.
+`quality` on the boards the desktop tidies, compact cards, before → after.
+Before is `main` with LAY-24 (`ed13efe`) for the rows with chips and `main`
+at `40239e9` for the rows with every wire, which LAY-24 does not change.
+`packed` is 0 on all 24 rows, the full density included; the default view
+is the first four rows.
 
 | Board, view | `packed` | Crossings | Board, px | Fit at 1600 × 1000 | at 960 × 540 |
 | --- | --- | --- | --- | --- | --- |
-| `order-flow`, chips, checks folded | 69 → 0 | 4 → 7 | 1888 × 758 → 1904 × 846 | 0.60 → 0.60 | 0.26 → 0.26 |
-| `shop-30`, chips, checks folded | 89 → 0 | 3 → 5 | 1864 × 1478 → 1880 × 1502 | 0.51 → 0.51 | 0.20 → 0.20 |
-| `shop-50`, chips, checks folded | 156 → 0 | 9 → 7 | 1912 × 2742 → 1928 × 2814 | 0.28 → 0.27 | 0.11 → 0.11 |
-| `fan-out`, chips, checks folded | 92 → 0 | 9 → 5 | 1912 × 1236 → 1928 × 1280 | 0.59 → 0.59 | 0.24 → 0.23 |
-| `shop-30`, chips, checks drawn | 196 → 0 | 9 → 18 | 1864 × 1550 → 1900 × 1714 | 0.49 → 0.44 | 0.19 → 0.18 |
-| `fan-out`, chips, checks drawn | 222 → 0 | 16 → 35 | 1912 × 1236 → 2048 × 1432 | 0.59 → 0.53 | 0.24 → 0.21 |
+| `order-flow`, chips, checks folded | 65 → 0 | 4 → 7 | 1888 × 758 → 1904 × 826 | 0.60 → 0.60 | 0.26 → 0.26 |
+| `shop-30`, chips, checks folded | 81 → 0 | 3 → 5 | 1864 × 1478 → 1880 × 1462 | 0.51 → 0.52 | 0.20 → 0.21 |
+| `shop-50`, chips, checks folded | 127 → 0 | 5 → 7 | 1912 × 2742 → 1928 × 2734 | 0.28 → 0.28 | 0.11 → 0.11 |
+| `fan-out`, chips, checks folded | 46 → 0 | 1 → 2 | 1912 × 1236 → 1928 × 1240 | 0.59 → 0.59 | 0.24 → 0.24 |
+| `shop-30`, chips, checks drawn | 186 → 0 | 7 → 13 | 1864 × 1550 → 1900 × 1694 | 0.49 → 0.45 | 0.19 → 0.18 |
+| `shop-50`, chips, checks drawn | 351 → 0 | 13 → 38 | 1912 × 2862 → 1968 × 3158 | 0.27 → 0.24 | 0.11 → 0.10 |
+| `fan-out`, chips, checks drawn | 141 → 0 | 1 → 9 | 1912 × 1236 → 2008 × 1332 | 0.59 → 0.57 | 0.24 → 0.23 |
 | `shop-30`, all wires, checks folded | 273 → 0 | 76 → 79 | 1864 × 1478 → 2020 × 1642 | 0.51 → 0.46 | 0.20 → 0.18 |
 | `fan-out`, all wires, checks folded | 265 → 0 | 50 → 64 | 1912 × 1236 → 2128 × 1440 | 0.59 → 0.53 | 0.24 → 0.21 |
 | `shop-30`, all wires, checks drawn | 494 → 0 | 112 → 118 | 1864 × 1550 → 2140 × 2014 | 0.49 → 0.38 | 0.19 → 0.15 |
 | `shop-50`, all wires, checks drawn | 1142 → 0 | 363 → 408 | 1912 × 2862 → 2388 × 3638 | 0.27 → 0.21 | 0.11 → 0.08 |
 
-- `shop-30` as a new install shows it still fits 1600 × 1000 at 0.50
-  (LAY-06 criterion 8), now measured with chips, the default since LAY-23;
-  with every wire drawn it fits at 0.46.
-- Four assertions of earlier tickets follow the new spacing and are
-  changed with their reasons in place: LAY-06 criteria 1 and 2 (the gap
-  between columns and under a row is 100 px or more, in steps of 20, not
-  96), LAY-06 criterion 11 (`shop-30`, every wire and check: 2.07
+- The default view is as large as it was: a row gap starts at 80 px (three
+  lines) instead of 96 and grows where a row needs more. `shop-30` as a
+  new install shows it fits 1600 × 1000 at 0.50 or more (LAY-06 criterion
+  8), now measured with chips, the default since LAY-23; with every wire
+  drawn it fits at 0.46.
+- With checks drawn, or every wire, the board grows and has more
+  crossings: lines that lay on each other run side by side, and a line
+  that leaves the others crosses them.
+- Assertions of earlier tickets that follow the new spacing, each changed
+  with its reason beside it: LAY-06 criteria 1 and 2 (the gap between
+  columns is 100 px or more and under a row 80 px or more, in steps of
+  20, not 96), LAY-06 criterion 11 (`shop-30`, every wire and check: 2.07
   crossings per wire, 1.96 before, limit 2.05 → 2.1), LAY-23 criterion 7
-  (`fan-out` with chips and checks drawn: 1.09 crossings per line, 0.5
-  before, limit 0.6 → 1.1), LAY-11 criterion 9 and LAY-23 criterion 8
-  (Tidy up after showing checks or switching *Wires* keeps every card's
-  column and place and changes the gaps).
+  (`fan-out` with chips and checks drawn, limit 0.6 → 1.1 crossings per
+  line), LAY-24 criterion 9 (`fan-out` with checks drawn: 9 crossings, 1
+  before, limit 2 → 9), LAY-11 criterion 9 and LAY-23 criterion 8 (Tidy
+  up after showing checks or switching *Wires* keeps every card's column
+  and place and changes the gaps), LAY-23 criterion 4's click on a wire
+  (aimed clear of the chips and counts, where lines now pass).
 - A full routing of the benchmark board of ADR 0006 (200 cards, 398
   wires) takes 118 ms (10 ms before, budget 30 ms → 150 ms, amended in
   the ADR); `shop-50` with every wire and check routes in 30 ms.
@@ -180,8 +191,9 @@ included; the default view is the first four rows.
 ## Not in scope
 
 - The order of lines across a channel to save crossings (LAY-05).
-- LAY-24's mark for the rail into the next step: with it there are fewer
-  rails to make room for; the rule holds with and without it.
+- LAY-24's arrow for the rail into the next step is as it was merged:
+  with it there are fewer rails to make room for, and the rule holds for
+  the rails it brings back.
 - Chips at readers, continuation marks and rail labels are drawn in the
   gaps where lines run and are not obstacles; a label on a rail still sits
   on its rail.
@@ -216,6 +228,6 @@ included; the default view is the first four rows.
   row, not by a distance of 376 px, since the gap between columns varies.
 - Lines brought back are routed among the lines at rest
   (`canvas/routing.rs`, `Request::among`), which stay as they are.
-- Painting is untouched, so LAY-24 (#343) merges on top: its rails not
-  drawn are not routed. `resting` still counts them until LAY-24 filters
-  them there too, which leaves room that is not needed, never too little.
+- Painting is untouched. With LAY-24 (merged first) a rail into the next
+  step is not routed and gets no room; brought back by pointing or
+  selecting, it is routed among the lines at rest like a chip's wire.

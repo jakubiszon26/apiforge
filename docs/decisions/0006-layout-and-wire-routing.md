@@ -180,8 +180,8 @@ spacing of shape D.
 3. **Order.** Rails first, then the shorter wires first (the longer first
    before): a wire between neighbours has one good route. On the reference
    boards this gives a third fewer crossings than the longer first.
-4. **Tidy up makes the room.** Shape D's gaps are 100 px between columns
-   and under a row, 24 px under a card. For the lines the board draws when
+4. **Tidy up makes the room.** Shape D's gaps are 100 px between columns,
+   80 px under a row and 24 px under a card. For the lines the board draws when
    Tidy up runs — folded checks and chips leave lines out — each wire is
    routed alone, allowed between two cards at a quarter of the price of
    the way round, and a corridor that `n` of them want gets room for `n`
