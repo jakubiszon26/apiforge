@@ -283,11 +283,14 @@ fn lay07_criterion_2_badges_follow_an_edit() {
         "before it, unchanged"
     );
     let graph = graph(&harness);
+    let mut checked = 0;
     for (index, id) in sequence(&graph).into_iter().enumerate() {
         if let Some(badge) = canvas(&harness).debug_badge(id) {
             assert_eq!(badge.text, (index + 1).to_string(), "{id}");
+            checked += 1;
         }
     }
+    assert!(checked >= 5, "badges in view: {checked}");
 }
 
 /// Criterion 3: during a real simulation held at the runner's *started* of
@@ -485,6 +488,36 @@ fn review_lay07() {
     fit(&mut harness);
     assert_a_card_in_view(&harness, "lay07-fit-1600");
     crate::testing::capture(&mut harness, "lay07-fit-1600", None);
+}
+
+/// Review of #338: the previous run shown beside a run is one of the same
+/// mode, as the engine reuses previous results only for the same mode; a
+/// simulation's results are never the muted past of a live run.
+#[test]
+fn lay07_a_previous_run_of_another_mode_is_not_shown() {
+    use apiforge_core::run::{RunMode, RunResult, RunStatus};
+    let run = |id: &str, mode: RunMode| RunResult {
+        id: id.into(),
+        scenario_id: "scen-1".into(),
+        mode,
+        started_at: "2026-11-15T00:00:00.000Z".into(),
+        finished_at: None,
+        status: RunStatus::Running,
+        steps: Vec::new(),
+        diagnostic: false,
+        snapshot: None,
+        error: None,
+        notice: None,
+        running: None,
+    };
+    let live = run("run-2", RunMode::Live);
+    let simulated = run("run-1", RunMode::Simulation);
+    assert!(super::super::runs::previous_of(&live, Some(&simulated)).is_none());
+    let earlier = run("run-0", RunMode::Live);
+    assert_eq!(
+        super::super::runs::previous_of(&live, Some(&earlier)).map(|run| run.id.as_str()),
+        Some("run-0")
+    );
 }
 
 /// The camera centred on `handle` at `zoom` while the run is held, a few
