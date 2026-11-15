@@ -145,6 +145,7 @@ impl FolderApp {
             .as_deref()
             .unwrap_or_else(|| graph_of(&model, false));
         let parameters = parameters_of(&model);
+        let shared = self.shared_values_of(&model);
         let selection = self
             .selections
             .get(document_id)
@@ -235,6 +236,8 @@ impl FolderApp {
                         Mode::Split => "split",
                         Mode::Code | Mode::Diagram => "diagram",
                     },
+                    scenario: Some(scenario_of(&model)),
+                    shared: &shared,
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
@@ -254,6 +257,81 @@ impl FolderApp {
         }
         for command in commands {
             self.board_command(document_id, &model, cleanup, snapshot.editable, command);
+        }
+    }
+
+    /// The values of `model` worth a variable, from the cache while the
+    /// model is the same one (LAY-25).
+    fn shared_values_of(
+        &mut self,
+        model: &Arc<Document>,
+    ) -> Arc<Vec<apiforge_core::edit::SharedValue>> {
+        if let Some((cached, shared)) = &self.shared_values
+            && Arc::ptr_eq(cached, model)
+        {
+            return shared.clone();
+        }
+        let project = self.context_project();
+        let (main, cleanup) = scenario_of(model);
+        let shared = Arc::new(apiforge_core::edit::shared_values(main, cleanup, &project));
+        self.shared_values = Some((model.clone(), shared.clone()));
+        shared
+    }
+
+    /// Saves `values` in variables as one model edit (LAY-25), on `edited`,
+    /// the board's graph with the connection that brought the proposal
+    /// made; the variables added on this board are moved clear of its
+    /// cards, and the variables are selected: every one, or with
+    /// `only_new` the new ones.
+    #[allow(clippy::too_many_arguments)]
+    fn save_values(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        cleanup: bool,
+        board: &Board<'_>,
+        edited: Graph,
+        values: &[apiforge_core::edit::ValueRef],
+        only_new: bool,
+    ) {
+        let (main, other) = match model {
+            Document::Scenario(scenario) if cleanup => (scenario.graph.clone(), Some(edited)),
+            Document::Scenario(scenario) => (edited, Some(scenario.cleanup.clone())),
+            Document::Component(_) => (edited, None),
+        };
+        match apiforge_core::edit::save_values(&main, other.as_ref(), board.project, values) {
+            Ok(mut saved) => {
+                let on_board = if cleanup {
+                    saved.cleanup.as_mut()
+                } else {
+                    Some(&mut saved.main)
+                };
+                if let Some(graph) = on_board {
+                    for id in &saved.created {
+                        if graph.nodes.iter().any(|node| &node.id == id) {
+                            *graph = board.free_slot_for(std::mem::take(graph), id);
+                        }
+                    }
+                }
+                let selection = if only_new {
+                    saved.created.clone()
+                } else {
+                    saved.variables.clone()
+                };
+                self.component_action(
+                    document_id,
+                    publication::Action::Model {
+                        next: Box::new(with_graphs(model, saved.main, saved.cleanup)),
+                        selection: Some(selection),
+                        check: None,
+                    },
+                );
+            }
+            Err(error) => {
+                if let Some(canvas) = self.canvases.get_mut(document_id) {
+                    canvas.set_error(error.to_string());
+                }
+            }
         }
     }
 
@@ -523,6 +601,64 @@ impl FolderApp {
                 self.open_save_component(document_id, model, cleanup, &selection);
                 None
             }
+            Command::SaveValues { values, first } => {
+                let edited = match first.map(|first| *first) {
+                    Some(Command::Connect {
+                        source,
+                        source_port,
+                        target,
+                        target_input,
+                        target_path,
+                    }) => {
+                        board.connect(&source, &source_port, &target, &target_input, &target_path)
+                    }
+                    Some(Command::Bind {
+                        node,
+                        input,
+                        path,
+                        binding,
+                    }) => board
+                        .set_input(&node, &input, &path, binding)
+                        .and_then(|graph| {
+                            graph.ok_or_else(|| {
+                                apiforge_core::edit::EditError::NodeNotFound.to_string()
+                            })
+                        }),
+                    _ => Ok(graph.clone()),
+                };
+                match edited {
+                    Ok(edited) => self.save_values(
+                        document_id,
+                        model,
+                        cleanup,
+                        &board,
+                        edited,
+                        &values,
+                        false,
+                    ),
+                    Err(message) => self.apply_edit(document_id, model, cleanup, Err(message)),
+                }
+                None
+            }
+            Command::SaveSharedValues => {
+                let (main, other) = scenario_of(model);
+                let values: Vec<_> = apiforge_core::edit::shared_values(main, other, &project)
+                    .into_iter()
+                    .map(|value| value.value)
+                    .collect();
+                if !values.is_empty() {
+                    self.save_values(
+                        document_id,
+                        model,
+                        cleanup,
+                        &board,
+                        graph.clone(),
+                        &values,
+                        true,
+                    );
+                }
+                None
+            }
         };
         if let Some(result) = result {
             self.apply_edit(document_id, model, cleanup, result);
@@ -783,6 +919,24 @@ impl FolderApp {
                     self.apply_edit(document_id, &model, cleanup, Ok(next.into()))
                 }
                 inspector::Action::EditComponent => self.open_component(graph, &node.id),
+                inspector::Action::ReadDirectly => {
+                    let (main, other) = scenario_of(&model);
+                    match apiforge_core::edit::read_directly(main, other, &node.id) {
+                        Ok(read) => self.component_action(
+                            document_id,
+                            publication::Action::Model {
+                                next: Box::new(with_graphs(&model, read.main, read.cleanup)),
+                                selection: Some(Vec::new()),
+                                check: None,
+                            },
+                        ),
+                        Err(error) => {
+                            if let Some(canvas) = self.canvases.get_mut(document_id) {
+                                canvas.set_error(error.to_string());
+                            }
+                        }
+                    }
+                }
                 inspector::Action::AssertField { port, path, value } => {
                     if let Some(run) = &run {
                         self.folder_report_action(

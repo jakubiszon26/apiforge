@@ -12,6 +12,7 @@ mod readers;
 mod routing;
 pub mod shape;
 mod strip;
+mod variables;
 
 pub use collapse::collapsible;
 pub use layout::{Card, CardDensity, Chip, parse_inline};
@@ -26,7 +27,7 @@ use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
     binding::data_edge_id,
     block::Block,
-    edit::proxy_binding,
+    edit::{self, SharedValue, proxy_binding},
     format::{Binding, Graph, Port, Position, Project, ProxySource},
     graph::{ORDER_PORT, URL_INPUT, WireKind, sequence, wires},
     model::{Branch, NodeKind},
@@ -149,6 +150,16 @@ pub enum Command {
         node: String,
         input: String,
     },
+    /// Save values in variables (LAY-25), in one edit: each read through
+    /// the variable that holds it or a new one after its step. `first` is
+    /// the connection that brought the proposal, made in the same edit.
+    SaveValues {
+        values: Vec<edit::ValueRef>,
+        first: Option<Box<Command>>,
+    },
+    /// *Save shared values as variables* in the right-click menu: every
+    /// value of `Input::shared` (LAY-25).
+    SaveSharedValues,
 }
 
 /// Where a carried wire may land on a card, and how near it must come: within
@@ -283,6 +294,13 @@ pub struct Input<'a> {
     /// as a resized window does; a panel opening or closing beside the
     /// board does not (UX-18).
     pub arrangement: &'a str,
+    /// The graphs a value saved in a variable is read in: a scenario's Main
+    /// and Cleanup, or a component's graph. `None` where the board proposes
+    /// no variable (LAY-25).
+    pub scenario: Option<(&'a Graph, Option<&'a Graph>)>,
+    /// The values of the document worth a variable, as
+    /// `edit::shared_values` lists them (LAY-25).
+    pub shared: &'a [SharedValue],
 }
 
 /// Where a run of the board's document has got to while it is on (LAY-07):
@@ -452,6 +470,10 @@ pub struct Canvas {
     last_viewport: Rect,
     drag: Option<Drag>,
     menu: Option<ActionMenu>,
+    /// The choice at an input where a far value was dropped (LAY-25).
+    offer: Option<variables::Offer>,
+    /// The menu of a port's `+ var` (LAY-25).
+    port_menu: Option<variables::PortMenu>,
     selected_wires: Vec<String>,
     inline: Option<InlineEdit>,
     error: Option<String>,
@@ -512,6 +534,12 @@ pub struct Canvas {
     tags: Vec<DrawnTag>,
     #[cfg(test)]
     counts: Vec<DrawnCount>,
+    /// The `+ var` marks and the choice at a drop the last frame drew
+    /// (LAY-25).
+    #[cfg(test)]
+    var_marks: Vec<DrawnMark>,
+    #[cfg(test)]
+    offer_rect: Option<Rect>,
     #[cfg(test)]
     statement: Option<String>,
     /// The continuation marks the last frame drew (LAY-06).
@@ -559,6 +587,16 @@ pub(crate) struct DrawnTag {
     pub font: f32,
 }
 
+/// A `+ var` mark as the last frame drew it, on screen (LAY-25).
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(crate) struct DrawnMark {
+    pub source: String,
+    #[allow(dead_code)]
+    pub port: String,
+    pub rect: Rect,
+}
+
 /// The count at a source's port as the last frame drew it (LAY-23).
 #[cfg(test)]
 #[derive(Clone, Debug)]
@@ -600,6 +638,8 @@ impl Default for Canvas {
             expanded_here: HashSet::new(),
             drag: None,
             menu: None,
+            offer: None,
+            port_menu: None,
             selected_wires: Vec::new(),
             inline: None,
             error: None,
@@ -625,6 +665,10 @@ impl Default for Canvas {
             tags: Vec::new(),
             #[cfg(test)]
             counts: Vec::new(),
+            #[cfg(test)]
+            var_marks: Vec::new(),
+            #[cfg(test)]
+            offer_rect: None,
             #[cfg(test)]
             statement: None,
             #[cfg(test)]
@@ -870,6 +914,18 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_counts(&self) -> &[DrawnCount] {
         &self.counts
+    }
+
+    /// The `+ var` marks the last frame drew (LAY-25).
+    #[cfg(test)]
+    pub(crate) fn debug_var_marks(&self) -> &[DrawnMark] {
+        &self.var_marks
+    }
+
+    /// The choice at a drop, on screen, while it is open (LAY-25).
+    #[cfg(test)]
+    pub(crate) fn debug_offer(&self) -> Option<Rect> {
+        self.offer.as_ref().and(self.offer_rect)
     }
 
     /// The statement the last frame showed for a pointed chip or input.
@@ -1196,6 +1252,8 @@ impl Canvas {
             self.kept_in_view = None;
             self.drag = None;
             self.menu = None;
+            self.offer = None;
+            self.port_menu = None;
             self.inline = None;
             self.selected_wires.clear();
             self.shown_port = None;
@@ -1989,6 +2047,85 @@ impl Canvas {
                 self.shown_port = (self.shown_port.as_ref() != Some(&port)).then_some(port);
             }
         }
+        // A port with values worth a variable shows `+ var` under its count;
+        // its menu lists them (LAY-25).
+        #[cfg(test)]
+        let mut drawn_marks: Vec<DrawnMark> = Vec::new();
+        let mut placed: Vec<Rect> = Vec::new();
+        for (count, laid) in shown_counts.iter().zip(&laid_counts) {
+            if !input
+                .shared
+                .iter()
+                .any(|value| value.value.node_id == count.source && value.value.port == count.port)
+            {
+                continue;
+            }
+            // Clear of the chips, the counts, the other marks and the rows of
+            // the card's other outputs.
+            let card = &cards[count.card];
+            let mut avoid: Vec<Rect> = chip_boxes.iter().chain(&placed).copied().collect();
+            for row in card.outputs.iter().filter(|row| row.name != count.port) {
+                if let Some(anchor) = card.output_anchor(&row.name) {
+                    let anchor = camera.to_screen(anchor);
+                    let half = laid.rect.height() / 2.0 + 1.0;
+                    avoid.push(Rect::from_min_max(
+                        egui::pos2(anchor.x, anchor.y - half),
+                        egui::pos2(anchor.x + 400.0 * camera.zoom, anchor.y + half),
+                    ));
+                }
+            }
+            let Some(mark) = readers::lay_mark(&painter, laid, camera, &avoid) else {
+                continue;
+            };
+            placed.push(mark.rect);
+            if !mark.rect.intersects(overlays.board) {
+                continue;
+            }
+            let open = self
+                .port_menu
+                .as_ref()
+                .is_some_and(|menu| menu.source == count.source && menu.port == count.port);
+            let step = input
+                .graph
+                .nodes
+                .iter()
+                .find(|node| node.id == count.source)
+                .map_or(card.name.as_str(), |node| node.handle.as_str());
+            let name = variables::mark_name(step);
+            let response = board_ui
+                .interact(
+                    mark.rect.intersect(overlays.board),
+                    board_ui.id().with(("var-mark", &count.source, &count.port)),
+                    Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text("Save a value many steps read in a variable");
+            readers::paint_mark(&board_painter, &mark, open || response.hovered());
+            response.widget_info(move || {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+            });
+            if response.clicked() {
+                clicked_card = true;
+                self.menu = None;
+                self.offer = None;
+                self.port_menu = (!open).then(|| variables::PortMenu {
+                    source: count.source.clone(),
+                    port: count.port.clone(),
+                    at: mark.rect.left_bottom(),
+                    opening: true,
+                });
+            }
+            #[cfg(test)]
+            drawn_marks.push(DrawnMark {
+                source: count.source.clone(),
+                port: count.port.clone(),
+                rect: mark.rect,
+            });
+        }
+        #[cfg(test)]
+        {
+            self.var_marks = drawn_marks;
+        }
         if let Some((text, near)) = &statement {
             readers::paint_statement(&painter, *near, text);
         }
@@ -2097,6 +2234,12 @@ impl Canvas {
             self.empty_state(ui, overlays.board, input, &mut commands);
         }
         self.error_banner(ui, &overlays);
+        // The right-click menu ends with *Save shared values as variables*
+        // where the board proposes variables (LAY-25).
+        let shared = input.scenario.map(|_| menu::Shared {
+            values: input.shared.len(),
+            editable: !input.read_only,
+        });
         if let Some(menu) = &mut self.menu {
             match menu.show(
                 ui.ctx(),
@@ -2104,6 +2247,7 @@ impl Canvas {
                 input.project,
                 input.library,
                 input.component,
+                shared,
             ) {
                 menu::Outcome::Open => {}
                 menu::Outcome::Close => self.menu = None,
@@ -2111,10 +2255,49 @@ impl Canvas {
                     commands.push(command);
                     self.menu = None;
                 }
+                menu::Outcome::SaveShared => {
+                    commands.push(Command::SaveSharedValues);
+                    self.menu = None;
+                }
                 menu::Outcome::Library(action) => {
                     // As a click in the library panel: at the visible centre.
                     commands.extend(library_command(action, self.visible_center()));
                     self.menu = None;
+                }
+            }
+        }
+        if let Some(offer) = &mut self.offer {
+            let at = camera.to_screen(offer.anchor);
+            let (outcome, _rect) = offer.show(ui.ctx(), at, overlays.board);
+            #[cfg(test)]
+            {
+                self.offer_rect = Some(_rect);
+            }
+            match outcome {
+                variables::Outcome::Open => {}
+                variables::Outcome::Close => self.offer = None,
+                variables::Outcome::Run(command) => {
+                    commands.push(command);
+                    self.offer = None;
+                }
+            }
+        }
+        if let Some(menu) = &mut self.port_menu {
+            let values: Vec<&SharedValue> = input
+                .shared
+                .iter()
+                .filter(|value| value.value.node_id == menu.source && value.value.port == menu.port)
+                .collect();
+            if values.is_empty() {
+                self.port_menu = None;
+            } else {
+                match menu.show(ui.ctx(), &values, !input.read_only) {
+                    variables::Outcome::Open => {}
+                    variables::Outcome::Close => self.port_menu = None,
+                    variables::Outcome::Run(command) => {
+                        commands.push(command);
+                        self.port_menu = None;
+                    }
                 }
             }
         }
@@ -2865,13 +3048,26 @@ impl Canvas {
                         binding,
                     });
                 }
-                (Some((target, input_name, path, _)), None) => commands.push(Command::Connect {
-                    source: source.unwrap_or_default(),
-                    source_port: port,
-                    target,
-                    target_input: input_name,
-                    target_path: path,
-                }),
+                (Some((target, input_name, path, anchor)), None) => {
+                    let source = source.unwrap_or_default();
+                    let value = edit::ValueRef::new(&source, &port, "");
+                    let direct = Command::Connect {
+                        source,
+                        source_port: port,
+                        target: target.clone(),
+                        target_input: input_name,
+                        target_path: path,
+                    };
+                    self.connect_or_offer(
+                        input,
+                        cards,
+                        value,
+                        &target,
+                        camera.to_world(anchor),
+                        direct,
+                        commands,
+                    );
+                }
                 (None, binding) => {
                     if binding.is_some()
                         || cards
@@ -3032,12 +3228,26 @@ impl Canvas {
                 position,
             }),
             Payload::Variable { binding, .. } => match row_under(cards) {
-                Some((node, target_input, path, _)) => commands.push(Command::Bind {
-                    node,
-                    input: target_input,
-                    path,
-                    binding: binding.clone(),
-                }),
+                Some((node, target_input, path, row)) => {
+                    let direct = Command::Bind {
+                        node: node.clone(),
+                        input: target_input,
+                        path,
+                        binding: binding.clone(),
+                    };
+                    match edit::ValueRef::of(binding) {
+                        Some(value) => self.connect_or_offer(
+                            input,
+                            cards,
+                            value,
+                            &node,
+                            camera.to_world(row.left_center()),
+                            direct,
+                            commands,
+                        ),
+                        None => commands.push(direct),
+                    }
+                }
                 // Dropped on a card but beside its arguments, it was aimed at one
                 // of them.
                 None if cards
@@ -3059,6 +3269,51 @@ impl Canvas {
         }
     }
 
+    /// A far value dropped on an input asks first (LAY-25): the choice of
+    /// reading it through a variable or wiring it directly opens at the
+    /// input. A value of a step that is not a request or a component call,
+    /// a reader beside its source and a board that proposes no variable
+    /// connect at once, with `direct`.
+    #[allow(clippy::too_many_arguments)]
+    fn connect_or_offer(
+        &mut self,
+        input: &Input<'_>,
+        cards: &[Card],
+        value: edit::ValueRef,
+        target: &str,
+        anchor: Pos2,
+        direct: Command,
+        commands: &mut Vec<Command>,
+    ) {
+        let source = input
+            .reference_graph
+            .nodes
+            .iter()
+            .chain(&input.graph.nodes)
+            .find(|node| node.id == value.node_id);
+        let card = |id: &str| cards.iter().find(|card| card.id == id);
+        let far = match (source, card(&value.node_id), card(target)) {
+            (Some(source), Some(from), Some(to)) => {
+                matches!(source.kind, NodeKind::Request | NodeKind::Component)
+                    && readers::far(cards, from, to)
+            }
+            _ => false,
+        };
+        match input.scenario {
+            Some((main, cleanup)) if far && !input.read_only => {
+                self.menu = None;
+                self.port_menu = None;
+                self.offer = Some(variables::Offer {
+                    anchor,
+                    proposal: edit::propose(main, cleanup, input.project, &value),
+                    direct,
+                    focus: true,
+                });
+            }
+            _ => commands.push(direct),
+        }
+    }
+
     /// Esc closes what is open first; on a quiet board it clears the
     /// selection, and the wires it brought back return to chips (LAY-23).
     /// A read-only board takes it too: it selects and reveals as well.
@@ -3067,6 +3322,9 @@ impl Canvas {
             || ui.ctx().memory(|memory| memory.top_modal_layer().is_some())
             || !ui.input(|state| state.key_pressed(Key::Escape))
         {
+            return;
+        }
+        if self.offer.take().is_some() || self.port_menu.take().is_some() {
             return;
         }
         if self.menu.is_none() && self.drag.is_none() {
@@ -4170,6 +4428,8 @@ mod tests {
                                 adding_input: None,
                                 settings: None,
                                 arrangement: "",
+                                scenario: None,
+                                shared: &[],
                             },
                         );
                     });
@@ -4224,6 +4484,8 @@ mod tests {
                                 adding_input: None,
                                 settings: None,
                                 arrangement: "",
+                                scenario: None,
+                                shared: &[],
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =
@@ -4306,6 +4568,8 @@ mod tests {
                                 header_width: 200.0,
                             }),
                             arrangement: "",
+                            scenario: None,
+                            shared: &[],
                         };
                         let room = canvas.header_room(ui, &input);
                         input.header_leading = Some(vec2(200.0, theme::CONTROL_HEIGHT));

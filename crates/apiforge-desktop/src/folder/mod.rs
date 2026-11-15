@@ -294,6 +294,9 @@ pub struct FolderApp {
     /// The steps the Cleanup board's cards read, kept while the model is the
     /// same: building them copies the Main graph (UX-16).
     cleanup_reference: Option<(Arc<Document>, Arc<Graph>)>,
+    /// The values worth a variable of the model the board shows, kept while
+    /// the model is the same (LAY-25).
+    shared_values: Option<(Arc<Document>, Arc<Vec<apiforge_core::edit::SharedValue>>)>,
     selections: HashMap<String, Vec<String>>,
     /// The input selected in a component's INPUTS strip, by document
     /// (UX-31). It counts only while no block of the document is selected.
@@ -523,6 +526,7 @@ impl FolderApp {
             completion_names: None,
             canvases: HashMap::new(),
             cleanup_reference: None,
+            shared_values: None,
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
             unchanged: None,
@@ -1972,6 +1976,30 @@ fn reference_of(model: &Document, cleanup: bool) -> std::borrow::Cow<'_, Graph> 
 
 /// The graph whose steps may read the board's: the scenario's Cleanup while
 /// the board shows Main (LAY-11); `None` anywhere else.
+/// The graphs a variable is read in: a scenario's Main and Cleanup, or a
+/// component's graph (LAY-25).
+fn scenario_of(model: &Document) -> (&Graph, Option<&Graph>) {
+    match model {
+        Document::Scenario(scenario) => (&scenario.graph, Some(&scenario.cleanup)),
+        Document::Component(component) => (&component.graph, None),
+    }
+}
+
+/// `model` with its graphs replaced, as `scenario_of` gives them.
+fn with_graphs(model: &Document, main: Graph, cleanup: Option<Graph>) -> Document {
+    let mut next = model.clone();
+    match &mut next {
+        Document::Scenario(scenario) => {
+            scenario.graph = main;
+            if let Some(cleanup) = cleanup {
+                scenario.cleanup = cleanup;
+            }
+        }
+        Document::Component(component) => component.graph = main,
+    }
+    next
+}
+
 fn later_of(model: &Document, cleanup: bool) -> Option<&Graph> {
     match model {
         Document::Scenario(scenario) if !cleanup => Some(&scenario.cleanup),

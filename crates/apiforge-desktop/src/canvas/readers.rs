@@ -2,8 +2,8 @@
 //! `← cartId` beside each reader's input instead of a long wire.
 //!
 //! A data wire becomes a chip when its output port is read by
-//! [`MIN_READERS`] or more steps of the document and its reader is not
-//! beside the source: in the next column of the source's row, or in the
+//! [`MIN_READERS`] or more steps of the document, or is a variable's
+//! (LAY-25), and its reader is not beside the source: in the next column of the source's row, or in the
 //! source's own column. The source's port says how many steps read it. The
 //! wire comes back while its chip or its input is pointed at and while its
 //! reader or its source is selected.
@@ -144,6 +144,12 @@ fn beside(rows: &[f32], from: Rect, to: Rect) -> bool {
         && (step.abs() < half || (step - pitch).abs() < half)
 }
 
+/// Whether the card `to` is far from the card `from` on the board: not
+/// beside it (LAY-25's drop asks first there).
+pub fn far(cards: &[Card], from: &Card, to: &Card) -> bool {
+    !beside(&rows(cards), from.rect(), to.rect())
+}
+
 /// The wires of `wires` that are chips, decided on `cards` where they rest.
 /// A wire from a proxy the person placed stays a wire: the proxy is there
 /// to shorten it.
@@ -161,7 +167,13 @@ pub fn chipped(graph: &Graph, cards: &[Card], wires: &[BoardWire]) -> HashSet<St
             let count = readers
                 .get(&(source.id.clone(), port.clone()))
                 .map_or(0, BTreeSet::len);
-            (count >= MIN_READERS && !beside(&rows, source.rect(), target.rect()))
+            // A variable's far reader is a chip whatever the count: saving a
+            // value is how a person says "do not wire this" (LAY-25).
+            let saved = graph
+                .nodes
+                .iter()
+                .any(|node| node.id == source.id && node.is_variable());
+            ((count >= MIN_READERS || saved) && !beside(&rows, source.rect(), target.rect()))
                 .then(|| wire.id.clone())
         })
         .collect()
@@ -465,6 +477,66 @@ pub fn lay_count(painter: &Painter, count: &Count, camera: Camera, avoid: &[Rect
         bend,
         socket: anchor,
     }
+}
+
+/// The mark `+ var` under a count (LAY-25): the port has values worth a
+/// variable. It stands in the gap under the count, at the count's size, and
+/// moves down past whatever in `avoid` it would cover (a chip, a count,
+/// another mark, the row of another output of the card, on screen); where
+/// the gap has no room for its text it says `+`, and with no room for that
+/// it is not drawn.
+pub fn lay_mark(painter: &Painter, count: &Laid, camera: Camera, avoid: &[Rect]) -> Option<Laid> {
+    let font_id = FontId::proportional(count.font);
+    let stub = stub_length(camera.zoom);
+    let room = GAP * camera.zoom - stub - 2.0;
+    let (shown, galley) = fitting(
+        painter,
+        &["+ var".to_owned(), "+".to_owned()],
+        &font_id,
+        room,
+    );
+    let size = galley.size() + vec2(8.0, 3.0);
+    if size.x > room {
+        return None;
+    }
+    let mut rect = Rect::from_min_size(pos2(count.rect.left(), count.rect.bottom() + 3.0), size);
+    for _ in 0..=avoid.len() {
+        let Some(over) = avoid.iter().find(|other| other.intersects(rect)) else {
+            break;
+        };
+        rect = rect.translate(vec2(0.0, over.bottom() + 2.0 - rect.top()));
+    }
+    Some(Laid {
+        galley,
+        shown,
+        rect,
+        font: count.font,
+        stub: [rect.left_center(), rect.left_center()],
+        bend: None,
+        socket: rect.left_center(),
+    })
+}
+
+/// The mark `+ var`: an action, so in the accent; filled while pointed at
+/// or while its menu is open.
+pub fn paint_mark(painter: &Painter, laid: &Laid, lit: bool) {
+    let fill = if lit {
+        theme::ACCENT_SOFT
+    } else {
+        theme::WHITE
+    };
+    painter.rect(
+        laid.rect,
+        laid.rect.height() / 2.0,
+        fill,
+        Stroke::new(1.0, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    painter.galley(
+        laid.rect.min + vec2(4.0, 1.5),
+        laid.galley.clone(),
+        theme::ACCENT,
+    );
 }
 
 /// A chip or a count: a grey outline and muted text, quieter than a proxy
