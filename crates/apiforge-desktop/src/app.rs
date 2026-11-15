@@ -2339,6 +2339,16 @@ impl App {
         })
         .flatten();
         let parameters = self.editor.parameter_names();
+        // The running step is marked while the run's results are shown
+        // (LAY-07); this window keeps no earlier run.
+        let on = steps.is_some()
+            && self
+                .run
+                .as_ref()
+                .is_some_and(|run| run.status == RunStatus::Running);
+        let running = on
+            .then(|| self.run.as_ref().and_then(|run| run.running.clone()))
+            .flatten();
         let commands = {
             let input = canvas::Input {
                 graph: self.editor.graph(),
@@ -2348,6 +2358,11 @@ impl App {
                 parameters: &parameters,
                 selection: &self.editor.selection,
                 steps: steps.as_deref(),
+                progress: canvas::Progress {
+                    on,
+                    running: running.as_deref(),
+                    previous: None,
+                },
                 can_paste: self
                     .editor
                     .clipboard
