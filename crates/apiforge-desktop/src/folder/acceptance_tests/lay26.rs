@@ -674,7 +674,10 @@ fn review_lay26() {
         assert!(!warnings(&harness, &id).is_empty());
         harness.step();
         assert!(
-            harness.query_by_label_contains(FAR_READ).is_some(),
+            harness
+                .query_all_by_label_contains(FAR_READ)
+                .next()
+                .is_some(),
             "a row of the problems list"
         );
         crate::testing::capture(&mut harness, &format!("lay26-code-{suffix}"), None);
