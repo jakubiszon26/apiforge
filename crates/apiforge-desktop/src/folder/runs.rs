@@ -141,6 +141,16 @@ fn publish(
     }
 }
 
+/// The run before `run` that the board may show beside it: one of the same
+/// mode, as the engine reuses previous results only for the same mode
+/// (LAY-07).
+pub(super) fn previous_of<'a>(
+    run: &RunResult,
+    previous: Option<&'a RunResult>,
+) -> Option<&'a RunResult> {
+    previous.filter(|previous| previous.mode == run.mode)
+}
+
 /// The hover of the header's label while a run of unsaved code runs (UX-04).
 const UNSAVED_HOVER: &str = "The run uses the code in the editor, which is not saved yet.";
 /// The hover while a run of the last confirmed code runs (UX-04).
@@ -226,7 +236,7 @@ impl FolderApp {
     pub(super) fn previous_run(&self, id: &str) -> Option<&RunResult> {
         let report = self.runs.reports.get(id)?;
         (report.result.status == RunStatus::Running && self.freshness(report) != Freshness::Stale)
-            .then_some(report.previous.as_ref())
+            .then(|| previous_of(&report.result, report.previous.as_ref()))
             .flatten()
     }
 
