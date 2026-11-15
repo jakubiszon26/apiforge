@@ -1189,6 +1189,72 @@ fn lay25_criterion_10_a_variable_is_read_through_chips() {
     assert_eq!(proxies(&diagram), 0, "diagram.json has no proxy");
 }
 
+/// Criterion 10, as the saved board is fitted (owner, #335): a chip of a
+/// variable's far reader says `← name`, else the number of the variable's
+/// badge (`← 7`), else the arrow alone. At 1600 × 1000 every one names
+/// its variable or its number; at 960 × 540 the arrow is allowed too, and
+/// no chip covers a card (LAY-23 criterion 6).
+#[test]
+fn lay25_criterion_10_a_variable_chip_names_its_variable() {
+    for size in [WIDE, crate::testing::MINIMUM] {
+        let (_project, mut harness, id) = tidied("far-value", size);
+        fit(&mut harness);
+        right_click_board(&mut harness, &id);
+        harness.get_by_label_contains(SAVE_SHARED).click();
+        settle(&mut harness);
+        harness.step();
+        app(&mut harness).selections.insert(id.clone(), Vec::new());
+        settle(&mut harness);
+        fit(&mut harness);
+        let graph = main_graph(&harness, &id);
+        let canvas = board(&harness, &id);
+        let saved: std::collections::BTreeMap<String, (String, String)> = graph
+            .nodes
+            .iter()
+            .filter(|node| node.is_variable())
+            .map(|node| {
+                let badge = canvas
+                    .debug_badge(&node.id)
+                    .unwrap_or_else(|| panic!("{size:?}: {} has a badge", node.handle));
+                (node.id.clone(), (node.handle.clone(), badge.text))
+            })
+            .collect();
+        let cards: Vec<Rect> = graph
+            .nodes
+            .iter()
+            .filter_map(|node| canvas.debug_world(&node.id))
+            .collect();
+        let zoom = canvas.debug_zoom();
+        let mut named: BTreeSet<String> = BTreeSet::new();
+        for tag in canvas.debug_tags() {
+            let Some((name, number)) = saved.get(&tag.tag.source) else {
+                continue;
+            };
+            let mut allowed = vec![format!("← {name}"), format!("← {number}")];
+            if size != WIDE {
+                allowed.push("←".to_owned());
+            }
+            assert!(
+                allowed.contains(&tag.shown),
+                "{size:?} at {zoom}: the chip at {} says {:?}, not one of {allowed:?}",
+                tag.tag.reader,
+                tag.shown
+            );
+            for card in &cards {
+                assert!(
+                    !tag.world.intersects(*card),
+                    "{size:?} at {zoom}: {} covers {card:?}",
+                    tag.tag.statement
+                );
+            }
+            named.insert(name.clone());
+        }
+        for name in ["cartId", "productId"] {
+            assert!(named.contains(name), "{size:?}: chips of {name}: {named:?}");
+        }
+    }
+}
+
 /// Criterion 11: *Read directly again* on `cartId` makes its readers read
 /// `cart.cart.id` and removes the variable, in one undoable edit; it is
 /// absent on a variable that holds anything but a plain reference.
