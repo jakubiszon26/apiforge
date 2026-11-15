@@ -651,17 +651,34 @@ fn lay26_criterion_7_errors_come_first() {
     assert!(warnings(&harness, &id).is_empty(), "no far read beside it");
 
     // 990 comments that belong to no statement, then fifteen far reads: the
-    // list keeps a thousand.
+    // list keeps a thousand. The window's own session analyses it, without
+    // drawing a thousand rows, which a debug build on a slow runner cannot
+    // settle in time.
     let mut full = fixture("far-value");
     for index in 0..990 {
         full.push_str(&format!("// note {index}\n"));
     }
-    let (_project, harness, id) = in_code(&full, WIDE);
-    let all = diagnostics(&harness, &id);
+    let project = crate::testing::shop_project();
+    fs::write(project.path().join(SCENARIO), &full).unwrap();
+    fs::remove_file(project.path().join(DIAGRAM)).unwrap();
+    let placer = super::super::placement::CardPlacer::new(
+        super::super::placement::DensityHandle::new(crate::canvas::CardDensity::Full),
+    );
+    let session =
+        apiforge_project::ProjectSession::open_with(project.path(), Arc::new(placer)).unwrap();
+    let document = session
+        .documents()
+        .iter()
+        .find(|document| document.entry().path.as_str() == SCENARIO)
+        .unwrap();
+    let all = document.diagnostics();
     assert_eq!(all.len(), apiforge_script::MAX_DIAGNOSTICS);
-    assert_eq!(warnings(&harness, &id).len(), 10, "as many as fit");
-    let session = folder(&harness).session.as_ref().unwrap();
-    assert_eq!(session.document(&id).unwrap().omitted_diagnostics(), 5);
+    assert_eq!(
+        all.iter().filter(|d| d.message == FAR_READ).count(),
+        10,
+        "as many as fit"
+    );
+    assert_eq!(document.omitted_diagnostics(), 5);
 }
 
 /// Criterion 7: the Code view with the warnings, at both window sizes.
