@@ -724,9 +724,10 @@ mod ux03 {
         folder(harness).marked_lines(&active_id(harness))
     }
 
-    /// The demo shop in Code with the marks' clock held at `start`.
+    /// The demo shop in Code with the marks' clock held at `start`, its far
+    /// reads saved in variables: the only marks are those a test types.
     fn shop_in_code(size: egui::Vec2, start: Instant) -> (tempfile::TempDir, FolderHarness) {
-        let project = crate::testing::shop_project();
+        let project = crate::testing::shop_project_without_far_reads();
         let mut harness = folder_harness(project.path(), size);
         show(&mut harness, "Code");
         app(&mut harness).set_marks_clock(start);

@@ -2,7 +2,7 @@
 //! identity. Card sizes belong to the renderer, so hosts supply their own
 //! placer; the fixed placer keeps headless sessions and the CLI deterministic.
 use apiforge_core::format::{Graph, Position, Project};
-use apiforge_script::Document;
+use apiforge_script::{Diagnostic, Document, SyntaxTree};
 use std::collections::HashSet;
 
 pub trait Placer: Send + Sync {
@@ -10,6 +10,20 @@ pub trait Placer: Send + Sync {
     /// The project context is the one the document was analysed in, so a host
     /// can measure a card the way it draws it.
     fn place(&self, document: &mut Document, fresh: &[String], context: &Project);
+
+    /// Warnings the host adds to a valid analysis, after the source's own
+    /// and within its limit: `tree` is the analysed text, `document` its
+    /// lowered model (LAY-26: the window's far reads). None by default, so
+    /// the sessions of MCP and the command line, which place with
+    /// [`FixedPlacer`], add nothing.
+    fn advise(
+        &self,
+        _tree: &SyntaxTree,
+        _document: &Document,
+        _context: &Project,
+    ) -> Vec<Diagnostic> {
+        Vec::new()
+    }
 }
 
 /// Uniform card sizes and the shared incremental layered layout.

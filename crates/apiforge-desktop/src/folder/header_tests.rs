@@ -283,7 +283,9 @@ fn tab_runs_from_the_name_through_main_and_cleanup_to_add_step_and_the_tools() {
         assert_row_stops_together(&visited, &board, &context);
 
         let (_project, mut split) = open(size, "Split");
-        let visited = tab_order(&mut split, 12);
+        // The demo's two far reads (LAY-26) put their rows and Apply fix
+        // in the problems list, which Tab visits before the code.
+        let visited = tab_order(&mut split, 16);
         let context = format!("Split at {size:?}");
         assert_visits_in_order(
             &visited,

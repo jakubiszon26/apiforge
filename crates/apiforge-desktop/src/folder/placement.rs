@@ -85,6 +85,16 @@ impl CardPlacer {
 }
 
 impl Placer for CardPlacer {
+    /// The Code view warns at each far read (LAY-26).
+    fn advise(
+        &self,
+        tree: &apiforge_script::SyntaxTree,
+        document: &Document,
+        context: &Project,
+    ) -> Vec<apiforge_script::Diagnostic> {
+        apiforge_script::far_read_warnings(tree, document, context)
+    }
+
     fn place(&self, document: &mut Document, fresh: &[String], context: &Project) {
         let density = self.density.get();
         let fresh: HashSet<&str> = fresh.iter().map(String::as_str).collect();
