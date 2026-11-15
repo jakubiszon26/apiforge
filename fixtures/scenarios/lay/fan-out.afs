@@ -1,0 +1,76 @@
+scenario "Fan-out" {
+  description "LAY reference: a cart component whose two values almost every later request reads."
+  on_error stop
+  param coupon = "WELCOME10"
+  param email = "guest@example.com"
+  begin = start
+  @after(begin)
+  catalogue = GET "/products" {
+    query { limit: 5 }
+    sample 200 { items: [{ id: 123, price: 100 }] }
+  }
+  var first = catalogue.body.items[0]
+  product = product@1(id: first.id)
+  cart = add_to_cart@1(product: product, quantity: 2)
+  var cartId = cart.cart.id
+  var itemId = cart.cart.productId
+  @after(cart)
+  quantity = PATCH "/carts/{{cartId}}/items/{{itemId}}" {
+    body { quantity: 3 }
+    sample 200 { id: "c-1", quantity: 3 }
+  }
+  quantity_ok = assert quantity.status == 200
+  @after(quantity_ok)
+  apply_coupon = POST "/carts/{{cartId}}/coupon" {
+    body { code: param.coupon }
+    sample 200 { id: "c-1", coupon: "WELCOME10" }
+  }
+  coupon_ok = assert apply_coupon.status == 200
+  @after(coupon_ok)
+  note = PUT "/carts/{{cartId}}/items/{{itemId}}/note" {
+    body { text: "Gift wrap" }
+    sample 200 { ok: true }
+  }
+  note_ok = assert note.status == 200
+  @after(note_ok)
+  stock = GET "/carts/{{cartId}}/items/{{itemId}}/stock" {
+    sample 200 { available: 12 }
+  }
+  in_stock = assert stock.body.available > 2
+  @after(in_stock)
+  shipping = PUT "/carts/{{cartId}}/shipping" {
+    body { method: "courier", item: itemId }
+    sample 200 { ok: true }
+  }
+  shipping_ok = assert shipping.status == 200
+  @after(shipping_ok)
+  remove_coupon = DELETE "/carts/{{cartId}}/coupon" {
+    sample 200 { id: "c-1" }
+  }
+  removed_ok = assert remove_coupon.status == 200
+  @after(removed_ok)
+  view = GET "/carts/{{cartId}}" {
+    sample 200 { id: "c-1", items: [{ id: 123, quantity: 3 }] }
+  }
+  same_item = assert view.body.items[0].id == itemId
+  @after(same_item)
+  checkout = POST "/checkout" {
+    body { cartId: cartId, itemId: itemId, email: param.email, payment: "card" }
+    sample 201 { id: "o-1", orderNumber: "N-0001", state: "new" }
+  }
+  checkout_ok = condition all {
+    checkout.status == 201,
+    checkout.body.state == "new",
+    nonempty checkout.body.orderNumber,
+  }
+  var orderNumber = checkout.body.orderNumber
+  @after(checkout_ok)
+  lookup = GET "/orders/by-number/{{orderNumber}}" {
+    query { email: param.email, cart: cartId }
+    sample 200 { id: "o-1", orderNumber: "N-0001", state: "paid" }
+  }
+  lookup_ok = condition all {
+    lookup.status == 200,
+    lookup.body.orderNumber == orderNumber,
+  }
+}

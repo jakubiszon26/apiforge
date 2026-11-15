@@ -11,13 +11,16 @@
 //! `fixtures/scenarios/lay/` as the desktop tidies them, read from
 //! `support/boards.txt`: each at the compact and the full density, with its checks
 //! collapsed and expanded, every card at the size the board draws it and every wire
-//! between the ports the board gives the router (LAY-06). The desktop's acceptance
+//! between the ports the board gives the router (LAY-06), and at the compact density
+//! once more with LAY-23's chips, whose wires the router is not given. The desktop's acceptance
 //! test `lay06_criterion_10_quality_on_real_card_sizes` writes that file and fails
 //! when it is out of date. The numbers are deterministic. `--dump` prints one
 //! generated board's rectangles and routes, for reading a case by hand.
 //!
 //! The columns:
 //!
+//! - `drawn`: which data wires the board draws, `all` or `chips` at the readers of a
+//!   value three or more steps read (LAY-23);
 //! - `wires`, `crossings` (the router's bridges), `bends`, `straight` (wires without
 //!   a bend), `incomplete` (routes that found no way around the cards);
 //! - `close`: pairs of parallel segments of different wires within 8 px of each
@@ -153,12 +156,15 @@ fn generated(seed: u64, count: usize, order: bool) -> Board {
 }
 
 /// One reference scenario as the desktop tidied it: `board <scenario> <density>
-/// <checks> <steps>`, then its `card`, `chip`, `wire` and `mark` lines, then `end`.
+/// <checks> <steps> <drawn>`, then its `card`, `chip`, `wire` and `mark` lines,
+/// then `end`.
 struct Tidied {
     name: String,
     density: String,
     checks: String,
     steps: usize,
+    /// `all`, or `chips` (LAY-23).
+    drawn: String,
     cards: Vec<Rect>,
     chips: Vec<Rect>,
     /// The continuation marks, which count in the board's size only.
@@ -202,6 +208,7 @@ fn boards(text: &str) -> Result<Vec<Tidied>, String> {
                 density: word()?,
                 checks: word()?,
                 steps: number(Some(&word()?))? as usize,
+                drawn: word()?,
                 cards: Vec::new(),
                 chips: Vec::new(),
                 marks: Vec::new(),
@@ -451,7 +458,7 @@ fn reference_table(text: &mut String) -> Result<(), String> {
     let _ = writeln!(
         text,
         "\nreference scenarios, tidied by the desktop, at the sizes it draws\n\n\
-         scenario   density checks    steps cards wires crossings  bends straight  close coincident incomplete width height fit_1600 fit_960 chips card_hits chip_hits clearance"
+         scenario   density checks    drawn steps cards wires crossings  bends straight  close coincident incomplete width height fit_1600 fit_960 chips card_hits chip_hits clearance"
     );
     for board in boards(BOARDS)? {
         let rectangles: Vec<Rect> = board.cards.iter().chain(&board.chips).copied().collect();
@@ -470,10 +477,11 @@ fn reference_table(text: &mut String) -> Result<(), String> {
         let (card_hits, chip_hits) = collisions(&board.cards, &board.chips);
         let _ = writeln!(
             text,
-            "{:<10} {:<7} {:<9} {:>5} {:>5} {:>5} {:>9} {:>6} {:>8} {:>6} {:>10} {:>10} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9}",
+            "{:<10} {:<7} {:<9} {:<5} {:>5} {:>5} {:>5} {:>9} {:>6} {:>8} {:>6} {:>10} {:>10} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9}",
             board.name,
             board.density,
             board.checks,
+            board.drawn,
             board.steps,
             board.cards.len(),
             measures.wires,
@@ -651,8 +659,8 @@ mod tests {
         let boards = boards(BOARDS).expect("the board file reads");
         assert_eq!(
             boards.len(),
-            12,
-            "three scenarios, two densities, two states"
+            24,
+            "four scenarios, two densities, two states, and chips at the compact density"
         );
         for board in &boards {
             assert!(
@@ -672,6 +680,7 @@ mod tests {
                     board.name == "shop-30"
                         && board.density == density
                         && board.checks == "expanded"
+                        && board.drawn == "all"
                 })
                 .expect("shop-30")
                 .cards
@@ -696,6 +705,22 @@ mod tests {
             collapsed("shop-30") < expanded("shop-30"),
             "collapsed folds checks"
         );
+        // Chips give the router fewer wires, never other cards.
+        let wires = |name: &str, drawn: &str| {
+            boards
+                .iter()
+                .find(|board| {
+                    board.name == name
+                        && board.density == "compact"
+                        && board.checks == "collapsed"
+                        && board.drawn == drawn
+                })
+                .map(|board| (board.cards.len(), board.wires.len()))
+                .expect("the board")
+        };
+        let (all, chips) = (wires("fan-out", "all"), wires("fan-out", "chips"));
+        assert_eq!(all.0, chips.0);
+        assert!(chips.1 < all.1, "{chips:?} against {all:?}");
     }
 
     #[test]

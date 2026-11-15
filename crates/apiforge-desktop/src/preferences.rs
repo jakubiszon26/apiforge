@@ -12,7 +12,7 @@
 //! last window to change the same preference wins. Each write is atomic, so a
 //! crash never leaves a half-written file behind.
 
-use crate::canvas::WireStyle;
+use crate::canvas::{WireMode, WireStyle};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -46,6 +46,19 @@ struct Stored {
     /// Absent from a file written before LAY-11, which reads as collapsed.
     #[serde(default = "on")]
     checks_collapsed: bool,
+    /// Absent from a file written before LAY-23, which reads as chips
+    /// (decision 2 of 2026-11-12).
+    #[serde(default)]
+    wires: StoredWires,
+}
+
+/// *Wires* (LAY-23) as the file holds it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredWires {
+    All,
+    #[default]
+    Chips,
 }
 
 fn on() -> bool {
@@ -60,6 +73,7 @@ pub enum Preference {
     CodePanel,
     CompactCards,
     ChecksCollapsed,
+    Wires,
 }
 
 /// The preferences of this session.
@@ -75,6 +89,9 @@ pub struct Preferences {
     /// Whether check cards with a subject are folded into its footer
     /// (LAY-11); on for a new install (Q4 = A).
     pub checks_collapsed: bool,
+    /// Which data wires the board draws (LAY-23); chips for a new install
+    /// and for one whose file does not name it (decision 2).
+    pub wires: WireMode,
     /// Where to write them, or `None` when the system has no configuration
     /// directory and preferences last only for this session.
     path: Option<PathBuf>,
@@ -88,6 +105,7 @@ impl Default for Preferences {
             code_panel: false,
             compact_cards: true,
             checks_collapsed: true,
+            wires: WireMode::Chips,
             path: default_path(),
         }
     }
@@ -115,6 +133,10 @@ impl Preferences {
             preferences.code_panel = stored.code_panel;
             preferences.compact_cards = stored.compact_cards;
             preferences.checks_collapsed = stored.checks_collapsed;
+            preferences.wires = match stored.wires {
+                StoredWires::All => WireMode::All,
+                StoredWires::Chips => WireMode::Chips,
+            };
         }
         preferences
     }
@@ -145,6 +167,7 @@ impl Preferences {
             Preference::CodePanel => stored.code_panel = self.code_panel,
             Preference::CompactCards => stored.compact_cards = self.compact_cards,
             Preference::ChecksCollapsed => stored.checks_collapsed = self.checks_collapsed,
+            Preference::Wires => stored.wires = stored_wires(self.wires),
         }
         let Ok(bytes) = serde_json::to_vec_pretty(&stored) else {
             return;
@@ -163,7 +186,15 @@ impl Preferences {
             code_panel: self.code_panel,
             compact_cards: self.compact_cards,
             checks_collapsed: self.checks_collapsed,
+            wires: stored_wires(self.wires),
         }
+    }
+}
+
+fn stored_wires(mode: WireMode) -> StoredWires {
+    match mode {
+        WireMode::All => StoredWires::All,
+        WireMode::Chips => StoredWires::Chips,
     }
 }
 

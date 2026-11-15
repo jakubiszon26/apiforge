@@ -348,6 +348,9 @@ fn lay11_criterion_6_a_shared_check_is_counted_twice() {
 #[test]
 fn lay11_criterion_7_gates_and_after_wires_stay() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
+    // The wires as LAY-11 accepted them, every one drawn (LAY-23).
+    app(&mut harness).debug_wires(crate::canvas::WireMode::All);
+    settle(&mut harness);
     show(&mut harness, "valid_cart", 0.6);
     assert!(!hidden(&harness, "valid_cart"), "the gate is drawn");
     assert!(world_of(&harness, "valid_cart").height() < world_of(&harness, "cart").height());

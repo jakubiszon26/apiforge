@@ -150,34 +150,44 @@ fn lay01_criterion_4_the_guide_names_the_command_beside_the_benchmark() {
 }
 
 /// Since LAY-06 each scenario is measured as the desktop tidies it, at the
-/// compact and the full density, with its checks collapsed and expanded.
+/// compact and the full density, with its checks collapsed and expanded;
+/// since LAY-23 `fan-out` is one of them, and each is measured once more at
+/// the compact density with chips.
 #[test]
 fn lay01_criterion_6_the_fixtures_are_measured() {
     let rows = table(report(), "scenario");
     let mut names: Vec<&str> = rows.iter().map(|row| row["scenario"].as_str()).collect();
     names.dedup();
-    assert_eq!(names, ["order-flow", "shop-30", "shop-50"]);
+    assert_eq!(names, ["order-flow", "shop-30", "shop-50", "fan-out"]);
     for name in names {
-        let mut variants: Vec<(&str, &str)> = rows
+        let mut variants: Vec<(&str, &str, &str)> = rows
             .iter()
             .filter(|row| row["scenario"] == name)
-            .map(|row| (row["density"].as_str(), row["checks"].as_str()))
+            .map(|row| {
+                (
+                    row["density"].as_str(),
+                    row["checks"].as_str(),
+                    row["drawn"].as_str(),
+                )
+            })
             .collect();
         variants.sort_unstable();
         assert_eq!(
             variants,
             [
-                ("compact", "collapsed"),
-                ("compact", "expanded"),
-                ("full", "collapsed"),
-                ("full", "expanded"),
+                ("compact", "collapsed", "all"),
+                ("compact", "collapsed", "chips"),
+                ("compact", "expanded", "all"),
+                ("compact", "expanded", "chips"),
+                ("full", "collapsed", "all"),
+                ("full", "expanded", "all"),
             ],
-            "{name} at both densities, collapsed and expanded"
+            "{name} at both densities, collapsed and expanded, and with chips"
         );
     }
     let mut steps: Vec<f64> = rows.iter().map(|row| number(row, "steps")).collect();
     steps.dedup();
-    assert_eq!(steps, [14.0, 30.0, 56.0]);
+    assert_eq!(steps, [14.0, 30.0, 56.0, 26.0]);
     for row in &rows {
         for column in [
             "wires",

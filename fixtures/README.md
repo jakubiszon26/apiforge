@@ -11,11 +11,13 @@
 
 ## Reference scenarios
 
-`scenarios/lay/` holds `order-flow` (14 steps), `shop-30` (30) and `shop-50`
-(56), which the [LAY tickets](../docs/sprints/lay.md) measure and test against.
+`scenarios/lay/` holds `order-flow` (14 steps), `shop-30` (30), `shop-50`
+(56) and `fan-out` (26), which the [LAY tickets](../docs/sprints/lay.md) measure
+and test against. `fan-out` is shaped like a board where a component call gives
+two values that almost every later request reads (LAY-23); it has no cleanup.
 A step is a node of the scenario's main graph: the start, every request, value,
 component, check and condition, a branch and both of its arms. The `cleanup`
-block is a second graph, counted apart (two steps in each scenario).
+block is a second graph, counted apart (two steps in each of the other three).
 
 They open in the demo shop project, whose components `shop-30` and `shop-50` call,
 as `crates/apiforge-runner/tests/acceptance.rs` does: it holds what the later

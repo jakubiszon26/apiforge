@@ -275,6 +275,8 @@ impl FolderApp {
                     // document (LAY-11).
                     | Command::SetChecksCollapsed(_)
                     | Command::ShowChecks(_)
+                    // Neither does the Wires setting (LAY-23).
+                    | Command::SetWires(_)
             )
         {
             return;
@@ -397,6 +399,10 @@ impl FolderApp {
             }
             Command::SetChecksCollapsed(collapsed) => {
                 self.collapse_checks(collapsed);
+                None
+            }
+            Command::SetWires(mode) => {
+                self.switch_wires(mode);
                 None
             }
             Command::ShowChecks(node) => {

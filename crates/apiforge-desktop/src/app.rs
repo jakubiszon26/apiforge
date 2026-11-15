@@ -2391,7 +2391,8 @@ impl App {
             | Command::AddInput
             | Command::ComponentSettings
             | Command::SetCompactCards(_)
-            | Command::SetChecksCollapsed(_) => {}
+            | Command::SetChecksCollapsed(_)
+            | Command::SetWires(_) => {}
             Command::InspectInput { node, .. } => self.editor.selection = vec![node],
             Command::ShowChecks(node) => {
                 self.editor.selection = vec![node];
