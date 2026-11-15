@@ -46,8 +46,8 @@ pub use proxies::{
     add_proxy, move_proxies, proxy_binding, proxy_source, prune_proxies, remove_proxies,
 };
 pub use shared::{
-    SHARED_READERS, Saved, SharedValue, ValueRef, plain_value, propose, read_directly, save_values,
-    shared_values, value_text,
+    FarRead, SHARED_READERS, Saved, SharedValue, ValueRef, far_reads, plain_value, propose,
+    read_directly, save_values, shared_values, value_text,
 };
 pub use storage::{migrate_demo_address, public_project};
 
