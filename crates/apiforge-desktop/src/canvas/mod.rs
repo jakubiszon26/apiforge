@@ -534,6 +534,9 @@ pub struct Canvas {
     tags: Vec<DrawnTag>,
     #[cfg(test)]
     counts: Vec<DrawnCount>,
+    /// The arrows the last frame drew at the badges (LAY-24).
+    #[cfg(test)]
+    arrows: Vec<DrawnArrow>,
     /// The `+ var` marks and the choice at a drop the last frame drew
     /// (LAY-25).
     #[cfg(test)]
@@ -572,6 +575,26 @@ pub(crate) struct DrawnWire {
     /// A wire of a chip, drawn because its chip or input is pointed at or
     /// its reader or source is selected (LAY-23).
     pub revealed: bool,
+    /// Where its label was drawn, on the board.
+    pub label_box: Option<Rect>,
+}
+
+/// The arrow at a step's badge as the last frame drew it (LAY-24).
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(crate) struct DrawnArrow {
+    /// The step it points into.
+    pub target: String,
+    /// The rails it stands for.
+    pub wires: Vec<String>,
+    /// What pointing at it shows: `after quantity_ok`.
+    pub text: String,
+    /// Its box and its hover area, on screen.
+    pub rect: Rect,
+    pub hit: Rect,
+    /// Its rail is drawn.
+    pub lit: bool,
+    pub color: Color32,
 }
 
 /// A chip at a reader as the last frame drew it (LAY-23).
@@ -665,6 +688,8 @@ impl Default for Canvas {
             tags: Vec::new(),
             #[cfg(test)]
             counts: Vec::new(),
+            #[cfg(test)]
+            arrows: Vec::new(),
             #[cfg(test)]
             var_marks: Vec::new(),
             #[cfg(test)]
@@ -914,6 +939,12 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_counts(&self) -> &[DrawnCount] {
         &self.counts
+    }
+
+    /// The arrows the last frame drew at the badges (LAY-24).
+    #[cfg(test)]
+    pub(crate) fn debug_arrows(&self) -> &[DrawnArrow] {
+        &self.arrows
     }
 
     /// The `+ var` marks the last frame drew (LAY-25).
@@ -1713,6 +1744,7 @@ impl Canvas {
                         .unwrap_or_default(),
                     bridges: bridged.get(&wire.id).copied().unwrap_or_default(),
                     revealed: revealed.contains(&wire.id),
+                    label_box: None,
                 })
                 .collect();
         }
