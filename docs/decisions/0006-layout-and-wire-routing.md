@@ -156,6 +156,56 @@ spine and satellites:
 Tidy up of a selection, and the board of the workspace window, keep the
 layered layout above. Tidy up ends with the camera fitted to the board.
 
+### The gap between lines (LAY-03)
+
+Amended by LAY-03 (2026-11-15, the owner's finding on #34: lines 2–4 px
+apart or merged into a band must never happen; a sprawling board is better
+than packed lines). It replaces step 5 of the routing above and the
+spacing of shape D.
+
+1. **One gap, 20 px** (`GAP`): the router's clearance from a card, the
+   length of a stub and the distance between two lines. A line keeps it
+   from every card, its own two included, and from every line routed
+   before it, side by side and end to end; lines cross at right angles as
+   before. The first and last 20 px of a line, at its ports, are not
+   judged. Wires of one port share the straight piece out of it and turn
+   off it one by one, 20 px apart; ports nearer each other than the gap
+   count as one port in this.
+2. **Tracks.** The search grid has a line every 20 px beside the sides of
+   the cards. Running within the gap of an earlier line costs 200 times
+   its length, more than any detour in the search window, so it happens
+   only where the window holds no other route; a wall instead of a price
+   would need a second search for that case. The stub end of every port is
+   kept free of lines running into it. Nudging is gone.
+3. **Order.** Rails first, then the shorter wires first (the longer first
+   before): a wire between neighbours has one good route. On the reference
+   boards this gives a third fewer crossings than the longer first.
+4. **Tidy up makes the room.** Shape D's gaps are 100 px between columns,
+   80 px under a row and 24 px under a card. For the lines the board draws when
+   Tidy up runs — folded checks and chips leave lines out — each wire is
+   routed alone, allowed between two cards at a quarter of the price of
+   the way round, and a corridor that `n` of them want gets room for `n`
+   lines; then the board is routed as drawn and every place a line still
+   runs within the gap widens the gap it lies in by 20 px, until none is
+   left. The gap between two columns is the same in every row. A scenario
+   opened from code is laid out the same way.
+5. **Without Tidy up** nothing moves: lines keep the gap by longer routes,
+   and give it up only where cards and the lines already drawn leave no
+   route within the search window.
+
+`apiforge_layout::packed` lists the breaches; the `quality` example prints
+their number per board, 0 on every reference board.
+
+**Cost.** The track grid makes a search larger. Full routing of the
+budget's board (200 cards, 398 wires, laid out in layers 48 px apart, where
+most wires have no route that keeps the gap) takes 118 ms on the reference
+machine against a budget of 30 ms and 10 ms before; rerouting while
+dragging takes 0.6 ms of its 8 ms. The budget for a full routing is
+therefore **150 ms** from this amendment on: it runs once when a board
+changes, not per frame, and `shop-50` with every wire and check drawn (56
+cards, 107 wires) routes in 30 ms. The board wired at random takes 0.9 s
+(0.3 s before). The bench prints all three.
+
 ## As implemented
 
 The decisions above hold, with these corrections found while building it:

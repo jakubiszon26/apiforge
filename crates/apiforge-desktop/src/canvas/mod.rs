@@ -10,6 +10,7 @@ mod layout;
 mod menu;
 mod paint;
 mod readers;
+mod resting;
 mod routing;
 pub mod shape;
 mod strip;
@@ -20,6 +21,7 @@ pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
 pub use readers::WireMode;
+pub use resting::{Drawn, Lines, resting};
 pub use routing::WireStyle;
 pub use strip::Pill as InputView;
 
@@ -1678,6 +1680,8 @@ impl Canvas {
             paint::continuation_mark(&board_painter, mark, camera);
         }
         let mut drawn: Vec<(String, Vec<Pos2>)> = Vec::with_capacity(board_wires.len());
+        // The lines at rest, which the wires brought back keep clear of.
+        let mut at_rest: Vec<Vec<Pos2>> = Vec::new();
         #[cfg(test)]
         let mut bridged: HashMap<String, usize> = HashMap::new();
         {
@@ -1688,6 +1692,7 @@ impl Canvas {
                 moving: &moving,
                 style: self.wire_style,
                 bridges: self.bridges,
+                among: &[],
             };
             #[cfg(test)]
             {
@@ -1695,6 +1700,9 @@ impl Canvas {
             }
             let routed = self.router.routes(&request);
             for wire in routed {
+                if wire.routed {
+                    at_rest.push(wire.points.clone());
+                }
                 paint::routed_wire(
                     &board_painter,
                     wire,
@@ -1710,7 +1718,8 @@ impl Canvas {
             }
         }
         // The wires of chips brought back, over the others and apart from
-        // them: their routes leave the routes drawn as they were.
+        // them: their routes leave the routes drawn as they were and keep
+        // the gap from them (LAY-03).
         let mut drawn_revealed: Vec<(String, Vec<Pos2>)> = Vec::new();
         #[cfg(test)]
         let mut label_boxes: HashMap<String, Rect> = HashMap::new();
@@ -1722,6 +1731,7 @@ impl Canvas {
                 moving: &moving,
                 style: self.wire_style,
                 bridges: self.bridges,
+                among: &at_rest,
             };
             let routed = self.revealed_router.routes(&request).to_vec();
             for wire in &routed {

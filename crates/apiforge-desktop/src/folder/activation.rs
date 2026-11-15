@@ -335,6 +335,7 @@ impl FolderApp {
                 // draw, so the preferences are read first (LAY-02).
                 let preferences = Preferences::load();
                 density.set(density_of(&preferences));
+                density.set_lines(lines_of(&preferences));
                 (
                     preferences,
                     navigation::RecentProjects::at(&data),

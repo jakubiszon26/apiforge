@@ -28,6 +28,13 @@
 //! - `close`: pairs of parallel segments of different wires within 8 px of each
 //!   other for at least 20 px; `coincident`: the same within 0.5 px, counted there
 //!   and not under `close`;
+//! - `packed`: the places where the gap of 20 px is not kept (LAY-03,
+//!   `apiforge_layout::packed`): two parallel segments of two wires nearer than
+//!   that, side by side or end to end, and a segment nearer than that to a card
+//!   or chip, the wire's own included. Not counted: the first and last 20 px of
+//!   a wire at its ports, and the straight pieces out of or into one port, or
+//!   ports nearer each other than the gap. It is 0 on every reference board;
+//!   the generated boards are laid out without the room Tidy up makes;
 //! - `long`: edges spanning more than one layer, for the generated boards;
 //! - `width`, `height`: the board's bounds; `fit_1600`, `fit_960`: the zoom that
 //!   shows all of it at 1600 × 1000 and 960 × 540, not limited to the zoom the
@@ -35,7 +42,7 @@
 //! - `card_hits`: pairs of cards that overlap; `chip_hits`: pairs with a proxy chip
 //!   in them. A scenario read from code has no chips yet: they are placed by hand
 //!   and live in the document, so `chips` says how many were measured;
-//! - `clearance`: route segments closer than 12 px to a card or chip the wire does
+//! - `clearance`: route segments closer than 20 px to a card or chip the wire does
 //!   not end on, the router's `Routing::margin`.
 //!
 //! The generated boards use the full card's geometry (`canvas/layout.rs`), which
@@ -44,7 +51,8 @@
 mod support;
 
 use apiforge_layout::{
-    Block, Edge, Graph, Point, Port, Rect, Route, Routing, Side, Size, Wire, layers_of, route, tidy,
+    Block, Edge, GAP, Graph, Point, Port, Rect, Route, Routing, Side, Size, Wire, layers_of,
+    packed, route, tidy,
 };
 use std::{fmt::Write, process::ExitCode};
 use support::Random;
@@ -61,7 +69,7 @@ const CLOSE: f32 = 8.0;
 const COINCIDENT: f32 = 0.5;
 const ALONGSIDE: f32 = 20.0;
 /// The router keeps exactly its margin; half a pixel forgives the sampling below.
-const CLEARANCE: f32 = 11.5;
+const CLEARANCE: f32 = GAP - 0.5;
 
 const SIZES: [usize; 4] = [6, 12, 25, 50];
 const SEEDS: u64 = 10;
@@ -379,6 +387,7 @@ struct Measures {
     coincident: f64,
     long: f64,
     incomplete: f64,
+    packed: f64,
 }
 
 impl Measures {
@@ -394,6 +403,7 @@ impl Measures {
             coincident: coincident as f64,
             long: laid.long as f64,
             incomplete: routes.iter().filter(|r| !r.complete).count() as f64,
+            packed: packed(routes, &laid.cards, GAP).len() as f64,
         }
     }
 
@@ -406,6 +416,7 @@ impl Measures {
         self.coincident += other.coincident;
         self.long += other.long;
         self.incomplete += other.incomplete;
+        self.packed += other.packed;
     }
 
     fn cells(&self, scale: f64, decimals: usize) -> String {
@@ -418,13 +429,14 @@ impl Measures {
             (self.coincident, 10),
             (self.long, 5),
             (self.incomplete, 10),
+            (self.packed, 6),
         ]
         .map(|(value, width)| format!("{:>width$.decimals$}", value / scale))
         .join(" ")
     }
 }
 
-const MEASURES: &str = " wires crossings  bends straight  close coincident  long incomplete";
+const MEASURES: &str = " wires crossings  bends straight  close coincident  long incomplete packed";
 
 /// What a fit fills in the folder window in Diagram at each standard size, with the
 /// explorer open and the Inspector closed (`BoardOverlays::focus`, measured there).
@@ -460,12 +472,12 @@ fn reference_table(text: &mut String) -> Result<(), String> {
     let _ = writeln!(
         text,
         "\nreference scenarios, tidied by the desktop, at the sizes it draws\n\n\
-         scenario   density checks    drawn steps cards wires crossings  bends straight  close coincident incomplete width height fit_1600 fit_960 chips card_hits chip_hits clearance"
+         scenario   density checks    drawn steps cards wires crossings  bends straight  close coincident incomplete packed width height fit_1600 fit_960 chips card_hits chip_hits clearance"
     );
     for board in boards(BOARDS)? {
         let rectangles: Vec<Rect> = board.cards.iter().chain(&board.chips).copied().collect();
         let laid = Laid {
-            cards: board.cards.clone(),
+            cards: rectangles.clone(),
             routes: route(&rectangles, &board.wires, &Routing::default()),
             long: 0,
         };
@@ -479,7 +491,7 @@ fn reference_table(text: &mut String) -> Result<(), String> {
         let (card_hits, chip_hits) = collisions(&board.cards, &board.chips);
         let _ = writeln!(
             text,
-            "{:<10} {:<7} {:<9} {:<5} {:>5} {:>5} {:>5} {:>9} {:>6} {:>8} {:>6} {:>10} {:>10} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9}",
+            "{:<10} {:<7} {:<9} {:<5} {:>5} {:>5} {:>5} {:>9} {:>6} {:>8} {:>6} {:>10} {:>10} {:>6} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9}",
             board.name,
             board.density,
             board.checks,
@@ -493,6 +505,7 @@ fn reference_table(text: &mut String) -> Result<(), String> {
             measures.close,
             measures.coincident,
             measures.incomplete,
+            measures.packed,
             fit(FIT_1600, width, height),
             fit(FIT_960, width, height),
             board.chips.len(),
@@ -633,8 +646,8 @@ mod tests {
         );
         let at = |y: f32| line(&[(100.0, y), (300.0, y)]);
         let count = |routed: Route| clearance_violations(&[routed], &[wire], &rectangles);
-        // 12 px under the third card is what the router keeps; 5 px is not.
-        assert_eq!(count(at(112.0)), 0);
+        // 20 px under the third card is what the router keeps; 5 px is not.
+        assert_eq!(count(at(120.0)), 0);
         assert_eq!(count(at(105.0)), 1);
         // A route that found no way is not judged.
         let mut lost = at(50.0);

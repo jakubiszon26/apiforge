@@ -118,16 +118,27 @@ fn readers_by_port(graph: &Graph) -> HashMap<(String, String), BTreeSet<String>>
     readers
 }
 
-/// The tops of the board's rows: of its spine cards.
-fn rows(cards: &[Card]) -> Vec<f32> {
-    let mut rows: Vec<f32> = cards
-        .iter()
-        .filter(|card| on_spine(card.kind))
-        .map(|card| card.rect().top())
-        .collect();
+/// The tops of the board's rows and the middles of its columns: of its
+/// spine cards. Tidy up widens the gap between two columns where lines need
+/// it (LAY-03), so a column is told by its place in the order, not by a
+/// distance.
+fn rows(cards: &[Card]) -> (Vec<f32>, Vec<f32>) {
+    let spine = || cards.iter().filter(|card| on_spine(card.kind));
+    let mut rows: Vec<f32> = spine().map(|card| card.rect().top()).collect();
     rows.sort_by(f32::total_cmp);
     rows.dedup_by(|a, b| (*a - *b).abs() < 1.0);
-    rows
+    let mut columns: Vec<f32> = spine().map(|card| card.rect().center().x).collect();
+    columns.sort_by(f32::total_cmp);
+    columns.dedup_by(|a, b| (*a - *b).abs() < layout::WIDTH / 2.0);
+    (rows, columns)
+}
+
+fn column_of(columns: &[f32], x: f32) -> usize {
+    columns
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))
+        .map_or(0, |(index, _)| index)
 }
 
 fn row_of(rows: &[f32], y: f32) -> usize {
@@ -138,12 +149,12 @@ fn row_of(rows: &[f32], y: f32) -> usize {
 
 /// A reader beside its source: in the same row, in the source's column or
 /// the next one.
-fn beside(rows: &[f32], from: Rect, to: Rect) -> bool {
-    let pitch = layout::WIDTH + GAP;
-    let step = to.left() - from.left();
-    let half = layout::WIDTH / 2.0;
-    row_of(rows, from.top()) == row_of(rows, to.top())
-        && (step.abs() < half || (step - pitch).abs() < half)
+fn beside((rows, columns): &(Vec<f32>, Vec<f32>), from: Rect, to: Rect) -> bool {
+    let (here, there) = (
+        column_of(columns, from.center().x),
+        column_of(columns, to.center().x),
+    );
+    row_of(rows, from.top()) == row_of(rows, to.top()) && (there == here || there == here + 1)
 }
 
 /// Whether the card `to` is far from the card `from` on the board: not

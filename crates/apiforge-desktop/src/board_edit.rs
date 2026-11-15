@@ -34,6 +34,9 @@ pub struct Board<'a> {
     /// the same places whether they are folded or not, so that showing them
     /// needs no second Tidy up.
     pub satellites: bool,
+    /// The lines the board draws, which Tidy up of the whole board makes
+    /// room for (LAY-03).
+    pub lines: canvas::Lines,
 }
 
 /// A graph edit and the selection that should follow it.
@@ -48,6 +51,11 @@ pub struct Paste {
     pub edit: Edit,
     pub unresolved: Vec<edit::Unresolved>,
 }
+
+/// How often Tidy up asks a board's lines what room they want, and how
+/// often it may then widen a gap a line is still short of (LAY-03).
+const ASKING_ROUNDS: usize = 4;
+const ROOM_ROUNDS: usize = 24;
 
 /// The space kept between pasted cards and the cards they clear.
 const PASTE_GAP: f32 = 40.0;
@@ -176,21 +184,95 @@ impl Board<'_> {
             .iter()
             .map(|node| self.card_block(node))
             .collect();
-        let (placed, _) = apiforge_layout::hang(&apiforge_layout::Hanging {
+        let hanging = apiforge_layout::Hanging {
             blocks: &blocks,
             spine: &plan.spine,
             satellites: &plan.satellites,
             rows: apiforge_layout::Rows::default(),
-        });
-        let mut tidied = self.graph.clone();
-        for (node, position) in tidied.nodes.iter_mut().zip(placed) {
-            node.position = Position {
-                x: f64::from(position.x),
-                y: f64::from(position.y),
-            };
-            node.auto_placed = true;
+        };
+        let laid = |placed: &[apiforge_layout::Point]| {
+            let mut tidied = self.graph.clone();
+            for (node, position) in tidied.nodes.iter_mut().zip(placed) {
+                node.position = Position {
+                    x: f64::from(position.x),
+                    y: f64::from(position.y),
+                };
+                node.auto_placed = true;
+            }
+            tidied
+        };
+        // Folded checks keep their places and are in no line's way.
+        let hidden: std::collections::BTreeSet<usize> = if self.lines.folded {
+            let index = |id: &str| self.graph.nodes.iter().position(|node| node.id == id);
+            canvas::collapsible(self.graph, self.sibling)
+                .iter()
+                .filter(|candidate| index(&candidate.anchor).is_some())
+                .filter_map(|candidate| index(&candidate.check))
+                .collect()
+        } else {
+            Default::default()
+        };
+        // What the router is given for the board laid out with `room`.
+        let drawn = |placed: &[apiforge_layout::Point]| {
+            let mut tidied = laid(placed);
+            chips_beside_their_readers(
+                &mut tidied,
+                self.reference,
+                self.project,
+                self.parameters,
+                self.density,
+                |_| true,
+            );
+            canvas::resting(&canvas::Drawn {
+                graph: &tidied,
+                reference: self.reference,
+                later: self.sibling,
+                project: self.project,
+                parameters: self.parameters,
+                density: self.density,
+                lines: self.lines,
+            })
+        };
+        // The room the lines need (LAY-03). First what they ask for: each
+        // wire routed alone takes the corridor it wants, and a corridor
+        // several want is made wide enough for all of them. The routes move
+        // a little as the gaps grow, so it is asked again, a few times.
+        let mut room = apiforge_layout::Room::default();
+        let gap = apiforge_layout::GAP;
+        let alone = apiforge_layout::Routing::sizing();
+        for _ in 0..ASKING_ROUNDS {
+            let (placed, rows) = apiforge_layout::hang_with(&hanging, &room);
+            let (cards, wires) = drawn(&placed);
+            let wanted: Vec<apiforge_layout::Route> = wires
+                .iter()
+                .flat_map(|wire| apiforge_layout::route(&cards, &[*wire], &alone))
+                .collect();
+            if !apiforge_layout::make_room(
+                &hanging, &placed, &rows, &wanted, &hidden, gap, &mut room,
+            ) {
+                break;
+            }
         }
-        Some(tidied)
+        // Then what is left: the board is routed as it will be drawn, and
+        // each place where a line still runs within the gap widens the gap
+        // it lies in. Gaps only grow, so this ends; the limit is for a board
+        // whose lines no room separates.
+        for _ in 0..ROOM_ROUNDS {
+            let (placed, rows) = apiforge_layout::hang_with(&hanging, &room);
+            let (cards, wires) = drawn(&placed);
+            let routes =
+                apiforge_layout::route(&cards, &wires, &apiforge_layout::Routing::default());
+            let found = apiforge_layout::packed(&routes, &cards, gap);
+            if found.is_empty()
+                || !apiforge_layout::widen(
+                    &hanging, &placed, &rows, &found, &hidden, gap, &mut room,
+                )
+            {
+                break;
+            }
+        }
+        let (placed, _) = apiforge_layout::hang_with(&hanging, &room);
+        Some(laid(&placed))
     }
 
     /// The whole board laid out with its foldable checks as satellites
@@ -806,6 +888,7 @@ mod tests {
         let board = Board {
             density: canvas::CardDensity::Full,
             satellites: false,
+            lines: canvas::Lines::default(),
             sibling: None,
             graph: &graph,
             reference: &graph,

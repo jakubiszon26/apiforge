@@ -24,15 +24,38 @@ use std::sync::{
 };
 
 /// The density the window draws its boards at, shared with the placer that
-/// runs on the analysis worker: *Compact cards* on or off.
+/// runs on the analysis worker: *Compact cards* on or off. It carries the
+/// lines the boards draw as well, *Wires* and *Collapse checks*, which decide
+/// the room a board laid out whole is given (LAY-03).
 #[derive(Clone, Debug)]
-pub struct DensityHandle(Arc<AtomicBool>);
+pub struct DensityHandle(Arc<AtomicBool>, Arc<[AtomicBool; 2]>);
 
 impl DensityHandle {
     pub fn new(density: canvas::CardDensity) -> Self {
-        Self(Arc::new(AtomicBool::new(
-            density == canvas::CardDensity::Compact,
-        )))
+        let lines = canvas::Lines::default();
+        Self(
+            Arc::new(AtomicBool::new(density == canvas::CardDensity::Compact)),
+            Arc::new([
+                AtomicBool::new(lines.wires == canvas::WireMode::Chips),
+                AtomicBool::new(lines.folded),
+            ]),
+        )
+    }
+
+    pub fn set_lines(&self, lines: canvas::Lines) {
+        self.1[0].store(lines.wires == canvas::WireMode::Chips, Ordering::Relaxed);
+        self.1[1].store(lines.folded, Ordering::Relaxed);
+    }
+
+    pub fn lines(&self) -> canvas::Lines {
+        canvas::Lines {
+            wires: if self.1[0].load(Ordering::Relaxed) {
+                canvas::WireMode::Chips
+            } else {
+                canvas::WireMode::All
+            },
+            folded: self.1[1].load(Ordering::Relaxed),
+        }
     }
 
     pub fn set(&self, density: canvas::CardDensity) {
@@ -104,6 +127,7 @@ impl Placer for CardPlacer {
                     sibling: super::sibling_of(document, cleanup),
                     density,
                     satellites: true,
+                    lines: self.density.lines(),
                 }
                 .tidy_up(&[])
             })
