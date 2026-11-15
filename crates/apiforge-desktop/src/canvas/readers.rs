@@ -69,7 +69,9 @@ pub struct Tag {
     /// What the chip says: the variable's name, or the step and the last
     /// field it reads (`login.token`).
     pub text: String,
-    /// The source step alone, for a zoom where the text has no room.
+    /// The source step alone, for a zoom where the text has no room; for a
+    /// variable, the number of its card's badge (`7`, LAY-07), so that the
+    /// chip still points at it (LAY-25).
     pub short: String,
     /// The whole reference, `cartId → checkout.body.cartId`: the chip's
     /// accessible name and what pointing at it shows.
@@ -194,13 +196,15 @@ fn fields(binding: Option<&Binding>, path: &[String]) -> Vec<String> {
     fields
 }
 
-/// What a chip says, its source step, and the reference written whole.
+/// What a chip says, its shorter form, and the reference written whole.
+/// `number` is the source's place in the engine's order, its badge.
 fn texts(
     graph: &Graph,
     project: &Project,
     wire: &BoardWire,
     reader: &str,
     source: &str,
+    number: Option<usize>,
 ) -> (String, String, String) {
     let reader = graph.nodes.iter().find(|node| node.id == reader);
     let source_node = graph.nodes.iter().find(|node| node.id == source);
@@ -213,13 +217,16 @@ fn texts(
         Some(Binding::Reference { port, path, .. }) => (port.clone(), path.clone()),
         _ => (String::new(), String::new()),
     };
-    let (text, whole) = if source_node.is_variable() {
+    let (text, short, whole) = if source_node.is_variable() {
         let whole = if field.is_empty() {
             source_node.handle.clone()
         } else {
             format!("{}.{field}", source_node.handle)
         };
-        (source_node.handle.clone(), whole)
+        // Its name, else the number on its card: never the bare arrow
+        // while a number fits (LAY-25).
+        let short = number.map_or_else(|| source_node.handle.clone(), |n| n.to_string());
+        (source_node.handle.clone(), short, whole)
     } else {
         let last = field.rsplit('.').next().filter(|last| !last.is_empty());
         let text = format!("{}.{}", source_node.handle, last.unwrap_or(&port));
@@ -235,18 +242,14 @@ fn texts(
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>()
             .join(".");
-        (text, whole)
+        (text, source_node.handle.clone(), whole)
     };
     let target = std::iter::once(reader.handle.clone())
         .chain(std::iter::once(wire.input.clone()))
         .chain(fields(binding, &wire.operand_path))
         .collect::<Vec<_>>()
         .join(".");
-    (
-        text,
-        source_node.handle.clone(),
-        format!("{whole} → {target}"),
-    )
+    (text, short, format!("{whole} → {target}"))
 }
 
 /// The chips and counts of the wires in `chipped`, at the cards as they are
@@ -260,6 +263,11 @@ pub fn plan(
     chipped: &HashSet<String>,
 ) -> (Vec<Tag>, Vec<Count>) {
     let readers = readers_by_port(graph);
+    let numbers: HashMap<&str, usize> = graph::sequence(graph)
+        .into_iter()
+        .enumerate()
+        .map(|(index, id)| (id, index + 1))
+        .collect();
     let mut tags: Vec<Tag> = Vec::new();
     let mut counts: Vec<Count> = Vec::new();
     for wire in wires.iter().filter(|wire| chipped.contains(&wire.id)) {
@@ -272,7 +280,8 @@ pub fn plan(
         let Some(anchor) = reader.input_anchor(&wire.input, &wire.operand_path) else {
             continue;
         };
-        let (text, short, statement) = texts(graph, project, wire, &reader.id, &source.id);
+        let number = numbers.get(source.id.as_str()).copied();
+        let (text, short, statement) = texts(graph, project, wire, &reader.id, &source.id, number);
         // One chip per value at a socket: a second read of it adds nothing.
         if let Some(tag) = tags
             .iter_mut()
@@ -394,7 +403,7 @@ fn fitting(painter: &Painter, texts: &[String], font: &FontId, room: f32) -> (St
 
 /// The chips of `tags` left of their sockets, in the gap between two
 /// columns; their text keeps a legible size at any zoom and shortens to the
-/// source step, then to the arrow, where the gap has no room for it. The
+/// source step (a variable's badge number), then to the arrow, where the gap has no room for it. The
 /// chips of one card stand one under the other: a chip that would cover the
 /// one above it moves down and its stub bends to its socket.
 pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera) -> Vec<Laid> {
