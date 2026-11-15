@@ -3334,6 +3334,26 @@ impl Canvas {
                                                 ui.close();
                                             }
                                         }
+                                        // LAY-25 mock-up: the scenario-wide edit.
+                                        #[cfg(test)]
+                                        {
+                                            ui.separator();
+                                            let shared = lay25::shared_values(input.graph).len();
+                                            let _ = ui
+                                                .add_enabled(
+                                                    editable && shared > 0,
+                                                    widgets::action(
+                                                        Icon::Variable,
+                                                        &format!(
+                                                            "Save shared values as variables ({shared})"
+                                                        ),
+                                                    )
+                                                    .quiet(),
+                                                )
+                                                .on_hover_text(
+                                                    "Every value three or more steps read gets a variable, and those steps read it; one undo",
+                                                );
+                                        }
                                     }
                                 },
                             );

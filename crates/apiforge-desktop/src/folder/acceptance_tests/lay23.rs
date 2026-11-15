@@ -1144,3 +1144,40 @@ fn review_lay25() {
         crate::testing::capture(&mut harness, label, None);
     }
 }
+
+/// LAY-25 mock-up (throwaway): the scenario-wide action in the board's
+/// menu, on `shop-30` and on a scenario where nothing qualifies.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay25_bulk() {
+    for (name, label) in [
+        ("shop-30", "lay25-6-bulk-menu-shop-30"),
+        ("far-value-saved", "lay25-6b-bulk-menu-nothing"),
+    ] {
+        let (_project, mut harness, id) = tidied(name, WIDE, Checks::Collapsed);
+        choose(&mut harness, FIT);
+        harness.step();
+        for (variable, value, readers) in crate::canvas::lay25::shared_values(&graph(&harness, &id))
+        {
+            eprintln!("{label}: var {variable} = {value} · {readers}");
+        }
+        let canvas = board(&harness, &id);
+        let focus = canvas.debug_focus();
+        assert!(
+            canvas
+                .debug_cards()
+                .iter()
+                .any(|(_, rect)| focus.contains_rect(*rect)),
+            "{label}: a card is in view"
+        );
+        harness.get_by_label("Board view").click();
+        settle(&mut harness);
+        assert!(
+            harness
+                .query_by_label_contains("Save shared values as variables")
+                .is_some(),
+            "{label}: the menu shows the action"
+        );
+        crate::testing::capture(&mut harness, label, None);
+    }
+}

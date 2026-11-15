@@ -190,3 +190,76 @@ pub fn show_offer(
                 });
         });
 }
+
+/// The values the scenario-wide action would save: each field of a
+/// request's or a component call's output that three or more steps read,
+/// one of them far, and no variable holds, as `(variable, value, readers)`
+/// in document order. Far is counted in the engine's order: the reader's
+/// step is two or more steps after the source's.
+pub fn shared_values(graph: &apiforge_core::format::Graph) -> Vec<(String, String, usize)> {
+    use apiforge_core::model::NodeKind;
+    use std::collections::{BTreeSet, HashMap};
+    let kind = |id: &str| {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .map(|n| n.kind)
+    };
+    let mut step = 0usize;
+    let mut step_of: HashMap<&str, usize> = HashMap::new();
+    for id in apiforge_core::graph::sequence(graph) {
+        if matches!(
+            kind(id),
+            Some(NodeKind::Request | NodeKind::Component | NodeKind::If)
+        ) {
+            step += 1;
+        }
+        step_of.insert(id, step);
+    }
+    let mut rows: Vec<(String, String, BTreeSet<&str>, bool)> = Vec::new();
+    for node in &graph.nodes {
+        for reference in node
+            .inputs
+            .values()
+            .flat_map(apiforge_core::format::Binding::references)
+        {
+            let Some(source) = graph.nodes.iter().find(|source| {
+                source.id == reference.node_id
+                    && matches!(source.kind, NodeKind::Request | NodeKind::Component)
+            }) else {
+                continue;
+            };
+            let far = step_of[node.id.as_str()] >= step_of[source.id.as_str()] + 2;
+            let field = reference.path.rsplit('.').next().unwrap_or_default();
+            let value = if reference.path.is_empty() {
+                format!("{}.{}", source.handle, reference.port)
+            } else if reference.path.starts_with(reference.port) {
+                format!("{}.{}", source.handle, reference.path)
+            } else {
+                format!("{}.{}.{}", source.handle, reference.port, reference.path)
+            };
+            let field = if field.is_empty() {
+                reference.port
+            } else {
+                field
+            };
+            match rows.iter_mut().find(|row| row.1 == value) {
+                Some(row) => {
+                    row.2.insert(node.id.as_str());
+                    row.3 |= far;
+                }
+                None => rows.push((
+                    proposed_name(&format!("{}.{field}", source.handle)),
+                    value,
+                    BTreeSet::from([node.id.as_str()]),
+                    far,
+                )),
+            }
+        }
+    }
+    rows.into_iter()
+        .filter(|row| row.2.len() >= readers::MIN_READERS && row.3)
+        .map(|(name, value, readers, _)| (name, value, readers.len()))
+        .collect()
+}
