@@ -4477,3 +4477,70 @@ fn mcp05b_criterion_4_an_unreadable_record_refuses_a_publish_with_an_id() {
     assert_eq!(entries[999]["id"], "after-version-1");
     assert_eq!(entries[999]["result"]["revision"], 3);
 }
+
+// ----- LAY-26 (#341): no far-read warning in MCP -----
+
+/// Criterion 5: `check` and `check_text` on `far-value` return no far-read
+/// warning, and `write_source` accepts the text as before, though the pass
+/// the Code view and `apiforge check` run finds fifteen in it.
+#[test]
+fn lay26_criterion_5_mcp_returns_no_far_read_warning() {
+    let far_value = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/scenarios/lay/far-value.afs"),
+    )
+    .unwrap();
+    let far = |diagnostics: &[tools::Diagnostic]| {
+        diagnostics
+            .iter()
+            .filter(|d| d.message == apiforge_script::FAR_READ)
+            .count()
+    };
+
+    // The pass itself finds them, so the answers below are not empty by
+    // accident.
+    let directory = checkout();
+    let root = directory.path();
+    fs::write(root.join(SCENARIO), &far_value).unwrap();
+    let session = ProjectSession::open_saved_read_only(root).unwrap();
+    let document = session
+        .documents()
+        .iter()
+        .find(|d| d.entry().path.as_str() == SCENARIO)
+        .unwrap();
+    let tree = apiforge_script::parse(&far_value);
+    let found =
+        apiforge_script::far_read_warnings(&tree, document.model().unwrap(), session.context());
+    assert_eq!(found.len(), 15);
+    assert!(
+        document
+            .diagnostics()
+            .iter()
+            .all(|d| d.message != apiforge_script::FAR_READ),
+        "not in the session's own analysis"
+    );
+    drop(session);
+
+    let checked = tools::check(root, Some(SCENARIO)).unwrap();
+    assert!(checked.valid);
+    assert_eq!(far(&checked.documents[0].diagnostics), 0, "check");
+    let all = tools::check(root, None).unwrap();
+    assert!(
+        all.documents.iter().all(|d| far(&d.diagnostics) == 0),
+        "check of the whole project"
+    );
+
+    let directory = checkout();
+    let root = directory.path();
+    let result = tools::check_text(root, SCENARIO, &far_value).unwrap();
+    assert!(result.valid);
+    assert_eq!(far(&result.diagnostics), 0, "check_text");
+
+    let (_, hash, _) = read(root, SCENARIO);
+    let written = agent(root)
+        .write_source(&write_args(SCENARIO, &far_value, &hash))
+        .unwrap();
+    assert!(written.wrote, "write_source accepts it");
+    assert!(written.valid);
+    assert_eq!(far(&written.diagnostics), 0, "write_source");
+    assert_eq!(fs::read_to_string(root.join(SCENARIO)).unwrap(), far_value);
+}

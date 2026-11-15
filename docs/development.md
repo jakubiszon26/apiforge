@@ -350,7 +350,11 @@ cargo run -p apiforge-cli --locked -- apply --folder /path/to/project --file sce
 cargo run -p apiforge-cli --locked -- run --folder /path/to/project --scenario scenarios/main.afs --json
 ```
 
-`check` optionally selects one registered source with `--file`. `print` emits its
+`check` optionally selects one registered source with `--file`. Besides the
+diagnostics MCP's `check` returns, it warns, as the Code view does, at each place
+where a step two or more steps later, or in Cleanup, reads a value of a request
+or a component call directly ([LAY-26](tickets/LAY-26.md)); a warning never
+changes its exit code. `print` emits its
 canonical definition; `apply` validates and saves the supplied source exactly under
 the exclusive project lock. Neither changes published component revisions. Folder
 calls must name `Handle@revision(...)`. `run` selects a scenario by registered path
