@@ -123,9 +123,24 @@ impl Aggregate {
     /// The numbers as they are written, ascending, one run of consecutive
     /// numbers per part: two or more as a range with an en dash.
     pub fn number_parts(&self) -> Vec<String> {
-        // Test hook: nothing is written yet.
-        let _ = &self.numbers;
-        Vec::new()
+        let mut numbers = self.numbers.clone();
+        numbers.sort_unstable();
+        numbers.dedup();
+        let mut parts = Vec::new();
+        let mut index = 0;
+        while index < numbers.len() {
+            let mut end = index;
+            while end + 1 < numbers.len() && numbers[end + 1] == numbers[end] + 1 {
+                end += 1;
+            }
+            parts.push(if end > index {
+                format!("{}–{}", numbers[index], numbers[end])
+            } else {
+                numbers[index].to_string()
+            });
+            index = end + 1;
+        }
+        parts
     }
 
     /// The checks line: the folded checks' numbers first (LAY-27), then
@@ -209,8 +224,11 @@ pub fn aggregates(
                 continue;
             }
             aggregate.checks += 1;
-            // Test hook: no folded check is named yet.
-            let _ = (folded, numbers);
+            if folded.contains(check.id.as_str())
+                && let Some(number) = numbers.get(check.id.as_str())
+            {
+                aggregate.numbers.push(*number);
+            }
             match status {
                 Some(StepStatus::Passed) => aggregate.passed += 1,
                 Some(StepStatus::Failed | StepStatus::Error) => aggregate.failed += 1,
