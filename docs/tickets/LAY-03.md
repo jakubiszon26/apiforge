@@ -1,51 +1,166 @@
-# LAY-03: Wires are never drawn on top of each other
+# LAY-03: Lines are always far enough apart to trace
 
-- Size: S · Owner review: 15 min · Risk: none
-- State: Backlog (issue #34) · LAY sprint, wave 3 (should), after LAY-04
-  ([lay.md](../sprints/lay.md) section 6)
-- Analysis model: Fable · Implementation model: —
+- Size: M · Owner review: 30 min · Risk: `visible UI`, `default` (what Tidy
+  up leaves between cards)
+- State: Re-scoped by the owner 2026-11-15 (issue #34) · in implementation ·
+  LAY sprint, part A, may start before the checkpoint (#296)
+- Analysis and implementation model: Fable (alias; version not confirmed —
+  the owner's exception to the model policy for this ticket)
 
 ## Goal
 
-Two wires that travel the same way run side by side with a visible gap, and
-a port that feeds several cards shows one wire per card.
+The owner's finding of 2026-11-15, on his own board: dashed `@after` rails
+and wires run 2–4 px apart or merge into one thick band — along the top of
+a row, where a vertical and a horizontal rail turn the same corner, under
+the last row, and where three or four lines arrive together. *This must
+never happen.* Every line is far enough from every other line and from
+every card to be followed with the eye; the good example is a rail about
+20 px from a card's edge. A sprawling board that needs scrolling is better
+than packed lines.
+
+It replaces the earlier scope (coincident pairs counted, capped at 30 in
+*Chips* mode): the rule is now a hard minimum and the count is zero.
+
+## What the board does today
+
+`main` at `40239e9`, reference scenarios tidied, 1600 × 1000, compact
+cards, checks folded. The captures are in
+[`docs/qa/2026-11-15/LAY-03/`](../qa/2026-11-15/LAY-03/), each opened and
+read; the owner's own captures are of a private project and are not here.
+Pairs of parallel segments of two lines nearer than 12 px for 20 px or more:
+
+| Board | Lines | Pairs under 12 px | Least gap |
+| --- | --- | --- | --- |
+| `fan-out`, chips (the default) | 19 | 17 | 0 px |
+| `fan-out`, all wires | 31 | 121 | 0 px |
+| `shop-30`, chips | 22 | 15 | 0 px |
+| `shop-30`, all wires | 42 | 98 | 0 px |
+| `shop-50`, chips | 32 | 24 | 0 px |
+| `far-value`, chips | 16 | 8 | 0 px |
+
+The four situations of the finding, each on a fixture:
+
+1. **A rail on the card tops and on another rail** — `fan-out`, rows 2 and
+   3: the rails of a row share one level 12 px above the cards, 0–4 px
+   from each other, and their labels are struck through
+   ([1600](../qa/2026-11-15/LAY-03/before-1-row-top-1600.png),
+   [960](../qa/2026-11-15/LAY-03/before-1-row-top-960.png)).
+2. **A vertical and a horizontal rail doubled round a corner** —
+   `fan-out`, right of `apply_coupon`: `quantity → apply_coupon` and
+   `remove_coupon → view` come down one corridor 4 px apart and turn
+   together
+   ([1600](../qa/2026-11-15/LAY-03/before-2-corner-1600.png),
+   [960](../qa/2026-11-15/LAY-03/before-2-corner-960.png)).
+3. **A band under the last row** — `shop-30`, all wires: the wires of
+   `order`'s readers run 0–9 px apart for 680–1430 px under the third row
+   ([1600](../qa/2026-11-15/LAY-03/before-3-under-last-row-1600.png),
+   [960](../qa/2026-11-15/LAY-03/before-3-under-last-row-960.png)).
+4. **A corner where three or four lines arrive** — `shop-30`, all wires,
+   between the first two rows: lines 0–6 px apart turn in one place
+   ([1600](../qa/2026-11-15/LAY-03/before-4-many-arrive-1600.png),
+   [960](../qa/2026-11-15/LAY-03/before-4-many-arrive-960.png)).
+
+One cause: the router gives every line the same few places — the 12 px
+edge of each card — and knows nothing of the lines already there. A second
+pass then moves lines that landed on one place 6 px apart, only where that
+is safe, and lines 3 px apart count as two places. Nothing makes room.
 
 ## What the owner will see
 
-- New: parallel wires are spaced apart; the wires of one output separate
-  after the port stub
-  (today: [coincident bundles](../qa/2026-10-26/LAY/crop-flow-left.png),
-  [a shared trunk](../qa/2026-10-26/LAY/crop-demo.png)).
-- Changed: a nudged wire may run inside the 12 px clearance of a card, never
-  inside the card.
-- Removed, migrated, defaults: nothing.
+- **The gap.** 20 px on the board (it scales with zoom): between any two
+  lines running the same way, between two lines end to end on one level,
+  and between a line and the edge of any card or chip, its own cards
+  included. Rails and wires alike. Lines still cross, at right angles, with
+  the bridge.
+- **At a port.** The first 20 px of a line, straight out of its port, are
+  as close to the neighbouring ports' lines as the ports are. Wires of one
+  port leave on one line and turn off it one by one, 20 px apart, like the
+  teeth of a comb: one line per reader from the turn onwards.
+- **Tidy up makes the room.** It widens the gap between two columns,
+  between two rows, or between a card and the card hung under it, in steps
+  of 20 px, only where the lines the board draws at that moment need it.
+  The board grows and Fit drops ([Measured](#measured)).
+- Changed: after Tidy up the gaps are 100 px between columns and rows
+  (96 today) and wider where lines need it. Showing folded checks or
+  switching to *All wires* moves no card, as today; the added lines keep
+  the gap by going the long way round where the board has no room, and a
+  second Tidy up makes it (LAY-11 promised that no second Tidy up was
+  needed; that held for the cards and no longer holds for the room).
+- Changed: a board tidied before this change keeps its positions. Its
+  lines keep the gap too, by longer routes; Tidy up widens it.
+- Removed or hidden: nothing. Migrated: nothing; no file format changes.
+- Default behaviour that changes: the spacing Tidy up gives, as above.
 
 ## Mock-up
 
-Not applicable: no new element; the wires keep their style.
+Not applicable: no new element. Before and after on the four situations,
+at 1600 × 1000 and 960 × 540, are the QA captures of the pull request.
 
 ## Acceptance criteria
 
-1. Generated boards (LAY-01): no coincident pair where the gap between the
-   cards leaves room for the channel gap times the number of wires.
-2. Nudging never adds a crossing: the bridge count after nudging is not above
-   the count before it.
-3. The guarantee tests of ADR 0006 still pass: no nudged segment enters a card.
-4. The demo board tidied: the two wires from *Product* are two visible lines
-   from the stub onwards.
+1. **The rule.** After Tidy up, on every reference board (`order-flow`,
+   `shop-30`, `shop-50`, `fan-out`) at either density, checks folded or
+   drawn, *All wires* or *Chips*: no two parallel segments of the lines
+   drawn are nearer than 20 px, side by side or end to end; no segment is
+   nearer than 20 px to a card or chip. Not counted: the first and last
+   20 px of a line at its ports, and the shared straight piece out of (or
+   into) one port.
+2. **No shared track.** No two lines lie on each other anywhere, except
+   wires of one port on that port's straight piece. On the demo shop board
+   tidied, the two wires from *Product* are two lines from their turns
+   onwards.
+3. **The metric.** `quality` prints `packed`, the number of breaches of
+   criterion 1 on a board; it is 0 on all 24 reference rows. `close` and
+   `coincident` stay for comparison.
+4. **Tidy up widens.** On `fan-out` in *All wires* a gap between two
+   columns is wider than 100 px and a gap no line needs stays 100 px; the
+   same Tidy up twice moves nothing; opening a scenario from code gives
+   the board Tidy up gives.
+5. **Without Tidy up.** On a board left as an earlier Tidy up placed it
+   (96 px gaps, 24 px under a card) the lines drawn still keep criterion 1
+   wherever a route with the gap exists; a line gives the gap up only where
+   cards leave it no other way, as today's last resort.
+6. **Lines brought back.** A wire drawn while its chip is pointed at or
+   its card is selected keeps the gap from the lines at rest and from
+   cards, like any other.
+7. **The contract of ADR 0006 holds**: no line enters a card; routing is
+   deterministic; the measured cost of a full routing is recorded in the
+   ADR.
+8. Review captures of the four situations before and after, at both
+   sizes, each asserting a card in view.
+
+## Measured
+
+Filled in by the implementation: `packed`, board size and Fit per
+reference row, before and after.
 
 ## Not in scope
 
-Lane order between columns (LAY-05); a deliberate bus style for fan-outs.
+- The order of lines across a channel to save crossings (LAY-05).
+- LAY-24's mark for the rail into the next step: with it there are fewer
+  rails to make room for; the rule holds with and without it.
+- Chips at readers, continuation marks and rail labels are drawn in the
+  gaps where lines run and are not obstacles; a label on a rail still sits
+  on its rail.
+- Ports of one card nearer than 20 px (two operands of a value): their
+  first 20 px run as close as the ports are; moving ports is card design.
+- Tidy up of a selection, and of a board without a spine step, widen
+  nothing yet.
 
 ## Technical appendix
 
-`route::nudge` (`crates/apiforge-layout/src/route.rs`): channels are keyed by
-the rounded line, so lines 3 px apart are two channels; the order across a
-channel sorts by the segment's start along the channel (`point.x` for a
-horizontal one) instead of by where the neighbouring segments come from; and
-`safe` tests the offset segment against cards inflated by the margin, so a wire
-hugging a clearance can never move towards the card and keeps its line. Fix:
-cluster lines within `channel_gap`, sort by the mean perpendicular coordinate
-of the previous and next points, test against the cards without margin, and
-spread outwards from a card instead of symmetrically when one side is blocked.
+- `route` (`crates/apiforge-layout/src/route.rs`): `Routing::margin`,
+  `stub` and `channel_gap` become one gap of 20. The search grid gains
+  tracks every 20 px; a segment already routed forbids travel the same way
+  within the gap of it (crossing it stays free), except for a wire of the
+  same port on that port's exit line. `nudge` goes. A wire with no route
+  under these rules falls back as today, wires first, then cards.
+- `packed` (`apiforge_layout::packed`): the breaches of criterion 1, used
+  by `quality`, by the tests and by Tidy up.
+- Tidy up (`board_edit.rs`, `layered::hang`): routes the lines the board
+  would draw with breaches allowed at a price, widens the gap each breach
+  lies in, and repeats until there is none.
+- Lines brought back are routed among the lines at rest
+  (`canvas/routing.rs`), which stay as they are.
+- Painting is untouched, so LAY-24 (#343) merges on top: its rails not
+  drawn are simply not routed.
