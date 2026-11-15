@@ -2,7 +2,7 @@
 use super::*;
 use apiforge_core::{
     journal::JournalRun,
-    run::{Phase, RunMode, RunResult},
+    run::{Phase, RunMode, RunResult, RunStatus},
 };
 use apiforge_project::PreparedRun;
 use apiforge_runner::{RunHandle, RunRequest, RunTarget, RunnerService};
@@ -39,6 +39,10 @@ pub(super) struct JournalReview {
 struct Report {
     prepared: PreparedRun,
     result: RunResult,
+    /// The run before, while it described the document as it is: the board
+    /// shows its results, muted, for the steps this run has not reached
+    /// (LAY-07).
+    previous: Option<RunResult>,
     /// In the order they were added; an undone check stays until another
     /// check replaces it, so that redo finds it again.
     checks: Vec<AddedCheck>,
@@ -48,10 +52,11 @@ struct Report {
 }
 
 impl Report {
-    fn new(prepared: PreparedRun, result: RunResult) -> Self {
+    fn new(prepared: PreparedRun, result: RunResult, previous: Option<RunResult>) -> Self {
         Self {
             prepared,
             result,
+            previous,
             checks: Vec::new(),
             text: Cell::new(None),
         }
@@ -112,18 +117,38 @@ pub(super) const LIVE_PAUSED: &str =
     "Live requests are not sent from this window while another process holds the project.";
 
 /// Keeps the latest report of `prepared`'s run. Another run starts a new
-/// report, and with it a new count of checks; the same run's progress keeps
-/// the checks added from it meanwhile.
-fn publish(reports: &mut HashMap<String, Report>, prepared: &PreparedRun, result: RunResult) {
+/// report, and with it a new count of checks, keeping the report it replaces
+/// as the previous run when `keep`; the same run's progress keeps the checks
+/// added from it meanwhile.
+fn publish(
+    reports: &mut HashMap<String, Report>,
+    prepared: &PreparedRun,
+    result: RunResult,
+    keep: bool,
+) {
     match reports.get_mut(prepared.document_id()) {
         Some(report) if report.result.id == result.id => report.result = result,
         _ => {
+            let previous = reports
+                .remove(prepared.document_id())
+                .filter(|_| keep)
+                .map(|report| report.result);
             reports.insert(
                 prepared.document_id().into(),
-                Report::new(prepared.clone(), result),
+                Report::new(prepared.clone(), result, previous),
             );
         }
     }
+}
+
+/// The run before `run` that the board may show beside it: one of the same
+/// mode, as the engine reuses previous results only for the same mode
+/// (LAY-07).
+pub(super) fn previous_of<'a>(
+    run: &RunResult,
+    previous: Option<&'a RunResult>,
+) -> Option<&'a RunResult> {
+    previous.filter(|previous| previous.mode == run.mode)
 }
 
 /// The hover of the header's label while a run of unsaved code runs (UX-04).
@@ -204,6 +229,15 @@ impl FolderApp {
     pub(super) fn fresh_run(&self, id: &str) -> Option<RunResult> {
         let report = self.runs.reports.get(id)?;
         (self.freshness(report) != Freshness::Stale).then(|| report.result.clone())
+    }
+
+    /// The run before the document's run that is on, while it is on: the
+    /// board shows its results for the steps not reached yet (LAY-07).
+    pub(super) fn previous_run(&self, id: &str) -> Option<&RunResult> {
+        let report = self.runs.reports.get(id)?;
+        (report.result.status == RunStatus::Running && self.freshness(report) != Freshness::Stale)
+            .then(|| previous_of(&report.result, report.previous.as_ref()))
+            .flatten()
     }
 
     /// Fresh while the run's own checks are clear; otherwise, when nothing
@@ -461,12 +495,19 @@ impl FolderApp {
 
     pub(super) fn poll_run(&mut self) {
         if let (Some(handle), Some(prepared)) = (&self.runs.handle, &self.runs.active) {
+            // The report a new run replaces stays as its previous run while
+            // it describes the document as it is (LAY-07).
+            let keep = self
+                .runs
+                .reports
+                .get(prepared.document_id())
+                .is_some_and(|report| self.freshness(report) != Freshness::Stale);
             if let Some(report) = handle.latest() {
-                publish(&mut self.runs.reports, prepared, report);
+                publish(&mut self.runs.reports, prepared, report, keep);
             }
             if handle.is_finished() {
                 if let Some(report) = handle.latest() {
-                    publish(&mut self.runs.reports, prepared, report);
+                    publish(&mut self.runs.reports, prepared, report, keep);
                 }
                 self.runs.handle = None;
                 self.runs.active = None;

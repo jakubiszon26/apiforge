@@ -16,7 +16,7 @@ mod strip;
 pub use collapse::collapsible;
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
-pub(crate) use paint::{DrawnText, NUMBER_MIN, TextKind};
+pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
 pub use readers::WireMode;
 pub use routing::WireStyle;
 pub use strip::Pill as InputView;
@@ -28,7 +28,7 @@ use apiforge_core::{
     block::Block,
     edit::proxy_binding,
     format::{Binding, Graph, Port, Position, Project, ProxySource},
-    graph::{ORDER_PORT, URL_INPUT, WireKind, wires},
+    graph::{ORDER_PORT, URL_INPUT, WireKind, sequence, wires},
     model::{Branch, NodeKind},
     operator::Operator,
     run::StepResult,
@@ -245,6 +245,8 @@ pub struct Input<'a> {
     pub parameters: &'a [String],
     pub selection: &'a [String],
     pub steps: Option<&'a [StepResult]>,
+    /// Where a run that is on has got to (LAY-07).
+    pub progress: Progress<'a>,
     pub can_paste: bool,
     /// Changing context resets the camera and transient state.
     pub context: &'a str,
@@ -281,6 +283,19 @@ pub struct Input<'a> {
     /// as a resized window does; a panel opening or closing beside the
     /// board does not (UX-18).
     pub arrangement: &'a str,
+}
+
+/// Where a run of the board's document has got to while it is on (LAY-07):
+/// the running step is marked, the steps not reached yet are muted and show
+/// their previous result as such. The default is no run on.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Progress<'a> {
+    /// A run is on; a step with no result in it has not been reached.
+    pub on: bool,
+    /// The step the runner announced and has not finished (LAY-22).
+    pub running: Option<&'a str>,
+    /// The results of the run before, of this board's phase.
+    pub previous: Option<&'a [StepResult]>,
 }
 
 /// The state of the *Component settings* button in a component board's
@@ -731,6 +746,24 @@ impl Canvas {
         self.debug_drawn(id)
             .map(|drawn| drawn.texts.clone())
             .unwrap_or_default()
+    }
+
+    /// The badge the card `id` drew in the last frame (LAY-07).
+    #[cfg(test)]
+    pub(crate) fn debug_badge(&self, id: &str) -> Option<DrawnBadge> {
+        self.debug_drawn(id)?.badge.clone()
+    }
+
+    /// Whether the card `id` had the selection's frame in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_selected(&self, id: &str) -> bool {
+        self.debug_drawn(id).is_some_and(|drawn| drawn.selected)
+    }
+
+    /// A box on the board, on screen in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_to_screen(&self, world: Rect) -> Rect {
+        self.screen_camera(self.last_viewport).rect(world)
     }
 
     /// The colour of the card's 2 px border for a failed or blocked step.
@@ -1235,6 +1268,13 @@ impl Canvas {
         // the camera; their subjects' footers sum them up (LAY-11).
         let folded = self.fold(input.graph, input.later, &mut cards, &mut chips);
         let aggregates = collapse::aggregates(input.graph, input.later, input.steps);
+        // Every step's place in the engine's order, the number of its row
+        // in Run results (LAY-07, Q2 = A); a pure function of the graph.
+        let numbers: HashMap<&str, usize> = sequence(input.graph)
+            .into_iter()
+            .enumerate()
+            .map(|(index, id)| (id, index + 1))
+            .collect();
         #[cfg(test)]
         {
             self.hidden = folded.keys().cloned().collect();
@@ -1425,6 +1465,12 @@ impl Canvas {
         let laid_counts: Vec<readers::Laid> = shown_counts
             .iter()
             .map(|count| readers::lay_count(&painter, count, camera, &mark_screens))
+            .collect();
+        // A step's badge keeps clear of the chips and counts (LAY-07).
+        let chip_boxes: Vec<Rect> = laid_tags
+            .iter()
+            .chain(&laid_counts)
+            .map(|laid| laid.rect)
             .collect();
         // Pointing at a chip, or at the input it stands at, shows its
         // statement and draws its wire.
@@ -1732,6 +1778,17 @@ impl Canvas {
             let step = input
                 .steps
                 .and_then(|steps| steps.iter().find(|step| step.node_id == card.id));
+            let run = paint::CardRun {
+                step,
+                number: numbers.get(card.id.as_str()).copied(),
+                running: input.progress.on && input.progress.running == Some(card.id.as_str()),
+                pending: input.progress.on,
+                previous: input
+                    .progress
+                    .previous
+                    .and_then(|steps| steps.iter().find(|step| step.node_id == card.id)),
+                clear_of: &chip_boxes,
+            };
             let reveal = Reveal::of(
                 card,
                 camera,
@@ -1774,7 +1831,7 @@ impl Canvas {
                     camera,
                     selection.contains(card.id.as_str()),
                     related_blocks.contains(&card.id),
-                    step,
+                    &run,
                     aggregate,
                 );
                 paint::trays(&board_painter, card, camera, reveal.inputs, reveal.outputs);
@@ -1803,7 +1860,7 @@ impl Canvas {
                     camera,
                     selection.contains(card.id.as_str()),
                     related_blocks.contains(&card.id),
-                    step,
+                    &run,
                     aggregate,
                 )
             };
@@ -4100,6 +4157,7 @@ mod tests {
                                 parameters: &[],
                                 selection: &selection,
                                 steps: None,
+                                progress: Progress::default(),
                                 can_paste: false,
                                 context: "test",
                                 library_in_view: true,
@@ -4153,6 +4211,7 @@ mod tests {
                                 parameters: &[],
                                 selection: &[],
                                 steps: None,
+                                progress: Progress::default(),
                                 can_paste: false,
                                 context: "test",
                                 library_in_view: true,
@@ -4230,6 +4289,7 @@ mod tests {
                             parameters: &[],
                             selection: &[],
                             steps: None,
+                            progress: Progress::default(),
                             can_paste: false,
                             context: "test",
                             library_in_view: true,
