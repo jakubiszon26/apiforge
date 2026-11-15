@@ -1,6 +1,7 @@
 //! ApiForge Script syntax, diagnostics and canonical source formatting.
 pub mod ast;
 pub mod complete;
+mod far;
 mod format;
 pub mod lexer;
 mod lower;
@@ -8,6 +9,7 @@ mod parser;
 pub use lower::{Document, LowerContext, Lowered, lower, validate_document_model};
 
 pub use ast::{Diagnostic, Fix, Severity, SyntaxTree, UNATTACHED_COMMENT};
+pub use far::{FAR_READ, far_read_warnings};
 pub use format::{format, format_tree};
 pub use parser::parse;
 
@@ -38,6 +40,23 @@ pub fn push_error(
     if let Some(index) = replaced {
         diagnostics.remove(index);
         diagnostics.push(error);
+    }
+}
+
+/// Adds `warnings` to `diagnostics` while the list has room under
+/// `MAX_DIAGNOSTICS`, counting the rest in `omitted`: a pass run after
+/// lowering (LAY-26's far reads) never takes an error's place.
+pub fn push_warnings(
+    diagnostics: &mut Vec<Diagnostic>,
+    omitted: &mut usize,
+    warnings: impl IntoIterator<Item = Diagnostic>,
+) {
+    for warning in warnings {
+        if diagnostics.len() < MAX_DIAGNOSTICS {
+            diagnostics.push(warning);
+        } else {
+            *omitted += 1;
+        }
     }
 }
 
