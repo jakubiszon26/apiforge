@@ -343,6 +343,41 @@ scenario "Values" {
 panel and lets the board show copies of it. It changes nothing in a run, and
 is allowed only on value blocks.
 
+Save a value in a variable when steps far from where it is made read it:
+a field of a request's or a component call's output that three or more
+steps read, or that a step two or more steps later reads. Write the `var`
+right after the step that makes the value and read the variable instead:
+
+```afs
+scenario "Saved value" {
+  begin = start
+  @after(begin)
+  cart = POST "/carts" {
+    sample 201 { id: "c-1" }
+  }
+  var cartId = cart.body.id
+  @after(cart)
+  items = GET "/carts/{{cartId}}/items" {
+    sample 200 {}
+  }
+  @after(items)
+  coupon = POST "/carts/{{cartId}}/coupon" {
+    sample 200 {}
+  }
+  @after(coupon)
+  checkout = POST "/checkout" {
+    body { cart: cartId }
+    sample 201 { id: "o-1" }
+  }
+}
+```
+
+Name it after the field, `token` for `login.body.token`, and after the step
+too where the field alone says nothing (`id`, `value`, `status`, `body`) or
+the name is taken: `cartId` for `cart.body.id`. The board draws the reads of
+a variable that are far from it as chips, not as long wires, and offers the
+same edit itself. A variable is a step of its own in a run's results.
+
 ## Assertions and predicates
 
 `assert` checks one predicate. A failed assertion fails the step (and with
