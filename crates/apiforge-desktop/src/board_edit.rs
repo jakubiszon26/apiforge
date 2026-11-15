@@ -546,13 +546,12 @@ impl Board<'_> {
     }
 
     /// Places new variables under the steps whose values they hold (LAY-25),
-    /// one under the other, each moved to the nearest free slot when that
-    /// place is not clear of the other cards and chips. Nothing else moves.
+    /// one under the other, each moved to the nearest free slot the layout
+    /// finds from there, as an added block is: the gaps between the rows
+    /// stay free for the wires. Nothing else moves.
     pub fn place_under_sources(&self, mut graph: Graph, ids: &[String]) -> Graph {
-        /// The space between a step and the variable under it, and the
-        /// least room it keeps from the other cards.
-        const GAP: f64 = 12.0;
-        const CLEARANCE: f32 = 8.0;
+        /// The space between a step and the variable under it.
+        const GAP: f64 = 24.0;
         let mut bottoms: HashMap<String, f64> = HashMap::new();
         for id in ids {
             let Some(source) = graph
@@ -583,29 +582,7 @@ impl Board<'_> {
                     y: top.round(),
                 };
             }
-            let clear = graph
-                .nodes
-                .iter()
-                .find(|node| &node.id == id)
-                .is_some_and(|placed| {
-                    let rect = card(placed).expand(CLEARANCE);
-                    graph
-                        .nodes
-                        .iter()
-                        .filter(|node| &node.id != id)
-                        .map(card)
-                        .chain(self.chip_obstacles(&graph).iter().map(|chip| {
-                            let rect = chip.rect();
-                            egui::Rect::from_min_max(
-                                egui::pos2(rect.min.x, rect.min.y),
-                                egui::pos2(rect.max.x, rect.max.y),
-                            )
-                        }))
-                        .all(|other| !rect.intersects(other))
-                });
-            if !clear {
-                graph = self.free_slot_for(graph, id);
-            }
+            graph = self.free_slot_for(graph, id);
             if let Some(node) = graph.nodes.iter().find(|node| &node.id == id) {
                 bottoms.insert(source.id.clone(), f64::from(card(node).bottom()));
             }
