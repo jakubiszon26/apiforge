@@ -989,3 +989,77 @@ mod mcp15 {
         assert_eq!(holder.endpoint(), None, "a command does not listen");
     }
 }
+
+/// LAY-26 (#341), criterion 4: `apiforge check` prints a warning at each far
+/// read of `far-value`, in the format of its other diagnostics, and its exit
+/// code is the one it gives without them: a file with warnings only passes.
+mod lay26 {
+    use super::run;
+    use apiforge_project::prepare_project;
+    use std::{fs, path::Path};
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+
+    fn fixture(name: &str) -> String {
+        fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/scenarios/lay")
+                .join(format!("{name}.afs")),
+        )
+        .unwrap()
+    }
+
+    /// The demo shop with `text` as its scenario.
+    fn shop(text: &str) -> tempfile::TempDir {
+        let directory = tempfile::tempdir().unwrap();
+        prepare_project(directory.path(), &apiforge_core::demos::shop_project()).unwrap();
+        fs::write(directory.path().join(SCENARIO), text).unwrap();
+        directory
+    }
+
+    /// The ranges of the lines of stderr that say `message`.
+    fn ranges(stderr: &str, message: &str) -> Vec<(usize, usize)> {
+        stderr
+            .lines()
+            .filter_map(|line| line.strip_suffix(&format!(": {message}")))
+            .map(|start| {
+                let range = start.strip_prefix("Warning ").expect("a warning");
+                let (from, to) = range.split_once("..").unwrap();
+                (from.parse().unwrap(), to.parse().unwrap())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn lay26_criterion_4_check_prints_the_far_reads_and_still_passes() {
+        let text = fixture("far-value");
+        let directory = shop(&text);
+        let output = run(directory.path(), "check", &[]);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let found = ranges(&stderr, apiforge_script::FAR_READ);
+        assert_eq!(found.len(), 15, "{stderr}");
+        for (start, end) in found {
+            let read = &text[start..end];
+            assert!(
+                [
+                    "cart.cart.id",
+                    "cart.cart.productId",
+                    "session.body.currency"
+                ]
+                .contains(&read),
+                "a far read: {read}"
+            );
+        }
+        let saved = shop(&fixture("far-value-saved"));
+        let without = run(saved.path(), "check", &[]);
+        assert!(
+            ranges(
+                &String::from_utf8_lossy(&without.stderr),
+                apiforge_script::FAR_READ
+            )
+            .is_empty()
+        );
+        assert_eq!(output.status.code(), without.status.code());
+        assert_eq!(output.status.code(), Some(0), "warnings only pass");
+    }
+}

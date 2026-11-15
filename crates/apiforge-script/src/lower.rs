@@ -1168,7 +1168,7 @@ pub(crate) fn ungroup(mut expr: &Expr) -> &Expr {
     }
     expr
 }
-fn reference_parts(expr: &Expr) -> (Option<&str>, Vec<String>) {
+pub(crate) fn reference_parts(expr: &Expr) -> (Option<&str>, Vec<String>) {
     let mut fields = Vec::new();
     let mut current = ungroup(expr);
     while let ExprKind::Field { base, key, .. } = &current.kind {
@@ -1185,7 +1185,7 @@ fn reference_parts(expr: &Expr) -> (Option<&str>, Vec<String>) {
         fields,
     )
 }
-fn field_path(fields: &[String]) -> String {
+pub(crate) fn field_path(fields: &[String]) -> String {
     let mut path = JsonPath::root();
     for field in fields {
         path.push_key(field);

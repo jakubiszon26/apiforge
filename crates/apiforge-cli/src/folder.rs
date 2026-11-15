@@ -108,10 +108,22 @@ fn execute(args: Args) -> Result<(), String> {
     }
 }
 
-/// Prints the document's diagnostics in the CLI's stderr format.
+/// Prints the document's diagnostics in the CLI's stderr format: those MCP's
+/// `check` returns, then the far reads of a valid document (LAY-26), which
+/// MCP does not return. Warnings never fail the check.
 fn check_document(session: &ProjectSession, id: &str) -> Result<(), String> {
     let (document, valid) = check_saved(session, id).map_err(|error| error.message)?;
-    super::diagnostics(document.diagnostics());
+    let mut diagnostics = document.diagnostics().to_vec();
+    if valid && let Some(model) = document.model() {
+        let tree = apiforge_script::parse(document.text());
+        let mut omitted = document.omitted_diagnostics();
+        apiforge_script::push_warnings(
+            &mut diagnostics,
+            &mut omitted,
+            apiforge_script::far_read_warnings(&tree, model, session.context()),
+        );
+    }
+    super::diagnostics(&diagnostics);
     if !valid {
         return Err("Saved source has no valid definition".into());
     }
