@@ -80,9 +80,9 @@ cards.
   shortened from its end, number by number, and ends with `…` (`21, …`);
   a digit is never cut and the first number is always written.
 - The numbers follow the name, not the 25 % line: Fit at 960 × 540 puts
-  `far-value` a hair under 25 %, where LAY-09 writes a name only where it
-  fits. A card that writes its name writes the numbers; a card that does
-  not gets nothing.
+  `far-value` a hair under 25 % (24 % since LAY-03 widened *Tidy up*,
+  #347), where LAY-09 writes a name only where it fits. A card that writes
+  its name writes the numbers; a card that does not gets nothing.
 
 ## Mock-up
 
@@ -94,6 +94,13 @@ view. Approved with the answer on 2026-11-15. The mock is not for merge.
 | --- | --- | --- |
 | 1 | [the line, 1600 × 1000, Fit (56 %)](../qa/2026-11-15/LAY-27/lay27-line-1600.png) | `7 · 1 check` under `quantity`, `21, 23 · 2 checks` under `checkout`, `23 · 1 check` under `lookup`. `cart` reads `19 · 1 check`: `same_item` compares `view` with `cart`'s product, so 19 stands under both |
 | 2 | [the name's row, 960 × 540, Fit](../qa/2026-11-15/LAY-27/lay27-a-name-row-960.png) | The numbers at the right end of the name's row: `quantity 7`, `ch… 21, 23`, `remo… 17`, `apply_… 9`, `shipp… 15` |
+
+Re-checked against main after LAY-24, LAY-26 and LAY-03 (#347): the
+numbers and the lines at 1600 × 1000 are unchanged (Fit 56 %). Fit at
+960 × 540 is 24 %, not 25 %, because LAY-03's *Tidy up* widens the board;
+`checkout`'s card is then too narrow for its name's 22 px and `21, 23`, so
+by the rule above it reads `ch… 21, …` (23 stays on the board, in
+`lookup`'s line). The mock drew the name with no minimum.
 
 ## Acceptance criteria
 
@@ -144,7 +151,8 @@ quotes them.
 10. Adding a step in code before step 5 renumbers the lines in the next
     frame, with the badges.
 11. `review_lay27` renders `far-value.afs` with checks collapsed at
-    1600 × 1000 (Fit) and 960 × 540 (25 %), before and after a simulation,
+    1600 × 1000 (Fit) and 960 × 540 (Fit, 24 % since LAY-03), before and
+    after a simulation,
     and one full card (*Compact cards* off); each asserts a card in view.
     Two captures in the pull request: the two sizes after a run.
 
