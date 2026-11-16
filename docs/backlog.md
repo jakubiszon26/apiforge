@@ -368,6 +368,7 @@ Exit criteria:
 | [#341](https://github.com/jakubiszon26/apiforge/issues/341) | LAY-26 Code and the command line warn where a far value is read directly; [ticket](tickets/LAY-26.md); decided 2026-11-15, split from LAY-25; checked against the merged LAY-25 | S–M · 15 · `visible UI` | before LAY-24 |
 | [#334](https://github.com/jakubiszon26/apiforge/issues/334) | LAY-24 A mark on the card replaces the `@after` rail into the next step; [ticket](tickets/LAY-24.md); decided 2026-11-15 (the arrow at the badge) | S–M · 20 · `visible UI`, `default`, `removal` | before the checkpoint, after LAY-25 and LAY-26 |
 | [#344](https://github.com/jakubiszon26/apiforge/issues/344) | LAY-27 A collapsed check line carries the checks' numbers (`7 · 1 check`); [ticket](tickets/LAY-27.md); decided 2026-11-15 | S · 15 · `visible UI` | after LAY-25 |
+| [#348](https://github.com/jakubiszon26/apiforge/issues/348), [#349](https://github.com/jakubiszon26/apiforge/issues/349) | LAY-28 Lines in one corridor are ordered so they cross less, and the inputs of a *Data condition* are 20 px apart; [ticket](tickets/LAY-28.md); #349 decided 2026-11-16 (A) | M · 25 · `visible UI` | before the checkpoint, with the owner's decision of 2026-11-16 |
 
 Nine UX-1 tickets joined the sprint on 2026-11-05 at the owner's request,
 keeping `sprint:ux` beside `sprint:lay`. Their pull requests were accepted in
