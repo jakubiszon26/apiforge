@@ -280,7 +280,8 @@ fn rail_anchor(source: &Card, port: &str, target: &Card) -> Option<Pos2> {
     let (from, to) = (source.rect(), target.rect());
     let under =
         to.top() >= from.bottom() - 0.5 && to.left() < from.right() && from.left() < to.right();
-    Some(if under {
+    let mock_a = std::env::var("APIFORGE_LAY29").is_ok_and(|mode| mode == "a");
+    Some(if under || mock_a {
         below
     } else {
         pos2(below.x, from.top())

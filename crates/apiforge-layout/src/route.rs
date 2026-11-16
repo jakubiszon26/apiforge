@@ -1255,6 +1255,42 @@ pub fn violations(routes: &[Route], wires: &[Wire], cards: &[Rect]) -> Vec<(usiz
     found
 }
 
+/// Wires that run under a card they join, as `(wire, card)` pairs (LAY-29).
+///
+/// A card is painted over its wires, so a piece of a line inside the card it
+/// leaves or enters is not seen: the line then seems to come out of an edge
+/// where there is no port. A line may lie on the edge of its card, where its
+/// port is; it is under the card when a piece of it lies inside. A wire
+/// with no route to judge (`complete` false) is left out, as in
+/// [`violations`].
+pub fn under_own(routes: &[Route], wires: &[Wire], cards: &[Rect]) -> Vec<(usize, usize)> {
+    let mut found = Vec::new();
+    for (index, (route, wire)) in routes.iter().zip(wires).enumerate() {
+        if !route.complete {
+            continue;
+        }
+        let mut own = vec![wire.from.block];
+        if wire.to.block != wire.from.block {
+            own.push(wire.to.block);
+        }
+        for card in own {
+            let Some(rectangle) = cards.get(card) else {
+                continue;
+            };
+            let inside = route.segments().any(|(from, to)| {
+                from.x.min(to.x) < rectangle.max.x - 0.01
+                    && from.x.max(to.x) > rectangle.min.x + 0.01
+                    && from.y.min(to.y) < rectangle.max.y - 0.01
+                    && from.y.max(to.y) > rectangle.min.y + 0.01
+            });
+            if inside {
+                found.push((index, card));
+            }
+        }
+    }
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1691,6 +1691,7 @@ impl Canvas {
         let mut drawn: Vec<(String, Vec<Pos2>)> = Vec::with_capacity(board_wires.len());
         // The lines at rest, which the wires brought back keep clear of.
         let mut at_rest: Vec<Vec<Pos2>> = Vec::new();
+        let mut mock_rail_starts: Vec<Pos2> = Vec::new();
         #[cfg(test)]
         let mut bridged: HashMap<String, usize> = HashMap::new();
         {
@@ -1711,6 +1712,17 @@ impl Canvas {
             for wire in routed {
                 if wire.routed {
                     at_rest.push(wire.points.clone());
+                }
+                if wire.control
+                    && let Some(first) = wire.points.first()
+                    && cards.iter().any(|card| {
+                        let rect = card.rect();
+                        (rect.top() - first.y).abs() < 0.5
+                            && rect.left() <= first.x
+                            && first.x <= rect.right()
+                    })
+                {
+                    mock_rail_starts.push(*first);
                 }
                 paint::routed_wire(
                     &board_painter,
@@ -1744,6 +1756,17 @@ impl Canvas {
             };
             let routed = self.revealed_router.routes(&request).to_vec();
             for wire in &routed {
+                if wire.control
+                    && let Some(first) = wire.points.first()
+                    && cards.iter().any(|card| {
+                        let rect = card.rect();
+                        (rect.top() - first.y).abs() < 0.5
+                            && rect.left() <= first.x
+                            && first.x <= rect.right()
+                    })
+                {
+                    mock_rail_starts.push(*first);
+                }
                 paint::routed_wire(&board_painter, wire, camera, true);
                 drawn_revealed.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
@@ -2143,6 +2166,11 @@ impl Canvas {
             self.chip_controls(&mut board_ui, chip, camera, !input.read_only, &mut commands);
         }
 
+        if std::env::var("APIFORGE_LAY29").is_ok_and(|mode| mode == "b") {
+            for start in &mock_rail_starts {
+                paint::mock_rail_socket(&board_painter, camera.to_screen(*start), camera.zoom);
+            }
+        }
         // The chips and counts, found by their names: pointing at a chip
         // draws its wire, a click on a count draws every wire of its port.
         for (tag, laid) in shown_tags.iter().zip(&laid_tags) {

@@ -1728,6 +1728,11 @@ pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
     socket(painter, camera.to_screen(chip.output_anchor()), false, z);
 }
 
+/// Mock-up of LAY-29, option B: the socket a rail leaves the top of a card from.
+pub fn mock_rail_socket(painter: &Painter, center: Pos2, zoom: f32) {
+    socket(painter, center, true, zoom);
+}
+
 /// Data sockets are round, control sockets square, so they differ beyond colour.
 fn socket(painter: &Painter, center: Pos2, control: bool, zoom: f32) {
     let radius = (4.5 * zoom).max(1.25);
