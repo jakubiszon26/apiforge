@@ -1063,3 +1063,65 @@ mod lay26 {
         assert_eq!(output.status.code(), Some(0), "warnings only pass");
     }
 }
+
+/// #351: the LAY reference scenarios that read the cart component's values
+/// simulate to the end in the demo shop: every main step passes.
+mod fixture_351 {
+    use super::run;
+    use apiforge_core::run::{Phase, RunResult, RunStatus, StepStatus};
+    use apiforge_project::prepare_project;
+    use std::{ffi::OsStr, fs, path::Path};
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+
+    /// The simulation of the LAY fixture `name` as the demo shop's scenario.
+    fn simulate(name: &str) -> RunResult {
+        let text = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/scenarios/lay")
+                .join(format!("{name}.afs")),
+        )
+        .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        prepare_project(directory.path(), &apiforge_core::demos::shop_project()).unwrap();
+        fs::write(directory.path().join(SCENARIO), text).unwrap();
+        let output = run(
+            directory.path(),
+            "run",
+            &[
+                OsStr::new("--scenario"),
+                OsStr::new(SCENARIO),
+                OsStr::new("--json"),
+            ],
+        );
+        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "{name}: no report ({error}); stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+    }
+
+    #[test]
+    fn fixture_351_the_cart_readers_simulate_to_the_end() {
+        for name in ["far-value", "far-value-saved", "fan-out"] {
+            let report = simulate(name);
+            let main: Vec<_> = report
+                .steps
+                .iter()
+                .filter(|step| step.phase == Phase::Main)
+                .collect();
+            assert!(!main.is_empty(), "{name}: no main step");
+            for step in &main {
+                assert_eq!(
+                    step.status,
+                    StepStatus::Passed,
+                    "{name}: {} {:?}",
+                    step.handle,
+                    step.message
+                );
+            }
+            assert_eq!(report.status, RunStatus::Passed, "{name}");
+        }
+    }
+}
