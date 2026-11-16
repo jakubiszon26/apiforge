@@ -24,6 +24,15 @@ pub trait Placer: Send + Sync {
     ) -> Vec<Diagnostic> {
         Vec::new()
     }
+
+    /// Lays out again a document restored exactly from its checkpoint, when
+    /// the host does not keep the layout it holds, and says whether anything
+    /// moved. The window lays out a scenario whose layout a session without
+    /// a window saved (LAY-33); the session then saves the new layout. None
+    /// by default, so a layout is kept as it was saved.
+    fn arrange(&self, _document: &mut Document, _context: &Project) -> bool {
+        false
+    }
 }
 
 /// Uniform card sizes and the shared incremental layered layout.
