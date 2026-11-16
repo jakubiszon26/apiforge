@@ -3,7 +3,7 @@
 - Date: 2026-11-16 · Analysis model: Fable 5.2
 - Issue: [#388](https://github.com/jakubiszon26/apiforge/issues/388) ·
   defines RUN-03 (#389), LANG-14 (#390), LANG-13 (#386), LANG-12 (#385) and
-  DIAG-05 (#391)
+  DIAG-06 (#391)
 - Risk: `format` (what a valid `.afs` is, what the window prints), `default`
   (the order a run evaluates checks in), backward compatibility (files valid
   today become errors)
@@ -93,7 +93,7 @@ recommendation.
 | 3 | A check before the next step | **The run computes ready checks and values before the next step**; `@after(check)` becomes an error |
 | 4 | The first step | **`start` is mandatory**; in the cleanup and in a branch the braces place the first step |
 | 5 | Existing files | **An error at once, with a one-click fix** that writes the chain in the order the file runs today; the same for a whole project from the command line |
-| 6 | The board: a second ordering wire from a *Next* port | **It inserts into the chain**: the new step follows the port's step, the former successor follows the new step (DIAG-05, with a mock-up) |
+| 6 | The board: a second ordering wire from a *Next* port | **It inserts into the chain**: the new step follows the port's step, the former successor follows the new step (DIAG-06, with a mock-up) |
 | 7 | A step after an `if` | **`@after(x)` = after the whole `if`**; the join by the ends of both branches is no longer needed |
 | 8 | `@after` on a check or a value | **No**: `@after` is written on steps only |
 
@@ -153,16 +153,16 @@ recommendation and the owner's to veto.
 | 2 | **LANG-14** #390 | Rule 5 and the chain printed inside braces. Additions only: nothing valid becomes invalid | S–M · 20 min · `format` |
 | 3 | **LANG-13** #386 | Rules 1 and 2 as errors; the fix, which already writes the final form (one chain, `@after(x)` joins, no check named), so a file is rewritten once; the reference; the repository's scenarios fixed | M · 30 min · `format` |
 | 4 | **LANG-12** #385 | Rules 3 and 4 as errors, for what the fix did not write; `@after` takes one name | S–M · 20 min · `format` |
-| 5 | **DIAG-05** #391 | The board's gestures keep the chain. Mock-up first; analysed and estimated from it | — |
+| 5 | **DIAG-06** #391 | The board's gestures keep the chain. Mock-up first; analysed and estimated from it | — |
 
-About 90 owner minutes without DIAG-05. Each is `M` or below because the
+About 90 owner minutes without DIAG-06. Each is `M` or below because the
 risk is bounded by the fix: it is tested to keep the order of steps of every
 repository scenario, and the simulated run of each scenario before and after
 is compared in the pull request.
 
-Between LANG-12 and DIAG-05 the board can still draw a second ordering wire
+Between LANG-12 and DIAG-06 the board can still draw a second ordering wire
 or drop a step without one; the file then shows the error and the fix.
-DIAG-05 follows directly.
+DIAG-06 follows directly.
 
 ### Acceptance criteria
 
@@ -221,7 +221,7 @@ DIAG-05 follows directly.
 - What a failed step does to the steps after it (RUN-01, #126), repeating
   a step (LANG-08, #352), a value from whichever branch ran (LANG-09,
   #353).
-- The board's gestures (DIAG-05) and how ordering wires are drawn
+- The board's gestures (DIAG-06) and how ordering wires are drawn
   (LAY-24, #382).
 - Running steps in parallel: the runner stays serial.
 
