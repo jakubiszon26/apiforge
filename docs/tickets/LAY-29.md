@@ -1,9 +1,8 @@
 # LAY-29: A wire never runs under its own card
 
-- Size: M · Owner review: 20 min (option A) or S–M · 15 min (option B) ·
-  Risk: `visible UI`
-- State: Analysis, one owner decision open (issue #382) · LAY sprint,
-  layout track, ahead of part B
+- Size: M · Owner review: 20 min · Risk: `visible UI`
+- State: implemented, awaiting acceptance (issue #382, pull request #405) ·
+  LAY sprint, layout track, ahead of part B
 - Analysis and implementation model: Fable 5.2 (the owner's rule for wire
   separation: the planning model analyses and develops the fix)
 
@@ -33,6 +32,12 @@ card it joins. It happens only where cards lie on each other (71 of 256
 wires on the generated piles), and is the second part of this ticket.
 
 ## The decision: where an ordering line leaves its card
+
+**Decided by the owner on 2026-11-16, on the mock-ups: A.** An ordering
+line leaves its socket at the bottom (*Next*, *Yes*, *No*) and goes round
+the card; rule 4 of shape D changes; the cost on `shop-30` (4 → 6
+crossings, Fit 51 % → 49 %, 60 px taller) is accepted. What was put to the
+owner follows.
 
 Two designs look different, so the owner chooses. Both rendered by the
 throwaway branch `mock/lay-29`, tidied, default view.
@@ -66,12 +71,14 @@ implementation may do better than its numbers, not worse.
 
 ## What the owner will see
 
-- Changed (A): ordering lines leave *Next*, *Yes* and *No*; the rail above
-  a row is reached past the card's side. Tidy up makes the room.
-- Changed (B): a square socket on the top edge of a card where a rail
-  leaves it.
-- Changed (both): where cards lie on each other, a line no longer passes
-  under the card it joins when a way round exists.
+- Changed: ordering lines leave *Next*, *Yes* and *No*; the rail above
+  a row is reached past the card's side. Tidy up makes the room. A board
+  tidied before keeps its positions, and its ordering lines go round
+  their cards where the room is.
+- Changed: where cards lie on each other, a line no longer passes under
+  a card it joins. A port the other card lies over is left by a longer
+  stub; a line with no way round at all is drawn as the plain lighter
+  corner of an enclosed port (3 of 256 wires on generated piles).
 - Removed or hidden, migrated, default behaviour, file format: nothing.
 
 ## Mock-up
@@ -80,9 +87,6 @@ implementation may do better than its numbers, not worse.
 `mock/lay-29` (`APIFORGE_LAY29=a|b`).
 
 ## Acceptance criteria
-
-Written for A; with B, criteria 1 and 2 read "starts at a socket the card
-draws" and criterion 3 keeps the limits of `main`.
 
 1. Five steps ordered after *Start*, tidied: every ordering line of
    *Start* begins at its *Next* socket on the bottom edge and leaves
@@ -96,14 +100,43 @@ draws" and criterion 3 keeps the limits of `main`.
    and check drawn at most 106 crossings.
 4. Router: a wire's own cards are in its way on every attempt. A port
    that lies inside the wire's other card is left through its stub, as one
-   inside a foreign card is (ADR 0006); on the generated piles fewer than
-   71 of 256 wires pass under a card they join, and none where its two
-   cards overlap no other.
+   inside a foreign card is (ADR 0006); on the generated piles no route
+   passes under a card it joins (71 of 256 wires before).
 5. The window draws it: the lines of criterion 1 on the tidied board, a
    bridge at every crossing; Tidy up twice gives the same board.
 6. Review captures at 960 × 540 and 1600 × 1000, each asserting a card in
    view.
 7. The budget of ADR 0006 holds: full routing of its board within 150 ms.
+
+## Measured
+
+`quality`, compact cards; *before* is `main` at `cf4fcf2`.
+
+| Board, view | Crossings | Bends | Board, px | Fit 1600 × 1000 |
+| --- | --- | --- | --- | --- |
+| `shop-30`, chips, checks folded (default) | 4 → 6 | 50 → 58 | 1880 × 1470 → 1880 × 1530 | 0.517 → 0.497 |
+| `shop-30`, chips, checks drawn | 10 → 12 | — → 104 | 1920 × 1710 → 1900 × 1690 | 0.444 → 0.450 |
+| `shop-30`, all wires, checks folded | 75 → 82 | — → 144 | 2020 × 1650 → 2080 × 1710 | 0.461 → 0.444 |
+| `shop-30`, all wires, checks drawn | 105 → 106 | 198 → 208 | 2160 × 2010 → 2160 × 1950 | 0.378 → 0.390 |
+| `fan-out`, chips, checks drawn | 5 → 5 | — → 76 | 2008 × 1360 → 2008 × 1360 | 0.559 → 0.559 |
+| `fan-out`, all wires, checks folded | 42 → 42 | 96 → 112 | 2128 × 1468 → 2128 × 1508 | 0.518 → 0.504 |
+| `fan-out`, all wires, checks drawn | 90 → 79 | — → 170 | 2228 × 1640 → 2228 × 1696 | 0.463 → 0.448 |
+| `shop-50`, chips, checks drawn | 26 → 19 | — → 176 | 1968 × 3218 → 1948 × 3098 | 0.236 → 0.245 |
+| `shop-50`, all wires, checks drawn | 340 → 315 | — → 390 | 2388 × 3690 → 2388 × 3878 | 0.206 → 0.196 |
+
+- `packed`, `close` and `incomplete` are 0 on all 24 boards, as before;
+  `under_own` is empty on all of them. Bends before are given where they
+  were measured.
+- In the window `shop-30` in the default view fits at 49 % (51 %).
+- Limits of earlier tickets follow the decision: LAY-06 criterion 4 (an
+  ordering line leaves the bottom socket and reaches the rail) and
+  criterion 8 (Fit 0.50 → 0.48); LAY-28 criteria 3 and 5 (`shop-30`: 75 →
+  82, 105 → 106, 10 → 12 crossings).
+- The budget's board routes in 133 ms (132 ms, budget 150 ms); `shop-50`
+  with every wire and check in 35 ms.
+- Captures: [five steps after *Start*, 960 × 540](../qa/2026-11-16/LAY-29/after-five-960.png),
+  [the same with every wire, 1600 × 1000](../qa/2026-11-16/LAY-29/after-five-1600.png),
+  [`shop-30` at Fit, 1600 × 1000](../qa/2026-11-16/LAY-29/after-shop-30-1600.png).
 
 ## Not in scope
 
@@ -116,14 +149,15 @@ draws" and criterion 3 keeps the limits of `main`.
 
 ## Technical appendix
 
-- A: `canvas/routing.rs` (`rail_anchor` goes: an ordering wire starts at
-  `output_anchor`); `apiforge-layout/src/route.rs` (`routing_order` knows
-  a rail by its two top ports today; the fallback rungs; `clear_stub` for
-  a port inside the wire's other card; `under_own`, the measure);
-  `layered.rs` only if Tidy up's room under a row needs it; the rail
-  tests of LAY-06 and the rail labels of LAY-24; `boards.txt` written
-  again; ADR 0006 amended (rule 4 of shape D, the guarantee).
-- B: the socket in `canvas/paint.rs`, which LAY-10 is changing: after
-  LAY-10 is merged. The router part as in A.
+- `canvas/routing.rs`: `rail_anchor` is gone, an ordering wire starts at
+  `output_anchor` like any other. `canvas/mod.rs` and `paint.rs` are
+  untouched.
+- `apiforge-layout/src/route.rs`: the attempts that let a wire under its
+  own cards are gone; `clear_stub` leaves the wire's other card when it
+  lies over the port; `violations` counts that stub as the exception;
+  `under_own` is the measure. `routing_order` is as it was: routing the
+  ordering lines first was tried and gives more crossings (8 for 6 on
+  `shop-30` in the default view).
+- `boards.txt` written again; ADR 0006 amended.
 - Tests: `crates/apiforge-layout/tests/lay29.rs`,
   `folder/acceptance_tests/lay29.rs`.

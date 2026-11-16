@@ -15,10 +15,10 @@ card 1160 0 280 190 cart
 card 1540 0 280 214 order
 card 0 644 280 94 created
 card 380 644 280 166 receipt
-card 0 778 280 96 failed
-wire 0 top 140 1 top 140
-wire 6 top 140 7 top 140
-wire 8 top 70 9 top 140
+card 0 798 280 96 failed
+wire 0 bottom 140 1 top 140
+wire 6 bottom 140 7 top 140
+wire 8 bottom 70 9 top 140
 wire 8 bottom 210 10 top 140
 wire 1 right 98 2 left 74
 wire 2 right 122 3 left 52
@@ -40,21 +40,21 @@ board order-flow compact expanded 14 all
 card 0 0 280 132 begin
 card 380 0 280 190 login
 card 380 230 280 96 logged_in
-card 760 0 280 166 products
-card 760 226 280 70 first
-card 760 336 280 70 second
-card 760 466 280 78 total
-card 1160 0 280 190 cart
-card 1160 250 280 104 cart_total
-card 1560 0 280 214 order
-card 0 684 280 94 created
-card 380 684 280 166 receipt
-card 380 930 280 104 receipt_total
-card 0 818 280 96 failed
-wire 0 top 140 1 top 140
-wire 8 top 140 9 top 140
-wire 10 top 70 11 top 140
-wire 10 top 70 12 top 140
+card 780 0 280 166 products
+card 780 226 280 70 first
+card 780 336 280 70 second
+card 780 466 280 78 total
+card 1180 0 280 190 cart
+card 1180 230 280 104 cart_total
+card 1580 0 280 214 order
+card 0 664 280 94 created
+card 380 664 280 166 receipt
+card 380 910 280 104 receipt_total
+card 0 838 280 96 failed
+wire 0 bottom 140 1 top 140
+wire 8 bottom 140 9 top 140
+wire 10 bottom 70 11 top 140
+wire 10 bottom 70 12 top 140
 wire 10 bottom 210 13 top 140
 wire 1 right 122 2 left 52
 wire 1 right 98 3 left 74
@@ -75,7 +75,7 @@ wire 9 right 122 11 left 51
 wire 1 right 98 11 left 74
 wire 11 right 98 12 left 46
 wire 7 right 122 12 left 66
-mark 1848 20 96 24
+mark 1868 20 96 24
 end
 board order-flow full collapsed 14 all
 card 0 0 280 132 begin
@@ -88,10 +88,10 @@ card 1140 0 280 424 cart
 card 1520 0 280 424 order
 card 0 1476 280 316 created
 card 380 1476 280 424 receipt
-card 0 1832 280 316 failed
-wire 0 top 140 1 top 140
-wire 6 top 140 7 top 140
-wire 8 top 70 9 top 140
+card 0 1852 280 316 failed
+wire 0 bottom 140 1 top 140
+wire 6 bottom 140 7 top 140
+wire 8 bottom 70 9 top 140
 wire 8 bottom 210 10 top 140
 wire 1 right 208 2 left 170
 wire 2 right 312 3 left 118
@@ -118,16 +118,16 @@ card 760 516 280 236 first
 card 760 792 280 236 second
 card 760 1088 280 288 total
 card 1160 0 280 424 cart
-card 1160 484 280 316 cart_total
+card 1160 464 280 316 cart_total
 card 1560 0 280 424 order
-card 0 1516 280 316 created
-card 380 1516 280 424 receipt
-card 380 2020 280 316 receipt_total
-card 0 1872 280 316 failed
-wire 0 top 140 1 top 140
-wire 8 top 140 9 top 140
-wire 10 top 70 11 top 140
-wire 10 top 70 12 top 140
+card 0 1496 280 316 created
+card 380 1496 280 424 receipt
+card 380 2000 280 316 receipt_total
+card 0 1892 280 316 failed
+wire 0 bottom 140 1 top 140
+wire 8 bottom 140 9 top 140
+wire 10 bottom 70 11 top 140
+wire 10 bottom 70 12 top 140
 wire 10 bottom 210 13 top 140
 wire 1 right 236 2 left 118
 wire 1 right 208 3 left 170
@@ -161,8 +161,8 @@ card 1140 0 280 190 cart
 card 1520 0 280 214 order
 card 0 604 280 94 created
 card 380 604 280 166 receipt
-card 0 738 280 96 failed
-wire 8 top 70 9 top 140
+card 0 758 280 96 failed
+wire 8 bottom 70 9 top 140
 wire 8 bottom 210 10 top 140
 wire 1 right 98 2 left 74
 wire 2 right 122 3 left 52
@@ -188,12 +188,12 @@ card 760 446 280 78 total
 card 1160 0 280 190 cart
 card 1160 230 280 104 cart_total
 card 1540 0 280 214 order
-card 0 624 280 94 created
-card 380 624 280 166 receipt
-card 380 850 280 104 receipt_total
-card 0 758 280 96 failed
-wire 10 top 70 11 top 140
-wire 10 top 70 12 top 140
+card 0 604 280 94 created
+card 380 604 280 166 receipt
+card 380 830 280 104 receipt_total
+card 0 778 280 96 failed
+wire 10 bottom 70 11 top 140
+wire 10 bottom 70 12 top 140
 wire 10 bottom 210 13 top 140
 wire 1 right 122 2 left 52
 wire 1 right 98 3 left 74
@@ -214,33 +214,33 @@ mark 1828 20 96 24
 end
 board shop-30 compact collapsed 30 all
 card 0 0 280 132 begin
-card 380 0 280 190 login
-card 900 0 280 190 catalogue
-card 900 334 280 70 first
-card 900 428 280 70 second
-card 1280 0 280 142 product
-card 1660 0 280 142 promoted
-card 1660 182 280 78 expected_total
+card 420 0 280 190 login
+card 940 0 280 190 catalogue
+card 940 334 280 70 first
+card 940 428 280 70 second
+card 1340 0 280 142 product
+card 1720 0 280 142 promoted
+card 1720 182 280 78 expected_total
 card 0 658 280 214 cart
-card 380 658 280 190 cart_view
-card 380 948 280 124 valid_cart
-card 900 658 280 142 address
-card 1280 658 280 214 checkout
-card 1660 658 280 190 order
+card 420 658 280 190 cart_view
+card 420 968 280 124 valid_cart
+card 940 658 280 142 address
+card 1340 658 280 214 checkout
+card 1720 658 280 190 order
 card 0 1420 280 94 paid
-card 380 1420 280 166 payment
-card 900 1420 280 166 receipt
-card 0 1554 280 96 not_created
-card 1280 1420 280 166 refund
-card 1660 1420 280 118 logout
-wire 0 top 140 1 top 140
-wire 8 top 140 11 top 140
-wire 11 top 140 12 top 140
-wire 14 top 70 15 top 140
-wire 14 top 70 16 top 140
+card 420 1420 280 166 payment
+card 940 1420 280 166 receipt
+card 0 1614 280 96 not_created
+card 1340 1420 280 166 refund
+card 1720 1420 280 118 logout
+wire 0 bottom 140 1 top 140
+wire 8 bottom 140 11 top 140
+wire 11 bottom 140 12 top 140
+wire 14 bottom 70 15 top 140
+wire 14 bottom 70 16 top 140
 wire 14 bottom 210 17 top 140
-wire 14 top 70 18 top 140
-wire 18 top 140 19 top 140
+wire 14 bottom 70 18 top 140
+wire 18 bottom 140 19 top 140
 wire 1 right 98 2 left 74
 wire 2 right 122 3 left 52
 wire 2 right 122 4 left 52
@@ -275,49 +275,49 @@ wire 1 right 98 16 left 74
 wire 13 right 122 18 left 51
 wire 1 right 98 18 left 74
 wire 1 right 98 19 left 74
-mark 1948 20 72 24
-mark 1948 678 72 24
+mark 2008 20 72 24
+mark 2008 678 72 24
 end
 board shop-30 compact expanded 30 all
 card 0 0 280 132 begin
-card 460 0 280 190 login
-card 460 230 280 96 logged_in
-card 460 366 280 96 known_user
-card 1000 0 280 190 catalogue
-card 1000 230 280 96 listed
-card 1000 386 280 70 first
-card 1000 480 280 70 second
+card 440 0 280 190 login
+card 440 230 280 96 logged_in
+card 440 366 280 96 known_user
+card 980 0 280 190 catalogue
+card 980 230 280 96 listed
+card 980 386 280 70 first
+card 980 480 280 70 second
 card 1400 0 280 142 product
 card 1800 0 280 142 promoted
 card 1800 182 280 78 expected_total
-card 0 750 280 214 cart
-card 0 1024 280 96 cart_created
-card 0 1180 280 104 cart_total
-card 460 750 280 190 cart_view
-card 460 1060 280 124 valid_cart
-card 1000 750 280 142 address
-card 1400 750 280 214 checkout
-card 1400 1084 280 104 checkout_total
-card 1400 1228 280 96 checkout_status
-card 1400 1364 280 96 checkout_created
-card 1800 750 280 190 order
-card 0 1660 280 94 paid
-card 460 1660 280 166 payment
-card 1000 1660 280 166 receipt
-card 1000 1886 280 104 receipt_total
-card 0 1794 280 96 not_created
-card 1400 1660 280 166 refund
-card 1400 1906 280 104 refund_amount
-card 1800 1660 280 118 logout
-wire 0 top 140 1 top 140
-wire 13 top 140 16 top 140
-wire 16 top 140 17 top 140
-wire 22 top 70 23 top 140
-wire 22 top 70 24 top 140
-wire 22 top 70 25 top 140
+card 0 730 280 214 cart
+card 0 1004 280 96 cart_created
+card 0 1140 280 104 cart_total
+card 440 730 280 190 cart_view
+card 440 1040 280 124 valid_cart
+card 980 730 280 142 address
+card 1400 730 280 214 checkout
+card 1400 1064 280 104 checkout_total
+card 1400 1208 280 96 checkout_status
+card 1400 1344 280 96 checkout_created
+card 1800 730 280 190 order
+card 0 1620 280 94 paid
+card 440 1620 280 166 payment
+card 980 1620 280 166 receipt
+card 980 1846 280 104 receipt_total
+card 0 1834 280 96 not_created
+card 1400 1620 280 166 refund
+card 1400 1846 280 104 refund_amount
+card 1800 1620 280 118 logout
+wire 0 bottom 140 1 top 140
+wire 13 bottom 140 16 top 140
+wire 16 bottom 140 17 top 140
+wire 22 bottom 70 23 top 140
+wire 22 bottom 70 24 top 140
+wire 22 bottom 70 25 top 140
 wire 22 bottom 210 26 top 140
-wire 22 top 70 27 top 140
-wire 28 top 140 29 top 140
+wire 22 bottom 70 27 top 140
+wire 28 bottom 140 29 top 140
 wire 1 right 122 2 left 52
 wire 1 right 98 3 left 52
 wire 1 right 98 4 left 74
@@ -367,37 +367,37 @@ wire 27 right 98 28 left 46
 wire 10 right 56 28 left 66
 wire 1 right 98 29 left 74
 mark 2088 20 72 24
-mark 2088 770 72 24
+mark 2088 750 72 24
 end
 board shop-30 full collapsed 30 all
 card 0 0 280 132 begin
-card 380 0 280 372 login
-card 900 0 280 476 catalogue
-card 900 788 280 236 first
-card 900 1048 280 236 second
-card 1280 0 280 212 product
-card 1660 0 280 212 promoted
-card 1660 252 280 288 expected_total
+card 420 0 280 372 login
+card 940 0 280 476 catalogue
+card 940 788 280 236 first
+card 940 1048 280 236 second
+card 1340 0 280 212 product
+card 1720 0 280 212 promoted
+card 1720 252 280 288 expected_total
 card 0 1424 280 424 cart
-card 380 1424 280 424 cart_view
-card 380 1948 280 472 valid_cart
-card 900 1424 280 424 address
-card 1280 1424 280 424 checkout
-card 1660 1424 280 476 order
+card 420 1424 280 424 cart_view
+card 420 1968 280 472 valid_cart
+card 940 1424 280 424 address
+card 1340 1424 280 424 checkout
+card 1720 1424 280 476 order
 card 0 3048 280 316 paid
-card 380 3048 280 424 payment
-card 900 3048 280 424 receipt
-card 0 3404 280 316 not_created
-card 1280 3048 280 424 refund
-card 1660 3048 280 424 logout
-wire 0 top 140 1 top 140
-wire 8 top 140 11 top 140
-wire 11 top 140 12 top 140
-wire 14 top 70 15 top 140
-wire 14 top 70 16 top 140
+card 420 3048 280 424 payment
+card 940 3048 280 424 receipt
+card 0 3464 280 316 not_created
+card 1340 3048 280 424 refund
+card 1720 3048 280 424 logout
+wire 0 bottom 140 1 top 140
+wire 8 bottom 140 11 top 140
+wire 11 bottom 140 12 top 140
+wire 14 bottom 70 15 top 140
+wire 14 bottom 70 16 top 140
 wire 14 bottom 210 17 top 140
-wire 14 top 70 18 top 140
-wire 18 top 140 19 top 140
+wire 14 bottom 70 18 top 140
+wire 18 bottom 140 19 top 140
 wire 1 right 208 2 left 170
 wire 2 right 312 3 left 118
 wire 2 right 312 4 left 118
@@ -432,49 +432,49 @@ wire 1 right 208 16 left 170
 wire 13 right 312 18 left 118
 wire 1 right 208 18 left 170
 wire 1 right 208 19 left 170
-mark 1948 20 72 24
-mark 1948 1444 72 24
+mark 2008 20 72 24
+mark 2008 1444 72 24
 end
 board shop-30 full expanded 30 all
 card 0 0 280 132 begin
 card 440 0 280 372 login
 card 440 412 280 316 logged_in
 card 440 768 280 316 known_user
-card 960 0 280 476 catalogue
-card 960 516 280 264 listed
-card 960 820 280 236 first
-card 960 1096 280 236 second
-card 1360 0 280 212 product
-card 1760 0 280 212 promoted
-card 1760 252 280 288 expected_total
+card 980 0 280 476 catalogue
+card 980 516 280 264 listed
+card 980 820 280 236 first
+card 980 1096 280 236 second
+card 1420 0 280 212 product
+card 1820 0 280 212 promoted
+card 1820 252 280 288 expected_total
 card 0 1512 280 424 cart
 card 0 1976 280 316 cart_created
-card 0 2352 280 316 cart_total
+card 0 2332 280 316 cart_total
 card 440 1512 280 424 cart_view
 card 440 2036 280 472 valid_cart
-card 960 1512 280 424 address
-card 1360 1512 280 424 checkout
-card 1360 2016 280 316 checkout_total
-card 1360 2372 280 316 checkout_status
-card 1360 2728 280 316 checkout_created
-card 1760 1512 280 476 order
-card 0 3244 280 316 paid
-card 440 3244 280 424 payment
-card 960 3244 280 424 receipt
-card 960 3728 280 316 receipt_total
-card 0 3600 280 316 not_created
-card 1360 3244 280 424 refund
-card 1360 3748 280 316 refund_amount
-card 1760 3244 280 424 logout
-wire 0 top 140 1 top 140
-wire 13 top 140 16 top 140
-wire 16 top 140 17 top 140
-wire 22 top 70 23 top 140
-wire 22 top 70 24 top 140
-wire 22 top 70 25 top 140
+card 980 1512 280 424 address
+card 1420 1512 280 424 checkout
+card 1420 2016 280 316 checkout_total
+card 1420 2372 280 316 checkout_status
+card 1420 2728 280 316 checkout_created
+card 1820 1512 280 476 order
+card 0 3224 280 316 paid
+card 440 3224 280 424 payment
+card 980 3224 280 424 receipt
+card 980 3708 280 316 receipt_total
+card 0 3660 280 316 not_created
+card 1420 3224 280 424 refund
+card 1420 3708 280 316 refund_amount
+card 1820 3224 280 424 logout
+wire 0 bottom 140 1 top 140
+wire 13 bottom 140 16 top 140
+wire 16 bottom 140 17 top 140
+wire 22 bottom 70 23 top 140
+wire 22 bottom 70 24 top 140
+wire 22 bottom 70 25 top 140
 wire 22 bottom 210 26 top 140
-wire 22 top 70 27 top 140
-wire 28 top 140 29 top 140
+wire 22 bottom 70 27 top 140
+wire 28 bottom 140 29 top 140
 wire 1 right 236 2 left 118
 wire 1 right 208 3 left 118
 wire 1 right 208 4 left 170
@@ -523,8 +523,8 @@ wire 1 right 208 27 left 170
 wire 27 right 260 28 left 118
 wire 10 right 208 28 left 170
 wire 1 right 208 29 left 170
-mark 2048 20 72 24
-mark 2048 1532 72 24
+mark 2108 20 72 24
+mark 2108 1532 72 24
 end
 board shop-30 compact collapsed 30 chips
 card 0 0 280 132 begin
@@ -537,21 +537,21 @@ card 1520 0 280 142 promoted
 card 1520 182 280 78 expected_total
 card 0 578 280 214 cart
 card 380 578 280 190 cart_view
-card 380 848 280 124 valid_cart
+card 380 868 280 124 valid_cart
 card 760 578 280 142 address
 card 1140 578 280 214 checkout
 card 1520 578 280 190 order
 card 0 1240 280 94 paid
 card 380 1240 280 166 payment
 card 760 1240 280 166 receipt
-card 0 1374 280 96 not_created
+card 0 1434 280 96 not_created
 card 1140 1240 280 166 refund
 card 1520 1240 280 118 logout
-wire 8 top 140 11 top 140
-wire 14 top 70 15 top 140
-wire 14 top 70 16 top 140
+wire 8 bottom 140 11 top 140
+wire 14 bottom 70 15 top 140
+wire 14 bottom 70 16 top 140
 wire 14 bottom 210 17 top 140
-wire 14 top 70 18 top 140
+wire 14 bottom 70 18 top 140
 wire 1 right 98 2 left 74
 wire 2 right 122 3 left 52
 wire 2 right 122 4 left 52
@@ -571,41 +571,41 @@ mark 1808 598 72 24
 end
 board shop-30 compact expanded 30 chips
 card 0 0 280 132 begin
-card 420 0 280 190 login
-card 420 230 280 96 logged_in
-card 420 366 280 96 known_user
-card 800 0 280 190 catalogue
-card 800 230 280 96 listed
-card 800 386 280 70 first
-card 800 480 280 70 second
-card 1180 0 280 142 product
-card 1560 0 280 142 promoted
-card 1560 182 280 78 expected_total
+card 400 0 280 190 login
+card 400 230 280 96 logged_in
+card 400 366 280 96 known_user
+card 780 0 280 190 catalogue
+card 780 230 280 96 listed
+card 780 386 280 70 first
+card 780 480 280 70 second
+card 1160 0 280 142 product
+card 1540 0 280 142 promoted
+card 1540 182 280 78 expected_total
 card 0 630 280 214 cart
 card 0 884 280 96 cart_created
-card 0 1040 280 104 cart_total
-card 420 630 280 190 cart_view
-card 420 900 280 124 valid_cart
-card 800 630 280 142 address
-card 1180 630 280 214 checkout
-card 1180 904 280 104 checkout_total
-card 1180 1048 280 96 checkout_status
-card 1180 1184 280 96 checkout_created
-card 1560 630 280 190 order
-card 0 1380 280 94 paid
-card 420 1380 280 166 payment
-card 800 1380 280 166 receipt
-card 800 1606 280 104 receipt_total
-card 0 1514 280 96 not_created
-card 1180 1380 280 166 refund
-card 1180 1586 280 104 refund_amount
-card 1560 1380 280 118 logout
-wire 13 top 140 16 top 140
-wire 22 top 70 23 top 140
-wire 22 top 70 24 top 140
-wire 22 top 70 25 top 140
+card 0 1020 280 104 cart_total
+card 400 630 280 190 cart_view
+card 400 900 280 124 valid_cart
+card 780 630 280 142 address
+card 1160 630 280 214 checkout
+card 1160 904 280 104 checkout_total
+card 1160 1048 280 96 checkout_status
+card 1160 1184 280 96 checkout_created
+card 1540 630 280 190 order
+card 0 1360 280 94 paid
+card 400 1360 280 166 payment
+card 780 1360 280 166 receipt
+card 780 1586 280 104 receipt_total
+card 0 1574 280 96 not_created
+card 1160 1360 280 166 refund
+card 1160 1566 280 104 refund_amount
+card 1540 1360 280 118 logout
+wire 13 bottom 140 16 top 140
+wire 22 bottom 70 23 top 140
+wire 22 bottom 70 24 top 140
+wire 22 bottom 70 25 top 140
 wire 22 bottom 210 26 top 140
-wire 22 top 70 27 top 140
+wire 22 bottom 70 27 top 140
 wire 1 right 122 2 left 52
 wire 1 right 98 3 left 52
 wire 1 right 98 4 left 74
@@ -630,61 +630,61 @@ wire 15 right 66 21 left 98
 wire 23 right 122 24 left 51
 wire 24 right 98 25 left 46
 wire 27 right 98 28 left 46
-mark 1848 20 72 24
-mark 1848 650 72 24
+mark 1828 20 72 24
+mark 1828 650 72 24
 end
 board shop-50 compact collapsed 56 all
 card 0 0 280 132 begin
 card 380 0 280 190 login
-card 1120 0 280 94 health
-card 1500 0 280 190 catalogue
-card 1500 334 280 70 first
-card 1500 428 280 70 second
-card 1920 0 280 190 search
-card 1920 334 280 70 third
+card 1140 0 280 94 health
+card 1520 0 280 190 catalogue
+card 1520 334 280 70 first
+card 1520 428 280 70 second
+card 1940 0 280 190 search
+card 1940 334 280 70 third
 card 0 678 280 166 stock
 card 380 678 280 142 product
-card 1120 678 280 142 promoted
-card 1120 860 280 78 expected_total
-card 1500 678 280 214 cart
-card 1920 678 280 190 cart_view
-card 1920 1140 280 124 valid_cart
-card 0 1384 280 166 coupon
-card 380 1384 280 94 discounted
-card 1120 1384 280 190 applied
-card 1500 1384 280 142 shipping
-card 1500 1566 280 70 cheapest
-card 1500 1676 280 96 cheap_enough
-card 1920 1384 280 142 address
-card 0 1952 280 190 checkout
-card 380 1952 280 166 order
-card 1120 1952 280 94 paid
-card 1500 1952 280 166 payment
-card 1920 1952 280 166 receipt
-card 0 2526 280 142 confirmation
-card 380 2526 280 142 notify
-card 1120 2526 280 118 cancel
-card 1500 2526 280 166 invoice
-card 1920 2526 280 166 history
-card 0 2980 280 166 refund
-card 380 2980 280 166 refunded_order
-card 1120 2980 280 118 logout
-card 1500 2980 280 166 logged_out
-wire 0 top 140 1 top 140
-wire 1 top 140 2 top 140
-wire 16 top 70 17 top 140
-wire 21 top 140 22 top 140
-wire 24 top 70 25 top 140
-wire 24 top 70 26 top 140
-wire 24 top 70 27 top 140
-wire 24 top 70 28 top 140
+card 1140 678 280 142 promoted
+card 1140 860 280 78 expected_total
+card 1520 678 280 214 cart
+card 1940 678 280 190 cart_view
+card 1940 1140 280 124 valid_cart
+card 0 1364 280 166 coupon
+card 380 1364 280 94 discounted
+card 1140 1364 280 190 applied
+card 1520 1364 280 142 shipping
+card 1520 1546 280 70 cheapest
+card 1520 1656 280 96 cheap_enough
+card 1940 1364 280 142 address
+card 0 1872 280 190 checkout
+card 380 1872 280 166 order
+card 1140 1872 280 94 paid
+card 1520 1872 280 166 payment
+card 1940 1872 280 166 receipt
+card 0 2806 280 142 confirmation
+card 380 2806 280 142 notify
+card 1140 2806 280 118 cancel
+card 1520 2806 280 166 invoice
+card 1940 2806 280 166 history
+card 0 3240 280 166 refund
+card 380 3240 280 166 refunded_order
+card 1140 3240 280 118 logout
+card 1520 3240 280 166 logged_out
+wire 0 bottom 140 1 top 140
+wire 1 bottom 140 2 top 140
+wire 16 bottom 70 17 top 140
+wire 21 bottom 140 22 top 140
+wire 24 bottom 70 25 top 140
+wire 24 bottom 70 26 top 140
+wire 24 bottom 70 27 top 140
+wire 24 bottom 70 28 top 140
 wire 24 bottom 210 29 top 140
-wire 26 top 140 30 top 140
-wire 30 top 140 32 top 140
-wire 32 top 140 33 top 140
-wire 32 top 140 34 top 140
-wire 33 top 140 34 top 140
-wire 34 top 140 35 top 140
+wire 26 bottom 140 30 top 140
+wire 30 bottom 140 32 top 140
+wire 32 bottom 140 33 top 140
+wire 32 bottom 140 34 top 140
+wire 33 bottom 140 34 top 140
+wire 34 bottom 140 35 top 140
 wire 1 right 98 3 left 74
 wire 3 right 122 4 left 52
 wire 3 right 122 5 left 52
@@ -744,17 +744,17 @@ wire 23 right 98 33 left 51
 wire 1 right 98 33 left 74
 wire 1 right 98 34 left 74
 wire 1 right 98 35 left 74
-mark 2208 20 80 24
-mark 2208 698 88 24
-mark 2208 1404 104 24
-mark 2208 1972 120 24
-mark 2208 2546 88 24
+mark 2228 20 80 24
+mark 2228 698 88 24
+mark 2228 1384 104 24
+mark 2228 1892 120 24
+mark 2228 2826 88 24
 end
 board shop-50 compact expanded 56 all
 card 0 0 280 132 begin
-card 400 0 280 190 login
-card 400 250 280 96 logged_in
-card 1160 0 280 94 health
+card 380 0 280 190 login
+card 380 230 280 96 logged_in
+card 1140 0 280 94 health
 card 1540 0 280 190 catalogue
 card 1540 230 280 96 listed
 card 1540 386 280 70 first
@@ -765,9 +765,9 @@ card 1980 370 280 70 third
 card 0 770 280 166 stock
 card 0 976 280 96 in_stock
 card 0 1112 280 104 same_product
-card 400 770 280 142 product
-card 1160 770 280 142 promoted
-card 1160 952 280 78 expected_total
+card 380 770 280 142 product
+card 1140 770 280 142 promoted
+card 1140 952 280 78 expected_total
 card 1540 770 280 214 cart
 card 1540 1024 280 96 cart_created
 card 1540 1160 280 104 cart_total
@@ -775,57 +775,57 @@ card 1980 770 280 190 cart_view
 card 1980 1000 280 104 same_total
 card 1980 1144 280 96 has_third
 card 1980 1320 280 124 valid_cart
-card 0 1584 280 166 coupon
-card 400 1584 280 94 discounted
-card 1160 1584 280 190 applied
-card 1160 1834 280 104 discount_ok
-card 0 1810 280 96 no_coupon
-card 1540 1584 280 142 shipping
-card 1540 1766 280 70 cheapest
-card 1540 1876 280 96 cheap_enough
-card 1980 1584 280 142 address
-card 0 2212 280 190 checkout
-card 0 2442 280 104 checkout_total
-card 400 2212 280 166 order
-card 400 2418 280 104 order_status
-card 1160 2212 280 94 paid
-card 1540 2212 280 166 payment
-card 1980 2212 280 166 receipt
-card 1980 2458 280 104 receipt_total
-card 0 2818 280 142 confirmation
-card 400 2818 280 142 notify
-card 400 2582 280 96 not_created
-card 1160 2818 280 118 cancel
-card 1540 2818 280 166 invoice
-card 1540 3064 280 104 invoice_total
-card 1980 2818 280 166 history
-card 1980 3044 280 96 in_history
-card 0 3328 280 166 refund
-card 0 3574 280 104 refund_amount
-card 400 3328 280 166 refunded_order
-card 400 3594 280 96 refunded
-card 1160 3328 280 118 logout
-card 1540 3328 280 166 logged_out
-card 1540 3554 280 96 rejected
-wire 0 top 140 1 top 140
-wire 2 top 140 3 top 140
-wire 25 top 70 26 top 140
-wire 25 top 70 27 top 140
-wire 25 top 210 28 top 140
-wire 32 top 140 33 top 140
-wire 37 top 70 38 top 140
-wire 37 top 70 39 top 140
-wire 37 top 70 40 top 140
-wire 37 top 70 41 top 140
-wire 37 top 70 42 top 140
-wire 37 top 210 43 top 140
+card 0 1544 280 166 coupon
+card 380 1544 280 94 discounted
+card 1140 1544 280 190 applied
+card 1140 1794 280 104 discount_ok
+card 0 1770 280 96 no_coupon
+card 1540 1544 280 142 shipping
+card 1540 1726 280 70 cheapest
+card 1540 1836 280 96 cheap_enough
+card 1980 1544 280 142 address
+card 0 2072 280 190 checkout
+card 0 2302 280 104 checkout_total
+card 380 2072 280 166 order
+card 380 2278 280 104 order_status
+card 1140 2072 280 94 paid
+card 1540 2072 280 166 payment
+card 1980 2072 280 166 receipt
+card 1980 2298 280 104 receipt_total
+card 0 3038 280 142 confirmation
+card 380 3038 280 142 notify
+card 380 2442 280 96 not_created
+card 1140 3038 280 118 cancel
+card 1540 3038 280 166 invoice
+card 1540 3264 280 104 invoice_total
+card 1980 3038 280 166 history
+card 1980 3264 280 96 in_history
+card 0 3528 280 166 refund
+card 0 3774 280 104 refund_amount
+card 380 3528 280 166 refunded_order
+card 380 3754 280 96 refunded
+card 1140 3528 280 118 logout
+card 1540 3528 280 166 logged_out
+card 1540 3754 280 96 rejected
+wire 0 bottom 140 1 top 140
+wire 2 bottom 140 3 top 140
+wire 25 bottom 70 26 top 140
+wire 25 bottom 70 27 top 140
+wire 25 bottom 210 28 top 140
+wire 32 bottom 140 33 top 140
+wire 37 bottom 70 38 top 140
+wire 37 bottom 70 39 top 140
+wire 37 bottom 70 40 top 140
+wire 37 bottom 70 41 top 140
+wire 37 bottom 70 42 top 140
+wire 37 bottom 210 43 top 140
 wire 37 bottom 210 44 top 140
-wire 40 top 140 45 top 140
-wire 46 top 140 49 top 140
-wire 49 top 140 51 top 140
-wire 50 top 140 53 top 140
-wire 52 top 140 53 top 140
-wire 53 top 140 54 top 140
+wire 40 bottom 140 45 top 140
+wire 46 bottom 140 49 top 140
+wire 49 bottom 140 51 top 140
+wire 50 bottom 140 53 top 140
+wire 52 bottom 140 53 top 140
+wire 53 bottom 140 54 top 140
 wire 1 right 122 2 left 52
 wire 1 right 98 4 left 74
 wire 4 right 122 5 left 52
@@ -916,62 +916,62 @@ wire 1 right 98 54 left 74
 wire 54 right 98 55 left 52
 mark 2268 20 80 24
 mark 2268 790 88 24
-mark 2268 1604 104 24
-mark 2268 2232 120 24
-mark 2268 2838 88 24
+mark 2268 1564 104 24
+mark 2268 2092 120 24
+mark 2268 3058 88 24
 end
 board shop-50 full collapsed 56 all
 card 0 0 280 132 begin
 card 380 0 280 372 login
-card 1120 0 280 372 health
-card 1520 0 280 476 catalogue
-card 1520 788 280 236 first
-card 1520 1048 280 236 second
-card 1940 0 280 476 search
-card 1940 788 280 236 third
+card 1140 0 280 372 health
+card 1540 0 280 476 catalogue
+card 1540 788 280 236 first
+card 1540 1048 280 236 second
+card 1960 0 280 476 search
+card 1960 788 280 236 third
 card 0 1464 280 424 stock
 card 380 1464 280 212 product
-card 1120 1464 280 212 promoted
-card 1120 1716 280 288 expected_total
-card 1520 1464 280 424 cart
-card 1940 1464 280 424 cart_view
-card 1940 2592 280 472 valid_cart
-card 0 3184 280 424 coupon
-card 380 3184 280 316 discounted
-card 1120 3184 280 424 applied
-card 1520 3184 280 424 shipping
-card 1520 3648 280 236 cheapest
-card 1520 3924 280 316 cheap_enough
-card 1940 3184 280 424 address
-card 0 4420 280 424 checkout
-card 380 4420 280 424 order
-card 1120 4420 280 316 paid
-card 1520 4420 280 424 payment
-card 1940 4420 280 424 receipt
-card 0 5684 280 424 confirmation
-card 380 5684 280 424 notify
-card 1120 5684 280 424 cancel
-card 1520 5684 280 424 invoice
-card 1940 5684 280 424 history
-card 0 6608 280 424 refund
-card 380 6608 280 424 refunded_order
-card 1120 6608 280 424 logout
-card 1520 6608 280 424 logged_out
-wire 0 top 140 1 top 140
-wire 1 top 140 2 top 140
-wire 16 top 70 17 top 140
-wire 21 top 140 22 top 140
-wire 24 top 70 25 top 140
-wire 24 top 70 26 top 140
-wire 24 top 70 27 top 140
-wire 24 top 70 28 top 140
+card 1140 1464 280 212 promoted
+card 1140 1716 280 288 expected_total
+card 1540 1464 280 424 cart
+card 1960 1464 280 424 cart_view
+card 1960 2592 280 472 valid_cart
+card 0 3164 280 424 coupon
+card 380 3164 280 316 discounted
+card 1140 3164 280 424 applied
+card 1540 3164 280 424 shipping
+card 1540 3628 280 236 cheapest
+card 1540 3904 280 316 cheap_enough
+card 1960 3164 280 424 address
+card 0 4340 280 424 checkout
+card 380 4340 280 424 order
+card 1140 4340 280 316 paid
+card 1540 4340 280 424 payment
+card 1960 4340 280 424 receipt
+card 0 5604 280 424 confirmation
+card 380 5604 280 424 notify
+card 1140 5604 280 424 cancel
+card 1540 5604 280 424 invoice
+card 1960 5604 280 424 history
+card 0 6508 280 424 refund
+card 380 6508 280 424 refunded_order
+card 1140 6508 280 424 logout
+card 1540 6508 280 424 logged_out
+wire 0 bottom 140 1 top 140
+wire 1 bottom 140 2 top 140
+wire 16 bottom 70 17 top 140
+wire 21 bottom 140 22 top 140
+wire 24 bottom 70 25 top 140
+wire 24 bottom 70 26 top 140
+wire 24 bottom 70 27 top 140
+wire 24 bottom 70 28 top 140
 wire 24 bottom 210 29 top 140
-wire 26 top 140 30 top 140
-wire 30 top 140 32 top 140
-wire 32 top 140 33 top 140
-wire 32 top 140 34 top 140
-wire 33 top 140 34 top 140
-wire 34 top 140 35 top 140
+wire 26 bottom 140 30 top 140
+wire 30 bottom 140 32 top 140
+wire 32 bottom 140 33 top 140
+wire 32 bottom 140 34 top 140
+wire 33 bottom 140 34 top 140
+wire 34 bottom 140 35 top 140
 wire 1 right 208 3 left 170
 wire 3 right 312 4 left 118
 wire 3 right 312 5 left 118
@@ -1031,88 +1031,88 @@ wire 23 right 260 33 left 118
 wire 1 right 208 33 left 170
 wire 1 right 208 34 left 170
 wire 1 right 208 35 left 170
-mark 2228 20 80 24
-mark 2228 1484 88 24
-mark 2228 3204 104 24
-mark 2228 4440 120 24
-mark 2228 5704 88 24
+mark 2248 20 80 24
+mark 2248 1484 88 24
+mark 2248 3184 104 24
+mark 2248 4360 120 24
+mark 2248 5624 88 24
 end
 board shop-50 full expanded 56 all
 card 0 0 280 132 begin
-card 420 0 280 372 login
-card 420 432 280 316 logged_in
-card 1180 0 280 372 health
-card 1580 0 280 476 catalogue
-card 1580 516 280 264 listed
-card 1580 820 280 236 first
-card 1580 1096 280 236 second
-card 2020 0 280 476 search
-card 2020 516 280 264 found
-card 2020 820 280 236 third
+card 380 0 280 372 login
+card 380 412 280 316 logged_in
+card 1140 0 280 372 health
+card 1540 0 280 476 catalogue
+card 1540 516 280 264 listed
+card 1540 820 280 236 first
+card 1540 1096 280 236 second
+card 1980 0 280 476 search
+card 1980 516 280 264 found
+card 1980 820 280 236 third
 card 0 1532 280 424 stock
 card 0 1996 280 316 in_stock
 card 0 2372 280 316 same_product
-card 420 1532 280 212 product
-card 1180 1532 280 212 promoted
-card 1180 1784 280 288 expected_total
-card 1580 1532 280 424 cart
-card 1580 1996 280 316 cart_created
-card 1580 2372 280 316 cart_total
-card 2020 1532 280 424 cart_view
-card 2020 1996 280 316 same_total
-card 2020 2352 280 316 has_third
-card 2020 2748 280 472 valid_cart
-card 0 3360 280 424 coupon
-card 420 3360 280 316 discounted
-card 1180 3360 280 424 applied
-card 1180 3844 280 316 discount_ok
-card 0 3844 280 316 no_coupon
-card 1580 3360 280 424 shipping
-card 1580 3824 280 236 cheapest
-card 1580 4100 280 316 cheap_enough
-card 2020 3360 280 424 address
-card 0 4656 280 424 checkout
-card 0 5140 280 316 checkout_total
-card 420 4656 280 424 order
-card 420 5140 280 316 order_status
-card 1180 4656 280 316 paid
-card 1580 4656 280 424 payment
-card 2020 4656 280 424 receipt
-card 2020 5160 280 316 receipt_total
-card 0 5972 280 424 confirmation
-card 420 5972 280 424 notify
-card 420 5516 280 316 not_created
-card 1180 5972 280 424 cancel
-card 1580 5972 280 424 invoice
-card 1580 6476 280 316 invoice_total
-card 2020 5972 280 424 history
-card 2020 6456 280 316 in_history
-card 0 6952 280 424 refund
-card 0 7456 280 316 refund_amount
-card 420 6952 280 424 refunded_order
-card 420 7476 280 316 refunded
-card 1180 6952 280 424 logout
-card 1580 6952 280 424 logged_out
-card 1580 7436 280 316 rejected
-wire 0 top 140 1 top 140
-wire 2 top 140 3 top 140
-wire 25 top 70 26 top 140
-wire 25 top 70 27 top 140
-wire 25 top 210 28 top 140
-wire 32 top 140 33 top 140
-wire 37 top 70 38 top 140
-wire 37 top 70 39 top 140
-wire 37 top 70 40 top 140
-wire 37 top 70 41 top 140
-wire 37 top 70 42 top 140
-wire 37 top 210 43 top 140
+card 380 1532 280 212 product
+card 1140 1532 280 212 promoted
+card 1140 1784 280 288 expected_total
+card 1540 1532 280 424 cart
+card 1540 1996 280 316 cart_created
+card 1540 2372 280 316 cart_total
+card 1980 1532 280 424 cart_view
+card 1980 1996 280 316 same_total
+card 1980 2352 280 316 has_third
+card 1980 2748 280 472 valid_cart
+card 0 3320 280 424 coupon
+card 380 3320 280 316 discounted
+card 1140 3320 280 424 applied
+card 1140 3804 280 316 discount_ok
+card 0 3804 280 316 no_coupon
+card 1540 3320 280 424 shipping
+card 1540 3784 280 236 cheapest
+card 1540 4060 280 316 cheap_enough
+card 1980 3320 280 424 address
+card 0 4516 280 424 checkout
+card 0 5000 280 316 checkout_total
+card 380 4516 280 424 order
+card 380 5000 280 316 order_status
+card 1140 4516 280 316 paid
+card 1540 4516 280 424 payment
+card 1980 4516 280 424 receipt
+card 1980 5000 280 316 receipt_total
+card 0 5852 280 424 confirmation
+card 380 5852 280 424 notify
+card 380 5376 280 316 not_created
+card 1140 5852 280 424 cancel
+card 1540 5852 280 424 invoice
+card 1540 6336 280 316 invoice_total
+card 1980 5852 280 424 history
+card 1980 6336 280 316 in_history
+card 0 6812 280 424 refund
+card 0 7316 280 316 refund_amount
+card 380 6812 280 424 refunded_order
+card 380 7296 280 316 refunded
+card 1140 6812 280 424 logout
+card 1540 6812 280 424 logged_out
+card 1540 7296 280 316 rejected
+wire 0 bottom 140 1 top 140
+wire 2 bottom 140 3 top 140
+wire 25 bottom 70 26 top 140
+wire 25 bottom 70 27 top 140
+wire 25 bottom 210 28 top 140
+wire 32 bottom 140 33 top 140
+wire 37 bottom 70 38 top 140
+wire 37 bottom 70 39 top 140
+wire 37 bottom 70 40 top 140
+wire 37 bottom 70 41 top 140
+wire 37 bottom 70 42 top 140
+wire 37 bottom 210 43 top 140
 wire 37 bottom 210 44 top 140
-wire 40 top 140 45 top 140
-wire 46 top 140 49 top 140
-wire 49 top 140 51 top 140
-wire 50 top 140 53 top 140
-wire 52 top 140 53 top 140
-wire 53 top 140 54 top 140
+wire 40 bottom 140 45 top 140
+wire 46 bottom 140 49 top 140
+wire 49 bottom 140 51 top 140
+wire 50 bottom 140 53 top 140
+wire 52 bottom 140 53 top 140
+wire 53 bottom 140 54 top 140
 wire 1 right 236 2 left 118
 wire 1 right 208 4 left 170
 wire 4 right 312 5 left 118
@@ -1201,11 +1201,11 @@ wire 51 right 260 52 left 118
 wire 1 right 208 53 left 170
 wire 1 right 208 54 left 170
 wire 54 right 288 55 left 118
-mark 2308 20 80 24
-mark 2308 1552 88 24
-mark 2308 3380 104 24
-mark 2308 4676 120 24
-mark 2308 5992 88 24
+mark 2268 20 80 24
+mark 2268 1552 88 24
+mark 2268 3340 104 24
+mark 2268 4536 120 24
+mark 2268 5872 88 24
 end
 board shop-50 compact collapsed 56 chips
 card 0 0 280 132 begin
@@ -1230,29 +1230,29 @@ card 1140 1244 280 142 shipping
 card 1140 1426 280 70 cheapest
 card 1140 1536 280 96 cheap_enough
 card 1520 1244 280 142 address
-card 0 1752 280 190 checkout
-card 380 1752 280 166 order
-card 760 1752 280 94 paid
-card 1140 1752 280 166 payment
-card 1520 1752 280 166 receipt
-card 0 2246 280 142 confirmation
-card 380 2246 280 142 notify
-card 760 2246 280 118 cancel
-card 1140 2246 280 166 invoice
-card 1520 2246 280 166 history
-card 0 2620 280 166 refund
-card 380 2620 280 166 refunded_order
-card 760 2620 280 118 logout
-card 1140 2620 280 166 logged_out
-wire 16 top 70 17 top 140
-wire 24 top 70 25 top 140
-wire 24 top 70 26 top 140
-wire 24 top 70 27 top 140
-wire 24 top 70 28 top 140
+card 0 1712 280 190 checkout
+card 380 1712 280 166 order
+card 760 1712 280 94 paid
+card 1140 1712 280 166 payment
+card 1520 1712 280 166 receipt
+card 0 2206 280 142 confirmation
+card 380 2206 280 142 notify
+card 760 2206 280 118 cancel
+card 1140 2206 280 166 invoice
+card 1520 2206 280 166 history
+card 0 2580 280 166 refund
+card 380 2580 280 166 refunded_order
+card 760 2580 280 118 logout
+card 1140 2580 280 166 logged_out
+wire 16 bottom 70 17 top 140
+wire 24 bottom 70 25 top 140
+wire 24 bottom 70 26 top 140
+wire 24 bottom 70 27 top 140
+wire 24 bottom 70 28 top 140
 wire 24 bottom 210 29 top 140
-wire 26 top 140 30 top 140
-wire 30 top 140 32 top 140
-wire 32 top 140 34 top 140
+wire 26 bottom 140 30 top 140
+wire 30 bottom 140 32 top 140
+wire 32 bottom 140 34 top 140
 wire 3 right 122 4 left 52
 wire 3 right 122 5 left 52
 wire 6 right 122 7 left 52
@@ -1273,79 +1273,79 @@ wire 25 right 122 26 left 51
 mark 1808 20 80 24
 mark 1808 598 88 24
 mark 1808 1264 104 24
-mark 1808 1772 120 24
-mark 1808 2266 88 24
+mark 1808 1732 120 24
+mark 1808 2226 88 24
 end
 board shop-50 compact expanded 56 chips
 card 0 0 280 132 begin
 card 380 0 280 190 login
 card 380 230 280 96 logged_in
-card 780 0 280 94 health
-card 1160 0 280 190 catalogue
-card 1160 230 280 96 listed
-card 1160 386 280 70 first
-card 1160 480 280 70 second
-card 1560 0 280 190 search
-card 1560 250 280 96 found
-card 1560 370 280 70 third
+card 760 0 280 94 health
+card 1140 0 280 190 catalogue
+card 1140 230 280 96 listed
+card 1140 386 280 70 first
+card 1140 480 280 70 second
+card 1540 0 280 190 search
+card 1540 250 280 96 found
+card 1540 370 280 70 third
 card 0 630 280 166 stock
 card 0 836 280 96 in_stock
 card 0 972 280 104 same_product
 card 380 630 280 142 product
-card 780 630 280 142 promoted
-card 780 812 280 78 expected_total
-card 1160 630 280 214 cart
-card 1160 884 280 96 cart_created
-card 1160 1020 280 104 cart_total
-card 1560 630 280 190 cart_view
-card 1560 860 280 104 same_total
-card 1560 1004 280 96 has_third
-card 1560 1180 280 124 valid_cart
+card 760 630 280 142 promoted
+card 760 812 280 78 expected_total
+card 1140 630 280 214 cart
+card 1140 884 280 96 cart_created
+card 1140 1020 280 104 cart_total
+card 1540 630 280 190 cart_view
+card 1540 860 280 104 same_total
+card 1540 1004 280 96 has_third
+card 1540 1180 280 124 valid_cart
 card 0 1384 280 166 coupon
 card 380 1384 280 94 discounted
-card 780 1384 280 190 applied
-card 780 1634 280 104 discount_ok
+card 760 1384 280 190 applied
+card 760 1634 280 104 discount_ok
 card 0 1610 280 96 no_coupon
-card 1160 1384 280 142 shipping
-card 1160 1566 280 70 cheapest
-card 1160 1676 280 96 cheap_enough
-card 1560 1384 280 142 address
-card 0 1932 280 190 checkout
-card 0 2162 280 104 checkout_total
-card 380 1932 280 166 order
-card 380 2138 280 104 order_status
-card 780 1932 280 94 paid
-card 1160 1932 280 166 payment
-card 1560 1932 280 166 receipt
-card 1560 2178 280 104 receipt_total
-card 0 2478 280 142 confirmation
-card 380 2478 280 142 notify
-card 380 2302 280 96 not_created
-card 780 2478 280 118 cancel
-card 1160 2478 280 166 invoice
-card 1160 2704 280 104 invoice_total
-card 1560 2478 280 166 history
-card 1560 2684 280 96 in_history
-card 0 2888 280 166 refund
-card 0 3114 280 104 refund_amount
-card 380 2888 280 166 refunded_order
-card 380 3114 280 96 refunded
-card 780 2888 280 118 logout
-card 1160 2888 280 166 logged_out
-card 1160 3094 280 96 rejected
-wire 25 top 70 26 top 140
-wire 25 top 70 27 top 140
-wire 25 top 210 28 top 140
-wire 37 top 70 38 top 140
-wire 37 top 70 39 top 140
-wire 37 top 70 40 top 140
-wire 37 top 70 41 top 140
-wire 37 top 70 42 top 140
-wire 37 top 210 43 top 140
+card 1140 1384 280 142 shipping
+card 1140 1566 280 70 cheapest
+card 1140 1676 280 96 cheap_enough
+card 1540 1384 280 142 address
+card 0 1852 280 190 checkout
+card 0 2082 280 104 checkout_total
+card 380 1852 280 166 order
+card 380 2058 280 104 order_status
+card 760 1852 280 94 paid
+card 1140 1852 280 166 payment
+card 1540 1852 280 166 receipt
+card 1540 2078 280 104 receipt_total
+card 0 2398 280 142 confirmation
+card 380 2398 280 142 notify
+card 380 2222 280 96 not_created
+card 760 2398 280 118 cancel
+card 1140 2398 280 166 invoice
+card 1140 2604 280 104 invoice_total
+card 1540 2398 280 166 history
+card 1540 2604 280 96 in_history
+card 0 2788 280 166 refund
+card 0 2994 280 104 refund_amount
+card 380 2788 280 166 refunded_order
+card 380 2994 280 96 refunded
+card 760 2788 280 118 logout
+card 1140 2788 280 166 logged_out
+card 1140 2994 280 96 rejected
+wire 25 bottom 70 26 top 140
+wire 25 bottom 70 27 top 140
+wire 25 bottom 210 28 top 140
+wire 37 bottom 70 38 top 140
+wire 37 bottom 70 39 top 140
+wire 37 bottom 70 40 top 140
+wire 37 bottom 70 41 top 140
+wire 37 bottom 70 42 top 140
+wire 37 bottom 210 43 top 140
 wire 37 bottom 210 44 top 140
-wire 40 top 140 45 top 140
-wire 46 top 140 49 top 140
-wire 50 top 140 53 top 140
+wire 40 bottom 140 45 top 140
+wire 46 bottom 140 49 top 140
+wire 50 bottom 140 53 top 140
 wire 1 right 122 2 left 52
 wire 4 right 122 5 left 52
 wire 4 right 122 6 left 52
@@ -1386,11 +1386,11 @@ wire 47 right 98 48 left 52
 wire 49 right 98 50 left 46
 wire 51 right 98 52 left 52
 wire 54 right 98 55 left 52
-mark 1848 20 80 24
-mark 1848 650 88 24
-mark 1848 1404 104 24
-mark 1848 1952 120 24
-mark 1848 2498 88 24
+mark 1828 20 80 24
+mark 1828 650 88 24
+mark 1828 1404 104 24
+mark 1828 1872 120 24
+mark 1828 2418 88 24
 end
 board fan-out compact collapsed 26 all
 card 0 0 280 132 begin
@@ -1398,28 +1398,28 @@ card 380 0 280 142 catalogue
 card 380 166 280 70 first
 card 760 0 280 142 product
 card 1140 0 280 166 cart
-card 1140 226 280 70 cartId
-card 1140 320 280 70 itemId
+card 1140 266 280 70 cartId
+card 1140 360 280 70 itemId
 card 1720 0 280 166 quantity
-card 0 630 280 166 apply_coupon
-card 380 630 280 166 note
-card 760 630 280 142 stock
-card 1140 630 280 166 shipping
-card 1720 630 280 142 remove_coupon
-card 0 1036 280 142 view
-card 380 1036 280 190 checkout
-card 380 1398 280 70 orderNumber
-card 760 1036 280 190 lookup
-wire 0 top 140 1 top 140
-wire 4 top 140 7 top 140
-wire 7 top 140 8 top 140
-wire 8 top 140 9 top 140
-wire 9 top 140 10 top 140
-wire 10 top 140 11 top 140
-wire 11 top 140 12 top 140
-wire 12 top 140 13 top 140
-wire 13 top 140 14 top 140
-wire 14 top 140 16 top 140
+card 0 650 280 166 apply_coupon
+card 380 650 280 166 note
+card 760 650 280 142 stock
+card 1140 650 280 166 shipping
+card 1720 650 280 142 remove_coupon
+card 0 1076 280 142 view
+card 380 1076 280 190 checkout
+card 380 1438 280 70 orderNumber
+card 760 1076 280 190 lookup
+wire 0 bottom 140 1 top 140
+wire 4 bottom 140 7 top 140
+wire 7 bottom 140 8 top 140
+wire 8 bottom 140 9 top 140
+wire 9 bottom 140 10 top 140
+wire 10 bottom 140 11 top 140
+wire 11 bottom 140 12 top 140
+wire 12 bottom 140 13 top 140
+wire 13 bottom 140 14 top 140
+wire 14 bottom 140 16 top 140
 wire 1 right 98 2 left 52
 wire 2 right 52 3 left 74
 wire 3 right 98 4 left 74
@@ -1442,45 +1442,45 @@ wire 14 right 98 15 left 52
 wire 15 right 52 16 left 51
 wire 5 right 52 16 left 74
 mark 2008 20 120 24
-mark 2008 650 72 24
+mark 2008 670 72 24
 end
 board fan-out compact expanded 26 all
 card 0 0 280 132 begin
 card 380 0 280 142 catalogue
 card 380 166 280 70 first
-card 820 0 280 142 product
-card 1200 0 280 166 cart
-card 1200 246 280 70 cartId
-card 1200 340 280 70 itemId
+card 840 0 280 142 product
+card 1220 0 280 166 cart
+card 1220 246 280 70 cartId
+card 1220 340 280 70 itemId
 card 1820 0 280 166 quantity
-card 1820 226 280 96 quantity_ok
+card 1820 206 280 96 quantity_ok
 card 0 630 280 166 apply_coupon
-card 0 856 280 96 coupon_ok
+card 0 836 280 96 coupon_ok
 card 380 630 280 166 note
-card 380 856 280 96 note_ok
-card 820 630 280 142 stock
-card 820 832 280 96 in_stock
-card 1200 630 280 166 shipping
-card 1200 856 280 96 shipping_ok
+card 380 836 280 96 note_ok
+card 840 630 280 142 stock
+card 840 812 280 96 in_stock
+card 1220 630 280 166 shipping
+card 1220 836 280 96 shipping_ok
 card 1820 630 280 142 remove_coupon
-card 1820 832 280 96 removed_ok
+card 1820 812 280 96 removed_ok
 card 0 1112 280 142 view
-card 0 1314 280 104 same_item
+card 0 1294 280 104 same_item
 card 380 1112 280 190 checkout
-card 380 1422 280 124 checkout_ok
-card 380 1570 280 70 orderNumber
-card 820 1112 280 190 lookup
-card 820 1362 280 124 lookup_ok
-wire 0 top 140 1 top 140
-wire 4 top 140 7 top 140
-wire 8 top 140 9 top 140
-wire 10 top 140 11 top 140
-wire 12 top 140 13 top 140
-wire 14 top 140 15 top 140
-wire 16 top 140 17 top 140
-wire 18 top 140 19 top 140
-wire 20 top 140 21 top 140
-wire 22 top 140 24 top 140
+card 380 1382 280 124 checkout_ok
+card 380 1626 280 70 orderNumber
+card 840 1112 280 190 lookup
+card 840 1362 280 124 lookup_ok
+wire 0 bottom 140 1 top 140
+wire 4 bottom 140 7 top 140
+wire 8 bottom 140 9 top 140
+wire 10 bottom 140 11 top 140
+wire 12 bottom 140 13 top 140
+wire 14 bottom 140 15 top 140
+wire 16 bottom 140 17 top 140
+wire 18 bottom 140 19 top 140
+wire 20 bottom 140 21 top 140
+wire 22 bottom 140 24 top 140
 wire 1 right 98 2 left 52
 wire 2 right 52 3 left 74
 wire 3 right 98 4 left 74
@@ -1525,28 +1525,28 @@ card 380 0 280 424 catalogue
 card 380 464 280 236 first
 card 760 0 280 212 product
 card 1140 0 280 264 cart
-card 1140 304 280 236 cartId
-card 1140 580 280 236 itemId
+card 1140 324 280 236 cartId
+card 1140 600 280 236 itemId
 card 1700 0 280 372 quantity
 card 0 1036 280 372 apply_coupon
 card 380 1036 280 372 note
 card 760 1036 280 372 stock
 card 1140 1036 280 372 shipping
 card 1700 1036 280 372 remove_coupon
-card 0 1868 280 372 view
-card 380 1868 280 372 checkout
-card 380 2812 280 236 orderNumber
-card 760 1868 280 424 lookup
-wire 0 top 140 1 top 140
-wire 4 top 140 7 top 140
-wire 7 top 140 8 top 140
-wire 8 top 140 9 top 140
-wire 9 top 140 10 top 140
-wire 10 top 140 11 top 140
-wire 11 top 140 12 top 140
-wire 12 top 140 13 top 140
-wire 13 top 140 14 top 140
-wire 14 top 140 16 top 140
+card 0 1888 280 372 view
+card 380 1888 280 372 checkout
+card 380 2832 280 236 orderNumber
+card 760 1888 280 424 lookup
+wire 0 bottom 140 1 top 140
+wire 4 bottom 140 7 top 140
+wire 7 bottom 140 8 top 140
+wire 8 bottom 140 9 top 140
+wire 9 bottom 140 10 top 140
+wire 10 bottom 140 11 top 140
+wire 11 bottom 140 12 top 140
+wire 12 bottom 140 13 top 140
+wire 13 bottom 140 14 top 140
+wire 14 bottom 140 16 top 140
 wire 1 right 260 2 left 118
 wire 2 right 156 3 left 94
 wire 3 right 132 4 left 94
@@ -1573,41 +1573,41 @@ mark 1988 1056 72 24
 end
 board fan-out full expanded 26 all
 card 0 0 280 132 begin
-card 380 0 280 424 catalogue
-card 380 464 280 236 first
+card 400 0 280 424 catalogue
+card 400 464 280 236 first
 card 820 0 280 212 product
 card 1200 0 280 264 cart
-card 1200 304 280 236 cartId
-card 1200 580 280 236 itemId
-card 1800 0 280 372 quantity
-card 1800 432 280 316 quantity_ok
-card 0 1016 280 372 apply_coupon
+card 1200 324 280 236 cartId
+card 1200 600 280 236 itemId
+card 1780 0 280 372 quantity
+card 1780 412 280 316 quantity_ok
+card 0 1036 280 372 apply_coupon
 card 0 1448 280 316 coupon_ok
-card 380 1016 280 372 note
-card 380 1468 280 316 note_ok
-card 820 1016 280 372 stock
-card 820 1468 280 316 in_stock
-card 1200 1016 280 372 shipping
-card 1200 1468 280 316 shipping_ok
-card 1800 1016 280 372 remove_coupon
-card 1800 1448 280 316 removed_ok
+card 400 1036 280 372 note
+card 400 1448 280 316 note_ok
+card 820 1036 280 372 stock
+card 820 1448 280 316 in_stock
+card 1200 1036 280 372 shipping
+card 1200 1448 280 316 shipping_ok
+card 1780 1036 280 372 remove_coupon
+card 1780 1448 280 316 removed_ok
 card 0 1944 280 372 view
-card 0 2376 280 316 same_item
-card 380 1944 280 372 checkout
-card 380 2416 280 524 checkout_ok
-card 380 2980 280 236 orderNumber
+card 0 2356 280 316 same_item
+card 400 1944 280 372 checkout
+card 400 2396 280 524 checkout_ok
+card 400 3000 280 236 orderNumber
 card 820 1944 280 424 lookup
 card 820 2428 280 420 lookup_ok
-wire 0 top 140 1 top 140
-wire 4 top 140 7 top 140
-wire 8 top 140 9 top 140
-wire 10 top 140 11 top 140
-wire 12 top 140 13 top 140
-wire 14 top 140 15 top 140
-wire 16 top 140 17 top 140
-wire 18 top 140 19 top 140
-wire 20 top 140 21 top 140
-wire 22 top 140 24 top 140
+wire 0 bottom 140 1 top 140
+wire 4 bottom 140 7 top 140
+wire 8 bottom 140 9 top 140
+wire 10 bottom 140 11 top 140
+wire 12 bottom 140 13 top 140
+wire 14 bottom 140 15 top 140
+wire 16 bottom 140 17 top 140
+wire 18 bottom 140 19 top 140
+wire 20 bottom 140 21 top 140
+wire 22 bottom 140 24 top 140
 wire 1 right 260 2 left 118
 wire 2 right 156 3 left 94
 wire 3 right 132 4 left 94
@@ -1643,8 +1643,8 @@ wire 5 right 156 24 left 170
 wire 24 right 288 25 left 118
 wire 24 right 260 25 left 222
 wire 23 right 156 25 left 274
-mark 2088 20 120 24
-mark 2088 1036 72 24
+mark 2068 20 120 24
+mark 2068 1056 72 24
 end
 board fan-out compact collapsed 26 chips
 card 0 0 280 132 begin
