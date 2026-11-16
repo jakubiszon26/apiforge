@@ -131,8 +131,18 @@ pub fn wire(
 ///
 /// A bridge is a gap in the line with a small semicircle over it, so a crossing
 /// reads as one wire passing above the other instead of a junction.
-pub fn routed_wire(painter: &Painter, routed: &Routed, camera: Camera, selected: bool) {
+pub fn routed_wire(
+    painter: &Painter,
+    routed: &Routed,
+    camera: Camera,
+    selected: bool,
+    dimmed: bool,
+) {
     let mut color = wire_color(selected, routed.control, routed.branch);
+    if dimmed {
+        // Not a wire of the selected step (LAY-10).
+        color = color.gamma_multiply(WIRE_KEEP);
+    }
     if !routed.routed {
         // A wire drawn directly during a drag is lighter, so the board shows that
         // the route is provisional until the next idle frame.
@@ -334,6 +344,99 @@ const LINE_TEXT: f32 = 12.0;
 /// A step number at 100 %, in a badge 20 px across (LAY-07).
 const NUMBER_TEXT: f32 = 11.0;
 const BADGE: f32 = 20.0;
+
+/// The halo of a step related to the selected one (LAY-10): a teal that is
+/// not the selection's accent, the running blue or a status colour.
+pub const RELATED: Color32 = Color32::from_rgb(40, 160, 160);
+/// How much of a dimmed card is kept: the rest is the board showing through.
+pub const CARD_KEEP: f32 = 0.6;
+/// How much of a dimmed wire is kept.
+pub const WIRE_KEEP: f32 = 0.25;
+
+/// The check colour: the halo of a check of the selected step, and of a
+/// selected check's subjects and values.
+pub fn check_ring() -> Color32 {
+    theme::block_color(apiforge_core::block::Block::Comparison)
+}
+
+/// How a card stands to the selected step (LAY-10).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Look {
+    /// The halo of a related card, in its colour.
+    pub ring: Option<Color32>,
+    /// Another step is selected and this one is not related to it.
+    pub dimmed: bool,
+}
+
+/// The board painted over a dimmed card, so that [`CARD_KEEP`] of it shows.
+fn veil() -> Color32 {
+    theme::BG.gamma_multiply(1.0 - CARD_KEEP)
+}
+
+/// Dims what is drawn so far of a card: the board's colour over its paint.
+/// Returns the painter for what straddles the card's edge, the badge and
+/// the sockets, which keeps the same share of them.
+fn dim(painter: &Painter, rect: Rect, radius: f32, look: Look, drawn: &mut Drawn) -> Painter {
+    let mut painter = painter.clone();
+    if look.dimmed {
+        painter.rect_filled(rect, radius, veil());
+        drawn.dimmed = true;
+        drawn.veil = Some(veil());
+        painter.multiply_opacity(CARD_KEEP);
+    }
+    painter
+}
+
+/// The selection's frame outside the card and its four handles.
+fn selection_frame(painter: &Painter, rect: Rect, radius: f32, drawn: &mut Drawn) {
+    painter.rect_stroke(
+        rect.expand(3.0),
+        radius + 3.0,
+        Stroke::new(2.5, theme::ACCENT),
+        StrokeKind::Outside,
+    );
+    for corner in [
+        rect.left_top(),
+        rect.right_top(),
+        rect.left_bottom(),
+        rect.right_bottom(),
+    ] {
+        painter.rect(
+            Rect::from_center_size(corner, Vec2::splat(7.0)),
+            1.0,
+            theme::WHITE,
+            Stroke::new(1.5, theme::ACCENT),
+            StrokeKind::Inside,
+        );
+    }
+    drawn.handles = true;
+}
+
+/// The soft halo around a related card: three widening strokes of its
+/// colour, fading out.
+fn halo(painter: &Painter, rect: Rect, radius: f32, color: Color32, drawn: &mut Drawn) {
+    for (grow, alpha) in [(9.0, 0.06), (6.0, 0.10), (3.0, 0.16)] {
+        painter.rect_stroke(
+            rect.expand(grow),
+            radius + grow,
+            Stroke::new(3.0, color.gamma_multiply(alpha)),
+            StrokeKind::Outside,
+        );
+    }
+    painter.rect_stroke(
+        rect.expand(1.0),
+        radius + 1.0,
+        Stroke::new(1.5, color),
+        StrokeKind::Outside,
+    );
+    drawn.ring = Some(color);
+}
+
+/// A ring around the port where a wire of the selected step meets a
+/// related card.
+pub fn port_ring(painter: &Painter, at: Pos2, color: Color32, zoom: f32) {
+    painter.circle_stroke(at, (7.0 * zoom).max(5.0), Stroke::new(2.0, color));
+}
 /// Below this zoom a card is its band, its border and its badge; its name
 /// is written only where it fits (LAY-09).
 const LABELS_FROM: f32 = 0.25;
@@ -463,6 +566,13 @@ pub struct Drawn {
     pub badge: Option<DrawnBadge>,
     /// The card has the selection's frame.
     pub selected: bool,
+    /// The selection's handles at the corners (LAY-10).
+    pub handles: bool,
+    /// The card is dimmed, and the colour painted over it to dim it.
+    pub dimmed: bool,
+    pub veil: Option<Color32>,
+    /// The halo's colour of a card related to the selected one.
+    pub ring: Option<Color32>,
 }
 
 impl Drawn {
@@ -708,14 +818,9 @@ fn numbers_on_name_row(
 }
 
 /// The border of a failed or blocked step: 2 px at every zoom, while the
-/// band keeps the step's own result (Q15 = A). On a selected card it runs
-/// inside the selection's border, so both show.
-fn signal_border(painter: &Painter, rect: Rect, radius: f32, selected: bool, color: Color32) {
-    let (rect, radius) = if selected {
-        (rect.shrink(2.0), (radius - 2.0).max(1.0))
-    } else {
-        (rect, radius)
-    };
+/// band keeps the step's own result (Q15 = A). The selection's frame is
+/// outside the card, so both show.
+fn signal_border(painter: &Painter, rect: Rect, radius: f32, color: Color32) {
     painter.rect_stroke(rect, radius, Stroke::new(2.0, color), StrokeKind::Inside);
 }
 
@@ -951,8 +1056,8 @@ pub fn card(
     card: &Card,
     camera: Camera,
     selected: bool,
-    // Part of what a selected proxy stands for, or reads it.
-    related: bool,
+    // How the card stands to the selected step, or to a selected proxy.
+    look: Look,
     run: &CardRun<'_>,
     // What became of the checks that read the step (LAY-11).
     aggregate: Option<&Aggregate>,
@@ -981,17 +1086,11 @@ pub fn card(
         Color32::from_black_alpha(8),
     );
     painter.rect_filled(rect, radius, theme::WHITE);
-    let border_color = if selected {
-        theme::ACCENT
-    } else if related {
-        theme::VARIABLE
-    } else {
-        theme::BORDER
-    };
+    // The selection's frame is drawn outside the card, with its handles.
     painter.rect_stroke(
         rect,
         radius,
-        Stroke::new(if selected || related { 1.7 } else { 1.0 }, border_color),
+        Stroke::new(1.0, theme::BORDER),
         StrokeKind::Inside,
     );
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
@@ -1262,11 +1361,15 @@ pub fn card(
     // Over everything the card wrote, so a label yields to it (LAY-09).
     drawn.signal = signal(step, aggregate);
     if let Some(color) = drawn.signal {
-        signal_border(painter, rect, radius, selected, color);
+        signal_border(painter, rect, radius, color);
+    }
+    let edge = dim(painter, rect, radius, look, &mut drawn);
+    if selected {
+        selection_frame(painter, rect, radius, &mut drawn);
     }
     if let Some(number) = run.number {
         badge(
-            painter,
+            &edge,
             &mut drawn,
             rect,
             name_rect,
@@ -1279,20 +1382,23 @@ pub fn card(
 
     // Connections remain visible and usable at every detail level.
     for index in 0..card.inputs.len() {
-        socket(painter, camera.to_screen(card.row_anchor(index)), false, z);
+        socket(&edge, camera.to_screen(card.row_anchor(index)), false, z);
     }
     for row in &card.outputs {
         if let Some(anchor) = card.output_anchor(&row.name) {
-            socket(painter, camera.to_screen(anchor), false, z);
+            socket(&edge, camera.to_screen(anchor), false, z);
         }
     }
     for (port, _) in &card.controls {
         if let Some(anchor) = card.output_anchor(port) {
-            socket(painter, camera.to_screen(anchor), true, z);
+            socket(&edge, camera.to_screen(anchor), true, z);
         }
     }
     if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
-        socket(painter, camera.to_screen(anchor), true, z);
+        socket(&edge, camera.to_screen(anchor), true, z);
+    }
+    if let Some(color) = look.ring {
+        halo(painter, rect, radius, color, &mut drawn);
     }
     drawn
 }
@@ -1306,7 +1412,7 @@ pub fn compact_card(
     card: &Card,
     camera: Camera,
     selected: bool,
-    related: bool,
+    look: Look,
     run: &CardRun<'_>,
     // What became of the checks that read the step (LAY-11).
     aggregate: Option<&Aggregate>,
@@ -1331,17 +1437,11 @@ pub fn compact_card(
         Color32::from_black_alpha(8),
     );
     painter.rect_filled(rect, radius, theme::WHITE);
-    let border_color = if selected {
-        theme::ACCENT
-    } else if related {
-        theme::VARIABLE
-    } else {
-        theme::BORDER
-    };
+    // The selection's frame is drawn outside the card, with its handles.
     painter.rect_stroke(
         rect,
         radius,
-        Stroke::new(if selected || related { 1.7 } else { 1.0 }, border_color),
+        Stroke::new(1.0, theme::BORDER),
         StrokeKind::Inside,
     );
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
@@ -1567,11 +1667,15 @@ pub fn compact_card(
     // Over the band and every line, at every zoom (Q15 = A).
     drawn.signal = signal(step, aggregate);
     if let Some(color) = drawn.signal {
-        signal_border(painter, rect, radius, selected, color);
+        signal_border(painter, rect, radius, color);
+    }
+    let edge = dim(painter, rect, radius, look, &mut drawn);
+    if selected {
+        selection_frame(painter, rect, radius, &mut drawn);
     }
     if let Some(number) = run.number {
         badge(
-            painter,
+            &edge,
             &mut drawn,
             rect,
             name,
@@ -1584,21 +1688,24 @@ pub fn compact_card(
 
     for index in 0..card.inputs.len() {
         if let Some(anchor) = card.shown_row_anchor(index) {
-            socket(painter, camera.to_screen(anchor), false, z);
+            socket(&edge, camera.to_screen(anchor), false, z);
         }
     }
     for row in &card.outputs {
         if let Some(anchor) = card.output_anchor(&row.name) {
-            socket(painter, camera.to_screen(anchor), false, z);
+            socket(&edge, camera.to_screen(anchor), false, z);
         }
     }
     for (port, _) in &card.controls {
         if let Some(anchor) = card.output_anchor(port) {
-            socket(painter, camera.to_screen(anchor), true, z);
+            socket(&edge, camera.to_screen(anchor), true, z);
         }
     }
     if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
-        socket(painter, camera.to_screen(anchor), true, z);
+        socket(&edge, camera.to_screen(anchor), true, z);
+    }
+    if let Some(color) = look.ring {
+        halo(painter, rect, radius, color, &mut drawn);
     }
     drawn
 }
@@ -1939,7 +2046,7 @@ mod tests {
                             &card,
                             camera,
                             true,
-                            false,
+                            super::Look::default(),
                             &super::CardRun::default(),
                             None,
                         );
@@ -2032,7 +2139,7 @@ mod tests {
                             &card,
                             camera,
                             true,
-                            false,
+                            super::Look::default(),
                             &super::CardRun::default(),
                             None,
                         );
