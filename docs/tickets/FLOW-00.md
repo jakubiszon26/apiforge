@@ -7,10 +7,9 @@
 - Risk: `format` (what a valid `.afs` is, what the window prints), `default`
   (the order a run evaluates checks in), backward compatibility (files valid
   today become errors)
-- State: the eight decisions below were taken by the owner on 2026-11-16;
-  the analysis as a whole, the four consequences in
-  [To confirm](#to-confirm-at-approval) and the estimates wait for the
-  owner's approval. No code before that.
+- State: **approved by the owner on 2026-11-16**, with the four consequences
+  of [To confirm](#to-confirm-at-approval): RUN-03 and LANG-14 start at once,
+  beside the LAY sprint; LANG-13 and LANG-12 follow LAY-12 (#296).
 
 ## Goal
 

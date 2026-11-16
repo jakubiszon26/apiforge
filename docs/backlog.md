@@ -318,7 +318,7 @@ LAY-19) are in (Q12 = C). DIAG-00 (#241) folded into LAY-09 and LAY-11
 (Q8 = A). Runs after UX-1's wave 3; UX-1's wave 4 continues beside it.
 
 What follows the checkpoint — the owner's order of part B, the tickets added
-ahead of it (DIAG-07, LAY-29 to LAY-33, 100 minutes) and where the notes of
+ahead of it and in it (DIAG-07, LAY-29 to LAY-34, 120 minutes; LAY-04 closed) and where the notes of
 2026-11-16 go — is in [After the checkpoint](sprints/lay.md#12-after-the-checkpoint-2026-11-16).
 
 Capacity: **385** owner review minutes over 21 tickets. The order of work
