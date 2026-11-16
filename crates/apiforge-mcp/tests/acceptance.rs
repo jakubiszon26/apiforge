@@ -4730,3 +4730,321 @@ fn mcp21_criterion_4_an_unresolved_call_adds_nothing() {
         "diagnostics unchanged"
     );
 }
+
+// ----- MCP-23 (#209): values and responses without the board snapshot -----
+
+/// A compact step as the model reads it, found by handle among all steps.
+fn step_json(steps: &[Step], handle: &str) -> Value {
+    flatten(steps)
+        .into_iter()
+        .find(|step| step.handle == handle)
+        .map(|step| serde_json::to_value(step).unwrap())
+        .unwrap_or_else(|| panic!("no step {handle}"))
+}
+
+/// Every compact step as JSON, nested ones included, with its handle.
+fn steps_json(steps: &[Step]) -> Vec<(String, Value)> {
+    flatten(steps)
+        .into_iter()
+        .map(|step| (step.handle.clone(), serde_json::to_value(step).unwrap()))
+        .collect()
+}
+
+/// `sample_product()` with a field `pad` of `pad` characters.
+fn padded_product(pad: usize) -> Value {
+    let mut product = sample_product();
+    product["pad"] = json!("x".repeat(pad));
+    product
+}
+
+/// The handles of the demo scenario's component calls and exports.
+const VALUED: [&str; 4] = ["product", "active_promotion", "add_to_cart", "cart"];
+
+/// Criterion 1: a component call and a component's export that ran carry
+/// `outputs`, nested steps included; other steps, and those that did not
+/// run, carry none.
+#[test]
+fn mcp23_criterion_1_exports_and_component_calls_carry_their_outputs() {
+    let directory = checkout();
+    let root = directory.path();
+    let report = simulate(root, &arguments(SCENARIO)).unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    let steps = report.steps.as_deref().unwrap();
+
+    let call = serde_json::to_value(&steps[0]).unwrap();
+    assert_eq!(call["handle"], "product");
+    assert_eq!(call["outputs"], json!({ "product": sample_product() }));
+    assert_eq!(call["steps"][1]["handle"], "product");
+    assert_eq!(
+        call["steps"][1]["outputs"],
+        json!({ "value": sample_product() }),
+        "the component's export, nested"
+    );
+    assert_eq!(
+        step_json(steps, "add_to_cart")["outputs"],
+        json!({ "cart": { "id": "sample-cart", "productId": 123, "quantity": 1, "total": 80 } })
+    );
+    for (handle, step) in steps_json(steps) {
+        assert_eq!(
+            step.get("outputs").is_some(),
+            VALUED.contains(&&*handle),
+            "{handle}: {step}"
+        );
+        assert!(step.get("outputs_omitted_bytes").is_none(), "{handle}");
+    }
+
+    // At the deadline the later calls do not run and carry nothing.
+    let runs = Runs::new(RunSettings {
+        deadline: Duration::from_millis(300),
+        step_delay: Some(Duration::from_millis(200)),
+    });
+    let report = tools::run(root, &arguments(SCENARIO), &runs, CancellationToken::new()).unwrap();
+    assert_eq!(report.ended_by, EndedBy::TimedOut);
+    let not_run: Vec<_> = steps_json(report.steps.as_deref().unwrap())
+        .into_iter()
+        .filter(|(handle, step)| VALUED.contains(&&**handle) && step.get("cause").is_some())
+        .collect();
+    assert!(!not_run.is_empty(), "a call did not run");
+    for (handle, step) in not_run {
+        assert!(step.get("outputs").is_none(), "{handle}: {step}");
+    }
+}
+
+/// Criterion 2: outputs over 4 KiB serialised are left out whole, with
+/// their size; at 4 KiB they are carried whole. `full` still carries them.
+#[test]
+fn mcp23_criterion_2_outputs_over_four_kib_are_left_out_whole() {
+    let directory = checkout();
+    let root = directory.path();
+    let size = |pad| {
+        serde_json::to_vec(&json!({ "value": padded_product(pad) }))
+            .unwrap()
+            .len()
+    };
+    let at_limit = 4096 - size(0);
+    assert_eq!(size(at_limit), 4096);
+
+    let report = simulate(
+        root,
+        &with_inputs(PROMOTION, json!({ "product": padded_product(at_limit) })),
+    )
+    .unwrap();
+    assert_eq!(report.status, Verdict::Passed, "{:?}", report.steps);
+    let export = step_json(report.steps.as_deref().unwrap(), "product");
+    assert_eq!(
+        export["outputs"],
+        json!({ "value": padded_product(at_limit) }),
+        "4 KiB is carried whole"
+    );
+    assert!(export.get("outputs_omitted_bytes").is_none());
+
+    let over = with_inputs(
+        PROMOTION,
+        json!({ "product": padded_product(at_limit + 1) }),
+    );
+    let report = simulate(root, &over).unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    let export = step_json(report.steps.as_deref().unwrap(), "product");
+    assert!(export.get("outputs").is_none(), "left out whole: {export}");
+    assert_eq!(export["outputs_omitted_bytes"], 4097);
+    let text = serde_json::to_string(&report).unwrap();
+    assert!(!text.contains("xxxx"), "never a part of the value");
+
+    let full = simulate(root, &RunArguments { full: true, ..over }).unwrap();
+    let report = full.report.unwrap();
+    let export = report["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["handle"] == "product")
+        .unwrap();
+    assert_eq!(export["outputs"]["value"], padded_product(at_limit + 1));
+}
+
+/// The steps of a runner report without what differs between two runs:
+/// durations.
+fn timeless(steps: &Value) -> Value {
+    fn strip(steps: &mut Value) {
+        for step in steps.as_array_mut().unwrap() {
+            step.as_object_mut().unwrap().remove("duration_ms");
+            if let Some(outputs) = step["outputs"].as_object_mut() {
+                outputs.remove("duration");
+            }
+            if let Some(children) = step.get_mut("children") {
+                strip(children);
+            }
+        }
+    }
+    let mut steps = steps.clone();
+    strip(&mut steps);
+    steps
+}
+
+/// Criterion 3: `full: true` is the runner's report without `snapshot`:
+/// steps with their requests, responses, inputs and outputs as the runner
+/// gives them.
+#[test]
+fn mcp23_criterion_3_full_is_the_runners_report_without_the_snapshot() {
+    let directory = checkout();
+    let root = directory.path();
+    let full = simulate(
+        root,
+        &RunArguments {
+            full: true,
+            ..arguments(SCENARIO)
+        },
+    )
+    .unwrap();
+    let report = full.report.unwrap();
+    assert!(report.get("snapshot").is_none(), "no board snapshot");
+
+    let request = demo_request(root, apiforge_core::run::RunMode::Simulation);
+    let outcome = executor::execute(request, None, CancellationToken::new(), DEADLINE).unwrap();
+    let runner = serde_json::to_value(&outcome.report).unwrap();
+    assert!(runner["snapshot"].is_object(), "the runner keeps it");
+    assert_eq!(timeless(&report["steps"]), timeless(&runner["steps"]));
+    for key in ["status", "mode", "diagnostic", "scenario_id"] {
+        assert_eq!(report.get(key), runner.get(key), "{key}");
+    }
+    let fetch = &report["steps"][0]["children"][0];
+    assert_eq!(fetch["handle"], "fetch_product");
+    assert_eq!(fetch["request"]["method"], "GET");
+    assert_eq!(fetch["outputs"]["status"], 200);
+    assert_eq!(fetch["outputs"]["body"], sample_product());
+    assert_eq!(report["steps"][1]["inputs"]["product"], sample_product());
+}
+
+const ECHO: &str = "components/echo.afs";
+const ECHO_TEXT: &str = "component echo \"Echo\" {\n  description \"What the API answers, and the token.\"\n  @label(\"Ask\")\n  ask = GET \"/echo?q={{env.TOKEN}}\" {\n    sample 200 { token: \"sample\" }\n  }\n  @label(\"Answer\")\n  export answer: object = ask.body\n  @label(\"Token\")\n  export token: string = env.TOKEN\n}\n";
+
+/// A loopback API that answers every request with `body` as JSON, until
+/// the flag returned is set.
+fn echoing(body: &Value) -> (String, Arc<AtomicBool>) {
+    use std::io::{Read, Write};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
+    let body = body.to_string();
+    thread::spawn(move || {
+        while !stopped.load(Ordering::Acquire) {
+            let Ok((mut socket, _)) = listener.accept() else {
+                thread::sleep(Duration::from_millis(5));
+                continue;
+            };
+            socket.set_nonblocking(false).unwrap();
+            let mut read = Vec::new();
+            let mut buffer = [0; 4096];
+            while !read.windows(4).any(|w| w == b"\r\n\r\n") {
+                match socket.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => read.extend_from_slice(&buffer[..n]),
+                }
+            }
+            let _ = write!(
+                socket,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    (format!("http://{address}/demo/shop"), stop)
+}
+
+/// Criterion 4: a known secret value in an export and in a response is
+/// replaced in the compact and the full form.
+#[test]
+fn mcp23_criterion_4_a_secret_in_an_export_or_a_response_is_replaced() {
+    let directory = checkout();
+    let root = directory.path();
+    edit(root, MANIFEST, |text| {
+        text.replace("\"secretNames\": []", "\"secretNames\": [\"TOKEN\"]")
+    });
+    let (base_url, stop) = echoing(&json!({ "token": TOKEN }));
+    point_at(root, &base_url);
+    let server = live_server(root, true, &[("APIFORGE_SECRET_TOKEN", TOKEN)]);
+    let created = server
+        .agent()
+        .create_document(&create_args(Kind::Component, ECHO, ECHO_TEXT))
+        .unwrap();
+    assert!(created.wrote, "{:?}", created.diagnostics);
+
+    let simulated = server
+        .run_tool(arguments(ECHO), CancellationToken::new())
+        .unwrap();
+    assert_eq!(simulated.status, Verdict::Passed, "{:?}", simulated.steps);
+    assert_eq!(
+        step_json(simulated.steps.as_deref().unwrap(), "token")["outputs"],
+        json!({ "value": "[REDACTED]" })
+    );
+
+    for full in [false, true] {
+        let report = server
+            .run_tool(
+                RunArguments { full, ..live(ECHO) },
+                CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(report.status, Verdict::Passed, "{report:?}");
+        assert!(report.redacted);
+        let text = serde_json::to_string(&report).unwrap();
+        assert!(!text.contains(TOKEN), "full: {full}: {text}");
+        if full {
+            let steps = &report.report.as_ref().unwrap()["steps"];
+            let ask = steps
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|step| step["handle"] == "ask")
+                .unwrap();
+            assert_eq!(ask["outputs"]["body"], json!({ "token": "[REDACTED]" }));
+        } else {
+            let steps = report.steps.as_deref().unwrap();
+            assert_eq!(
+                step_json(steps, "answer")["outputs"],
+                json!({ "value": { "token": "[REDACTED]" } })
+            );
+            assert_eq!(
+                step_json(steps, "token")["outputs"],
+                json!({ "value": "[REDACTED]" })
+            );
+        }
+    }
+    stop.store(true, Ordering::Release);
+}
+
+/// A report as JSON without `replayed`.
+fn unreplayed(report: &tools::RunReport) -> Value {
+    let mut value = serde_json::to_value(report).unwrap();
+    value.as_object_mut().unwrap().remove("replayed");
+    value
+}
+
+/// Criterion 6: a recorded result replays as recorded, outputs included;
+/// the journal needs no migration (a finished run leaves none).
+#[test]
+fn mcp23_criterion_6_a_recorded_result_replays_as_recorded() {
+    let directory = checkout();
+    let root = directory.path();
+    let api = demo_api(root);
+    let server = live_server(root, true, &[]);
+    let with_id = RunArguments {
+        request_id: Some("mcp23-run".into()),
+        ..live(SCENARIO)
+    };
+    let first = server
+        .run_tool(with_id.clone(), CancellationToken::new())
+        .unwrap();
+    assert_eq!(first.status, Verdict::Passed);
+    assert!(
+        step_json(first.steps.as_deref().unwrap(), "product")
+            .get("outputs")
+            .is_some()
+    );
+    drop(api);
+    let second = server.run_tool(with_id, CancellationToken::new()).unwrap();
+    assert!(second.replayed);
+    assert_eq!(unreplayed(&second), unreplayed(&first));
+    assert!(journal(root).is_none(), "a finished run leaves no journal");
+}
