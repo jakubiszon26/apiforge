@@ -642,3 +642,76 @@ async fn causes_on_shop_30() {
         Ok("refund_amount")
     );
 }
+
+// LANG-11 (#357) --------------------------------------------------------------
+
+/// A `then` branch of three requests in a chain, and `later`, written before
+/// the `if`, ordered after the branch's last statement and the other branch.
+fn after_the_branch(taken: bool) -> String {
+    format!(
+        r#"scenario "After the branch" {{
+  param taken = {taken}
+  @after(third, choice.else)
+  later = GET "/later" {{
+    sample 200 {{}}
+  }}
+  choice = if param.taken == true {{
+    made = POST "/made" {{
+      sample 201 {{}}
+    }}
+    @after(made)
+    second = GET "/second" {{
+      sample 200 {{}}
+    }}
+    @after(second)
+    third = GET "/third" {{
+      sample 200 {{}}
+    }}
+  }}
+}}
+"#
+    )
+}
+
+fn position(run: &RunResult, handle: &str) -> usize {
+    run.steps
+        .iter()
+        .position(|step| step.handle == handle)
+        .unwrap_or_else(|| panic!("no result for `{handle}`: {run:#?}"))
+}
+
+/// Criterion 1: `@after(last_in_then, x.else)` waits for the statements of the
+/// `then` branch when it is taken, though the line comes first in the file.
+#[tokio::test]
+async fn lang11_criterion_1_after_the_last_statement_waits_for_the_branch() {
+    let (project, scenario) = lowered(&after_the_branch(true));
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+    let order = ["choice", "made", "second", "third", "later"].map(|handle| position(&run, handle));
+    assert!(order.is_sorted(), "{order:?}: {run:#?}");
+    for handle in ["made", "second", "third", "later"] {
+        assert_eq!(
+            by_handle(&run, handle).status,
+            StepStatus::Passed,
+            "{handle}"
+        );
+    }
+}
+
+/// Criterion 1: with the `else` branch taken, the statements of `then` are
+/// skipped and `later` still runs, through `choice.else`.
+#[tokio::test]
+async fn lang11_criterion_1_after_the_other_branch_runs_when_it_is_taken() {
+    let (project, scenario) = lowered(&after_the_branch(false));
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+    for handle in ["made", "second", "third"] {
+        assert_eq!(
+            by_handle(&run, handle).status,
+            StepStatus::Skipped,
+            "{handle}"
+        );
+    }
+    assert_eq!(by_handle(&run, "later").status, StepStatus::Passed);
+    assert!(position(&run, "choice") < position(&run, "later"));
+}

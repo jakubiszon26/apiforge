@@ -553,11 +553,21 @@ fn graph(
             "Control edge endpoint does not exist",
         )?;
         if let Some(source) = nodes.get(edge.source.as_str()) {
-            require(
-                (source.kind == NodeKind::If) == edge.branch.is_some(),
-                &edge_path,
-                "Only IF outputs require a true/false branch",
-            )?;
+            if source.kind == NodeKind::If {
+                require(
+                    edge.branch.is_some(),
+                    &edge_path,
+                    "`@after` an if names a branch, `x.then` or `x.else`; to wait for the \
+                     branch's statements, name its last one and the other branch: \
+                     `@after(last_in_then, x.else)`",
+                )?;
+            } else {
+                require(
+                    edge.branch.is_none(),
+                    &edge_path,
+                    "Only IF outputs require a true/false branch",
+                )?;
+            }
         }
         require(
             nodes
