@@ -65,11 +65,11 @@ struct Piece {
 }
 
 /// The axis-aligned segments of the complete routes, port stretches removed.
-fn pieces(routes: &[Route], gap: f32) -> Vec<Piece> {
+fn pieces(routes: &[Route], gap: f32, judged: impl Fn(usize) -> bool) -> Vec<Piece> {
     let mut pieces = Vec::new();
     for (route, drawn) in routes.iter().enumerate() {
         let points = &drawn.points;
-        if !drawn.complete || points.len() < 2 {
+        if !drawn.complete || points.len() < 2 || !judged(route) {
             continue;
         }
         let last = points.len() - 2;
@@ -124,80 +124,136 @@ fn area(horizontal: bool, along: (f32, f32), across: (f32, f32)) -> Rect {
 /// route joins included. A route that found no way round the cards is not
 /// judged.
 pub fn packed(routes: &[Route], cards: &[Rect], gap: f32) -> Vec<Breach> {
-    let pieces = pieces(routes, gap);
+    let pieces = pieces(routes, gap, |_| true);
     let limit = gap - TOLERANCE;
     let mut breaches = Vec::new();
-    let beside = |a: Option<Point>, b: Option<Point>| matches!((a, b), (Some(a), Some(b)) if a.distance(b) < limit);
     for (position, a) in pieces.iter().enumerate() {
-        for b in &pieces[position + 1..] {
-            if a.horizontal != b.horizontal {
-                continue;
-            }
-            let across = (a.line - b.line).abs();
-            // Negative while the two run side by side.
-            let apart = a.low.max(b.low) - a.high.min(b.high);
-            if across >= limit {
-                continue;
-            }
-            if a.route == b.route {
-                // A route folded on itself; a jog between two of its segments
-                // is one line still.
-                if apart > -TOLERANCE || a.index.abs_diff(b.index) < 2 {
-                    continue;
-                }
-            } else {
-                if apart >= limit {
-                    continue;
-                }
-                // Wires of one port on the straight piece out of it, or into
-                // it; and the pieces of two ports nearer than the gap, which
-                // are as near each other as their ports.
-                let ports = [
-                    (a.leaves, b.leaves),
-                    (a.enters, b.enters),
-                    (a.leaves, b.enters),
-                    (a.enters, b.leaves),
-                ];
-                if ports.into_iter().any(|(a, b)| beside(a, b)) {
-                    continue;
-                }
-            }
-            breaches.push(Breach {
-                route: a.route,
-                near: Near::Route(b.route),
-                horizontal: a.horizontal,
-                area: area(
-                    a.horizontal,
-                    (a.low.max(b.low), a.high.min(b.high)),
-                    (a.line, b.line),
-                ),
-            });
-        }
+        breaches.extend(
+            pieces[position + 1..]
+                .iter()
+                .filter_map(|b| beside(a, b, limit)),
+        );
     }
     for piece in &pieces {
-        for (card, rectangle) in cards.iter().enumerate() {
-            let zone = rectangle.inflate(limit);
-            let (near, far, low, high) = if piece.horizontal {
-                (zone.min.y, zone.max.y, zone.min.x, zone.max.x)
-            } else {
-                (zone.min.x, zone.max.x, zone.min.y, zone.max.y)
-            };
-            if piece.line <= near || piece.line >= far {
-                continue;
-            }
-            let (from, to) = (piece.low.max(low), piece.high.min(high));
-            if to - from <= 0.01 {
-                continue;
-            }
-            breaches.push(Breach {
-                route: piece.route,
-                near: Near::Card(card),
-                horizontal: piece.horizontal,
-                area: area(piece.horizontal, (from, to), (piece.line, piece.line)),
-            });
-        }
+        breaches.extend(
+            cards
+                .iter()
+                .enumerate()
+                .filter_map(|(card, rectangle)| at_card(piece, card, rectangle, limit)),
+        );
     }
     breaches
+}
+
+/// The breaches [`packed`] lists that have a segment `of` names in them, by
+/// its route and its place among the route's segments: what a change to
+/// those segments can alter, without listing the rest. `near` leaves out the
+/// routes too far from them to matter.
+pub(crate) fn involving(
+    routes: &[Route],
+    cards: &[Rect],
+    gap: f32,
+    of: impl Fn(usize, usize) -> bool,
+    near: impl Fn(usize) -> bool,
+) -> Vec<Breach> {
+    let pieces = pieces(routes, gap, near);
+    let limit = gap - TOLERANCE;
+    let mut breaches = Vec::new();
+    let named = |piece: &Piece| of(piece.route, piece.index);
+    for (position, a) in pieces.iter().enumerate().filter(|(_, a)| named(a)) {
+        // Each pair once, in the order `packed` lists it: against a named
+        // segment only from the earlier of the two.
+        breaches.extend(
+            pieces
+                .iter()
+                .enumerate()
+                .filter(|(other, b)| *other > position || !named(b))
+                .filter_map(|(other, b)| {
+                    if other > position {
+                        beside(a, b, limit)
+                    } else {
+                        beside(b, a, limit)
+                    }
+                }),
+        );
+        breaches.extend(
+            cards
+                .iter()
+                .enumerate()
+                .filter_map(|(card, rectangle)| at_card(a, card, rectangle, limit)),
+        );
+    }
+    breaches
+}
+
+/// The breach of two pieces that run the same way nearer than `limit`.
+fn beside(a: &Piece, b: &Piece, limit: f32) -> Option<Breach> {
+    if a.horizontal != b.horizontal {
+        return None;
+    }
+    let across = (a.line - b.line).abs();
+    // Negative while the two run side by side.
+    let apart = a.low.max(b.low) - a.high.min(b.high);
+    if across >= limit {
+        return None;
+    }
+    if a.route == b.route {
+        // A route folded on itself; a jog between two of its segments
+        // is one line still.
+        if apart > -TOLERANCE || a.index.abs_diff(b.index) < 2 {
+            return None;
+        }
+    } else {
+        if apart >= limit {
+            return None;
+        }
+        // Wires of one port on the straight piece out of it, or into
+        // it; and the pieces of two ports nearer than the gap, which
+        // are as near each other as their ports.
+        let near = |a: Option<Point>, b: Option<Point>| matches!((a, b), (Some(a), Some(b)) if a.distance(b) < limit);
+        let ports = [
+            (a.leaves, b.leaves),
+            (a.enters, b.enters),
+            (a.leaves, b.enters),
+            (a.enters, b.leaves),
+        ];
+        if ports.into_iter().any(|(a, b)| near(a, b)) {
+            return None;
+        }
+    }
+    Some(Breach {
+        route: a.route,
+        near: Near::Route(b.route),
+        horizontal: a.horizontal,
+        area: area(
+            a.horizontal,
+            (a.low.max(b.low), a.high.min(b.high)),
+            (a.line, b.line),
+        ),
+    })
+}
+
+/// The breach of a piece nearer than `limit` to a card.
+fn at_card(piece: &Piece, card: usize, rectangle: &Rect, limit: f32) -> Option<Breach> {
+    let zone = rectangle.inflate(limit);
+    let (near, far, low, high) = if piece.horizontal {
+        (zone.min.y, zone.max.y, zone.min.x, zone.max.x)
+    } else {
+        (zone.min.x, zone.max.x, zone.min.y, zone.max.y)
+    };
+    if piece.line <= near || piece.line >= far {
+        return None;
+    }
+    let (from, to) = (piece.low.max(low), piece.high.min(high));
+    if to - from <= 0.01 {
+        return None;
+    }
+    Some(Breach {
+        route: piece.route,
+        near: Near::Card(card),
+        horizontal: piece.horizontal,
+        area: area(piece.horizontal, (from, to), (piece.line, piece.line)),
+    })
 }
 
 #[cfg(test)]

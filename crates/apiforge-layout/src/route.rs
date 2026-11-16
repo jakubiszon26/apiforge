@@ -22,6 +22,7 @@
 //! contract; `violations` is how tests check it.
 
 use crate::geometry::{Point, Port, Rect, Side, compare};
+use crate::order::{Rules, untangle};
 use crate::packed::GAP;
 use std::collections::BinaryHeap;
 
@@ -45,8 +46,8 @@ pub struct Routing {
     /// Tidy up finds the gaps to widen.
     pub squeeze: Option<f32>,
     /// Whether the lines of a corridor are put in the order that crosses
-    /// least, once every wire has its route (LAY-28). Not yet: each line
-    /// keeps the track the router gave it.
+    /// least, once every wire has its route (LAY-28, [`crate::order`]).
+    /// Without it each line keeps the track the router gave it.
     pub ordered: bool,
 }
 
@@ -343,6 +344,24 @@ pub fn route_among(
             complete,
         };
     }
+    if settings.ordered && settings.squeeze.is_none() {
+        // The lines are where the gaps allow; now their order in each
+        // corridor (LAY-28). The lines that stay are counted, not moved.
+        let mut board: Vec<Route> = routes;
+        board.extend(fixed.iter().cloned());
+        untangle(
+            &mut board,
+            wires,
+            &Rules {
+                cards,
+                mouths: &mouths,
+                gap: settings.channel_gap,
+                stub: settings.stub,
+            },
+        );
+        board.truncate(wires.len());
+        routes = board;
+    }
     bridges(&mut routes, wires, cards);
     routes
 }
@@ -357,12 +376,12 @@ struct Rung {
 }
 
 /// Where the stub of a port ends, kept free for that port's wires.
-struct Mouth {
-    at: Point,
+pub(crate) struct Mouth {
+    pub(crate) at: Point,
     /// Whether the stub runs horizontally.
-    horizontal: bool,
+    pub(crate) horizontal: bool,
     /// The card the port is on.
-    block: usize,
+    pub(crate) block: usize,
 }
 
 /// A line already on the board, as the wires routed after it see it.

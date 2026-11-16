@@ -947,12 +947,13 @@ fn lay24_criterion_9_fewer_crossings_on_fan_out() {
         let (_project, harness, id) = tidied("fan-out", WIDE, checks);
         let (lines, crossings, pairs) = measures(&harness, &id);
         // Since LAY-03 lines keep 20 px from each other: with the checks
-        // drawn, the three wires into `checkout_ok`, whose inputs are 6 px
-        // apart, come round it one by one and cross the lines beside it (9
-        // crossings, 1 before). The order of lines in a corridor is LAY-05's.
+        // drawn, the three wires into `checkout_ok` come round it one by one
+        // and cross the lines beside it (9 crossings, 1 before). With its
+        // inputs 20 px apart (#349) and the lines of a corridor in order
+        // (LAY-28) there are 5.
         let most = match checks {
             Checks::Collapsed => 2,
-            Checks::Expanded => 9,
+            Checks::Expanded => 5,
         };
         assert!(
             crossings <= most,
