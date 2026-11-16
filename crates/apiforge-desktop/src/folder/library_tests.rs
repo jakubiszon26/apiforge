@@ -1071,17 +1071,20 @@ fn ktlo11_the_explorer_on_files_does_what_it_does_in_code() {
                 click(&mut harness, "Files");
             }
 
-            // + offers new items in the selected folder.
+            // + offers new items; a scenario goes into scenarios/ whatever
+            // is selected (UX-22).
             click_row(&mut harness, "components");
             click(&mut harness, "New");
             click(&mut harness, "New scenario");
             assert!(
                 matches!(
                     &folder(&harness).prompt,
-                    Some(Prompt::NewDocument { kind: DocumentKind::Scenario, folder: Some(into), .. })
-                        if into == "components"
+                    Some(Prompt::NewDocument {
+                        kind: DocumentKind::Scenario,
+                        ..
+                    })
                 ),
-                "{context}: *New scenario* asks for a name in components"
+                "{context}: *New scenario* asks for a name"
             );
             harness.key_press(Key::Escape);
             settle(&mut harness);

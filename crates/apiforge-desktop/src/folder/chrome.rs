@@ -664,12 +664,9 @@ impl FolderApp {
                 self.comment_loss_prompt(context, ticket, action)
             }
             Prompt::CloseTab(document_id) => self.close_tab_prompt(context, document_id),
-            Prompt::NewDocument {
-                kind,
-                folder,
-                name,
-                error,
-            } => self.new_document_prompt(context, kind, folder, name, error),
+            Prompt::NewDocument { kind, name, error } => {
+                self.new_document_prompt(context, kind, name, error)
+            }
             Prompt::CloseFailed(message) => self.close_failed_prompt(context, message),
             Prompt::Rename { path, name, error } => self.rename_prompt(context, path, name, error),
             Prompt::MoveTo {
@@ -791,7 +788,6 @@ impl FolderApp {
         &mut self,
         context: &egui::Context,
         kind: DocumentKind,
-        folder: Option<String>,
         mut name: String,
         mut error: Option<String>,
     ) -> Option<Prompt> {
@@ -829,44 +825,33 @@ impl FolderApp {
             return None;
         }
         if create && !name.trim().is_empty() {
-            match self.create_document(kind, folder.as_deref(), name.trim()) {
+            match self.create_document(kind, name.trim()) {
                 Ok(()) => return self.prompt.take(),
                 Err(message) => error = Some(message),
             }
         }
-        Some(Prompt::NewDocument {
-            kind,
-            folder,
-            name,
-            error,
-        })
+        Some(Prompt::NewDocument { kind, name, error })
     }
 
-    pub(super) fn create_document(
-        &mut self,
-        kind: DocumentKind,
-        folder: Option<&str>,
-        name: &str,
-    ) -> Result<(), String> {
+    /// Creates a scenario in `scenarios/` or a component in `components/`,
+    /// whatever row of the explorer is selected (UX-22, decision 13).
+    pub(super) fn create_document(&mut self, kind: DocumentKind, name: &str) -> Result<(), String> {
         if self.session.is_none() {
             return Err("No project is open.".into());
         }
         let name = name.to_owned();
-        let selected_folder = folder.map(str::to_owned);
         let failed = Prompt::NewDocument {
             kind,
-            folder: selected_folder.clone(),
             name: name.clone(),
             error: None,
         };
         self.working_project(
             "Creating document…",
             move |session| {
-                let (default_folder, source) = match kind {
+                let (folder, source) = match kind {
                     DocumentKind::Scenario => ("scenarios", scenario_template(&name)),
                     DocumentKind::Component => ("components", component_template(&name)),
                 };
-                let folder = selected_folder.unwrap_or_else(|| default_folder.into());
                 let stem = file_stem(&name);
                 let path = (1..=apiforge_storage::project::MAX_TREE_ENTRIES)
                     .map(|index| {
@@ -875,11 +860,7 @@ impl FolderApp {
                         } else {
                             format!("{stem}-{index}.afs")
                         };
-                        if folder.is_empty() {
-                            name
-                        } else {
-                            format!("{folder}/{name}")
-                        }
+                        format!("{folder}/{name}")
                     })
                     .find(|path| {
                         !session
@@ -894,9 +875,7 @@ impl FolderApp {
             },
             move |app, result| match result {
                 Ok((id, path, folder)) => {
-                    if !folder.is_empty() {
-                        app.workbench.expanded.insert(folder);
-                    }
+                    app.workbench.expanded.insert(folder.to_owned());
                     app.explorer.selected = Some(path);
                     app.activate_tab(&id);
                     app.watcher.rescan();

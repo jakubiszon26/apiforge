@@ -259,12 +259,12 @@ fn review_ux22() {
     open_add_step(&mut harness);
     reveal(&mut harness, OTHER);
     harness.step();
-    capture(&mut harness, "ux22-own-add-step-960", None);
+    capture(&mut harness, "ux22-own-add-step-960x540", None);
 
     let project = crate::testing::shop_project();
     let (mut harness, _) = window(project.path(), MINIMUM, SCENARIO, "Code");
     click_row(&mut harness, "promotion-and-cart-price.afs");
     create(&mut harness, "New component", "Checkout flow");
     harness.step();
-    capture(&mut harness, "ux22-explorer-new-component-960", None);
+    capture(&mut harness, "ux22-explorer-new-component-960x540", None);
 }

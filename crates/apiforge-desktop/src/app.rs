@@ -1623,7 +1623,10 @@ impl App {
                 .map(|node| (node.id.clone(), node.display_name().to_owned()))
                 .collect(),
             parameters: self.editor.parameter_names(),
-            editing_component: self.editor.draft().is_some(),
+            editing_component: self
+                .editor
+                .draft()
+                .map(|draft| draft.definition.id.as_str()),
             running,
             document_locked: self.document_locked(),
             show_examples: true,
@@ -2383,7 +2386,10 @@ impl App {
                 context: &context,
                 library_in_view: true,
                 read_only: false,
-                component: self.editor.draft().is_some(),
+                component: self
+                    .editor
+                    .draft()
+                    .map(|draft| draft.definition.id.as_str()),
                 header_leading: None,
                 library: None,
                 inputs: None,

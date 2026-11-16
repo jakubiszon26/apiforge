@@ -153,10 +153,10 @@ enum Prompt {
     },
     /// A tab with unsaved work: save, discard or keep it open.
     CloseTab(String),
+    /// A new scenario or component, created in `scenarios/` or `components/`
+    /// (UX-22, decision 13).
     NewDocument {
         kind: DocumentKind,
-        /// The explorer folder it goes into; the kind's default folder if none.
-        folder: Option<String>,
         name: String,
         error: Option<String>,
     },
@@ -1744,7 +1744,9 @@ impl FolderApp {
             self.toggle_library();
         }
         let actions = panel.inner;
-        if let Some(((document_id, snapshot, model), (_, cleanup))) = board.zip(library) {
+        // The library's context borrows the board's model.
+        let cleanup = library.map(|(_, cleanup)| cleanup);
+        if let Some(((document_id, snapshot, model), cleanup)) = board.zip(cleanup) {
             for action in actions {
                 self.library_action(document_id, &model, cleanup, snapshot.editable, action);
             }
@@ -1943,7 +1945,7 @@ fn context_key(document_id: &str, cleanup: bool) -> String {
 fn library_context<'a>(
     project: &'a Project,
     document_id: &'a str,
-    model: &Document,
+    model: &'a Document,
     cleanup: bool,
     editable: bool,
 ) -> library::Context<'a> {
@@ -1962,10 +1964,18 @@ fn library_context<'a>(
         scenario_id: document_id,
         variables,
         parameters: parameters_of(model),
-        editing_component: matches!(*model, Document::Component(_)),
+        editing_component: component_id(model),
         running: false,
         document_locked: !editable,
         show_examples: false,
+    }
+}
+
+/// The ID of the component a document is; `None` for a scenario.
+fn component_id(model: &Document) -> Option<&str> {
+    match model {
+        Document::Component(component) => Some(&component.id),
+        Document::Scenario(_) => None,
     }
 }
 
