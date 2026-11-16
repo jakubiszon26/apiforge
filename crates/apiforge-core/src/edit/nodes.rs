@@ -51,7 +51,9 @@ fn default_slot(node: &Node) -> Option<(String, Vec<String>)> {
 /// Adds a new block of `kind`, optionally connected from an existing output.
 ///
 /// - From a control pseudo-port the block gets an ordering edge (taking the IF
-///   branch of `__true`/`__false`).
+///   branch of `__true`/`__false`). From a step's `__order` it is written after
+///   that step and the checks and values that follow it, so it runs directly
+///   after it; every other new block is written last.
 /// - From a data output the block's default input is bound to it: `actual` for
 ///   checks, `value` for values, `body` for requests and the action input of a
 ///   component. A block without such an input gets an ordering edge instead.
@@ -105,9 +107,14 @@ pub fn add_node(
     }
 
     let mut next = graph.clone();
+    // Where the new block is written: last, unless it follows a step's *Next*.
+    let mut at = next.nodes.len();
     match source {
         Some(source) => match control_branch(source.port) {
             Some(branch) => {
+                if branch.is_none() {
+                    at = after_step(graph, source.node_id);
+                }
                 let edge = order_edge(&next, source.node_id, &node.id, branch);
                 next.edges.push(edge);
             }
@@ -145,11 +152,30 @@ pub fn add_node(
         }
     }
     let node_id = node.id.clone();
-    next.nodes.push(node);
+    next.nodes.insert(at, node);
     Ok(AddedNode {
         graph: next,
         node_id,
     })
+}
+
+/// The index after `source` and the checks and values written after it,
+/// before the next step: where a step that follows `source` is written, so
+/// that it runs directly after it (DIAG-07). Among ready blocks the engine
+/// takes the one written first.
+fn after_step(graph: &Graph, source: &str) -> usize {
+    let Some(index) = graph.nodes.iter().position(|node| node.id == source) else {
+        return graph.nodes.len();
+    };
+    graph.nodes[index + 1..]
+        .iter()
+        .position(|node| {
+            matches!(
+                node.kind,
+                NodeKind::Start | NodeKind::Request | NodeKind::Component | NodeKind::If
+            )
+        })
+        .map_or(graph.nodes.len(), |offset| index + 1 + offset)
 }
 
 /// A comparison of one output field with an expected value, placed next to `source`.
