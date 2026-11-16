@@ -4866,7 +4866,7 @@ fn mcp23_criterion_2_outputs_over_four_kib_are_left_out_whole() {
 fn timeless(steps: &Value) -> Value {
     fn strip(steps: &mut Value) {
         for step in steps.as_array_mut().unwrap() {
-            step.as_object_mut().unwrap().remove("duration_ms");
+            step.as_object_mut().unwrap().remove("durationMs");
             if let Some(outputs) = step["outputs"].as_object_mut() {
                 outputs.remove("duration");
             }
@@ -4902,8 +4902,13 @@ fn mcp23_criterion_3_full_is_the_runners_report_without_the_snapshot() {
     let outcome = executor::execute(request, None, CancellationToken::new(), DEADLINE).unwrap();
     let runner = serde_json::to_value(&outcome.report).unwrap();
     assert!(runner["snapshot"].is_object(), "the runner keeps it");
+    assert!(
+        runner["steps"][0]["durationMs"].is_u64(),
+        "what timeless leaves out"
+    );
+    assert!(runner["scenarioId"].is_string());
     assert_eq!(timeless(&report["steps"]), timeless(&runner["steps"]));
-    for key in ["status", "mode", "diagnostic", "scenario_id"] {
+    for key in ["status", "mode", "diagnostic", "scenarioId"] {
         assert_eq!(report.get(key), runner.get(key), "{key}");
     }
     let fetch = &report["steps"][0]["children"][0];
