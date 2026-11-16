@@ -178,12 +178,15 @@ fn diag03_the_checks_tab_names_the_requirement_of_a_failed_check() {
 }
 
 /// Design review: the passed `!=`, the failed `!=` and `nonempty` at the
-/// minimum window, for the owner's quiz (criterion 4).
+/// minimum window, for the owner's quiz (criterion 4). Run results are
+/// maximised: at their normal height the card's box is below the fold.
 #[test]
 #[ignore = "DIAG-03: design review capture; run with tools/gui/review.sh"]
 fn review_diag03_check_cards() {
     let (_project, mut harness, _id) = open(MINIMUM);
     simulate(&mut harness);
+    harness.get_by_label("Maximise run results").click();
+    settle(&mut harness);
     for (handle, name) in [
         ("not_accepted", "diag03-passed-not-equal-960x540"),
         ("not_202", "diag03-failed-not-equal-960x540"),

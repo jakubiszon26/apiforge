@@ -2104,6 +2104,7 @@ impl App {
     fn report(&mut self, ui: &mut egui::Ui) {
         let actions = {
             let selected_id = self.editor.selection.first().map(String::as_str);
+            let scenario = self.editor.scenario();
             let context = report::Context {
                 run: self.run.as_ref(),
                 selected_node_id: selected_id,
@@ -2117,6 +2118,11 @@ impl App {
                 files_busy: self.files.busy(),
                 component: false,
                 document_locked: self.document_locked(),
+                graphs: Some(report::RunGraphs {
+                    main: &scenario.graph,
+                    cleanup: Some(&scenario.cleanup),
+                    project: self.editor.project(),
+                }),
             };
             self.report.show(ui, &context)
         };

@@ -300,3 +300,50 @@ fn review_run_results_maximised() {
         }
     }
 }
+
+/// DIAG-03 criterion 1: the EXPECTED side of a check's card, one case per
+/// predicate, then `~=` without a tolerance and a Data condition of several
+/// checks.
+#[test]
+fn diag03_the_expected_side_states_the_requirement() {
+    use crate::report::{expected_text, several_text};
+    use apiforge_core::{
+        format::OptionalJson,
+        model::{Match, Predicate},
+    };
+    use serde_json::json;
+    let value = |value: serde_json::Value| OptionalJson::Present(value);
+    let cases = [
+        (Predicate::Equals, value(json!(202)), 0.0, "202"),
+        (Predicate::NotEquals, value(json!(202)), 0.0, "≠ 202"),
+        (Predicate::Greater, value(json!(0)), 0.0, "> 0"),
+        (Predicate::Less, value(json!(10)), 0.0, "< 10"),
+        (
+            Predicate::Approximately,
+            value(json!(9.99)),
+            0.01,
+            "≈ 9.99 ± 0.01",
+        ),
+        (Predicate::Approximately, value(json!(9.99)), 0.0, "≈ 9.99"),
+        (
+            Predicate::Contains,
+            value(json!("x")),
+            0.0,
+            "contains \"x\"",
+        ),
+        (Predicate::Type, value(json!("number")), 0.0, "is number"),
+        (Predicate::Exists, OptionalJson::Missing, 0.0, "exists"),
+        (Predicate::NotEmpty, OptionalJson::Missing, 0.0, "nonempty"),
+        // As before DIAG-03: an equality with no expected value.
+        (Predicate::Equals, OptionalJson::Missing, 0.0, "—"),
+    ];
+    for (predicate, expected, tolerance, text) in cases {
+        assert_eq!(
+            expected_text(predicate, &expected, tolerance),
+            text,
+            "{predicate:?} of {expected:?} within {tolerance}"
+        );
+    }
+    assert_eq!(several_text(3, Match::All), "all of 3 checks");
+    assert_eq!(several_text(2, Match::Any), "any of 2 checks");
+}
