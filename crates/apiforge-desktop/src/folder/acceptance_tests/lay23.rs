@@ -728,15 +728,11 @@ fn lay23_criterion_7_fewer_crossings_per_line() {
             let (_project, harness, id) = tidied(name, WIDE, checks);
             let (lines, crossings, pairs) = measures(&harness, &id);
             let per_line = crossings as f32 / lines as f32;
-            // Since LAY-03 the lines of `fan-out` with its checks drawn run
-            // 20 px apart instead of on each other, and cross where one
-            // leaves the others: 35 crossings on 32 lines (16 before). The
-            // order of lines in a corridor is LAY-05's.
-            let most = if name == "fan-out" && checks == Checks::Expanded {
-                1.1
-            } else {
-                0.6
-            };
+            // LAY-03 put the lines of `fan-out` with its checks drawn 20 px
+            // apart, where a line leaving the others crosses them (limit
+            // 1.1); LAY-28 orders the lines of a corridor and the limit is
+            // the first one again.
+            let most = 0.6;
             assert!(
                 per_line <= most,
                 "{name} {checks:?}: {crossings} crossings on {lines} lines"

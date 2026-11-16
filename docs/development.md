@@ -122,7 +122,7 @@ How readable the boards are is measured beside it, before and after a layout
 ticket, and the numbers go into the ticket's pull request:
 
 ```bash
-cargo run -p apiforge-layout --example quality --release --locked [-- --dump <seed> <cards>]
+cargo run -p apiforge-layout --example quality --release --locked [-- --unordered | --dump <seed> <cards>]
 ```
 
 It prints wires, crossings, bends, straight wires, close and coincident pairs,
@@ -136,7 +136,9 @@ with chips for shared values (LAY-23) and arrows for the rails into the next ste
 (LAY-24), with their board size, fit zoom at 1600 × 1000 and 960 × 540, card and
 chip collisions and 20 px clearance violations. Two runs print the same; the
 example's header defines each column.
-`--dump` prints one generated board's rectangles and routes.
+`--dump` prints one generated board's rectangles and routes; `--unordered`
+prints the tables without the order of lines in a corridor (LAY-28), for
+comparison.
 
 The reference boards come from the desktop: its acceptance test
 `lay06_criterion_10_quality_on_real_card_sizes` tidies each scenario in the
