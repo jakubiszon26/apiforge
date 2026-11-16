@@ -1263,7 +1263,8 @@ released.
 - **Head of the LANG sprint**, in FLOW-00's order: LANG-13 (#386) → LANG-12
   (#385) → DIAG-06 (#391, mock-up first). LANG-13 rewrites the LAY
   reference scenarios and so lands after LAY-12. Then LANG-08 (#352),
-  LANG-09 (#353), DIAG-05 (#374).
+  LANG-09 (#353), DIAG-05 (#374). The sprint's own plan, which replaces
+  this paragraph, is [lang.md](lang.md).
 - LANG-11 (#357) merges as written; LANG-14 replaces its message. LANG-10
   (#354) follows it.
 - REP-07 (#381) runs beside LAY: one mock-up with UX-19 (#227), after

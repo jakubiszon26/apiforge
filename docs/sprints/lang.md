@@ -1,0 +1,135 @@
+# LANG: the language sprint — plan
+
+- State: **proposed 2026-11-16**. The order below is the owner's (LANG
+  quiz of 2026-11-16, recorded on
+  [#388](https://github.com/jakubiszon26/apiforge/issues/388)); the rows
+  that depend on [LANG-00](../tickets/LANG-00.md) wait for its three
+  decisions. The sprint starts when LAY closes (LAY-12, #296); the rows of
+  [Beside LAY](#beside-lay) run now.
+- Analysis model: Fable 5.2.
+- Inputs: [FLOW-00](../tickets/FLOW-00.md), [LANG-00](../tickets/LANG-00.md),
+  [LAY section 12](lay.md#12-after-the-checkpoint-2026-11-16), every open
+  LANG, RUN, EDIT and CLI issue on 2026-11-16, the code on `main` at
+  `7cc0660`.
+
+## Goal
+
+A tester writes a scenario that reads in the order it runs, keeps running
+sensibly after a failure, and — in the second half — can repeat, wait and
+choose. A file is safe to edit by hand, on the board and by an agent, and a
+build that cannot read a project says so.
+
+The sprint has two halves with a release between them:
+
+1. **The one-chain language, released as 0.2.0.** Errors in a chain, the
+   language version, the chain itself, the board that keeps it.
+2. **The language grows**, designed from what a tester cannot write today
+   (LANG-16), not ticket by ticket.
+
+Not the goal: compatibility with 0.1.0. Breaking changes are allowed in the
+0.x series (the owner, 2026-11-16); the repository's files and the owner's
+test projects are updated, and the version detects the rest.
+
+## Beside LAY
+
+| Ticket | State | Files |
+| --- | --- | --- |
+| LANG-10 #354 `uuid()` | merged (#402) | — |
+| RUN-03 #389 checks before the next step | pull request #409 | `apiforge-runner/src/engine.rs`, `apiforge-core/src/graph.rs`, `fixtures/runs` |
+| LANG-14 #390 a step after a whole `if`; a chain stays in its braces | starts now; with it the amendments of ADR 0003 and ADR 0005 that FLOW-00 owes | `apiforge-script` `lower.rs`, `print.rs`; `apiforge-core` `validation.rs`; `reference.md` |
+| LANG-00 part A #411 | analysis written, waits for the owner | `docs/` |
+| DIAG-06 #391 mock-up | owed; shows where a dropped step lands | a `mock/` branch |
+| LAY-34 #396 a board edit changes one statement | LAY part B, after LANG-14 | `apiforge-script` `print.rs`, `lower.rs`, `ast.rs` |
+
+If LANG-00's decision 1 is "the order written", LANG-14 keeps its run-time
+rule and its braces rule and does not add the spelling `@after(x)`. It is
+not blocked either way.
+
+## First half — to 0.2.0
+
+| Order | Ticket | Size | Needs | Files |
+| --- | --- | --- | --- | --- |
+| 1 | RUN-01 #126 the chain goes on after an error; only a missing value blocks | M · 20 · `default` | LANG-00 approved; #409 merged (same file) | `apiforge-runner/src/engine.rs`, `apiforge-core/src/run.rs`, `fixtures/runs`, `reference.md` (*on_error*) |
+| 1 | LANG-15 #412 the language version | S–M · 20 · `format` | LANG-00 decisions 2 and 3 | `apiforge-storage/src/project/schema.rs`, `apiforge-project`, `apiforge-cli`, `apiforge-mcp` (`project_overview`, refusals), `reference.md` (first line) |
+| 2 | LANG-13 #386 the chain, with the fix and `apiforge fix` | M · 30 · `format` | LANG-00 decision 1; LANG-14, LAY-34 and LAY-12 merged; LANG-15 (the fix raises the version) | `apiforge-script` `lower.rs`, `print.rs`; `apiforge-core/src/validation.rs`; `apiforge-cli`; `reference.md`; every `.afs` under `fixtures/` and `docs/` |
+| 3 | LANG-12 #385 one successor, `@after` on steps only | S–M · 20 · `format` | only if `@after` stays; after LANG-13 | `apiforge-core/src/validation.rs`, `reference.md` |
+| 2 | DIAG-06 #391 the board keeps the chain | from the mock-up · `visible UI` | mock-up approved; DIAG-07 (#392) merged | `apiforge-core/src/edit/nodes.rs`, `apiforge-desktop/src/canvas/` |
+| 4 | LANG-06 #143 with KTLO-37 #211 Format keeps free comments; one attribute order | S · 15 · `format` | LANG-13 merged (same writer) | `apiforge-script` `format.rs`, `parser.rs`, `print.rs`; `reference.md` |
+| 4 | LANG-05 #142 the window prints a compound `if` condition as written | S · 10 · `format` | LANG-13 merged | `apiforge-script` `print.rs` |
+| 5 | REL-05 #414 release 0.2.0 | — | all above | release notes |
+
+**Side by side.** Rows with the same order number touch different crates:
+RUN-01 (runner) beside LANG-15 (storage, command line, MCP); LANG-13
+(script, validation) beside DIAG-06 (edit, desktop). `reference.md` is
+touched by five tickets in different sections; each merges `main` before
+its last push. LANG-13 changes every fixture, so nothing else that reads
+`fixtures/scenarios` is open when it lands — that is why it waits for
+LAY-12.
+
+**Owner minutes**, without DIAG-06 and the mock-up: about 115 with LANG-12,
+95 without.
+
+### Exit criteria of the first half
+
+They are REL-05's release conditions:
+
+- [ ] Every `.afs` of the repository passes `check`, prints unchanged, and
+      its simulated run lists the same steps in the same order through the
+      command line and the MCP server.
+- [ ] The fix was applied to every scenario, fixture and example of the
+      repository and to the owner's test projects; the order of steps is
+      the same before and after; no comment was lost.
+- [ ] Under `on_error continue` a chain goes on after an error and stops
+      only at a missing value (RUN-01's eight criteria).
+- [ ] 0.1.0 refuses a project saved by 0.2.0, and 0.2.0 does not run a
+      project of language 1 before the fix; each says why.
+- [ ] No gesture on the board writes a file that does not pass `check`.
+- [ ] The reference describes language 2 only; ADR 0003, ADR 0005 and
+      ADR 0010 are amended by the tickets that change them.
+
+## Second half — the language grows
+
+| Order | Ticket | Note |
+| --- | --- | --- |
+| 1 | LANG-16 #413 part B: the corpus of 15–20 scenarios, then blocks, loops, block results, scopes; mock-up of a block on the board | Analysis; decides the shape of everything below |
+| 2 | LANG-01 #127 with LANG-09 #353 a missing field is a failure, not an error; a value from whichever branch ran | One analysis: both ask for the same thing, a value that may be absent and a way to say what stands in for it |
+| 3 | LANG-08 #352 with LANG-07 #212 repeat for every element; repeat until a state holds | One block shape, two conditions for going round again; RUN-02 (#130, a test over a table) is read with them |
+| 4 | LANG-02 #129 with LANG-04 #132 every, some, map, filter in checks; a partial match in a collection | A partial match is "some element where…"; one analysis |
+| 5 | LANG-03 #131 text functions, comparison without case | S, additive, the pattern of LANG-10 |
+| — | DIAG-05 #374 | As scheduled in LAY section 12.3 |
+
+After LANG, as the owner scheduled: EDIT-01 (#358), CLI-01 (#359), EDIT-02
+(#360) with EDIT-03 (#369). CLI-01 and LANG-13 both add a command; LANG-13
+adds only `apiforge fix`.
+
+Exit criteria of the second half are written by LANG-16.
+
+## The older tickets, placed
+
+| Ticket | Was | Now |
+| --- | --- | --- |
+| LANG-05 #142 | "`if` takes one condition" | A defect of the writer, not a gap: `if a == 1 && b != 2 {` is read by 0.1.0 and printed back as `(…) == true`. Retitled, S, first half |
+| LANG-01 #127 · LANG-09 #353 | two tickets | one analysis after LANG-16 |
+| LANG-08 #352 · LANG-07 #212 | two tickets | one analysis after LANG-16 |
+| LANG-02 #129 · LANG-04 #132 | two tickets | one analysis; not the same thing as LANG-08 (checks, not steps) |
+| LANG-06 #143 · KTLO-37 #211 | two tickets | one pull request, first half |
+| LANG-11 #357 | closed | its reference text is replaced by LANG-14 |
+| RUN-01 #126 | backlog, "syntax to be found" | decided without syntax; first in the sprint |
+
+## Decisions and records
+
+| Decision | Where |
+| --- | --- |
+| The steps are one chain (eight decisions, four consequences) | [FLOW-00](../tickets/FLOW-00.md), #388 |
+| The LANG quiz: the edge after an error, two parts of LANG-00, one release, the fix touches only `@after`, one formatter decision, one round on line order | #388, 2026-11-16 |
+| Breaking changes allowed in 0.x; no several versions, no migration framework | the owner, 2026-11-16; [LANG-00](../tickets/LANG-00.md) |
+| A board edit keeps what the author wrote | #396, #211 |
+| Open: how a chain is written; how the manifest carries the version; an older project in a newer build | [LANG-00](../tickets/LANG-00.md#owner-decisions-needed) |
+
+ADRs the first half amends: [0003](../decisions/0003-start-reachability.md)
+(a flow with a step has a start; a step outside the flow is an error),
+[0005](../decisions/0005-scenario-language.md) (ordering, the braces rule,
+what line order means, the three text operations),
+[0010](../decisions/0010-folder-projects.md) (the manifest's language
+version). No ADR states what a blocked step blocks; RUN-01 records its
+rules in the one it finds closest, or in a new one.
