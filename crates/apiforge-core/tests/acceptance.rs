@@ -236,3 +236,194 @@ fn a_report_without_causes_still_loads() {
         serde_json::from_str(&serde_json::to_string(&later).expect("serialises")).expect("loads");
     assert_eq!(reloaded, later);
 }
+
+// DIAG-07 (#392) --------------------------------------------------------------
+
+mod diag07 {
+    use super::*;
+    use apiforge_core::{
+        block::Block,
+        edit::{OutputRef, add_node},
+        format::Position,
+        graph::{ORDER_PORT, TRUE_PORT},
+        model::NodeKind,
+    };
+    use apiforge_script::print_scenario;
+
+    const AT: Position = Position { x: 0.0, y: 0.0 };
+
+    fn id_of(graph: &Graph, handle: &str) -> String {
+        node_by_handle(graph, handle).id.clone()
+    }
+
+    /// `scenario` with a request added from the output `port` of `handle`,
+    /// and the new request's identifier.
+    fn added_from(scenario: &Scenario, handle: &str, port: &str) -> (Scenario, String) {
+        let source = id_of(&scenario.graph, handle);
+        let added = add_node(
+            &scenario.graph,
+            Block::Request,
+            AT,
+            None,
+            Some(OutputRef {
+                node_id: &source,
+                port,
+            }),
+        )
+        .expect("the request is added");
+        let mut next = scenario.clone();
+        next.graph = added.graph;
+        (next, added.node_id)
+    }
+
+    fn printed(project: &Project, scenario: &Scenario) -> String {
+        print_scenario(project, scenario).expect("the scenario prints")
+    }
+
+    /// The text lowered again and printed: what a window shows of it.
+    fn reprinted(project: &Project, text: &str) -> String {
+        let lowered = lower(&parse(text), &LowerContext::folder(project));
+        assert!(!lowered.has_errors(), "{:#?}", lowered.diagnostics);
+        let Some(Document::Scenario(scenario)) = lowered.document else {
+            panic!("a scenario");
+        };
+        printed(project, &scenario)
+    }
+
+    /// The lines of `text` without those of the statement written for
+    /// `handle`: its attributes before it and its block after it.
+    fn without(text: &str, handle: &str) -> String {
+        let lines: Vec<&str> = text.lines().collect();
+        let first = line_of(text, &format!("{handle} = "));
+        let indent = |line: &str| line.len() - line.trim_start().len();
+        let mut start = first;
+        while start > 0 && lines[start - 1].trim_start().starts_with('@') {
+            start -= 1;
+        }
+        let mut end = first + 1;
+        if lines[first].trim_end().ends_with('{') {
+            while !(indent(lines[end]) == indent(lines[first]) && lines[end].trim() == "}") {
+                end += 1;
+            }
+            end += 1;
+        }
+        let mut kept: Vec<&str> = lines[..start].to_vec();
+        kept.extend(&lines[end..]);
+        kept.join("\n") + if text.ends_with('\n') { "\n" } else { "" }
+    }
+
+    /// The line on which `prefix` starts a statement.
+    fn line_of(text: &str, prefix: &str) -> usize {
+        text.lines()
+            .position(|line| line.trim_start().starts_with(prefix))
+            .unwrap_or_else(|| panic!("`{prefix}` is written:\n{text}"))
+    }
+
+    /// Criterion 1: on `shop-30`, a request added from `cart`'s *Next* is the
+    /// step the simulated run executes next after `cart`: after its checks
+    /// and values, before `cart_view` and `order`.
+    #[tokio::test]
+    async fn criterion_1_a_step_added_from_next_runs_directly_after_its_source() {
+        let (project, scenario) = fixture("shop-30");
+        let (next, added) = added_from(&scenario, "cart", ORDER_PORT);
+        let run = simulate(project, &next).await;
+        let order = executed(&run, Phase::Main);
+        let graph = &next.graph;
+        let handles = |ids: &[&str]| -> Vec<String> {
+            ids.iter()
+                .map(|id| handle_of(graph, id).to_owned())
+                .collect()
+        };
+        let position = |id: &str| {
+            order
+                .iter()
+                .position(|step| *step == id)
+                .unwrap_or_else(|| panic!("{id} runs: {:?}", handles(&order)))
+        };
+        let cart = position(&id_of(graph, "cart"));
+        let new = position(&added);
+        assert!(cart < new, "{:?}", handles(&order));
+        let between = handles(&order[cart + 1..new]);
+        assert!(
+            between.iter().all(|handle| matches!(
+                node_by_handle(graph, handle).kind,
+                NodeKind::Assert | NodeKind::Condition | NodeKind::Value | NodeKind::Export
+            )),
+            "only checks and values run between cart and the new step: {between:?}"
+        );
+        for later in ["cart_view", "address", "checkout", "order"] {
+            assert!(
+                new < position(&id_of(graph, later)),
+                "the new step runs before {later}: {:?}",
+                handles(&order)
+            );
+        }
+        assert_eq!(sequence(graph), order, "the board's order is the run's");
+    }
+
+    /// Criterion 2: the source shows `@after(cart)` on the new request,
+    /// written after `cart` and the checks and values that follow it and
+    /// before the next step; nothing else moves, and text → window → text is
+    /// unchanged.
+    #[test]
+    fn criterion_2_the_step_is_written_after_its_source_and_its_checks() {
+        let (project, scenario) = fixture("shop-30");
+        let before = printed(&project, &scenario);
+        let (next, added) = added_from(&scenario, "cart", ORDER_PORT);
+        let handle = handle_of(&next.graph, &added).to_owned();
+        let text = printed(&project, &next);
+        let at = line_of(&text, &format!("{handle} = "));
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[at - 1].trim(), "@after(cart)", "{text}");
+        assert!(line_of(&text, "cart_total = ") < at - 1, "{text}");
+        assert!(at < line_of(&text, "cart_view = "), "{text}");
+        assert_eq!(without(&text, &handle), before, "nothing else moves");
+        assert_eq!(reprinted(&project, &text), text, "text → window → text");
+    }
+
+    /// Criterion 3: from `paid.then` the step is written inside that branch,
+    /// last, as before; nothing else in the file moves.
+    #[test]
+    fn criterion_3_a_step_from_a_branch_is_written_inside_it() {
+        let (project, scenario) = fixture("shop-30");
+        let before = printed(&project, &scenario);
+        let (next, added) = added_from(&scenario, "paid", TRUE_PORT);
+        let handle = handle_of(&next.graph, &added).to_owned();
+        let text = printed(&project, &next);
+        let at = line_of(&text, &format!("{handle} = "));
+        assert!(line_of(&text, "receipt_total = ") < at, "{text}");
+        assert!(at < line_of(&text, "} else {"), "{text}");
+        assert_eq!(without(&text, &handle), before, "nothing else moves");
+        assert_eq!(reprinted(&project, &text), text, "text → window → text");
+    }
+
+    /// Criterion 4: a block added with no source, or from a data port, is
+    /// appended.
+    #[test]
+    fn criterion_4_without_a_source_or_from_data_the_block_is_appended() {
+        let (_, scenario) = fixture("shop-30");
+        let graph = &scenario.graph;
+        let cart = id_of(graph, "cart");
+        for source in [
+            None,
+            Some(OutputRef {
+                node_id: &cart,
+                port: "body",
+            }),
+        ] {
+            for block in [Block::Request, Block::Comparison, Block::Value] {
+                let added = add_node(graph, block, AT, None, source).expect("added");
+                assert_eq!(
+                    added.graph.nodes.last().map(|node| node.id.as_str()),
+                    Some(added.node_id.as_str()),
+                    "{block:?} from {source:?}"
+                );
+                assert_eq!(
+                    added.graph.nodes[..graph.nodes.len()],
+                    graph.nodes[..],
+                    "{block:?} from {source:?}: nothing else moves"
+                );
+            }
+        }
+    }
+}

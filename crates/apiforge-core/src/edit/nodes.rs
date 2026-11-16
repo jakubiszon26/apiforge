@@ -576,6 +576,58 @@ mod tests {
         ));
     }
 
+    /// DIAG-07: a step added from a step's *Next* is written after that step
+    /// and the checks and values that follow it, before the next step; from
+    /// an IF branch, with no source or from data it is appended.
+    #[test]
+    fn a_step_from_next_is_written_after_its_source_and_its_checks() {
+        let kinds = [
+            NodeKind::Start,
+            NodeKind::Request,
+            NodeKind::Assert,
+            NodeKind::Value,
+            NodeKind::Condition,
+            NodeKind::Request,
+            NodeKind::If,
+            NodeKind::Assert,
+        ];
+        let graph = Graph {
+            nodes: kinds.into_iter().map(node).collect(),
+            edges: vec![],
+            proxies: Vec::new(),
+        };
+        let ids: Vec<String> = graph.nodes.iter().map(|node| node.id.clone()).collect();
+        let order = |source: &str, port: &str| {
+            let added = add_node(
+                &graph,
+                Block::Request,
+                AT,
+                None,
+                Some(OutputRef {
+                    node_id: source,
+                    port,
+                }),
+            )
+            .unwrap();
+            let at = added
+                .graph
+                .nodes
+                .iter()
+                .position(|node| node.id == added.node_id)
+                .unwrap();
+            let mut rest = added.graph.nodes.clone();
+            rest.remove(at);
+            assert_eq!(rest, graph.nodes, "nothing else moves");
+            at
+        };
+        assert_eq!(order(&ids[0], ORDER_PORT), 1, "after Start");
+        assert_eq!(order(&ids[1], ORDER_PORT), 5, "after the checks and values");
+        assert_eq!(order(&ids[5], ORDER_PORT), 6, "before an IF");
+        assert_eq!(order(&ids[7], ORDER_PORT), 8, "after the last block");
+        assert_eq!(order(&ids[6], FALSE_PORT), 8, "a branch appends");
+        assert_eq!(order(&ids[1], "body"), 8, "data appends");
+    }
+
     #[test]
     fn new_handles_are_numbered() {
         let (graph, _) = start_graph();
