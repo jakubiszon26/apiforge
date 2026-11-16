@@ -225,9 +225,9 @@ fn drop_field(
     harness.step();
 }
 
-/// `cart.cart.id` as the response tree of `cart` hands it to a drag.
+/// `cart.id` as the response tree of `cart` hands it to a drag.
 fn cart_id(harness: &FolderHarness, id: &str) -> Binding {
-    Binding::reference(id_of(harness, id, "cart"), "cart", "cart.id")
+    Binding::reference(id_of(harness, id, "cart"), "cart", "id")
 }
 
 /// A point of the empty board, in the part the camera fits: no card, chip
@@ -415,8 +415,8 @@ fn lay25_criterion_1_a_far_wire_asks_first() {
     }
 }
 
-/// Criterion 1, a field: `cart.cart.id` dragged from the response tree onto
-/// a far input opens the choice; Enter writes `var cartId = cart.cart.id`
+/// Criterion 1, a field: `cart.id` dragged from the response tree onto
+/// a far input opens the choice; Enter writes `var cartId = cart.id`
 /// after `cart`, every step that read the value reads `cartId`, the new one
 /// included, and the variable is selected.
 #[test]
@@ -424,15 +424,15 @@ fn lay25_criterion_1_a_far_field_asks_first() {
     let (_project, mut harness, id) = tidied("far-value", WIDE);
     fit(&mut harness);
     let before = text(&harness, &id);
-    let direct = readers(&harness, &id, "cart", "cart", "cart.id");
-    assert_eq!(direct.len(), 9, "nine steps read cart.cart.id");
+    let direct = readers(&harness, &id, "cart", "cart", "id");
+    assert_eq!(direct.len(), 9, "nine steps read cart.id");
 
     let value = cart_id(&harness, &id);
     drop_field(
         &mut harness,
         &id,
         value.clone(),
-        "cart.id",
+        "id",
         "remove_coupon",
         "body",
     );
@@ -442,19 +442,19 @@ fn lay25_criterion_1_a_far_field_asks_first() {
     harness.step();
     assert_eq!(text(&harness, &id), before, "Esc writes nothing");
 
-    drop_field(&mut harness, &id, value, "cart.id", "remove_coupon", "body");
+    drop_field(&mut harness, &id, value, "id", "remove_coupon", "body");
     harness.key_press(egui::Key::Enter);
     settle(&mut harness);
     harness.step();
     let after = text(&harness, &id);
     assert_eq!(
         line_after(&after, "cart = add_to_cart@1"),
-        "var cartId = cart.cart.id",
+        "var cartId = cart.id",
         "the variable follows its source"
     );
     assert!(
-        readers(&harness, &id, "cart", "cart", "cart.id") == vec!["cartId".to_owned()],
-        "only the variable reads cart.cart.id"
+        readers(&harness, &id, "cart", "cart", "id") == vec!["cartId".to_owned()],
+        "only the variable reads cart.id"
     );
     for reader in direct
         .iter()
@@ -508,7 +508,7 @@ fn lay25_criterion_3_a_held_value_is_read_through_its_variable() {
     fit(&mut harness);
     let before = variables(&harness, &id);
     let value = cart_id(&harness, &id);
-    drop_field(&mut harness, &id, value, "cart.id", "remove_coupon", "body");
+    drop_field(&mut harness, &id, value, "id", "remove_coupon", "body");
     assert!(
         has(&harness, "Read cartId"),
         "the first row names the variable"
@@ -612,23 +612,23 @@ fn lay25_criterion_4_the_port_proposes_its_fields() {
         .click();
     settle(&mut harness);
     harness.step();
-    let cart_row = label_containing(&harness, "var cartId = cart.cart.id");
+    let cart_row = label_containing(&harness, "var cartId = cart.id");
     assert!(cart_row.contains("9 steps"), "{cart_row}");
-    let product_row = label_containing(&harness, "var productId = cart.cart.productId");
+    let product_row = label_containing(&harness, "var productId = cart.productId");
     assert!(product_row.contains("6 steps"), "{product_row}");
     assert!(!has_containing(&harness, "currency"), "two readers: no row");
     harness
-        .get_by_label_contains("var cartId = cart.cart.id")
+        .get_by_label_contains("var cartId = cart.id")
         .click();
     settle(&mut harness);
     harness.step();
     let after = text(&harness, &id);
     assert_eq!(
         line_after(&after, "cart = add_to_cart@1"),
-        "var cartId = cart.cart.id"
+        "var cartId = cart.id"
     );
     assert_eq!(
-        readers(&harness, &id, "cart", "cart", "cart.id"),
+        readers(&harness, &id, "cart", "cart", "id"),
         vec!["cartId".to_owned()]
     );
     assert_eq!(
@@ -816,7 +816,7 @@ fn lay25_criterion_6_held_values_and_clashes() {
     // far-value with cartId already held, read directly by every step.
     let source = fixture("far-value").replace(
         "  cart = add_to_cart@1(product: product, quantity: 2)\n",
-        "  cart = add_to_cart@1(product: product, quantity: 2)\n  var cartId = cart.cart.id\n",
+        "  cart = add_to_cart@1(product: product, quantity: 2)\n  var cartId = cart.id\n",
     );
     let (_project, mut harness, id) = tidied_source(&source, WIDE);
     fit(&mut harness);
@@ -838,11 +838,11 @@ fn lay25_criterion_6_held_values_and_clashes() {
     let after = text(&harness, &id);
     assert_eq!(after.matches("var cartId").count(), 1, "no second variable");
     assert_eq!(
-        readers(&harness, &id, "cart", "cart", "cart.id"),
+        readers(&harness, &id, "cart", "cart", "id"),
         vec!["cartId".to_owned()],
         "the readers moved to cartId"
     );
-    assert!(after.contains("var productId = cart.cart.productId"));
+    assert!(after.contains("var productId = cart.productId"));
     let now = world(&harness);
     let moved: Vec<&String> = cards
         .iter()
@@ -998,7 +998,7 @@ fn lay25_criterion_8_names() {
 
     // far-value and shop-30: cartId and token.
     for (name, line) in [
-        ("far-value", "var cartId = cart.cart.id"),
+        ("far-value", "var cartId = cart.id"),
         ("shop-30", "var token = login.body.token"),
     ] {
         let (_project, mut harness, id) = tidied(name, WIDE);
@@ -1020,7 +1020,7 @@ fn lay25_criterion_9_one_undo() {
     fit(&mut harness);
     let before = text(&harness, &id);
     let value = cart_id(&harness, &id);
-    drop_field(&mut harness, &id, value, "cart.id", "remove_coupon", "body");
+    drop_field(&mut harness, &id, value, "id", "remove_coupon", "body");
     harness.key_press(egui::Key::Enter);
     settle(&mut harness);
     harness.step();
@@ -1042,7 +1042,7 @@ fn lay25_criterion_9_one_undo() {
     settle(&mut harness);
     harness.step();
     harness
-        .get_by_label_contains("var productId = cart.cart.productId")
+        .get_by_label_contains("var productId = cart.productId")
         .click();
     settle(&mut harness);
     harness.step();
@@ -1152,7 +1152,7 @@ fn lay25_criterion_10_a_variable_is_read_through_chips() {
     let (project, mut harness, id) = tidied("far-value", WIDE);
     fit(&mut harness);
     let value = cart_id(&harness, &id);
-    drop_field(&mut harness, &id, value, "cart.id", "remove_coupon", "body");
+    drop_field(&mut harness, &id, value, "id", "remove_coupon", "body");
     harness.key_press(egui::Key::Enter);
     settle(&mut harness);
     harness.step();
@@ -1163,7 +1163,7 @@ fn lay25_criterion_10_a_variable_is_read_through_chips() {
     settle(&mut harness);
     harness.step();
     harness
-        .get_by_label_contains("var productId = cart.cart.productId")
+        .get_by_label_contains("var productId = cart.productId")
         .click();
     settle(&mut harness);
     harness.step();
@@ -1256,13 +1256,13 @@ fn lay25_criterion_10_a_variable_chip_names_its_variable() {
 }
 
 /// Criterion 11: *Read directly again* on `cartId` makes its readers read
-/// `cart.cart.id` and removes the variable, in one undoable edit; it is
+/// `cart.id` and removes the variable, in one undoable edit; it is
 /// absent on a variable that holds anything but a plain reference.
 #[test]
 fn lay25_criterion_11_read_directly_again() {
     let source = fixture("far-value-saved").replace(
-        "  var productId = cart.cart.productId\n",
-        "  var productId = cart.cart.productId\n  var double = cart.cart.productId * 2\n",
+        "  var productId = cart.productId\n",
+        "  var productId = cart.productId\n  var double = cart.productId * 2\n",
     );
     let (_project, mut harness, id) = tidied_source(&source, WIDE);
     fit(&mut harness);
@@ -1299,11 +1299,11 @@ fn lay25_criterion_11_read_directly_again() {
         !variables(&harness, &id).contains("cartId"),
         "the variable is gone"
     );
-    let mut direct = readers(&harness, &id, "cart", "cart", "cart.id");
+    let mut direct = readers(&harness, &id, "cart", "cart", "id");
     direct.sort();
     let mut expected = readers_of_variable.clone();
     expected.sort();
-    assert_eq!(direct, expected, "its readers read cart.cart.id");
+    assert_eq!(direct, expected, "its readers read cart.id");
     assert!(!text(&harness, &id).contains("cartId}}"));
     undo(&mut harness);
     assert_eq!(text(&harness, &id), before, "one undo");
@@ -1397,7 +1397,7 @@ fn review_lay25() {
         let (_project, mut harness, id) = tidied("far-value", size);
         fit(&mut harness);
         let value = cart_id(&harness, &id);
-        drop_field(&mut harness, &id, value, "cart.id", "remove_coupon", "body");
+        drop_field(&mut harness, &id, value, "id", "remove_coupon", "body");
         assert!(board(&harness, &id).debug_offer().is_some(), "the choice");
         card_in_view(&harness, &id, "choice");
         crate::testing::capture(&mut harness, &format!("lay25-choice-{suffix}"), None);

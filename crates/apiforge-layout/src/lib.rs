@@ -7,6 +7,7 @@
 //! records the algorithms and the guarantees.
 mod geometry;
 mod layered;
+mod order;
 mod packed;
 mod route;
 mod smooth;
