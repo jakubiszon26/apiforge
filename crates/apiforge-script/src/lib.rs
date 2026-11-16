@@ -60,6 +60,24 @@ pub fn push_warnings(
     }
 }
 
+/// The one-based line and column of a byte offset in `text`, the column
+/// counted in characters: where the Code view and the CLI place a diagnostic.
+/// An offset past the end or inside a character moves back to a boundary.
+pub fn line_column(text: &str, offset: usize) -> (usize, usize) {
+    let mut offset = offset.min(text.len());
+    while !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    let before = &text[..offset];
+    let line = before.matches('\n').count() + 1;
+    let column = before
+        .rsplit('\n')
+        .next()
+        .map_or(0, |line| line.chars().count())
+        + 1;
+    (line, column)
+}
+
 mod reconcile;
 pub use reconcile::{Reconciled, reconcile, semantic};
 

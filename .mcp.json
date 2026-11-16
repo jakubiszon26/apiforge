@@ -2,8 +2,8 @@
   "mcpServers": {
     "egui": {
       "type": "stdio",
-      "command": "tools/gui/egui-mcp.sh",
-      "args": []
+      "command": "bash",
+      "args": ["-c", "d=$PWD; until [ -x \"$d/tools/gui/egui-mcp.sh\" ] || [ \"$d\" = / ]; do d=$(dirname \"$d\"); done; exec \"$d/tools/gui/egui-mcp.sh\" \"$@\"", "egui-mcp"]
     }
   }
 }

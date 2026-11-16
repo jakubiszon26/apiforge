@@ -62,8 +62,41 @@ fn unattached_comments_warn_before_formatting_removes_them() {
     fs::write(&path, "// floating\nscenario \"Notes\" { value = 1 }").unwrap();
     let output = run(&[OsStr::new("fmt"), path.as_os_str()]);
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Warning"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains(": warning: "));
     assert!(!fs::read_to_string(&path).unwrap().contains("floating"));
+}
+
+/// #346, criterion 2: `fmt` on a file that does not parse prints each
+/// diagnostic as `path:line:column: severity: message`, the path as given and
+/// the column counted in characters, never a byte range.
+#[test]
+fn issue346_criterion_2_fmt_prints_path_line_and_character_column() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("żółw.afs");
+    // An error on line 3; a warning on line 1 after three two-byte
+    // characters, at character column 17 (byte column 20).
+    fs::write(&path, "scenario \"Żółw\" // c\n{\n  other = )\n}\n").unwrap();
+    let output = run(&[OsStr::new("fmt"), path.as_os_str()]);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let lines: Vec<&str> = stderr.lines().collect();
+    let shown = path.display();
+    assert_eq!(
+        lines,
+        [
+            format!("{shown}:3:11: error: Expected an expression"),
+            format!(
+                "{shown}:1:17: warning: {}",
+                apiforge_script::UNATTACHED_COMMENT
+            ),
+        ],
+        "{stderr}"
+    );
+    assert!(!lines.iter().any(|line| {
+        line.as_bytes()
+            .windows(4)
+            .any(|w| w[0].is_ascii_digit() && w[1] == b'.' && w[2] == b'.' && w[3].is_ascii_digit())
+    }));
+    assert_eq!(output.status.code(), Some(1));
 }
 
 #[test]

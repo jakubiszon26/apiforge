@@ -359,7 +359,19 @@ cargo run -p apiforge-cli --locked -- run --folder /path/to/project --scenario s
 diagnostics MCP's `check` returns, it warns, as the Code view does, at each place
 where a step two or more steps later, or in Cleanup, reads a value of a request
 or a component call directly ([LAY-26](tickets/LAY-26.md)); a warning never
-changes its exit code. `print` emits its
+changes its exit code. Every command that reports diagnostics (`check`, `fmt`,
+`print`, `apply`) prints one line per diagnostic on stderr, as compilers do:
+
+```text
+scenarios/order.afs:26:33: warning: A far step reads this value directly; save it as a variable
+```
+
+The file is named as the command was given it (the `--file` path, or the
+registered path when `check` reads every file; the `.afs` argument otherwise),
+followed by the line and column where the diagnostic starts, both one-based and
+the column counted in characters as in the Code view. `check --workspace`
+without a file checks printed text that has no file, so its lines start at the
+line number. MCP's `check` returns structured ranges instead. `print` emits its
 canonical definition; `apply` validates and saves the supplied source exactly under
 the exclusive project lock. Neither changes published component revisions. Folder
 calls must name `Handle@revision(...)`. `run` selects a scenario by registered path

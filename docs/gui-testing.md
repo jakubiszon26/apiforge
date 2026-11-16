@@ -109,7 +109,10 @@ tools/gui/egui-mcp.sh --install
 
 installs the pinned `egui_mcp` release outside the repository. The project's
 [`.mcp.json`](../.mcp.json) registers `tools/gui/egui-mcp.sh` as the MCP
-server `egui`; it reports when the release is not installed.
+server `egui`; it reports when the release is not installed. The server starts
+from any directory inside the repository, including a folder project under
+`target/release/` that is a Git repository of its own: the launch walks up from
+the current directory to the script.
 
 ### Hosts
 

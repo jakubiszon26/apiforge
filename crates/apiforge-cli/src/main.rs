@@ -79,7 +79,7 @@ fn main() -> ExitCode {
         Ok(_) => &tree.diagnostics,
         Err(diagnostics) => diagnostics,
     };
-    self::diagnostics(diagnostics);
+    self::diagnostics(Some(&path.display().to_string()), &text, diagnostics);
     match formatted {
         Ok(formatted) if check => {
             if text == formatted {
@@ -101,11 +101,18 @@ fn main() -> ExitCode {
     }
 }
 
-fn diagnostics(diagnostics: &[apiforge_script::Diagnostic]) {
+/// Prints diagnostics of `text` to stderr as compilers do (#346):
+/// `file:line:column: severity: message`, at the start of each range, the
+/// line and column one-based and the column counted in characters. A text
+/// with no file prints `line:column: severity: message`.
+fn diagnostics(file: Option<&str>, text: &str, diagnostics: &[apiforge_script::Diagnostic]) {
     for diagnostic in diagnostics {
-        eprintln!(
-            "{:?} {}..{}: {}",
-            diagnostic.severity, diagnostic.range.start, diagnostic.range.end, diagnostic.message
-        );
+        let (line, column) = apiforge_script::line_column(text, diagnostic.range.start);
+        let severity = match diagnostic.severity {
+            apiforge_script::Severity::Error => "error",
+            apiforge_script::Severity::Warning => "warning",
+        };
+        let file = file.map(|file| format!("{file}:")).unwrap_or_default();
+        eprintln!("{file}{line}:{column}: {severity}: {}", diagnostic.message);
     }
 }

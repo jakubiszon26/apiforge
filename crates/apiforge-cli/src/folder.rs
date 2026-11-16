@@ -68,25 +68,25 @@ fn execute(args: Args) -> Result<(), String> {
         .transpose()?;
     if args.command == "apply" {
         let id = selected.as_ref().expect("apply requires --file");
+        let file = args.file.as_deref().expect("apply requires --file");
         let text = super::source(args.source.as_ref().expect("apply requires source"))?;
         session
             .edit_source(id, &text, Origin::SESSION)
             .map_err(|e| e.to_string())?;
         session.settle(id).map_err(|e| e.to_string())?;
-        check_document(&session, id)?;
+        check_document(&session, id, file)?;
         session.save(id).map_err(|e| e.to_string())?;
         return Ok(());
     }
     if args.command == "print" {
         let id = selected.as_ref().expect("print requires --file");
-        check_document(&session, id)?;
-        let model = session
-            .document(id)
-            .and_then(|document| document.model())
-            .ok_or("No valid definition")?;
+        let file = args.file.as_deref().expect("print requires --file");
+        check_document(&session, id, file)?;
+        let document = session.document(id).ok_or("No valid definition")?;
+        let model = document.model().ok_or("No valid definition")?;
         let text = apiforge_script::print_folder_document(session.context(), model).map_err(
             |diagnostics| {
-                super::diagnostics(&diagnostics);
+                super::diagnostics(Some(file), document.text(), &diagnostics);
                 "Cannot print definition"
             },
         )?;
@@ -99,7 +99,13 @@ fn execute(args: Args) -> Result<(), String> {
         .iter()
         .filter(|document| selected.as_deref().is_none_or(|id| document.id() == id))
     {
-        valid &= check_document(&session, document.id()).is_ok();
+        // A file is named as the command was given it, or else by its
+        // registered path.
+        let file = args
+            .file
+            .as_deref()
+            .unwrap_or(document.entry().path.as_str());
+        valid &= check_document(&session, document.id(), file).is_ok();
     }
     if valid {
         Ok(())
@@ -110,8 +116,8 @@ fn execute(args: Args) -> Result<(), String> {
 
 /// Prints the document's diagnostics in the CLI's stderr format: those MCP's
 /// `check` returns, then the far reads of a valid document (LAY-26), which
-/// MCP does not return. Warnings never fail the check.
-fn check_document(session: &ProjectSession, id: &str) -> Result<(), String> {
+/// MCP does not return. Warnings never fail the check. Each line names `file`.
+fn check_document(session: &ProjectSession, id: &str, file: &str) -> Result<(), String> {
     let (document, valid) = check_saved(session, id).map_err(|error| error.message)?;
     let mut diagnostics = document.diagnostics().to_vec();
     if valid && let Some(model) = document.model() {
@@ -123,7 +129,7 @@ fn check_document(session: &ProjectSession, id: &str) -> Result<(), String> {
             apiforge_script::far_read_warnings(&tree, model, session.context()),
         );
     }
-    super::diagnostics(&diagnostics);
+    super::diagnostics(Some(file), document.text(), &diagnostics);
     if !valid {
         return Err("Saved source has no valid definition".into());
     }
