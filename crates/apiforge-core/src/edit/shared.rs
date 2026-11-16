@@ -3,7 +3,7 @@
 //! that saves one or many of them and its inverse.
 //!
 //! A value is a field of a request's or a component call's output, read
-//! exactly (`cart.cart.id`). Saving it adds `var cartId = cart.cart.id`
+//! exactly (`cart.id`). Saving it adds `var cartId = cart.id`
 //! after its step and makes every step of Main and Cleanup that read the
 //! value read the variable; nothing else changes. *Read directly again*
 //! takes a variable that holds a plain reference back.
@@ -63,7 +63,7 @@ impl ValueRef {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedValue {
     pub value: ValueRef,
-    /// The value as code writes it, `cart.cart.id`.
+    /// The value as code writes it, `cart.id`.
     pub text: String,
     /// The variable's name: the one that already holds the value, or the
     /// one a new variable would get.
@@ -75,7 +75,7 @@ pub struct SharedValue {
 }
 
 impl SharedValue {
-    /// The line a new variable writes, `var cartId = cart.cart.id`.
+    /// The line a new variable writes, `var cartId = cart.id`.
     pub fn line(&self) -> String {
         format!("var {} = {}", self.name, self.text)
     }

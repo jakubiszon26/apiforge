@@ -1071,17 +1071,20 @@ fn ktlo11_the_explorer_on_files_does_what_it_does_in_code() {
                 click(&mut harness, "Files");
             }
 
-            // + offers new items in the selected folder.
+            // + offers new items; a scenario goes into scenarios/ whatever
+            // is selected (UX-22).
             click_row(&mut harness, "components");
             click(&mut harness, "New");
             click(&mut harness, "New scenario");
             assert!(
                 matches!(
                     &folder(&harness).prompt,
-                    Some(Prompt::NewDocument { kind: DocumentKind::Scenario, folder: Some(into), .. })
-                        if into == "components"
+                    Some(Prompt::NewDocument {
+                        kind: DocumentKind::Scenario,
+                        ..
+                    })
                 ),
-                "{context}: *New scenario* asks for a name in components"
+                "{context}: *New scenario* asks for a name"
             );
             harness.key_press(Key::Escape);
             settle(&mut harness);
@@ -1468,8 +1471,16 @@ mod ux40 {
             // A window of its own: a second one on a folder only observes it.
             let project = shop();
             let harness = open(&project, WIDE, path, "Split");
-            let components =
-                apiforge_core::graph::latest_components(&folder(&harness).context_project()).len();
+            // A component's board leaves the component itself out (UX-22).
+            let app = folder(&harness);
+            let active = app.workbench.active().expect("the document is open");
+            let session = app.session.as_ref().unwrap();
+            let model = session.document(active).unwrap().model().unwrap();
+            let components = crate::library::offered_components(
+                &app.context_project(),
+                crate::folder::component_id(model),
+            )
+            .len();
             let entries = listed_blocks(&harness).len() + components;
             let caption = harness.get_by_label("Block library").rect();
             let shown: Vec<usize> = harness

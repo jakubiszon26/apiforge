@@ -1623,7 +1623,10 @@ impl App {
                 .map(|node| (node.id.clone(), node.display_name().to_owned()))
                 .collect(),
             parameters: self.editor.parameter_names(),
-            editing_component: self.editor.draft().is_some(),
+            editing_component: self
+                .editor
+                .draft()
+                .map(|draft| draft.definition.id.as_str()),
             running,
             document_locked: self.document_locked(),
             show_examples: true,
@@ -2104,6 +2107,7 @@ impl App {
     fn report(&mut self, ui: &mut egui::Ui) {
         let actions = {
             let selected_id = self.editor.selection.first().map(String::as_str);
+            let scenario = self.editor.scenario();
             let context = report::Context {
                 run: self.run.as_ref(),
                 selected_node_id: selected_id,
@@ -2117,6 +2121,11 @@ impl App {
                 files_busy: self.files.busy(),
                 component: false,
                 document_locked: self.document_locked(),
+                graphs: Some(report::RunGraphs {
+                    main: &scenario.graph,
+                    cleanup: Some(&scenario.cleanup),
+                    project: self.editor.project(),
+                }),
             };
             self.report.show(ui, &context)
         };
@@ -2383,7 +2392,10 @@ impl App {
                 context: &context,
                 library_in_view: true,
                 read_only: false,
-                component: self.editor.draft().is_some(),
+                component: self
+                    .editor
+                    .draft()
+                    .map(|draft| draft.definition.id.as_str()),
                 header_leading: None,
                 library: None,
                 inputs: None,

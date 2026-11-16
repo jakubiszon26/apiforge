@@ -207,7 +207,7 @@ pub fn mark_name(step: &str) -> String {
     format!("Save a value of {step} as a variable")
 }
 
-/// A row of the port's menu: `var cartId = cart.cart.id, 9 steps read it`.
+/// A row of the port's menu: `var cartId = cart.id, 9 steps read it`.
 pub fn port_row(value: &SharedValue) -> String {
     let line = if value.held_by.is_some() {
         format!("Read {} for {}", value.name, value.text)

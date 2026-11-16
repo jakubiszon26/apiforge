@@ -49,6 +49,9 @@
 //! MCP-22 (#208): `may_have_reached_api` over a live run against the demo
 //! API and against a closed port; a replayed `publish` in the same server
 //! and after a restart; no description that says the person is asked.
+//!
+//! MCP-21 (#207), criterion 5: `used` is described, in the outputSchema and
+//! in the tool descriptions, as the published revisions the document calls.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -2855,5 +2858,43 @@ fn mcp22_criterion_3_nobody_is_said_to_be_asked() {
     }
     for (name, text) in texts {
         assert!(!text.contains("asked"), "{name}: {text}");
+    }
+}
+
+// MCP-21 (#207) --------------------------------------------------------------
+
+/// Criterion 5: `used` is described in `check_text`'s and `run`'s
+/// outputSchema, and in both tool descriptions, as the published revisions
+/// the document calls; the overview remains where every one is listed.
+#[test]
+fn mcp21_criterion_5_used_is_described_as_the_revisions_the_document_calls() {
+    const CALLS: &str = "the published revisions this document calls";
+    for tool in ["check_text", "run"] {
+        for description in described(tool, "used") {
+            assert!(
+                description.to_lowercase().contains(CALLS),
+                "{tool}: {description}"
+            );
+        }
+    }
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+    let listed = server.request(2, "tools/list", json!({}));
+    assert_clean_end(server);
+    for tool in listed["result"]["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        if ["check_text", "run"].contains(&name) {
+            let description = tool["description"].as_str().unwrap();
+            assert!(
+                description.to_lowercase().contains(CALLS),
+                "{name}: {description}"
+            );
+            assert!(
+                description.contains("project_overview"),
+                "{name} names where every revision is: {description}"
+            );
+        }
     }
 }

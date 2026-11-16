@@ -24,8 +24,8 @@ const TIDY: &str = "Tidy up";
 /// The three values `far-value` reads far: as code writes them, with the
 /// step, output and path they name (`add_to_cart` has one output, `cart`).
 const VALUES: [(&str, &str, &str, &str); 3] = [
-    ("cart.cart.id", "cart", "cart", "cart.id"),
-    ("cart.cart.productId", "cart", "cart", "cart.productId"),
+    ("cart.id", "cart", "cart", "id"),
+    ("cart.productId", "cart", "cart", "productId"),
     ("session.body.currency", "session", "body", "currency"),
 ];
 
@@ -414,20 +414,20 @@ fn lay26_criterion_2_a_held_value_is_read_through_its_variable() {
 
     let source = fixture("far-value").replace(
         "  cart = add_to_cart@1(product: product, quantity: 2)\n",
-        "  cart = add_to_cart@1(product: product, quantity: 2)\n  var cartId = cart.cart.id\n",
+        "  cart = add_to_cart@1(product: product, quantity: 2)\n  var cartId = cart.id\n",
     );
     let (_project, mut harness, id) = in_code(&source, WIDE);
     let project = context(&harness);
     let before = model(&harness, &id);
     let expected = board_edit(&before, &project, &value_of(&before, VALUES[0]));
-    apply_fix_on(&mut harness, &id, "cart.cart.id");
+    apply_fix_on(&mut harness, &id, "cart.id");
     let text = source_of(&harness, &id);
     assert_eq!(
         text.lines().count(),
         source.lines().count(),
         "no line added"
     );
-    assert_eq!(text.matches("cart.cart.id").count(), 1, "only the variable");
+    assert_eq!(text.matches("cart.id").count(), 1, "only the variable");
     assert_eq!(text.matches("var cartId").count(), 1);
     assert_eq!(shape(&model(&harness, &id)), shape(&expected));
 }
@@ -443,8 +443,8 @@ fn lay26_criterion_2_the_fix_keeps_every_other_byte_and_one_undo_restores_it() {
         )
         .replace("body { quantity: 3 }", "body {   quantity:    3 }")
         .replace(
-            "  shipping = PUT \"/carts/{{cart.cart.id}}/shipping\" {",
-            "  shipping = PUT   \"/carts/{{ cart.cart.id }}/shipping\"  {",
+            "  shipping = PUT \"/carts/{{cart.id}}/shipping\" {",
+            "  shipping = PUT   \"/carts/{{ cart.id }}/shipping\"  {",
         );
     let (_project, mut harness, id) = in_code(&source, WIDE);
     assert!(
@@ -455,13 +455,13 @@ fn lay26_criterion_2_the_fix_keeps_every_other_byte_and_one_undo_restores_it() {
     );
     let text = source_of(&harness, &id);
     assert_eq!(text, source);
-    // The first problem with a fix is the first far read, of cart.cart.id.
+    // The first problem with a fix is the first far read, of cart.id.
     let first = diagnostics(&harness, &id)
         .into_iter()
         .find(|diagnostic| diagnostic.fix.is_some())
         .unwrap();
     assert_eq!(first.message, FAR_READ);
-    assert_eq!(&source[first.range.clone()], "cart.cart.id");
+    assert_eq!(&source[first.range.clone()], "cart.id");
     harness
         .query_all_by_label("Apply fix")
         .next()
@@ -470,9 +470,9 @@ fn lay26_criterion_2_the_fix_keeps_every_other_byte_and_one_undo_restores_it() {
     settle(&mut harness);
     let fixed = source_of(&harness, &id);
     let cart = line_range(&source, "cart = add_to_cart@1");
-    let mut expected = source.replace("cart.cart.id", "cartId");
+    let mut expected = source.replace("cart.id", "cartId");
     let at = line_range(&expected, "cart = add_to_cart@1").end;
-    expected.insert_str(at, "  var cartId = cart.cart.id\n");
+    expected.insert_str(at, "  var cartId = cart.id\n");
     assert_eq!(
         fixed, expected,
         "only the new line and the references change"

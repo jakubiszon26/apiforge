@@ -273,7 +273,7 @@ fn collect<'a>(
     }
 }
 
-/// Every reference `expr` writes, whole: `cart.cart.id` once, not `cart`.
+/// Every reference `expr` writes, whole: `cart.id` once, not `cart`.
 fn references<'a>(reader: &'a str, expr: &'a Expr, written: &mut Vec<Written<'a>>) {
     match &expr.kind {
         ExprKind::Name(_) | ExprKind::Field { .. } => {

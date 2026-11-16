@@ -7,7 +7,7 @@ use crate::{library, theme};
 use apiforge_core::{
     block::Block,
     format::{Graph, Port, Position, Project},
-    graph::{ORDER_PORT, TRUE_PORT, compatible, latest_components, output_ports},
+    graph::{ORDER_PORT, TRUE_PORT, compatible, output_ports},
     model::NodeKind,
     operator::OperatorGroup,
 };
@@ -82,9 +82,10 @@ impl ActionMenu {
     }
 
     /// The steps offered on a scenario's board, or on a component's with
-    /// `component`: there *Export* is offered, and *Start* and *Data
-    /// condition*, which only a scenario runs, are not (UX-21, decision 12).
-    fn actions(&self, graph: &Graph, project: &Project, component: bool) -> Vec<Action> {
+    /// `component`, its ID: there *Export* is offered, and *Start* and *Data
+    /// condition*, which only a scenario runs, are not (UX-21, decision 12),
+    /// nor the component itself (UX-22).
+    fn actions(&self, graph: &Graph, project: &Project, component: Option<&str>) -> Vec<Action> {
         let source_port: Option<Port> = self.source.as_ref().and_then(|(node, port)| {
             let node = graph.nodes.iter().find(|candidate| &candidate.id == node)?;
             output_ports(node, project)
@@ -117,7 +118,7 @@ impl ActionMenu {
             .iter()
             .copied()
             .chain([Block::Export])
-            .filter(|block| block.offered(component))
+            .filter(|block| block.offered(component.is_some()))
             .map(|block| Action {
                 block,
                 name: block.label().to_owned(),
@@ -129,7 +130,7 @@ impl ActionMenu {
             .source
             .as_ref()
             .is_some_and(|(_, port)| !port.starts_with("__"));
-        for component in latest_components(project) {
+        for component in library::offered_components(project, component) {
             // From a data output, offer only components declaring a compatible action.
             if data_source {
                 let Some(action) = &component.action else {
@@ -159,17 +160,17 @@ impl ActionMenu {
     }
 
     /// Shows the popup. With `library`, the steps are followed by the block
-    /// library's Variables and Operators sections (KTLO-05d). `component`
-    /// offers a component's steps (UX-21). With `shared`, the menu opened on
-    /// the empty board ends with *Save shared values as variables*, outside
-    /// the scrolling list (LAY-25).
+    /// library's Variables and Operators sections (KTLO-05d). `component`, a
+    /// component's ID, offers that component's steps (UX-21, UX-22). With
+    /// `shared`, the menu opened on the empty board ends with *Save shared
+    /// values as variables*, outside the scrolling list (LAY-25).
     pub fn show(
         &mut self,
         ctx: &egui::Context,
         graph: &Graph,
         project: &Project,
         library: Option<&library::Context<'_>>,
-        component: bool,
+        component: Option<&str>,
         shared: Option<Shared>,
     ) -> Outcome {
         // The opening click belongs to the toolbar/card, outside the new popup.
@@ -208,7 +209,7 @@ impl ActionMenu {
                                 ui.label(
                                     RichText::new(if source_node.is_some() {
                                         "What should happen next?"
-                                    } else if component {
+                                    } else if component.is_some() {
                                         "Add a step to the component"
                                     } else {
                                         "Add a step to the scenario"
@@ -429,7 +430,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            blocks(true),
+            blocks(Some("component")),
             [
                 Block::Request,
                 Block::Branch,
@@ -441,7 +442,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            blocks(false),
+            blocks(None),
             [
                 Block::Request,
                 Block::Branch,
@@ -484,7 +485,7 @@ mod tests {
                     }
                     if let Some(menu) = &mut popup
                         && matches!(
-                            menu.show(&context, graph, &project, None, false, None),
+                            menu.show(&context, graph, &project, None, None, None),
                             Outcome::Close
                         )
                     {

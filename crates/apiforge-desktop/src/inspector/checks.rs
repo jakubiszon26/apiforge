@@ -9,6 +9,7 @@
 //! aggregation hides no failure (LAY-20). Nothing here edits the document.
 
 use super::Context;
+use crate::report::Requirement;
 use crate::{labels, theme, widgets};
 use apiforge_core::{
     format::{Binding, Graph, Node, OptionalJson},
@@ -18,6 +19,7 @@ use apiforge_core::{
 };
 use eframe::egui::{self, Color32, RichText, Ui};
 use indexmap::IndexSet;
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// How a line of the list reads at a glance.
@@ -179,8 +181,9 @@ fn json(value: &OptionalJson) -> Option<String> {
     }
 }
 
-/// The result of a check in words.
-fn status(step: Option<&StepResult>) -> (String, Tone, Outcome) {
+/// The result of a check in words. A failed comparison names what `check`
+/// required, as its card in Run results does (DIAG-03).
+fn status(step: Option<&StepResult>, check: &Node) -> (String, Tone, Outcome) {
     let Some(step) = step else {
         return ("Not run yet".to_owned(), Tone::Quiet, Outcome::Waiting);
     };
@@ -190,6 +193,9 @@ fn status(step: Option<&StepResult>) -> (String, Tone, Outcome) {
             let label = step.status.label();
             let text = match (json(&step.actual), json(&step.expected)) {
                 (Some(actual), Some(expected)) => {
+                    let expected = Requirement::of(check).map_or(expected, |requirement| {
+                        requirement.text_with(&step.expected, Value::to_string)
+                    });
                     format!("✕ {label}: got {actual}, expected {expected}")
                 }
                 _ => match &step.message {
@@ -256,7 +262,7 @@ fn pass(
                 .iter()
                 .map(|candidate| candidate.step)
                 .max_by_key(|step| position.get(step))?;
-            let (status, tone, outcome) = status(run.and_then(|run| run.step(&check.id)));
+            let (status, tone, outcome) = status(run.and_then(|run| run.step(&check.id)), check);
             let moment = if cleanup {
                 cleanup_moment(check, run)
             } else {

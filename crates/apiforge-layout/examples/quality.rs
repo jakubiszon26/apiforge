@@ -4,6 +4,7 @@
 //! ```text
 //! cargo run -p apiforge-layout --example quality --release --locked
 //! cargo run -p apiforge-layout --example quality --release --locked -- --dump <seed> <cards>
+//! cargo run -p apiforge-layout --example quality --release --locked -- --unordered
 //! ```
 //!
 //! It prints two tables: generated scenario-like boards of 6, 12, 25 and 50 cards,
@@ -17,6 +18,9 @@
 //! test `lay06_criterion_10_quality_on_real_card_sizes` writes that file and fails
 //! when it is out of date. The numbers are deterministic. `--dump` prints one
 //! generated board's rectangles and routes, for reading a case by hand.
+//! `--unordered` prints the tables with each line on the track the router gave
+//! it, without the order of lines in a corridor (LAY-28): the difference in
+//! `crossings` is what the order saves.
 //!
 //! The columns:
 //!
@@ -256,7 +260,7 @@ struct Laid {
     long: usize,
 }
 
-fn lay(board: &Board) -> Laid {
+fn lay(board: &Board, routing: &Routing) -> Laid {
     let blocks = &board.blocks;
     let graph = Graph::new(blocks, &board.edges);
     let layers = layers_of(&graph);
@@ -265,7 +269,7 @@ fn lay(board: &Board) -> Laid {
         .zip(blocks)
         .map(|(position, block)| Rect::from_size(*position, block.size))
         .collect();
-    let routes = route(&rectangles, &board.wires, &Routing::default());
+    let routes = route(&rectangles, &board.wires, routing);
     Laid {
         cards: rectangles,
         routes,
@@ -447,7 +451,7 @@ fn fit(area: Size, width: f32, height: f32) -> f32 {
     (area.width / width).min(area.height / height).min(1.0)
 }
 
-fn generated_table(text: &mut String) {
+fn generated_table(text: &mut String, routing: &Routing) {
     let _ = writeln!(
         text,
         "generated boards, tidied: the mean of {SEEDS} seeds\n\ncards order{MEASURES}"
@@ -456,7 +460,7 @@ fn generated_table(text: &mut String) {
         for order in [true, false] {
             let mut total = Measures::default();
             for seed in 1..=SEEDS {
-                total.add(&Measures::of(&lay(&generated(seed, count, order))));
+                total.add(&Measures::of(&lay(&generated(seed, count, order), routing)));
             }
             let _ = writeln!(
                 text,
@@ -468,7 +472,7 @@ fn generated_table(text: &mut String) {
     }
 }
 
-fn reference_table(text: &mut String) -> Result<(), String> {
+fn reference_table(text: &mut String, routing: &Routing) -> Result<(), String> {
     let _ = writeln!(
         text,
         "\nreference scenarios, tidied by the desktop, at the sizes it draws\n\n\
@@ -478,7 +482,7 @@ fn reference_table(text: &mut String) -> Result<(), String> {
         let rectangles: Vec<Rect> = board.cards.iter().chain(&board.chips).copied().collect();
         let laid = Laid {
             cards: rectangles.clone(),
-            routes: route(&rectangles, &board.wires, &Routing::default()),
+            routes: route(&rectangles, &board.wires, routing),
             long: 0,
         };
         let measures = Measures::of(&laid);
@@ -517,7 +521,7 @@ fn reference_table(text: &mut String) -> Result<(), String> {
 
 fn dump(seed: u64, count: usize) -> String {
     let board = generated(seed, count, true);
-    let laid = lay(&board);
+    let laid = lay(&board, &Routing::default());
     let mut text = String::new();
     for (index, card) in laid.cards.iter().enumerate() {
         let _ = writeln!(
@@ -551,12 +555,11 @@ fn dump(seed: u64, count: usize) -> String {
 
 fn run(arguments: &[String]) -> Result<String, String> {
     match arguments {
-        [] => {
-            let mut text = String::new();
-            generated_table(&mut text);
-            reference_table(&mut text)?;
-            Ok(text)
-        }
+        [] => tables(&Routing::default()),
+        [flag] if flag == "--unordered" => tables(&Routing {
+            ordered: false,
+            ..Routing::default()
+        }),
         [flag, seed, cards] if flag == "--dump" => {
             let seed = seed.parse().map_err(|_| format!("not a seed: {seed}"))?;
             let cards = cards
@@ -564,8 +567,15 @@ fn run(arguments: &[String]) -> Result<String, String> {
                 .map_err(|_| format!("not a number of cards: {cards}"))?;
             Ok(dump(seed, cards))
         }
-        _ => Err("usage: quality [--dump <seed> <cards>]".to_owned()),
+        _ => Err("usage: quality [--unordered | --dump <seed> <cards>]".to_owned()),
     }
+}
+
+fn tables(routing: &Routing) -> Result<String, String> {
+    let mut text = String::new();
+    generated_table(&mut text, routing);
+    reference_table(&mut text, routing)?;
+    Ok(text)
 }
 
 fn main() -> ExitCode {
@@ -663,7 +673,7 @@ mod tests {
             edges: vec![Edge::new(0, 1), Edge::new(1, 2), Edge::new(0, 2)],
             ..Board::default()
         };
-        assert_eq!(lay(&board).long, 1);
+        assert_eq!(lay(&board, &Routing::default()).long, 1);
     }
 
     /// LAY-06 criterion 10: the reference boards are the desktop's, at both

@@ -17,8 +17,8 @@ scenario "Far value saved" {
   }
   product = product@1(id: catalogue.body.items[0].id)
   cart = add_to_cart@1(product: product, quantity: 2)
-  var cartId = cart.cart.id
-  var productId = cart.cart.productId
+  var cartId = cart.id
+  var productId = cart.productId
   @after(cart)
   quantity = PATCH "/carts/{{cartId}}/items/{{productId}}" {
     body { quantity: 3 }
