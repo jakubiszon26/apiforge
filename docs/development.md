@@ -194,7 +194,15 @@ an ADR.
 
 ## Continuous integration
 
-The workflow runs on Linux and Windows: formatting, clippy, tests, the scenario
+A pull request runs the workflow on Linux once; a newer commit cancels the
+older run. Windows runs on every push to `main`, on a pull request labelled
+`ci:windows` and by hand (*Run workflow*) ([#407](https://github.com/jakubiszon26/apiforge/issues/407)).
+Add `ci:windows` to a pull request that changes processes or IPC, files and
+paths, `build.rs`, packaging or anything else Windows-specific. A red Windows
+run on `main` gets a fix ticket before further merges; `release.yml` still
+builds and tests Windows for every release.
+
+The workflow runs these steps on both systems: formatting, clippy, tests, the scenario
 examples and workspace check, a release build and `--check` with the release binary.
 It then opens the real application window twice per platform (`--smoke-test` and
 `--screenshot`) and uploads the capture and the binary as artifacts. The folder
