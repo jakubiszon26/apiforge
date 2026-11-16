@@ -1041,12 +1041,7 @@ mod lay26 {
         for (start, end) in found {
             let read = &text[start..end];
             assert!(
-                [
-                    "cart.cart.id",
-                    "cart.cart.productId",
-                    "session.body.currency"
-                ]
-                .contains(&read),
+                ["cart.id", "cart.productId", "session.body.currency"].contains(&read),
                 "a far read: {read}"
             );
         }

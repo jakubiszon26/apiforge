@@ -980,15 +980,15 @@ fn lay23_criterion_4_a_selected_wire_stays_drawn() {
 }
 
 /// #340: a chip of a component's output states the reference as the code
-/// writes it: `cart.cart.id`, the call's one output port left out, never
-/// `cart.cart.cart.id`.
+/// writes it: `cart.id`, the call's one output port left out, never
+/// `cart.cart.id`.
 #[test]
 fn lay23_a_component_output_is_stated_as_written() {
     let text = fixture("fan-out")
-        .replace("  var cartId = cart.cart.id\n", "")
-        .replace("{{cartId}}", "{{cart.cart.id}}")
-        .replace("cartId: cartId", "cartId: cart.cart.id")
-        .replace("cart: cartId", "cart: cart.cart.id");
+        .replace("  var cartId = cart.id\n", "")
+        .replace("{{cartId}}", "{{cart.id}}")
+        .replace("cartId: cartId", "cartId: cart.id")
+        .replace("cart: cartId", "cart: cart.id");
     assert!(!text.contains("var cartId"));
     let (_project, harness, id) = tidied_text(&text, WIDE, Checks::Collapsed);
     let cart = id_of(&harness, &id, "cart");
@@ -1000,12 +1000,11 @@ fn lay23_a_component_output_is_stated_as_written() {
         .collect();
     assert!(
         statements.len() >= 3,
-        "cart.cart.id is read far by several steps: {statements:?}"
+        "cart.id is read far by several steps: {statements:?}"
     );
     for statement in &statements {
         assert!(
-            statement.starts_with("cart.cart.id → ")
-                || statement.starts_with("cart.cart.productId → "),
+            statement.starts_with("cart.id → ") || statement.starts_with("cart.productId → "),
             "stated as the code writes it: {statement}"
         );
     }
