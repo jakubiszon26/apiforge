@@ -66,11 +66,10 @@ fn id_of(graph: &Graph, handle: &str) -> String {
 }
 
 fn handle_of<'a>(graph: &'a Graph, id: &str) -> &'a str {
-    graph
-        .nodes
-        .iter()
-        .find(|node| node.id == id)
-        .map_or_else(|| panic!("a step {id}"), |node| node.handle.as_str())
+    graph.nodes.iter().find(|node| node.id == id).map_or_else(
+        || panic!("a step the run reports is on the board"),
+        |node| node.handle.as_str(),
+    )
 }
 
 fn board<'a>(harness: &'a FolderHarness, id: &str) -> &'a crate::canvas::Canvas {

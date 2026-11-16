@@ -338,7 +338,10 @@ mod diag07 {
             order
                 .iter()
                 .position(|step| *step == id)
-                .unwrap_or_else(|| panic!("{id} runs: {:?}", handles(&order)))
+                .unwrap_or_else(|| {
+                    let step = handle_of(graph, id);
+                    panic!("{step} runs: {:?}", handles(&order))
+                })
         };
         let cart = position(&id_of(graph, "cart"));
         let new = position(&added);
