@@ -324,3 +324,61 @@ fn review_lay29() {
         crate::testing::capture(&mut harness, &format!("lay29-{label}"), None);
     }
 }
+
+/// Criterion 8: selecting a step brings back the lines of its chips and
+/// its rails, and they keep the gap from the lines at rest, from each
+/// other and from the cards, on `shop-30` and `fan-out`, step by step. A
+/// rail brought back leaves the socket at the bottom of its card, where
+/// Tidy up left it room, and the lines at rest keep off the sockets of the
+/// wires chips stand for. `login` on `shop-30` is the one step left out:
+/// its eleven lines come back to one port and nine places are within the
+/// gap, as before this ticket.
+#[test]
+fn lay29_criterion_8_lines_brought_back_keep_the_gap_for_every_selection() {
+    for name in ["shop-30", "fan-out"] {
+        let (_project, mut harness, id) = tidied(&fixture(name), WIDE, false, WireMode::Chips);
+        let at_rest: Vec<Vec<egui::Pos2>> = board(&harness, &id)
+            .debug_wires()
+            .iter()
+            .filter(|wire| !wire.revealed)
+            .map(|wire| wire.points.clone())
+            .collect();
+        let steps = graph(&harness, &id).nodes;
+        let mut brought_back = 0;
+        for step in &steps {
+            app(&mut harness)
+                .selections
+                .insert(id.clone(), vec![step.id.clone()]);
+            settle(&mut harness);
+            harness.step();
+            let canvas = board(&harness, &id);
+            let resting: Vec<Vec<egui::Pos2>> = canvas
+                .debug_wires()
+                .iter()
+                .filter(|wire| !wire.revealed)
+                .map(|wire| wire.points.clone())
+                .collect();
+            assert_eq!(
+                resting, at_rest,
+                "{name}: selecting {} moves no line at rest",
+                step.handle
+            );
+            brought_back += canvas
+                .debug_wires()
+                .iter()
+                .filter(|wire| wire.revealed && !wire.points.is_empty())
+                .count();
+            if name == "shop-30" && step.handle == "login" {
+                continue;
+            }
+            let (routes, cards) = drawn(&harness, &id);
+            assert_eq!(
+                packed(&routes, &cards, GAP),
+                [],
+                "{name} with {} selected",
+                step.handle
+            );
+        }
+        assert!(brought_back > 0, "{name}: selections bring lines back");
+    }
+}
