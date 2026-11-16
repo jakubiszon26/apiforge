@@ -1189,6 +1189,82 @@ programming environments* (1996); Whitley, *Visual programming languages
 and the empirical evidence for and against* (1997); Yoghourdjian et al.,
 *Exploring the limits of complexity* (2018).
 
+## 12. After the checkpoint (2026-11-16)
+
+The checkpoint ([#296](https://github.com/jakubiszon26/apiforge/issues/296))
+was run by an agent on the two frozen builds; its table, and the owner's
+decisions on it, are in the issue. The owner then filed his own notes from
+real use. This section places them. Section 11 stands except where a row
+below says otherwise.
+
+### 12.1 Decided by the owner
+
+- Part B runs **LAY-10 → 14 → 18 → 13 → 19 → 17 → 15**, then LAY-12.
+- Task 9 is a defect ahead of part B: DIAG-07 (#392).
+- "First open is not the Tidy up shape" is reproduced on a clean folder
+  before it is called a defect: LAY-33 (#393).
+- Checks are **expanded by default** and their switch sits on the board's
+  bar (LAY-30, #383). This answers the checkpoint's question on Q4 and
+  reverses decision 4 of [5.1](#51-decisions-taken-2026-11-05).
+- A step and its checks are one group (LAY-31, #384); a value shown as a
+  chip is read only through chips (LAY-32, #387); a wire never runs under
+  its own card (LAY-29, #382).
+- The steps of a scenario are one chain
+  ([FLOW-00](https://github.com/jakubiszon26/apiforge/issues/388): eight
+  decisions taken, the analysis as a whole waits for approval).
+
+Open: LAY-04 (#332), the source rewrite on the first Diagram edit, and the
+questions named in the rows below.
+
+### 12.2 Ahead of part B
+
+| Ticket | Size | Track · files | State |
+| --- | --- | --- | --- |
+| DIAG-07 #392 a step added from *Next* is written and runs after that step | S · 15 | core · `apiforge-core/src/edit/nodes.rs` | `ready:opus` |
+| LAY-33 #393 first open gives the Tidy up shape: reproduce, fix if real | S · 10 | `folder/{placement,opening,activation,mod}.rs` | `ready:opus` |
+| LAY-10 #294 focus on selection | S–M · 20 | cards · `canvas/{mod,paint}.rs` | `ready:opus` |
+| LAY-32 #387 one form per source: chips or wires | S · 20 | cards · `canvas/readers.rs` | `ready:opus` |
+| LAY-28 #348 with #349 lines in a corridor cross less | M | layout · `apiforge-layout`, `canvas/routing.rs` | in progress |
+| LAY-29 #382 no wire under its own card | S–M · 15 | layout · `route.rs` | after LAY-28, same agent |
+| LAY-31 #384 a step and its checks are one group | M · 20 | layout · `layered.rs`, `route.rs` | after LAY-29; a before-and-after capture and one decision first |
+| LAY-30 #383 checks expanded by default, the switch on the bar and per step | S–M · 20 | `preferences.rs`, `canvas/` | after LAY-31; mock-up first |
+| RUN-03 #389 checks and values run before the next step | M · 20 | engine · `apiforge-runner/src/engine.rs` | after FLOW-00 is approved; before LAY-19 |
+| LANG-14 #390 `@after(x)` after a whole `if`; a chain stays in its braces | S–M · 20 | `apiforge-script` `lower.rs`, `print.rs`; `reference.md` | after RUN-03; before LAY-13 |
+
+The four `ready:opus` rows touch different files and run in parallel; each
+adds one `mod` line to `acceptance_tests.rs`. The layout rows are one
+chain. RUN-03 and LANG-14 touch neither the canvas nor the layout and run
+beside both once FLOW-00 is approved; RUN-03 also answers task 10 (a check
+added from the board is evaluated in place) and moves the badge numbers to
+*step, its checks, next step*.
+
+The rest of part B (LAY-14 onwards) starts when LAY-10 is merged; LAY-13
+after LANG-14, LAY-19 after RUN-03.
+
+Added to the sprint: **100** owner minutes (DIAG-07, LAY-29 to LAY-33);
+RUN-03 and LANG-14 are 40 more, charged to FLOW-00.
+
+### 12.3 After LAY
+
+- **Head of the LANG sprint**, in FLOW-00's order: LANG-13 (#386) → LANG-12
+  (#385) → DIAG-06 (#391, mock-up first). LANG-13 rewrites the LAY
+  reference scenarios and so lands after LAY-12. Then LANG-08 (#352),
+  LANG-09 (#353), DIAG-05 (#374).
+- LANG-11 (#357) merges as written; LANG-14 replaces its message. LANG-10
+  (#354) follows it.
+- REP-07 (#381) runs beside LAY: one mock-up with UX-19 (#227), after
+  DIAG-03 (#356) is merged (same file).
+- After LANG, as the owner scheduled: EDIT-01 (#358), CLI-01 (#359),
+  EDIT-02 (#360), with EDIT-03 (#369).
+- Backlog, not scheduled: REP-05 (#363), REP-06 (#364), DIAG-04 (#365),
+  WS-01 to WS-03 (#366–#368), EDIT-04 (#370), EDIT-05 (#371), ENV-02
+  (#372), DB-02 (#373), COMP-02 (#355).
+
+### 12.4 Mock-ups owed
+
+LAY-31 (capture of `shop-30`, checks expanded, before and after), LAY-30
+(the bar switch and the per-step switch), REP-07 with UX-19, DIAG-06.
+
 ## Technical appendix
 
 - Subjects: `Binding::references()` over `node.inputs`, filtered by node
