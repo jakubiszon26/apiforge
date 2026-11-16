@@ -7,6 +7,8 @@ use apiforge_core::{
     demos::shop_project,
     format::{Graph, Node, Project, Scenario},
     graph::{relations, sequence},
+    model::ValueType,
+    operator::{Operator, OperatorGroup, RandomSource},
     run::{NotRunCause, Phase, RunMode, RunResult, StepStatus},
 };
 use apiforge_runner::{HttpTransport, RunOptions, RunRequest, run_scenario};
@@ -429,4 +431,70 @@ mod diag07 {
             }
         }
     }
+}
+
+// LANG-10 (#354) --------------------------------------------------------------
+
+/// The built-in `uuid`, by the name a document writes it with.
+fn uuid_operator() -> Operator {
+    serde_json::from_value(serde_json::json!("uuid")).expect("`uuid` is a built-in")
+}
+
+/// Units in `[0, 1)` from SplitMix64 with a fixed seed, as a seeded run draws them.
+fn seeded(seed: u64) -> impl FnMut() -> f64 {
+    let mut state = seed;
+    move || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// `xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx` in lowercase hexadecimal.
+fn is_uuid_v4(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_digit() || (b'a'..=b'f').contains(byte),
+        })
+        && bytes[14] == b'4'
+        && b"89ab".contains(&bytes[19])
+}
+
+/// Criterion 1: `uuid` is a text built-in of the Text group with no operand.
+#[test]
+fn lang10_criterion_1_uuid_is_a_text_built_in_without_operands() {
+    let uuid = uuid_operator();
+    assert!(Operator::ALL.contains(&uuid));
+    assert_eq!(uuid.label(), "New UUID");
+    let spec = uuid.spec();
+    assert_eq!(spec.group, OperatorGroup::Text);
+    assert_eq!(spec.output, ValueType::String);
+    assert!(spec.operands.is_empty(), "{spec:?}");
+}
+
+/// Criterion 1: with a seeded source, `uuid()` is a valid version 4 text; the
+/// same seed gives the same value, and every call a new one.
+#[test]
+fn lang10_criterion_1_a_seeded_uuid_is_version_4_reproducible_and_new_per_call() {
+    let uuid = uuid_operator();
+    let draw = |source: &mut dyn RandomSource| match uuid.evaluate(None, None, source) {
+        Ok(Some(serde_json::Value::String(text))) => text,
+        other => panic!("uuid() gave {other:?}"),
+    };
+    let mut source = seeded(7);
+    let drawn: Vec<String> = (0..1000).map(|_| draw(&mut source)).collect();
+    for text in &drawn {
+        assert!(is_uuid_v4(text), "{text}");
+    }
+    assert_eq!(
+        drawn.iter().collect::<BTreeSet<_>>().len(),
+        drawn.len(),
+        "two calls gave the same value"
+    );
+    assert_eq!(draw(&mut seeded(7)), drawn[0]);
+    assert_ne!(draw(&mut seeded(8)), drawn[0]);
 }

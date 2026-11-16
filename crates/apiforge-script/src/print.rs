@@ -290,11 +290,20 @@ impl Printer<'_> {
                 {
                     ExprKind::Not(Box::new(self.binding(&inputs["left"])))
                 } else {
+                    let name = serde_json::to_value(operator).unwrap();
+                    let name = name.as_str().unwrap();
+                    // A call without operands has no argument form to choose, so it
+                    // is written as typed (`uuid()`), unless a component shares the
+                    // name and would claim the statement.
+                    let plain = inputs.is_empty()
+                        && operator.spec().operands.is_empty()
+                        && !self.project.components.iter().any(|c| c.handle == name);
                     ExprKind::Call {
-                        name: format!(
-                            "op.{}",
-                            serde_json::to_value(operator).unwrap().as_str().unwrap()
-                        ),
+                        name: if plain {
+                            name.to_owned()
+                        } else {
+                            format!("op.{name}")
+                        },
                         revision: None,
                         arguments: inputs
                             .iter()

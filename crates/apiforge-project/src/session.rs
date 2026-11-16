@@ -1,6 +1,6 @@
 use crate::{
     Error, Result,
-    analysis::{self, Analysis, AnalysisInput, AnalysisTicket, Target},
+    analysis::{self, Analysis, AnalysisInput, AnalysisTicket, Restored, Target},
     context,
     document::{AnalysisState, DocumentSession, Unavailable},
     layout::{FixedPlacer, Placer},
@@ -728,6 +728,7 @@ impl ProjectSession {
         {
             return Err(Error::StaleAnalysis);
         }
+        let arranged = analysis.restored() == Some(Restored::Arranged);
         let document = &mut self.documents[index];
         document.diagnostics = analysis.diagnostics;
         document.omitted_diagnostics = analysis.omitted_diagnostics;
@@ -755,6 +756,9 @@ impl ProjectSession {
         self.seal_valid(index);
         if valid {
             self.seal_first_checkpoint(index);
+        }
+        if arranged {
+            self.seal_arranged(index);
         }
         self.emit(
             Origin::SESSION,
@@ -1136,6 +1140,18 @@ impl ProjectSession {
         };
         let Some(file) = &self.diagram else { return };
         if file.records.iter().any(|record| record.key == key) {
+            return;
+        }
+        self.seal_new_checkpoint(index);
+    }
+
+    /// Saves the layout the host's placer made again for a document restored
+    /// from its checkpoint (LAY-33), on the conditions of the first seal, so
+    /// that the next open reads it and the document is left with nothing to
+    /// save.
+    fn seal_arranged(&mut self, index: usize) {
+        let document = &self.documents[index];
+        if self.store.is_read_only() || document.is_dirty() || document.conflict.is_some() {
             return;
         }
         self.seal_new_checkpoint(index);

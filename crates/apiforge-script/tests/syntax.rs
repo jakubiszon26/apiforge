@@ -347,3 +347,48 @@ fn generated_utf8_and_token_mutations_never_panic_or_produce_invalid_ranges() {
         }
     }
 }
+
+// LANG-10 (#354) --------------------------------------------------------------
+
+/// `source` lowered in the demo shop project, with its diagnostics.
+fn lowered_in_shop(source: &str) -> apiforge_script::Lowered {
+    let project = apiforge_core::demos::shop_project();
+    apiforge_script::lower(
+        &parse(source),
+        &apiforge_script::LowerContext::folder(&project),
+    )
+}
+
+/// Criterion 2: `id = uuid()` is canonical, checks, and prints back unchanged
+/// when the window writes the file from the board.
+#[test]
+fn lang10_criterion_2_uuid_checks_and_prints_back_unchanged() {
+    let source = "scenario \"Ids\" {\n  on_error stop\n  id = uuid()\n}\n";
+    assert_eq!(stable(source), source);
+    let lowered = lowered_in_shop(source);
+    assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+    let Some(apiforge_script::Document::Scenario(scenario)) = lowered.document else {
+        panic!("not a scenario");
+    };
+    let project = apiforge_core::demos::shop_project();
+    assert_eq!(
+        apiforge_script::print_scenario(&project, &scenario).unwrap(),
+        source
+    );
+}
+
+/// Criterion 2: `uuid` takes no operand; one is the existing operand error.
+#[test]
+fn lang10_criterion_2_an_operand_of_uuid_is_an_error() {
+    for call in ["uuid(1)", "uuid(left: 1)"] {
+        let source = format!("scenario \"Ids\" {{\n  id = {call}\n}}\n");
+        let lowered = lowered_in_shop(&source);
+        let errors: Vec<&str> = lowered
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == Severity::Error)
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert_eq!(errors, ["Unknown or excess operator operand"], "{call}");
+    }
+}

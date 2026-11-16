@@ -47,6 +47,9 @@ pub struct AnalysisInput {
 pub enum Restored {
     /// The checkpoint describes exactly this source and context.
     Checkpoint,
+    /// As `Checkpoint`, with the layout made again by the host's placer
+    /// ([`Placer::arrange`]), which the session saves (LAY-33).
+    Arranged,
     /// Matched against the session model or an older checkpoint.
     Reconciled,
     /// No usable identity base: new identities and automatic layout.
@@ -171,8 +174,13 @@ pub(crate) fn derive_counted(
         (None, Some(record)) if record.describes(text, &lowered_base, context) => {
             let mut exact = document_of(&record.identity_base);
             normalise(&mut exact, target);
+            let restored = if placer.arrange(&mut exact, context) {
+                Restored::Arranged
+            } else {
+                Restored::Checkpoint
+            };
             apiforge_script::push_warnings(&mut diagnostics, &mut omitted, advice);
-            return (diagnostics, omitted, Some((exact, Restored::Checkpoint)));
+            return (diagnostics, omitted, Some((exact, restored)));
         }
         (None, Some(record)) => (document_of(&record.identity_base), Restored::Reconciled),
         (None, None) => (empty, Restored::Fresh),

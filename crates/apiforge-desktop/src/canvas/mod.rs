@@ -32,10 +32,10 @@ use apiforge_core::{
     block::Block,
     edit::{self, SharedValue, proxy_binding},
     format::{Binding, Graph, Port, Position, Project, ProxySource},
-    graph::{ORDER_PORT, URL_INPUT, WireKind, sequence, wires},
+    graph::{ORDER_PORT, URL_INPUT, WireKind, relations, sequence, wires},
     model::{Branch, NodeKind},
     operator::Operator,
-    run::StepResult,
+    run::{StepResult, StepStatus},
 };
 use eframe::egui::{
     self, Align2, Color32, FontId, Key, Modifiers, PointerButton, Pos2, Rect, Sense, Stroke,
@@ -562,6 +562,9 @@ pub struct Canvas {
     /// border (LAY-09).
     #[cfg(test)]
     drawn: Vec<(String, paint::Drawn)>,
+    /// The ports the last frame ringed for the selected step (LAY-10).
+    #[cfg(test)]
+    ringed_ports: Vec<(String, Pos2)>,
 }
 
 /// A wire as the last frame drew it: its id, its source and target cards,
@@ -584,6 +587,10 @@ pub(crate) struct DrawnWire {
     pub revealed: bool,
     /// Where its label was drawn, on the board.
     pub label_box: Option<Rect>,
+    /// A wire of the selected step, at full strength (LAY-10).
+    pub lit: bool,
+    /// Drawn at a quarter of its strength while a step is selected.
+    pub dimmed: bool,
 }
 
 /// The arrow at a step's badge as the last frame drew it (LAY-24).
@@ -710,6 +717,8 @@ impl Default for Canvas {
             geometry: (Vec::new(), Vec::new()),
             #[cfg(test)]
             drawn: Vec::new(),
+            #[cfg(test)]
+            ringed_ports: Vec::new(),
         }
     }
 }
@@ -835,6 +844,42 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_selected(&self, id: &str) -> bool {
         self.debug_drawn(id).is_some_and(|drawn| drawn.selected)
+    }
+
+    /// Whether the card `id` was drawn in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_is_drawn(&self, id: &str) -> bool {
+        self.debug_drawn(id).is_some()
+    }
+
+    /// Whether the card `id` was dimmed in the last frame (LAY-10).
+    #[cfg(test)]
+    pub(crate) fn debug_dimmed(&self, id: &str) -> bool {
+        self.debug_drawn(id).is_some_and(|drawn| drawn.dimmed)
+    }
+
+    /// The colour over the card `id` that dimmed it in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_veil(&self, id: &str) -> Option<Color32> {
+        self.debug_drawn(id)?.veil
+    }
+
+    /// The colour of the halo around the card `id` in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_ring(&self, id: &str) -> Option<Color32> {
+        self.debug_drawn(id)?.ring
+    }
+
+    /// Whether the card `id` drew the selection's handles.
+    #[cfg(test)]
+    pub(crate) fn debug_handles(&self, id: &str) -> bool {
+        self.debug_drawn(id).is_some_and(|drawn| drawn.handles)
+    }
+
+    /// The ports ringed in the last frame: the card and the port on screen.
+    #[cfg(test)]
+    pub(crate) fn debug_ringed_ports(&self) -> Vec<(String, Pos2)> {
+        self.ringed_ports.clone()
     }
 
     /// A box on the board, on screen in the last frame.
@@ -1537,6 +1582,16 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &folded);
+        // One selected step rings what it is related to and dims the rest
+        // (LAY-10); its wires are lit, every other wire is dimmed.
+        let focus = Focus::of(input.graph, input.selection, &board_wires, &cards);
+        let lit: HashSet<String> = focus.as_ref().map_or_else(HashSet::new, |focus| {
+            board_wires
+                .iter()
+                .filter(|wire| focus.lit(wire, &cards, &chips))
+                .map(|wire| wire.id.clone())
+                .collect()
+        });
         // The chips of the wires decided above, at the cards as they are drawn
         // now; a wire with no chip stays a wire (LAY-23).
         let (tags, counts) = match rest_plan {
@@ -1716,7 +1771,10 @@ impl Canvas {
                     &board_painter,
                     wire,
                     camera,
-                    selected_wires.contains(&wire.id) || related_wires.contains(&wire.id),
+                    selected_wires.contains(&wire.id)
+                        || related_wires.contains(&wire.id)
+                        || lit.contains(&wire.id),
+                    focus.is_some() && !lit.contains(&wire.id),
                 );
                 if let Some(text) = wire_labels.get(&wire.id) {
                     paint::wire_label(&board_painter, wire, camera, text);
@@ -1744,7 +1802,13 @@ impl Canvas {
             };
             let routed = self.revealed_router.routes(&request).to_vec();
             for wire in &routed {
-                paint::routed_wire(&board_painter, wire, camera, true);
+                paint::routed_wire(
+                    &board_painter,
+                    wire,
+                    camera,
+                    true,
+                    focus.is_some() && !lit.contains(&wire.id),
+                );
                 drawn_revealed.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
                 bridged.insert(wire.id.clone(), wire.bridges.len());
@@ -1768,6 +1832,35 @@ impl Canvas {
                         wire.id.clone(),
                         Rect::from_min_max(camera.to_world(label.min), camera.to_world(label.max)),
                     );
+                }
+            }
+        }
+        // Where a wire of the selected step meets a related card, its port
+        // is ringed in the card's colour; painted over the cards below.
+        let mut port_rings: Vec<(String, Pos2, Color32)> = Vec::new();
+        if let Some(focus) = &focus {
+            for (id, points) in drawn.iter().chain(&drawn_revealed) {
+                let Some(wire) = board_wires
+                    .iter()
+                    .chain(&revealed_wires)
+                    .find(|wire| &wire.id == id)
+                else {
+                    continue;
+                };
+                if !lit.contains(id) {
+                    continue;
+                }
+                let target = &cards[wire.target].id;
+                let (other, at) = if *target == focus.selected {
+                    match &wire.start {
+                        routing::Start::Output { card, .. } => (&cards[*card].id, points.first()),
+                        routing::Start::Chip(_) => continue,
+                    }
+                } else {
+                    (target, points.last())
+                };
+                if let (Some(color), Some(at)) = (focus.rings.get(other), at) {
+                    port_rings.push((other.clone(), camera.to_screen(*at), *color));
                 }
             }
         }
@@ -1831,6 +1924,8 @@ impl Canvas {
                     bridges: bridged.get(&wire.id).copied().unwrap_or_default(),
                     revealed: revealed.contains(&wire.id),
                     label_box: label_boxes.get(&wire.id).copied(),
+                    lit: lit.contains(&wire.id),
+                    dimmed: focus.is_some() && !lit.contains(&wire.id),
                 })
                 .collect();
         }
@@ -2003,13 +2098,27 @@ impl Canvas {
                     }
                 }
             }
+            // A failed or running card is never dimmed (LAY-10).
+            let failed = step
+                .is_some_and(|step| matches!(step.status, StepStatus::Failed | StepStatus::Error))
+                || aggregate.is_some_and(collapse::Aggregate::failed);
+            let look = paint::Look {
+                ring: focus
+                    .as_ref()
+                    .and_then(|focus| focus.rings.get(&card.id).copied())
+                    .or_else(|| related_blocks.contains(&card.id).then_some(paint::RELATED)),
+                dimmed: focus.as_ref().is_some_and(|focus| {
+                    focus.selected != card.id && !focus.rings.contains_key(&card.id)
+                }) && !failed
+                    && !run.running,
+            };
             let drawn_card = if card.compact.is_some() {
                 let drawn = paint::compact_card(
                     &board_painter,
                     card,
                     camera,
                     selection.contains(card.id.as_str()),
-                    related_blocks.contains(&card.id),
+                    look,
                     &run,
                     aggregate,
                 );
@@ -2038,7 +2147,7 @@ impl Canvas {
                     card,
                     camera,
                     selection.contains(card.id.as_str()),
-                    related_blocks.contains(&card.id),
+                    look,
                     &run,
                     aggregate,
                 )
@@ -2060,6 +2169,17 @@ impl Canvas {
                 egui::UiBuilder::new().id_salt(("card-controls", &card.id)),
                 |ui| self.card_controls(ui, card, camera, input, reveal, &mut commands),
             );
+        }
+
+        for (_, at, color) in &port_rings {
+            paint::port_ring(&board_painter, *at, *color, camera.zoom);
+        }
+        #[cfg(test)]
+        {
+            self.ringed_ports = port_rings
+                .iter()
+                .map(|(id, at, _)| (id.clone(), *at))
+                .collect();
         }
 
         self.show_arrows(
@@ -4234,6 +4354,82 @@ fn folded_wires(
         }
     }
     (result, labels)
+}
+
+/// The one selected step and what it is related to (LAY-10, Q9 = A): the
+/// cards its halo rings, each in its colour. Every other card and wire is
+/// dimmed while it is selected.
+struct Focus {
+    selected: String,
+    rings: HashMap<String, Color32>,
+}
+
+impl Focus {
+    /// The focus of `selection` when it is one step of `graph`: its direct
+    /// producers, readers and ordering neighbours in the related hue, its
+    /// checks and gates, or a selected check's subjects and values, in the
+    /// check colour. An `@after` on a folded check is drawn from its
+    /// subject: the step it reaches from there is ringed too.
+    fn of(
+        graph: &Graph,
+        selection: &[String],
+        wires: &[routing::BoardWire],
+        cards: &[Card],
+    ) -> Option<Self> {
+        let [selected] = selection else {
+            return None;
+        };
+        let node = graph.nodes.iter().find(|node| &node.id == selected)?;
+        let found = relations(graph, node);
+        let mut rings: HashMap<String, Color32> = HashMap::new();
+        let check = paint::check_ring();
+        for id in found
+            .checks
+            .iter()
+            .map(|of| of.check)
+            .chain(found.gates.iter().copied())
+            .chain(found.subjects.iter().map(|subject| subject.step))
+            .chain(found.values.iter().copied())
+        {
+            rings.insert(id.to_owned(), check);
+        }
+        for id in found
+            .producers
+            .iter()
+            .chain(&found.readers)
+            .map(|feed| feed.step)
+            .chain(found.after.iter().copied())
+            .chain(found.followers.iter().copied())
+        {
+            rings.entry(id.to_owned()).or_insert(paint::RELATED);
+        }
+        for wire in wires.iter().filter(|wire| wire.control) {
+            let routing::Start::Output { card, .. } = &wire.start else {
+                continue;
+            };
+            let (source, target) = (&cards[*card].id, &cards[wire.target].id);
+            if source == selected {
+                rings.entry(target.clone()).or_insert(paint::RELATED);
+            } else if target == selected {
+                rings.entry(source.clone()).or_insert(paint::RELATED);
+            }
+        }
+        rings.remove(selected);
+        Some(Self {
+            selected: selected.clone(),
+            rings,
+        })
+    }
+
+    /// Whether `wire` is the selected step's: one of its ends is the step,
+    /// or a chip of it.
+    fn lit(&self, wire: &routing::BoardWire, cards: &[Card], chips: &[Chip]) -> bool {
+        let source = match &wire.start {
+            routing::Start::Output { card, .. } => Some(cards[*card].id.as_str()),
+            routing::Start::Chip(index) => chips[*index].source_node(),
+        };
+        cards[wire.target].id == self.selected || source == Some(self.selected.as_str())
+    }
 }
 
 /// What the selected proxies stand for and everything that reads it: the blocks to

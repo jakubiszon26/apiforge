@@ -42,6 +42,7 @@ pub enum Operator {
     Letter,
     Length,
     Contains,
+    Uuid,
     Abs,
     Floor,
     Ceiling,
@@ -225,7 +226,7 @@ const EXISTS: &[OperandSpec] = &[OperandSpec {
 
 impl Operator {
     /// Every operator, in catalogue order.
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 38] = [
         Self::Add,
         Self::Subtract,
         Self::Multiply,
@@ -246,6 +247,7 @@ impl Operator {
         Self::Letter,
         Self::Length,
         Self::Contains,
+        Self::Uuid,
         Self::Abs,
         Self::Floor,
         Self::Ceiling,
@@ -288,6 +290,7 @@ impl Operator {
             Self::Letter => "Letter of text",
             Self::Length => "Length of text / list",
             Self::Contains => "A contains B",
+            Self::Uuid => "New UUID",
             Self::Abs => "Absolute value",
             Self::Floor => "Round down",
             Self::Ceiling => "Round up",
@@ -329,6 +332,7 @@ impl Operator {
             Self::Letter => (G::Text, T::String, LETTER),
             Self::Length => (G::Text, T::Number, LENGTH),
             Self::Contains => (G::Text, T::Boolean, CONTAINS),
+            Self::Uuid => (G::Text, T::String, &[][..]),
             Self::Abs
             | Self::Floor
             | Self::Ceiling
@@ -423,6 +427,7 @@ impl Operator {
                 }
                 _ => return Err(OperatorError::ContainsOperands),
             }),
+            Self::Uuid => Value::String(random_uuid(random)),
             Self::Abs => number(a.abs())?,
             Self::Floor => number(a.floor())?,
             Self::Ceiling => number(a.ceil())?,
@@ -466,7 +471,7 @@ impl Operator {
     }
 }
 
-/// Source of uniformly distributed numbers in `[0, 1)` for the `random` operator.
+/// Source of uniformly distributed numbers in `[0, 1)` for `random` and `uuid`.
 ///
 /// Injected so that runs can record a seed and tests stay deterministic.
 pub trait RandomSource {
@@ -548,6 +553,31 @@ fn random_between(a: f64, b: f64, random: &mut dyn RandomSource) -> f64 {
     } else {
         low + unit * (high - low)
     }
+}
+
+/// A version 4 UUID from 122 bits of `random`, lowercase and hyphenated. It is as
+/// reproducible as the source, and not cryptographic.
+fn random_uuid(random: &mut dyn RandomSource) -> String {
+    let mut pairs = [[0u8; 2]; 8];
+    for pair in &mut pairs {
+        // 16 of a unit's 53 random bits; a unit is below 1, so this stays below 2^16.
+        *pair = ((random.next_unit() * 65_536.0) as u16).to_be_bytes();
+    }
+    let bytes: [u8; 16] = pairs.concat().try_into().expect("8 pairs are 16 bytes");
+    uuid::Builder::from_random_bytes(bytes)
+        .into_uuid()
+        .hyphenated()
+        .to_string()
+}
+
+/// What `uuid()` gives in a simulation: the `sequence`-th placeholder counted
+/// from 1, `00000000-0000-4000-8000-000000000001`. Valid version 4 texts,
+/// distinct within a run, the same in every simulation, and plainly not real.
+pub fn simulated_uuid(sequence: u64) -> String {
+    format!(
+        "00000000-0000-4000-8000-{:012}",
+        sequence % 1_000_000_000_000
+    )
 }
 
 fn round(value: f64, places: f64) -> Result<f64, OperatorError> {
@@ -671,7 +701,8 @@ mod tests {
             ),
         ];
         let mut covered: Vec<_> = examples.iter().map(|example| example.0).collect();
-        covered.push(Random);
+        // Both draw from the random source, tested on their own.
+        covered.extend([Random, Uuid]);
         covered.sort_by_key(|operator| Operator::ALL.iter().position(|o| o == operator));
         assert_eq!(covered, Operator::ALL);
 
@@ -855,14 +886,32 @@ mod tests {
     }
 
     #[test]
+    fn uuid_sets_the_version_and_variant_over_the_drawn_bits() {
+        let uuid = |unit: f64| {
+            Operator::Uuid
+                .evaluate(None, None, &mut move || unit)
+                .unwrap()
+                .unwrap()
+        };
+        assert_eq!(uuid(0.0), json!("00000000-0000-4000-8000-000000000000"));
+        assert_eq!(
+            uuid(0.999_999_999),
+            json!("ffffffff-ffff-4fff-bfff-ffffffffffff")
+        );
+        assert_eq!(simulated_uuid(1), "00000000-0000-4000-8000-000000000001");
+        assert_eq!(simulated_uuid(42), "00000000-0000-4000-8000-000000000042");
+    }
+
+    #[test]
     fn catalogue_defaults_match_operand_types() {
         for operator in Operator::ALL {
             let spec = operator.spec();
-            assert!(
-                !spec.operands.is_empty() && spec.operands.len() <= 2,
-                "{operator:?}"
-            );
-            assert_eq!(spec.operands[0].name, "left");
+            assert!(spec.operands.len() <= 2, "{operator:?}");
+            // Only `uuid` takes nothing; every other operator has a `left` slot.
+            assert_eq!(spec.operands.is_empty(), operator == Operator::Uuid);
+            if let Some(first) = spec.operands.first() {
+                assert_eq!(first.name, "left", "{operator:?}");
+            }
             for operand in spec.operands {
                 let Some(default) = operand.default else {
                     assert!(!operand.required, "{operator:?}");

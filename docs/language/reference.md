@@ -317,12 +317,15 @@ mix positional and named arguments in one call.
 | `letter(text, position)` | the letter at `position`, counted from 1 |
 | `length(x)` | the length of a text or an array |
 | `contains(x, value)` | whether a text contains a text, or an array an item |
+| `uuid()` | a new random UUID, version 4, as lowercase text; each call gives another (not cryptographic). A simulation gives `00000000-0000-4000-8000-000000000001`, `…002` and on, in the order the run reaches them |
 | `typeOf(x)` | `"string"`, `"number"`, `"boolean"`, `"object"`, `"array"` or `"null"` |
 | `exists(x)` | whether `x` has a value (`null` counts as a value) |
 | `field(data, "items[0].price")` | the value at a path into `data` |
 
 A function call cannot hold a component call. Function arguments may be any
 expression.
+`uuid()` is newer than v0.1.0, which marks a line that uses it *Unknown
+operator or nested component call* and does not run the document.
 
 ## Values and var
 
