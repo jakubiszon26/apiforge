@@ -2898,3 +2898,70 @@ fn mcp21_criterion_5_used_is_described_as_the_revisions_the_document_calls() {
         }
     }
 }
+
+// MCP-23 (#209) --------------------------------------------------------------
+
+/// Criterion 5: run results with `outputs`, with `outputs_omitted_bytes`
+/// and with `full: true` match `run`'s advertised outputSchema, which
+/// describes both fields; the tool description says where values and
+/// responses are.
+#[test]
+fn mcp23_criterion_5_values_match_the_output_schema_and_are_described() {
+    let directory = demo();
+    let root = directory.path();
+    let mut server = Server::spawn(Some(root), root);
+    initialize(&mut server);
+
+    let passed = assert_run_result(&call(&mut server, 2, "run", json!({ "path": SCENARIO })));
+    assert!(passed["steps"][0]["outputs"].is_object(), "{passed}");
+
+    let product = json!({
+        "id": 123,
+        "name": "Whole bean coffee",
+        "price": 100,
+        "promotion": { "type": "fixed_price", "active": true, "price": 80, "inna_nazwa": "x" },
+        "pad": "x".repeat(5000),
+    });
+    let omitted = assert_run_result(&call(
+        &mut server,
+        3,
+        "run",
+        json!({ "path": "components/active-promotion.afs", "inputs": { "product": product } }),
+    ));
+    assert!(
+        flattened(&omitted["steps"])
+            .iter()
+            .any(|step| step["outputs_omitted_bytes"].is_u64()),
+        "{omitted}"
+    );
+
+    let full = assert_run_result(&call(
+        &mut server,
+        4,
+        "run",
+        json!({ "path": SCENARIO, "full": true }),
+    ));
+    assert!(full["report"].get("snapshot").is_none(), "{full}");
+    let listed = server.request(5, "tools/list", json!({}));
+    assert_clean_end(server);
+
+    assert!(!described("run", "outputs").is_empty());
+    for description in described("run", "outputs_omitted_bytes") {
+        assert!(description.contains("4 KiB"), "{description}");
+    }
+    let run = listed["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "run")
+        .unwrap();
+    let description = run["description"].as_str().unwrap();
+    for words in [
+        "`outputs`",
+        "`outputs_omitted_bytes`",
+        "responses",
+        "snapshot",
+    ] {
+        assert!(description.contains(words), "{words}: {description}");
+    }
+}
