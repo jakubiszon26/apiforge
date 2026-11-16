@@ -44,3 +44,26 @@ fn an_error_that_replaces_a_warning_at_the_limit_counts_the_warning() {
     assert_eq!(lowered.diagnostics.len(), 1000);
     assert_eq!(lowered.omitted_diagnostics, 1);
 }
+
+// LANG-11 (#357) --------------------------------------------------------------
+
+/// Criterion 2: `@after` on an `if` without a branch is still refused, at the
+/// statement that declares it, and the message says what to write instead.
+#[test]
+fn lang11_criterion_2_after_an_if_names_its_branches_and_the_last_statement() {
+    let source =
+        "scenario \"After\" {\n  x = if true {\n    inside = 1\n  }\n  @after(x)\n  y = 2\n}\n";
+    let project = apiforge_core::demos::shop_project();
+    let lowered = lower(&parse(source), &LowerContext::folder(&project));
+    let errors: Vec<_> = lowered
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "{:#?}", lowered.diagnostics);
+    assert_eq!(&source[errors[0].range.clone()], "@after(x)\n  y = 2");
+    let message = &errors[0].message;
+    for part in ["`x.then`", "`x.else`", "`@after(last_in_then, x.else)`"] {
+        assert!(message.contains(part), "{part} in {message:?}");
+    }
+}
