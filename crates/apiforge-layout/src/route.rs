@@ -44,6 +44,10 @@ pub struct Routing {
     /// a wire routed alone this way shows the corridor it wants, which is how
     /// Tidy up finds the gaps to widen.
     pub squeeze: Option<f32>,
+    /// Whether the lines of a corridor are put in the order that crosses
+    /// least, once every wire has its route (LAY-28). Not yet: each line
+    /// keeps the track the router gave it.
+    pub ordered: bool,
 }
 
 impl Default for Routing {
@@ -55,6 +59,7 @@ impl Default for Routing {
             crossing_cost: 120.0,
             channel_gap: GAP,
             squeeze: None,
+            ordered: true,
         }
     }
 }
