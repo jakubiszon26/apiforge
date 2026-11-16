@@ -466,3 +466,32 @@ fn tidying_a_selection_keeps_off_the_cards_outside_it() {
         }
     }
 }
+
+/// LAY-29 criterion 4: on piles of cards no complete route passes under a
+/// card it joins, past the stub out of a port the other card lies over. A
+/// wire with no way round has no route, and those are few.
+#[test]
+fn lay29_criterion_4_no_route_passes_under_its_own_card_on_piled_boards() {
+    let routing = Routing::default();
+    let (mut wires_routed, mut incomplete) = (0, 0);
+    for seed in 1..=40u64 {
+        let count = 4 + (seed as usize * 5) % 10;
+        let mut board = board(seed, count, true);
+        for index in (0..count).step_by(3) {
+            board.blocks[index].position = Point::new(300.0 + index as f32 * 8.0, 200.0);
+        }
+        let positions: Vec<Point> = board.blocks.iter().map(|block| block.position).collect();
+        let cards = rectangles(&positions, &board.blocks);
+        let wires = wires(&board, &board.blocks, seed);
+        let routes = route(&cards, &wires, &routing);
+        assert_eq!(
+            apiforge_layout::under_own(&routes, &wires, &cards),
+            [],
+            "seed {seed}: a route passes under a card it joins"
+        );
+        wires_routed += wires.len();
+        incomplete += routes.iter().filter(|route| !route.complete).count();
+    }
+    println!("LAY29 piles: {incomplete} of {wires_routed} wires have no route");
+    assert_eq!(wires_routed, 256);
+}
