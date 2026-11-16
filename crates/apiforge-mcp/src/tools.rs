@@ -29,6 +29,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::{
+    collections::BTreeSet,
     path::Path,
     sync::{
         Arc, OnceLock,
@@ -544,7 +545,7 @@ fn bounded<T: Serialize>(result: T) -> Result<T, ToolError> {
     bound(Ok(result))
 }
 
-/// A published revision the analysis or the run was evaluated against.
+/// A published revision the document calls.
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct UsedSource {
     pub path: String,
@@ -579,7 +580,9 @@ pub struct TextCheck {
     /// SHA-256 of the saved document the text would replace; absent for a
     /// new document.
     pub source_sha256: Option<String>,
-    /// The published revisions of the project's context the analysis used.
+    /// The published revisions this document calls, directly or through
+    /// the revisions those calls pin; each once, ordered by path then
+    /// revision. `project_overview.revisions` lists every one.
     pub used: Vec<UsedSource>,
     pub problems: Vec<Problem>,
     pub diagnostics: Vec<Diagnostic>,
@@ -696,7 +699,10 @@ pub struct RunReport {
     pub generation: u64,
     /// SHA-256 of the saved document that ran.
     pub source_sha256: Option<String>,
-    /// The published revisions of the project's context the run used.
+    /// The published revisions this document calls, directly or through
+    /// the revisions those calls pin; each once, ordered by path then
+    /// revision. A component run alone does not call its own.
+    /// `project_overview.revisions` lists every one.
     pub used: Vec<UsedSource>,
     /// Known secret values are replaced in every report.
     pub redacted: bool,
@@ -819,7 +825,7 @@ fn check_proposal(folder: &Path, path: &str, text: &str) -> Result<TextCheck, To
     }
     let validated = folder::validate(path)?;
     let mut session = open(folder)?;
-    let used = used_sources(&session);
+    let used = used_sources(&session, &session.called_revisions(text));
     let generation = session.loaded_generation();
     let registered = session
         .documents()
@@ -904,20 +910,23 @@ pub(crate) fn problem(problem: RegistrationProblem) -> Problem {
     }
 }
 
-/// Every published revision: the context an analysis and a run are
-/// evaluated in.
-fn used_sources(session: &ProjectSession) -> Vec<UsedSource> {
-    session
+/// The published revisions `called` names, (component ID, revision), each
+/// once, ordered by path then revision (MCP-21).
+fn used_sources(session: &ProjectSession, called: &BTreeSet<(String, u32)>) -> Vec<UsedSource> {
+    let mut used: Vec<_> = session
         .manifest()
         .revisions
         .iter()
+        .filter(|revision| called.contains(&(revision.component_id.clone(), revision.revision)))
         .map(|revision| UsedSource {
             path: revision.path.as_str().to_owned(),
             handle: revision.handle.clone(),
             revision: revision.revision,
             source_sha256: revision.source_hash.clone(),
         })
-        .collect()
+        .collect();
+    used.sort_by(|a, b| (&a.path, a.revision).cmp(&(&b.path, b.revision)));
+    used
 }
 
 /// Holds the server's run slot until dropped.
@@ -1014,8 +1023,8 @@ pub(crate) fn prepare(
     let path = document.entry().path.as_str().to_owned();
     let source_sha256 = document.saved_sha256().map(str::to_owned);
     let generation = session.loaded_generation();
-    let used = used_sources(session);
     let prepared = session.prepare_run(&id).map_err(storage_error)?;
+    let used = used_sources(session, &prepared.called_revisions());
     let project = prepared.project().map_err(storage_error)?;
     let (scenario_id, target) = match prepared.snapshot.document() {
         IdentityBase::Scenario(scenario) => {

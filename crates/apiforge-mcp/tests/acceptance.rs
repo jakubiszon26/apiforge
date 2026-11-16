@@ -739,25 +739,11 @@ fn mcp03_criterion_1_check_text_reports_the_proposal_for_a_registered_path() {
         Some(sha256(&root.join(PRODUCT))),
         "the saved document the text would replace"
     );
-    let mut used: Vec<_> = result
-        .used
-        .iter()
-        .map(|used| {
-            (
-                used.handle.as_str(),
-                used.revision,
-                used.source_sha256.as_str(),
-            )
-        })
-        .collect();
-    used.sort();
-    let mut revisions: Vec<_> = overview
-        .revisions
-        .iter()
-        .map(|r| (r.handle.as_str(), r.revision, r.source_sha256.as_str()))
-        .collect();
-    revisions.sort();
-    assert_eq!(used, revisions);
+    assert!(
+        result.used.is_empty(),
+        "the product calls no component (MCP-21): {:?}",
+        result.used
+    );
 
     // Positions as `read_source` gives them for the same text saved.
     let saved_copy = checkout();
@@ -808,7 +794,7 @@ fn mcp03_criterion_2_an_unregistered_path_is_checked_as_a_new_document() {
     assert!(result.problems.is_empty(), "{:?}", result.problems);
     assert!(result.valid, "{:?}", result.diagnostics);
     assert_eq!(result.source_sha256, None);
-    assert_eq!(result.used.len(), 3);
+    assert!(result.used.is_empty(), "it calls no component (MCP-21)");
     assert!(
         result
             .diagnostics
@@ -936,7 +922,14 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
     assert!(report.redacted);
     assert_eq!(report.generation, overview.generation);
     assert_eq!(report.source_sha256, Some(sha256(&root.join(SCENARIO))));
-    assert_eq!(report.used.len(), 3);
+    assert_eq!(
+        used(&report.used),
+        published(
+            root,
+            &[("product", 1), ("active_promotion", 1), ("add_to_cart", 1)]
+        ),
+        "the three revisions the scenario calls (MCP-21)"
+    );
     assert!(report.report.is_none(), "compact by default");
     let steps = report.steps.as_deref().unwrap();
     assert_eq!(report.step_count, 18);
@@ -4543,4 +4536,197 @@ fn lay26_criterion_5_mcp_returns_no_far_read_warning() {
     assert!(written.valid);
     assert_eq!(far(&written.diagnostics), 0, "write_source");
     assert_eq!(fs::read_to_string(root.join(SCENARIO)).unwrap(), far_value);
+}
+
+// ----- MCP-21 (#207): `used` names the published revisions the document calls -----
+
+const WRAPPER: &str = "components/wrapper.afs";
+const WRAPPER_TEXT: &str = "component wrapper \"Wrapper\" {\n  description \"A product fetched through its first revision.\"\n  @label(\"Product ID\")\n  input id: number = 123\n  @label(\"Fetched\")\n  fetched = product@1(id: param.id)\n  @label(\"Product\")\n  export product: object = fetched\n}\n";
+const WRAPPED: &str = "scenarios/wrapped.afs";
+/// Calls `wrapper@1` twice and `product@1`, which `wrapper@1` calls too.
+const WRAPPED_TEXT: &str = "scenario \"Wrapped\" {\n  first = wrapper@1(id: 123)\n  second = wrapper@1(id: 124)\n  direct = product@1(id: 123)\n}\n";
+
+/// `used` as (path, handle, revision, hash), in the order given.
+fn used(used: &[tools::UsedSource]) -> Vec<(String, String, u32, String)> {
+    used.iter()
+        .map(|u| {
+            (
+                u.path.clone(),
+                u.handle.clone(),
+                u.revision,
+                u.source_sha256.clone(),
+            )
+        })
+        .collect()
+}
+
+/// The overview's published revisions `wanted` (handle, revision), each
+/// required to exist, ordered by path then revision.
+fn published(root: &Path, wanted: &[(&str, u32)]) -> Vec<(String, String, u32, String)> {
+    let overview = tools::project_overview(root).unwrap();
+    let mut found: Vec<_> = wanted
+        .iter()
+        .map(|(handle, revision)| {
+            let listed = overview
+                .revisions
+                .iter()
+                .find(|r| r.handle == *handle && r.revision == *revision)
+                .unwrap_or_else(|| panic!("{handle}@{revision} is not published"));
+            (
+                listed.path.clone(),
+                listed.handle.clone(),
+                listed.revision,
+                listed.source_sha256.clone(),
+            )
+        })
+        .collect();
+    found.sort_by(|a, b| (&a.0, a.2).cmp(&(&b.0, b.2)));
+    found
+}
+
+/// The demo shop with `wrapper@1`, which calls `product@1`, `product@2`,
+/// which nobody calls, and the scenario `WRAPPED` saved; the agent session
+/// is finished.
+fn wrapped_checkout() -> tempfile::TempDir {
+    let directory = checkout();
+    let root = directory.path();
+    let agent = agent(root);
+    let created = agent
+        .create_document(&create_args(Kind::Component, WRAPPER, WRAPPER_TEXT))
+        .unwrap();
+    assert!(created.wrote, "{:?}", created.diagnostics);
+    agent
+        .publish(&publish_args(WRAPPER, &created.source_sha256))
+        .unwrap();
+    let (_, hash, _) = read(root, PRODUCT);
+    assert_eq!(
+        agent
+            .publish(&publish_args(PRODUCT, &hash))
+            .unwrap()
+            .revision,
+        2
+    );
+    let created = agent
+        .create_document(&create_args(Kind::Scenario, WRAPPED, WRAPPED_TEXT))
+        .unwrap();
+    assert!(created.wrote, "{:?}", created.diagnostics);
+    agent.finish_editing();
+    assert_eq!(
+        tools::project_overview(root).unwrap().revisions.len(),
+        5,
+        "product@1, product@2, active_promotion@1, add_to_cart@1, wrapper@1"
+    );
+    directory
+}
+
+/// Criterion 1: a component that calls nothing uses nothing, registered or
+/// checked as a new document.
+#[test]
+fn mcp21_criterion_1_a_component_that_calls_nothing_uses_nothing() {
+    let directory = checkout();
+    let root = directory.path();
+    let (text, _, _) = read(root, PRODUCT);
+    let result = tools::check_text(root, PRODUCT, &text).unwrap();
+    assert!(result.valid, "{:?}", result.diagnostics);
+    assert_eq!(result.used, []);
+
+    let result = tools::check_text(root, DISCOUNT, DISCOUNT_TEXT).unwrap();
+    assert!(!result.registered);
+    assert!(result.valid, "{:?}", result.diagnostics);
+    assert_eq!(result.used, []);
+}
+
+/// Criterion 2: a document that calls `wrapper@1`, whose pinned call is
+/// `product@1`, uses exactly those two, each once, ordered by path then
+/// revision; `product@2` and the other published revisions are absent. The
+/// same for `check_text` (registered and new) and for `run`.
+#[test]
+fn mcp21_criterion_2_used_is_what_the_document_calls_directly_or_through_them() {
+    let directory = wrapped_checkout();
+    let root = directory.path();
+    let expected = published(root, &[("product", 1), ("wrapper", 1)]);
+
+    let registered = tools::check_text(root, WRAPPED, WRAPPED_TEXT).unwrap();
+    assert!(registered.registered);
+    assert!(registered.valid, "{:?}", registered.diagnostics);
+    assert_eq!(used(&registered.used), expected, "check_text");
+
+    let new = tools::check_text(root, "scenarios/another.afs", WRAPPED_TEXT).unwrap();
+    assert!(!new.registered);
+    assert!(new.valid, "{:?}", new.diagnostics);
+    assert_eq!(used(&new.used), expected, "check_text of a new document");
+
+    let only_wrapper = WRAPPED_TEXT.replace("  direct = product@1(id: 123)\n", "");
+    let result = tools::check_text(root, WRAPPED, &only_wrapper).unwrap();
+    assert!(result.valid, "{:?}", result.diagnostics);
+    assert_eq!(
+        used(&result.used),
+        expected,
+        "product@1 through the revision wrapper@1 pins"
+    );
+
+    let report = simulate(root, &arguments(WRAPPED)).unwrap();
+    assert_eq!(report.status, Verdict::Passed, "{:?}", report.steps);
+    assert_eq!(used(&report.used), expected, "run");
+}
+
+/// Criterion 3: a component run on its own does not list its own published
+/// revision, only what it calls.
+#[test]
+fn mcp21_criterion_3_a_component_run_alone_does_not_use_itself() {
+    let directory = wrapped_checkout();
+    let root = directory.path();
+
+    let report = simulate(root, &arguments(PRODUCT)).unwrap();
+    assert_eq!(report.status, Verdict::Passed);
+    assert_eq!(report.used, [], "product@1 and product@2 are its own");
+
+    let report = simulate(root, &arguments(WRAPPER)).unwrap();
+    assert_eq!(report.status, Verdict::Passed, "{:?}", report.steps);
+    assert_eq!(
+        used(&report.used),
+        published(root, &[("product", 1)]),
+        "wrapper@1 is its own"
+    );
+}
+
+/// Criterion 4: a call that resolves to no published revision adds nothing;
+/// the diagnostics are those `read_source` gives for the same text saved.
+#[test]
+fn mcp21_criterion_4_an_unresolved_call_adds_nothing() {
+    let directory = checkout();
+    let root = directory.path();
+    let text = "scenario \"Calls\" {\n  direct = product@1(id: 123)\n  later = product@9(id: 1)\n  other = nosuch@1(id: 1)\n}\n";
+    for path in [SCENARIO, "scenarios/calls.afs"] {
+        let result = tools::check_text(root, path, text).unwrap();
+        assert!(!result.valid, "{path}");
+        assert_eq!(
+            used(&result.used),
+            published(root, &[("product", 1)]),
+            "{path}"
+        );
+        for (name, message) in [
+            ("product@9", "Component revision does not exist"),
+            ("nosuch@1", "Unknown operator or nested component call"),
+        ] {
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.severity == Severity::Error
+                        && d.message == message
+                        && covered(text, d).contains(name)),
+                "{path}: no error {message:?} on {name:?}: {:#?}",
+                result.diagnostics
+            );
+        }
+    }
+    let saved = checkout();
+    fs::write(saved.path().join(SCENARIO), text).unwrap();
+    let read = tools::read_source(saved.path(), SCENARIO).unwrap();
+    let result = tools::check_text(root, SCENARIO, text).unwrap();
+    assert_eq!(
+        result.diagnostics, read.diagnostics,
+        "diagnostics unchanged"
+    );
 }
