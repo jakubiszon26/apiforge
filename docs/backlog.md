@@ -5,7 +5,9 @@ one per ticket, titled `<ID>: <goal>` and labelled as the
 [development process](process/README.md#labels) says. Their state — open,
 closed, `decision-needed`, `awaiting-acceptance` — lives there and nowhere
 else. This file names the current sprint, its exit criteria and the issues
-in it, and keeps the record of finished sprints.
+in it, and keeps the record of finished sprints. Where the work stood at
+the end of the last working day, and what comes next, is in the
+[handoff](handoff.md).
 
 At most four pull requests await owner acceptance at a time, within 60
 estimated review minutes ([limits](process/README.md#limits-that-keep-review-possible)).
