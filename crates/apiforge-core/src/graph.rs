@@ -706,12 +706,17 @@ pub struct Relations<'a> {
     pub subjects: Vec<Subject<'a>>,
     /// For a check, the Value blocks it reads; empty otherwise.
     pub values: Vec<&'a str>,
+    /// The steps whose ordering edges lead into the step: what its `@after`
+    /// names (LAY-10).
+    pub after: Vec<&'a str>,
+    /// The steps whose `@after` names the step: where its ordering edges lead.
+    pub followers: Vec<&'a str>,
 }
 
 /// The producers and readers of `node`, each with the output field and the
 /// input between them, its checks and its gates; for a check also its
-/// subjects and value sources. Only references inside `graph` count, and
-/// ordering edges relate nothing here.
+/// subjects and value sources; and the steps its ordering edges join it to.
+/// Only references and edges inside `graph` count.
 pub fn relations<'a>(graph: &'a Graph, node: &'a Node) -> Relations<'a> {
     let kind_of = |id: &str| {
         graph
@@ -776,6 +781,18 @@ pub fn relations<'a>(graph: &'a Graph, node: &'a Node) -> Relations<'a> {
     let own = check_subjects(graph, node);
     relations.subjects = own.subjects;
     relations.values = own.values;
+    let mut after: IndexSet<&str> = IndexSet::new();
+    let mut followers: IndexSet<&str> = IndexSet::new();
+    for edge in &graph.edges {
+        if edge.target == node.id && kind_of(&edge.source).is_some() {
+            after.insert(&edge.source);
+        }
+        if edge.source == node.id && kind_of(&edge.target).is_some() {
+            followers.insert(&edge.target);
+        }
+    }
+    relations.after = after.into_iter().collect();
+    relations.followers = followers.into_iter().collect();
     relations
 }
 
@@ -1413,6 +1430,26 @@ mod tests {
             .inputs
             .insert("value".into(), Binding::reference("b", "value", ""));
         assert!(has_cycle(&graph));
+    }
+
+    #[test]
+    fn relations_name_the_steps_ordering_edges_join() {
+        let graph = Graph {
+            nodes: vec![
+                node("start", NodeKind::Start),
+                node("a", NodeKind::Request),
+                node("b", NodeKind::Request),
+            ],
+            edges: vec![edge("start", "a"), edge("a", "b"), edge("a", "gone")],
+            proxies: Vec::new(),
+        };
+        let a = relations(&graph, &graph.nodes[1]);
+        assert_eq!(a.after, ["start"]);
+        assert_eq!(a.followers, ["b"], "an edge to no node relates nothing");
+        assert!(a.producers.is_empty() && a.readers.is_empty());
+        let start = relations(&graph, &graph.nodes[0]);
+        assert_eq!(start.followers, ["a"]);
+        assert!(start.after.is_empty());
     }
 
     #[test]

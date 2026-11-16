@@ -95,6 +95,55 @@ impl Placer for CardPlacer {
         apiforge_script::far_read_warnings(tree, document, context)
     }
 
+    /// A scenario whose layout a session without a window saved, MCP or the
+    /// command line, is laid out by the window's own Tidy up on its first
+    /// open (LAY-33, owner decision of 2026-11-16). Such a board is told by
+    /// its positions: every block is where the uniform placer of those
+    /// sessions puts a board whose blocks are all fresh, and none was placed
+    /// by hand. A board the window laid out, or a person changed, is kept.
+    fn arrange(&self, document: &mut Document, context: &Project) -> bool {
+        let Document::Scenario(scenario) = &*document else {
+            return false;
+        };
+        let mut uniform = Document::Scenario(scenario.clone());
+        let Document::Scenario(laid) = &mut uniform else {
+            unreachable!("a copy of a scenario");
+        };
+        let mut every = Vec::new();
+        for graph in [&mut laid.graph, &mut laid.cleanup] {
+            for node in &mut graph.nodes {
+                node.position = Position { x: 0.0, y: 0.0 };
+                every.push(node.id.clone());
+            }
+        }
+        apiforge_project::FixedPlacer.place(&mut uniform, &every, context);
+        let Document::Scenario(laid) = &uniform else {
+            unreachable!("a copy of a scenario");
+        };
+        let windowless = |graph: &Graph, uniform: &Graph| {
+            !graph.nodes.is_empty()
+                && graph.nodes.iter().zip(&uniform.nodes).all(|(node, at)| {
+                    node.auto_placed
+                        && (node.position.x - at.position.x).abs() < 0.01
+                        && (node.position.y - at.position.y).abs() < 0.01
+                })
+        };
+        let fresh: Vec<String> = [
+            (&scenario.graph, &laid.graph),
+            (&scenario.cleanup, &laid.cleanup),
+        ]
+        .into_iter()
+        .filter(|(graph, uniform)| windowless(graph, uniform))
+        .flat_map(|(graph, _)| graph.nodes.iter().map(|node| node.id.clone()))
+        .collect();
+        if fresh.is_empty() {
+            return false;
+        }
+        let before = document.clone();
+        self.place(document, &fresh, context);
+        *document != before
+    }
+
     fn place(&self, document: &mut Document, fresh: &[String], context: &Project) {
         let density = self.density.get();
         let fresh: HashSet<&str> = fresh.iter().map(String::as_str).collect();

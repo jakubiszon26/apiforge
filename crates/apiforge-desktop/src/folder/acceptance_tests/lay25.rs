@@ -1098,8 +1098,9 @@ fn lay25_criterion_9_one_undo() {
 }
 
 /// Criterion 10: a variable's far reader is a chip whatever the number of
-/// readers; a reader beside the variable keeps its wire; no gesture adds a
-/// proxy.
+/// readers; a reader beside a variable that no far step reads keeps its
+/// wire, a variable read far is read through chips at every reader (LAY-32);
+/// no gesture adds a proxy.
 #[test]
 fn lay25_criterion_10_a_variable_is_read_through_chips() {
     let (_project, mut harness, id) = tidied("far-value-saved", WIDE);
@@ -1124,8 +1125,8 @@ fn lay25_criterion_10_a_variable_is_read_through_chips() {
             "{reader}: a chip of currency, read by two steps: {chips:?}"
         );
     }
-    // fan-out: `first`, read by one step, and `cartId` keep their wires to
-    // the readers beside them.
+    // fan-out: `first`, read by one step beside it, keeps its wire; `cartId`,
+    // read far, gives `quantity` beside it a chip (LAY-32).
     let (_project, harness, id) = tidied("fan-out", WIDE);
     let graph = main_graph(&harness, &id);
     let handle = |id: &str| {
@@ -1141,12 +1142,21 @@ fn lay25_criterion_10_a_variable_is_read_through_chips() {
         .filter(|wire| !wire.dashed && !wire.revealed)
         .filter_map(|wire| Some((handle(wire.source.as_deref()?), handle(&wire.target))))
         .collect();
-    for (variable, reader) in [("first", "product"), ("cartId", "quantity")] {
-        assert!(
-            wires.contains(&(variable.to_owned(), reader.to_owned())),
-            "{reader} beside {variable} keeps its wire: {wires:?}"
-        );
-    }
+    assert!(
+        wires.contains(&("first".to_owned(), "product".to_owned())),
+        "product beside first keeps its wire: {wires:?}"
+    );
+    assert!(
+        !wires.contains(&("cartId".to_owned(), "quantity".to_owned())),
+        "quantity reads cartId through its chip: {wires:?}"
+    );
+    assert!(
+        board(&harness, &id)
+            .debug_tags()
+            .iter()
+            .any(|tag| { handle(&tag.tag.reader) == "quantity" && tag.tag.text == "cartId" }),
+        "quantity carries a chip of cartId"
+    );
 
     // No gesture adds a proxy.
     let (project, mut harness, id) = tidied("far-value", WIDE);

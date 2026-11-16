@@ -30,7 +30,7 @@ use apiforge_core::{
     journal::{EffectState, JournalEntry, JournalRun, JournalSink},
     js::{self, js_key_order},
     model::{BodyFormat, Branch, HttpMethod, Match, NodeKind, ValueType},
-    operator::{Operator, OperatorError, RandomSource},
+    operator::{Operator, OperatorError, RandomSource, simulated_uuid},
     path,
     predicate::PredicateError,
     run::{
@@ -244,6 +244,9 @@ struct Engine<'a, F> {
     limits: RunLimits,
     transport: http::HttpTransport,
     random: Box<dyn RandomSource + Send>,
+    /// `uuid()` calls of a simulation so far, nested component calls included:
+    /// a simulation numbers its ids instead of drawing them.
+    simulated_uuids: u64,
     redactor: Redactor,
     /// Records live requests before they are sent; `None` for a simulation or a
     /// session that has no place to keep a journal.
@@ -323,6 +326,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             limits: options.limits,
             transport: options.transport,
             random: options.random,
+            simulated_uuids: 0,
             redactor,
             // A simulation sends nothing, so there is nothing to record.
             journal: options
@@ -1344,6 +1348,12 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         for (name, child) in inputs {
             let value = self.resolve(child, context)?;
             operands.insert(name.as_str(), value);
+        }
+        if operator == Operator::Uuid
+            && self.request.mode == apiforge_core::run::RunMode::Simulation
+        {
+            self.simulated_uuids += 1;
+            return Ok(Some(Value::String(simulated_uuid(self.simulated_uuids))));
         }
         let operand = |name: &str| operands.get(name).cloned().flatten();
         Ok(operator.evaluate(
