@@ -126,7 +126,7 @@ fn execute(args: Args) -> Result<(), String> {
         .transpose()?;
     if args.command == "print" {
         let text = print_scenario(project, &project.scenarios[selected.unwrap()]).map_err(|d| {
-            super::diagnostics(&d);
+            super::diagnostics(None, "", &d);
             "Cannot print scenario"
         })?;
         print!("{text}");
@@ -143,11 +143,11 @@ fn execute(args: Args) -> Result<(), String> {
             // The checked projection also resolves workspace names; import
             // validation alone deliberately allows unresolved environments.
             let source = print_scenario(project, scenario).map_err(|d| {
-                super::diagnostics(&d);
+                super::diagnostics(None, "", &d);
                 "Scenario has diagnostics"
             })?;
             let checked = lower(&parse(&source), &LowerContext::new(project));
-            super::diagnostics(&checked.diagnostics);
+            super::diagnostics(None, &source, &checked.diagnostics);
             if checked.has_errors() {
                 return Err("Scenario has diagnostics".into());
             }
@@ -157,7 +157,11 @@ fn execute(args: Args) -> Result<(), String> {
     let text = super::source(&path)?;
     let tree = parse(&text);
     let lowered = lower(&tree, &LowerContext::new(project));
-    super::diagnostics(&lowered.diagnostics);
+    super::diagnostics(
+        Some(&path.display().to_string()),
+        &text,
+        &lowered.diagnostics,
+    );
     if lowered.has_errors() {
         return Err("Source has diagnostics; document was preserved".into());
     }
