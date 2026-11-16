@@ -8,9 +8,10 @@
 use crate::icons::Icon;
 use crate::{dnd::Payload, labels, theme, widgets};
 use apiforge_core::{
-    format::{Binding, OptionalJson},
+    format::{Binding, Graph, Node, OptionalJson, Project},
+    graph::{component_definition, condition_predicates, predicate},
     js::{json_stringify, type_name},
-    model::{ErrorPolicy, NodeKind},
+    model::{ErrorPolicy, Match, NodeKind, Predicate},
     path::JsonPath,
     run::{Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
@@ -65,6 +66,148 @@ pub struct Context<'a> {
     /// and the empty report does not speak of a scenario.
     pub component: bool,
     pub document_locked: bool,
+    /// What the run executed, where a check's card reads what the check
+    /// required (DIAG-03); without it the card reads as before.
+    pub graphs: Option<RunGraphs<'a>>,
+}
+
+/// The graphs a run executed. A step's result carries only the values a
+/// check compared; its predicate is read from the step's node (DIAG-03).
+#[derive(Clone, Copy)]
+pub struct RunGraphs<'a> {
+    /// The scenario's graph, or the component's when it runs on its own.
+    pub main: &'a Graph,
+    /// The scenario's Cleanup graph.
+    pub cleanup: Option<&'a Graph>,
+    /// Where the revision a component call is pinned to is found.
+    pub project: &'a Project,
+}
+
+impl<'a> RunGraphs<'a> {
+    /// The node of `row`'s step: through the component calls that hold it,
+    /// or `None` when one of them, or the node, is no longer there.
+    fn node(&self, row: &StepRow<'_>) -> Option<&'a Node> {
+        let mut graph = match row.step.phase {
+            Phase::Main => self.main,
+            Phase::Cleanup => self.cleanup?,
+        };
+        for call in &row.calls {
+            let call = graph.nodes.iter().find(|node| node.id == *call)?;
+            graph = &component_definition(self.project, call)?.graph;
+        }
+        graph.nodes.iter().find(|node| node.id == row.step.node_id)
+    }
+}
+
+/// What a check required, as its node says (DIAG-03).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Requirement {
+    /// An assertion, an `if` or a Data condition of one check.
+    One {
+        predicate: Predicate,
+        tolerance: f64,
+    },
+    /// A Data condition of several checks.
+    Several { count: usize, mode: Match },
+}
+
+impl Requirement {
+    /// `None` for a node that is not a check.
+    pub(crate) fn of(node: &Node) -> Option<Self> {
+        let tolerance = node.config.tolerance.unwrap_or(0.0);
+        match node.kind {
+            NodeKind::Assert | NodeKind::If => Some(Self::One {
+                predicate: predicate(node),
+                tolerance,
+            }),
+            NodeKind::Condition => match condition_predicates(node)[..] {
+                [predicate] => Some(Self::One {
+                    predicate,
+                    tolerance,
+                }),
+                ref several => Some(Self::Several {
+                    count: several.len(),
+                    mode: node.config.match_mode.unwrap_or(Match::All),
+                }),
+            },
+            _ => None,
+        }
+    }
+
+    /// The EXPECTED side of the card.
+    fn text(self, expected: &OptionalJson) -> String {
+        self.text_with(expected, compact_json)
+    }
+
+    /// The requirement with the value written by `value`.
+    pub(crate) fn text_with(self, expected: &OptionalJson, value: fn(&Value) -> String) -> String {
+        match self {
+            Self::One {
+                predicate,
+                tolerance,
+            } => requirement_text(predicate, expected, tolerance, value),
+            Self::Several { count, mode } => several_text(count, mode),
+        }
+    }
+
+    /// `exists` and `nonempty` say what was required of a value that may be
+    /// missing, so their box is shown even when neither side has a value.
+    fn always_compared(self) -> bool {
+        matches!(
+            self,
+            Self::One {
+                predicate: Predicate::Exists | Predicate::NotEmpty,
+                ..
+            }
+        )
+    }
+}
+
+/// What one check required, as the EXPECTED side of its card says it: the
+/// predicate's sign before the value, the value alone for equality (DIAG-03).
+pub(crate) fn expected_text(
+    predicate: Predicate,
+    expected: &OptionalJson,
+    tolerance: f64,
+) -> String {
+    requirement_text(predicate, expected, tolerance, compact_json)
+}
+
+/// [`expected_text`] with the value written by `value`.
+pub(crate) fn requirement_text(
+    predicate: Predicate,
+    expected: &OptionalJson,
+    tolerance: f64,
+    value: fn(&Value) -> String,
+) -> String {
+    let operand = || match expected {
+        // A type is named, not quoted.
+        OptionalJson::Present(Value::String(name)) if predicate == Predicate::Type => name.clone(),
+        OptionalJson::Present(expected) => value(expected),
+        OptionalJson::Missing => "—".into(),
+    };
+    match predicate {
+        Predicate::Equals => operand(),
+        Predicate::NotEquals => format!("≠ {}", operand()),
+        Predicate::Greater => format!("> {}", operand()),
+        Predicate::Less => format!("< {}", operand()),
+        Predicate::Approximately if tolerance != 0.0 => {
+            format!("≈ {} ± {tolerance}", operand())
+        }
+        Predicate::Approximately => format!("≈ {}", operand()),
+        Predicate::Contains => format!("contains {}", operand()),
+        Predicate::Type => format!("is {}", operand()),
+        Predicate::Exists => "exists".into(),
+        Predicate::NotEmpty => "nonempty".into(),
+    }
+}
+
+/// The EXPECTED side of a Data condition of several checks.
+pub(crate) fn several_text(count: usize, mode: Match) -> String {
+    match mode {
+        Match::All => format!("all of {count} checks"),
+        Match::Any => format!("any of {count} checks"),
+    }
 }
 
 /// A step in the flattened step list; component children have `depth > 0` and keep
@@ -75,34 +218,40 @@ pub struct StepRow<'a> {
     pub key: String,
     pub root_id: String,
     pub depth: usize,
+    /// The node ids of the component calls that hold the step, outermost
+    /// first; empty at the top level.
+    pub calls: Vec<&'a str>,
 }
 
 /// Flattens top-level steps and any nested component steps in execution order.
 pub fn flatten_steps(steps: &[StepResult]) -> Vec<StepRow<'_>> {
     let mut out = Vec::new();
-    flatten_into(steps, None, "", 0, &mut out);
+    flatten_into(steps, &[], "", 0, &mut out);
     out
 }
 
 fn flatten_into<'a>(
     steps: &'a [StepResult],
-    root_id: Option<&str>,
+    calls: &[&'a str],
     prefix: &str,
     depth: usize,
     out: &mut Vec<StepRow<'a>>,
 ) {
     for (index, step) in steps.iter().enumerate() {
         let key = format!("{prefix}{index}:{}", step.node_id);
-        let root = root_id.unwrap_or(&step.node_id);
+        let root = calls.first().copied().unwrap_or(&step.node_id);
         out.push(StepRow {
             step,
             key: key.clone(),
             root_id: root.to_owned(),
             depth,
+            calls: calls.to_vec(),
         });
         if let Some(children) = &step.children {
             let child_prefix = format!("{key}/");
-            flatten_into(children, Some(root), &child_prefix, depth + 1, out);
+            let mut inner = calls.to_vec();
+            inner.push(&step.node_id);
+            flatten_into(children, &inner, &child_prefix, depth + 1, out);
         }
     }
 }
@@ -743,10 +892,14 @@ impl ReportPanel {
                         .id_salt("report-step-details")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
+                            let requirement = selected
+                                .as_ref()
+                                .and_then(|row| Requirement::of(context.graphs?.node(row)?));
                             self.step_details(
                                 ui,
                                 &run.id,
                                 selected.as_ref(),
+                                requirement,
                                 !context.document_locked,
                                 context.component,
                                 actions,
@@ -790,11 +943,13 @@ impl ReportPanel {
             });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn step_details(
         &mut self,
         ui: &mut Ui,
         run_id: &str,
         selected: Option<&StepRow<'_>>,
+        requirement: Option<Requirement>,
         editable: bool,
         component: bool,
         actions: &mut Vec<Action>,
@@ -844,8 +999,17 @@ impl ReportPanel {
                 });
         }
 
-        if !step.expected.is_missing() || !step.actual.is_missing() {
-            comparison_box(ui, &step.expected, &step.actual);
+        // A step whose node is not found (its component's definition is
+        // gone) reads as before DIAG-03.
+        if !step.expected.is_missing()
+            || !step.actual.is_missing()
+            || requirement.is_some_and(Requirement::always_compared)
+        {
+            let expected = match requirement {
+                Some(requirement) => requirement.text(&step.expected),
+                None => expected_text(Predicate::Equals, &step.expected, 0.0),
+            };
+            comparison_box(ui, &expected, &step.actual);
         }
 
         ui.horizontal(|ui| {
@@ -1305,7 +1469,7 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
     });
 }
 
-fn comparison_box(ui: &mut Ui, expected: &OptionalJson, actual: &OptionalJson) {
+fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
     egui::Frame::new()
         .fill(theme::FIELD)
         .stroke(Stroke::new(1.0, theme::BORDER))
@@ -1317,17 +1481,13 @@ fn comparison_box(ui: &mut Ui, expected: &OptionalJson, actual: &OptionalJson) {
                 ui.allocate_ui(egui::vec2(col_width, 36.0), |ui| {
                     ui.vertical(|ui| {
                         widgets::subcaption(ui, "EXPECTED");
-                        let text = match expected {
-                            OptionalJson::Present(value) => compact_json(value),
-                            OptionalJson::Missing => "—".into(),
-                        };
                         ui.add(
                             egui::Label::new(
-                                RichText::new(labels::truncate(&text, 120)).monospace(),
+                                RichText::new(labels::truncate(expected, 120)).monospace(),
                             )
                             .truncate(),
                         )
-                        .on_hover_text(text);
+                        .on_hover_text(expected);
                     });
                 });
                 ui.label(RichText::new("→").color(theme::MUTED));
@@ -1518,6 +1678,74 @@ mod tests {
         StepResult::new(&node, phase)
     }
 
+    /// DIAG-03: a step inside a component call finds its node in the
+    /// revision the call is pinned to; a call whose revision is gone finds
+    /// nothing, and its card reads as before.
+    #[test]
+    fn a_step_inside_a_call_finds_its_node_in_the_called_revision() {
+        use apiforge_core::model::Predicate;
+        let mut project = apiforge_core::demos::shop_project();
+        let scenario = project.scenarios[0].clone();
+        let call = scenario
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::Component)
+            .expect("the demo shop calls a component")
+            .clone();
+        let definition = project
+            .components
+            .iter_mut()
+            .find(|component| {
+                Some(component.id.as_str()) == call.config.component_id.as_deref()
+                    && Some(component.revision) == call.config.revision
+            })
+            .expect("the call's revision is in the project");
+        let mut check = apiforge_core::graph::create_node(
+            NodeKind::Assert,
+            apiforge_core::format::Position { x: 0.0, y: 0.0 },
+            None,
+        );
+        check.id = "inner-check".into();
+        check.config.predicate = Some(Predicate::NotEquals);
+        definition.graph.nodes.push(check.clone());
+
+        let mut outer = StepResult::new(&call, Phase::Main);
+        outer.children = Some(vec![StepResult::new(&check, Phase::Main)]);
+        let steps = vec![outer];
+        let rows = flatten_steps(&steps);
+        let inner = rows.iter().find(|row| row.depth == 1).unwrap();
+        assert_eq!(inner.calls, vec![call.id.as_str()]);
+        assert_eq!(inner.root_id, call.id);
+
+        let graphs = RunGraphs {
+            main: &scenario.graph,
+            cleanup: Some(&scenario.cleanup),
+            project: &project,
+        };
+        let node = graphs.node(inner).expect("the check is found");
+        assert_eq!(
+            Requirement::of(node),
+            Some(Requirement::One {
+                predicate: Predicate::NotEquals,
+                tolerance: 0.0
+            })
+        );
+
+        let mut gone = scenario.clone();
+        for node in &mut gone.graph.nodes {
+            if node.id == call.id {
+                node.config.revision = Some(999);
+            }
+        }
+        let graphs = RunGraphs {
+            main: &gone.graph,
+            cleanup: Some(&gone.cleanup),
+            project: &project,
+        };
+        assert!(graphs.node(inner).is_none(), "the revision is gone");
+    }
+
     fn sample_run() -> RunResult {
         let mut child = step("inner-req", "Inner request", NodeKind::Request, Phase::Main);
         child.outputs.insert("status".into(), json!(200));
@@ -1599,6 +1827,7 @@ mod tests {
             files_busy: false,
             component: false,
             document_locked: false,
+            graphs: None,
         };
         let draw = |panel: &mut ReportPanel| {
             let input = egui::RawInput {
@@ -1710,6 +1939,7 @@ mod tests {
                     files_busy: false,
                     component: false,
                     document_locked: false,
+                    graphs: None,
                 };
                 assert!(panel.show(ui, &empty).is_empty());
             });
@@ -1727,6 +1957,7 @@ mod tests {
                     files_busy: false,
                     component: false,
                     document_locked: false,
+                    graphs: None,
                 };
                 let _ = panel.show(ui, &populated);
             });
@@ -1783,6 +2014,7 @@ mod tests {
                         files_busy: false,
                         component: false,
                         document_locked: locked,
+                        graphs: None,
                     };
                     let _ = panel.show(ui, &context);
                 });
@@ -1833,6 +2065,7 @@ mod tests {
             files_busy: false,
             component: false,
             document_locked: false,
+            graphs: None,
         };
         let mut draw = |height: f32| {
             let mut output = context.run_ui(
@@ -1893,6 +2126,7 @@ mod tests {
                 files_busy: false,
                 component: false,
                 document_locked: false,
+                graphs: None,
             };
             let mut draw = |height: f32, events: Vec<egui::Event>| {
                 let mut output = context.run_ui(
@@ -1956,6 +2190,7 @@ mod tests {
                 files_busy: false,
                 component: false,
                 document_locked: false,
+                graphs: None,
             };
             let draw = |panel: &mut ReportPanel, events| {
                 let mut id = egui::Id::NULL;

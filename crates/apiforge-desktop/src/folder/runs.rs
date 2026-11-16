@@ -615,6 +615,17 @@ impl FolderApp {
             .get(id)
             .and_then(|ids| ids.first())
             .map(String::as_str);
+        // The run's own revision: what it executed, whatever changed since.
+        let executed = &report.prepared.snapshot;
+        let (main, cleanup) = match executed.document() {
+            IdentityBase::Scenario(scenario) => (&scenario.graph, Some(&scenario.cleanup)),
+            IdentityBase::Component(component) => (&component.graph, None),
+        };
+        let graphs = crate::report::RunGraphs {
+            main,
+            cleanup,
+            project: executed.context(),
+        };
         let actions = self.runs.panel.show(
             ui,
             &crate::report::Context {
@@ -632,6 +643,7 @@ impl FolderApp {
                     .is_some_and(|document| document.entry().kind == DocumentKind::Component),
                 document_locked: stale
                     || snapshot.as_ref().is_none_or(|snapshot| !snapshot.editable),
+                graphs: Some(graphs),
             },
         );
         for action in actions {
