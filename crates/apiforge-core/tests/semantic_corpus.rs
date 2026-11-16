@@ -147,7 +147,9 @@ fn operators_match_the_reference_implementation() {
             ));
         }
     }
-    for operator in Operator::ALL {
+    // `uuid` (LANG-10) came after the corpus was frozen and has no reference
+    // value to compare: its own tests cover it.
+    for operator in Operator::ALL.into_iter().filter(|o| *o != Operator::Uuid) {
         assert!(
             cases.iter().any(|case| case.operator == operator),
             "{operator:?} has no corpus cases"
