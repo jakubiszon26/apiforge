@@ -32,13 +32,18 @@ impl FolderApp {
             return;
         };
         if let Some(path) = self.text_of(document_id) {
-            centred_hint(
-                ui,
-                &format!(
-                    "{} is a text file, not a scenario or component, so it has no diagram.",
-                    file_name(path)
-                ),
+            let text = format!(
+                "{} is a text file, not a scenario or component, so it has no diagram.",
+                file_name(path)
             );
+            // Diagram offers the way to its text, as the read-only board does
+            // (UX-23, decision 15); Split shows the text beside it already.
+            if self.workbench.mode != Mode::Diagram {
+                centred_hint(ui, &text);
+            } else if centred_hint_with_action(ui, &text, "Show code") {
+                self.workbench.mode = Mode::Code;
+                self.touched();
+            }
             return;
         }
         let Some(snapshot) = self.snapshot(document_id) else {
