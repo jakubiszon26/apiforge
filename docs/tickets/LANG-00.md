@@ -7,10 +7,11 @@
   LANG-12 (#385) and LANG-14 (#390)
 - Risk: `default` (what runs after an error), `format` (the manifest, what a
   valid `.afs` is)
-- State: **decided by the owner on 2026-11-16**: the three
-  [decisions](#owner-decisions-2026-11-16), each on the recommended option.
-  The four consequences of [To confirm at approval](#to-confirm-at-approval)
-  still wait.
+- State: **approved by the owner**: the three
+  [decisions](#owner-decisions-2026-11-16) on 2026-11-16 and the four
+  consequences of [Confirmed at approval](#confirmed-at-approval) on
+  2026-11-17, each on the recommended option. Its tickets wait for the LANG
+  sprint, which starts after LAY ([plan](../sprints/lang.md)).
 - Part B (loops, block results, scopes, the board) is LANG-16 (#413)
 
 ## Goal
@@ -433,20 +434,29 @@ recommendation.
 | 2 | How the manifest carries the language version | **`formatVersion: 2` with `languageVersion`**; 0.1.0 answers *Unsupported folder format version* |
 | 3 | A project in the older language, opened by a newer build | **It opens, is checked and edited, and runs only after the fix** |
 
-## To confirm at approval
+The owner added a requirement to decision 1: the document's graph of
+ordering edges stays an architectural requirement, so that a later explicit
+parallel block is not shut out. Running in parallel is neither designed nor
+implemented now.
+
+## Confirmed at approval
+
+Confirmed by the owner on 2026-11-17, all four as proposed.
 
 1. Under `on_error continue` an export of a component call that failed
    later is readable in the main flow, as it is in the cleanup today
-   (section 1, rule 7).
+   (section 1, rule 7): a value that existed when the error happened can be
+   read; only a missing value that a step needs blocks it.
 2. A request that answered without the field read stays an *error* at the
    reading step, not a *blocked* (rule 5).
-3. Cut from the 0.2.0 conditions, by the owner's frame: a reversible or
-   transactional migration, and tests on project files gathered from 0.1.0
-   users. Kept: the fix on every repository scenario and the owner's test
-   projects with the order of steps compared before and after; comments
-   kept by the fix (it costs nothing: the fix edits ranges).
-4. The writer's attribute order is the canonical one (KTLO-37); the
-   reference follows it.
+3. Cut from the 0.2.0 conditions: a reversible or transactional migration,
+   tests on project files gathered from 0.1.0 users, and reading several
+   language versions. Kept: the version is detected and the message names
+   both versions; the fix writes a file whole or not at all and raises the
+   version as its last write; the fix keeps comments.
+4. One canonical attribute order for `print` and `fmt` (KTLO-37). The
+   parser does not require that order, and an ordinary edit on the board
+   keeps the author's order: its difference stays as small as the edit.
 
 ## Tickets
 
@@ -455,7 +465,7 @@ recommendation.
 | 1 | **RUN-01** #126 | Section 1 in the runner and in the reference | M · 20 min · `default` |
 | 2 | **LANG-15** #412 | Section 2: the manifest, the three refusals, the reference's first line | S–M · 20 min · `format` |
 | 3 | **LANG-13** #386 | The rules of language 2, with the fix; `apiforge fix`; the repository's files | M · 30 min · `format` |
-| — | **LANG-12** #385 | Not needed: in a file nothing can be followed by two steps. Proposed for closing | — |
+| — | **LANG-12** #385 | Closed 2026-11-17 as replaced by LANG-13: in a file nothing can be followed by two steps | — |
 | 5 | **DIAG-06** #391 | The board keeps the chain; mock-up first | from the mock-up |
 | — | **LANG-06** #143 with **KTLO-37** #211 | Format keeps free comments; one attribute order | S · 15 min · `format` |
 

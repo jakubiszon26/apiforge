@@ -6,8 +6,12 @@
   three decisions of [LANG-00](../tickets/LANG-00.md) are taken: a chain is
   written by the order of its lines, the manifest carries the language
   version under `formatVersion: 2`, a project in the older language runs
-  only after the fix. The sprint starts when LAY closes (LAY-12, #296);
-  the rows of [Beside LAY](#beside-lay) run now.
+  only after the fix.
+- **Not started, and paused by the owner on 2026-11-17.** Finishing LAY
+  comes first. The sprint starts after LAY closes, its acceptance (LAY-12,
+  #296) and its retrospective. Until then nothing of LANG is designed or
+  implemented except the rows of [Beside LAY](#beside-lay) marked *now*,
+  and no ticket of this plan carries a `ready:*` label.
 - Analysis model: Fable 5.2.
 - Inputs: [FLOW-00](../tickets/FLOW-00.md), [LANG-00](../tickets/LANG-00.md),
   [LAY section 12](lay.md#12-after-the-checkpoint-2026-11-16), every open
@@ -34,20 +38,25 @@ test projects are updated, and the version detects the rest.
 
 ## Beside LAY
 
-| Ticket | State | Files |
-| --- | --- | --- |
-| LANG-10 #354 `uuid()` | merged (#402) | — |
-| RUN-03 #389 checks before the next step | pull request #409 | `apiforge-runner/src/engine.rs`, `apiforge-core/src/graph.rs`, `fixtures/runs` |
-| LANG-14 #390 a step after a whole `if`; a chain stays in its braces | starts now; with it the amendments of ADR 0003 and ADR 0005 that FLOW-00 owes | `apiforge-script` `lower.rs`, `print.rs`; `apiforge-core` `validation.rs`; `reference.md` |
-| LANG-00 part A #411 | decided; four consequences to confirm | `docs/` |
-| DIAG-06 #391 mock-up | owed; shows where a dropped step lands | a `mock/` branch |
-| LAY-34 #396 a board edit changes one statement | LAY part B, after LANG-14 | `apiforge-script` `print.rs`, `lower.rs`, `ast.rs` |
+What LAY needs from the language and the run, and nothing else:
+
+| Ticket | State | Why LAY needs it | Files |
+| --- | --- | --- | --- |
+| LANG-10 #354 `uuid()` | merged (#402) | — | — |
+| RUN-03 #389 checks before the next step | *now*: pull request #409 | LAY-19 and the badge numbers of LAY-07 read the run's order | `apiforge-runner/src/engine.rs`, `apiforge-core/src/graph.rs`, `fixtures/runs` |
+| DIAG-07 #392 a step added from *Next* runs after that step | *now*: pull request #400 | ahead of part B (LAY section 12.2) | `apiforge-core/src/edit/nodes.rs` |
+| LANG-14 #390 a step after a whole `if`; a chain stays in its braces | *now*, as approved | LAY-34 and LAY-13 read which statements stand in a branch's braces | `apiforge-script` `lower.rs`, `print.rs`; `apiforge-core` `validation.rs`; `reference.md` |
+| LAY-34 #396 a board edit changes one statement | *now*: LAY part B, after LANG-14 | a ticket of LAY | `apiforge-script` `print.rs`, `lower.rs`, `ast.rs` |
+| LANG-00 part A #411 | approved; its tickets wait | — | `docs/` |
+| DIAG-06 #391 and its mock-up | **paused** with the sprint | not needed by LAY | — |
 
 LANG-14 goes ahead as approved. Its spelling `@after(x)` is the only way to
 write the step until LANG-13, which keeps the lowering and removes the
 spelling with every other `@after`.
 
 ## First half — to 0.2.0
+
+Paused until the sprint starts.
 
 | Order | Ticket | Size | Needs | Files |
 | --- | --- | --- | --- | --- |
@@ -114,7 +123,7 @@ Exit criteria of the second half are written by LANG-16.
 | LANG-02 #129 · LANG-04 #132 | two tickets | one analysis; not the same thing as LANG-08 (checks, not steps) |
 | LANG-06 #143 · KTLO-37 #211 | two tickets | one pull request, first half |
 | LANG-11 #357 | closed | its reference text is replaced by LANG-14 |
-| LANG-12 #385 | one successor by `@after` | not needed once order is written as lines; proposed for closing |
+| LANG-12 #385 | one successor by `@after` | closed 2026-11-17 as replaced by LANG-13 |
 | RUN-01 #126 | backlog, "syntax to be found" | decided without syntax; first in the sprint |
 
 ## Decisions and records

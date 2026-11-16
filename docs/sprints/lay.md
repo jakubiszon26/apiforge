@@ -1280,6 +1280,32 @@ released.
 LAY-31 (capture of `shop-30`, checks expanded, before and after), LAY-30
 (the bar switch and the per-step switch), REP-07 with UX-19, DIAG-06.
 
+### 12.5 What the language decisions change for part B (2026-11-17)
+
+The owner decided in [LANG-00](../tickets/LANG-00.md) that a chain is
+written by the order of its lines and `@after` leaves the language, in the
+LANG sprint, after LAY. Read against the open tickets of this sprint:
+
+- **The board draws the document's ordering edges, not the text.** The
+  document stays a graph, so every ticket that draws, routes, groups or
+  traces wires keeps its work: LAY-13, LAY-14, LAY-15, LAY-17, LAY-18,
+  LAY-19, LAY-30, LAY-31, LAY-35, and LAY-24's mark, which becomes the way
+  nearly every ordering edge is drawn.
+- **The reference scenarios change at LANG-13**: no ordering wire from a
+  check into a step (34 of the 52 today), none from *Start* to several
+  steps. Figures measured on them — LAY-01's baseline, the costs in
+  LAY-29's table — are measured again then, as FLOW-00 already says.
+- **LAY-29** (#382): the fan from *Start* cannot be written in language 2.
+  Its second half, no wire under its own card where cards overlap, does not
+  depend on the language.
+- **LAY-34** (#396) stays before LAY-13. Where a board edit writes a new
+  statement matters after LANG-13, when the place in the text is the order.
+- **RUN-03** (#389) and **DIAG-07** (#392) work on the run and on the
+  document's edges; both hold in language 2. RUN-01 (#126) later changes
+  when a step is *blocked* under `on_error continue`; LAY-19 reads the
+  cause the engine gives and its criteria use `stop` and a missing value,
+  which do not change.
+
 ## Technical appendix
 
 - Subjects: `Binding::references()` over `node.inputs`, filtered by node
