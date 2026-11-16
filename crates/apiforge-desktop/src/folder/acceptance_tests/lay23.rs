@@ -729,10 +729,14 @@ fn lay23_criterion_7_fewer_crossings_per_line() {
             // 20 px apart instead of on each other, and cross where one
             // leaves the others: 35 crossings on 32 lines (16 before). The
             // order of lines in a corridor is LAY-05's.
-            let most = if name == "fan-out" && checks == Checks::Expanded {
-                1.1
-            } else {
-                0.6
+            // Since LAY-32 every reader of a port with chips has a chip, the
+            // neighbour's too: `shop-30` with its checks drawn keeps its 13
+            // crossings on 19 lines instead of 30, as the lines left are the
+            // rails and the checks' wires that cross them.
+            let most = match (name, checks) {
+                ("fan-out", Checks::Expanded) => 1.1,
+                ("shop-30", Checks::Expanded) => 0.7,
+                _ => 0.6,
             };
             assert!(
                 per_line <= most,

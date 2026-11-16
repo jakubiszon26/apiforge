@@ -146,7 +146,9 @@ entry of a *Wires* setting that keeps *All wires* and later takes C
    proxy chips already stand for variables and parameters.
 3. **It keeps the wires that read well.** A reader beside its source keeps
    its wire, so the local flow stays drawn; those are the wires LAY-04
-   makes straight.
+   makes straight. *Changed by the owner on 2026-11-16 (LAY-32, #387): a
+   value shown as a chip is read only through chips, the neighbour's
+   included; see decision 3.*
 4. **It is cheap and writes nothing.** A rendering rule in the canvas, no
    router change, no format change, no ADR amendment; B needs the router
    to route a net (an amendment of ADR 0006, `L`).
@@ -164,9 +166,13 @@ they were decided drawn (Q3 = A) and are not this ticket.
 
 ## The threshold rule
 
-Decided: **a data wire becomes a chip when its output port is read by
-three or more steps and its reader is not beside the source** (the next
-column of the same row, or the source's own column). The count is taken on
+Decided on 2026-11-12: **a data wire becomes a chip when its output port is
+read by three or more steps and its reader is not beside the source** (the
+next column of the same row, or the source's own column). Amended on
+2026-11-16 (LAY-32, decision 3): **an output port read by three or more
+steps is read through chips at every reader**, the one beside it too, and a
+variable is read through chips at every reader as soon as one of them is
+not beside it. The count is taken on
 the document, not on what is drawn, so the *Checks* toggle never turns a
 wire into a chip; the rule is applied when a card is dropped, never while
 it is dragged.
@@ -429,11 +435,12 @@ Stage 1, option A. Tests in
 `crates/apiforge-desktop/src/folder/acceptance_tests/lay23.rs`, on
 `fan-out.afs` and `shop-30.afs`, tidied, at 1600 × 1000 and 960 × 540.
 
-1. On `fan-out` no wire is drawn from `cartId` or `itemId` to a reader
-   that is not beside them; each such input carries a chip that names its
-   source, two chips where an address reads both; `quantity`, beside them,
-   keeps both wires; a port read by fewer than three steps keeps all of its
-   wires (`catalogue → first`, `checkout → orderNumber`). Test:
+1. On `fan-out` no wire is drawn from `cartId` or `itemId`; each input
+   that reads them carries a chip that names its source, two chips where
+   an address reads both, `quantity` beside them included (amended by
+   LAY-32; before, `quantity` kept both wires); a port read by fewer than
+   three steps keeps all of its wires (`catalogue → first`,
+   `checkout → orderNumber`). Test:
    `lay23_criterion_1_a_fanned_out_port_draws_chips`.
 2. The port of `cartId` reads `→ 9 readers`, the number of steps that read
    it in the document; the *Checks* toggle changes neither that number nor
@@ -492,6 +499,18 @@ Two quiz rounds on the analysis above; the recommended option every time
    whose preferences do not name the setting.
 3. **Threshold.** A value read by three or more steps becomes chips; a
    reader in the next column (or the source's own column) keeps its wire.
+   *Amended by the owner on 2026-11-16 (LAY-32, #387):* **a value shown as
+   a chip is read only through chips.** Once an output port is drawn with
+   chips every reader of it has a chip, the neighbour included; a port
+   never shows a reader count and a line. The unit is the output port: a
+   step whose `body.token` has chips may still wire its `status` to a
+   neighbour. A variable with at least one far reader has a chip at every
+   reader; one read only beside it, by fewer than three steps, stays wired.
+   On `shop-30` (tidied, compact, 1600 × 1000) the lines drawn and their
+   crossings go from 19 · 5 to 13 · 4 with checks collapsed and from
+   30 · 13 to 19 · 13 with checks drawn; criterion 7's bound for the latter
+   is 0.7 crossings per line, as the lines left are rails and checks'
+   wires.
 4. **The `@after` rail into the next step.** A mark on the card
    (`after quantity_ok`) is mocked up as LAY-24 (#334) and decided on the
    capture; this ticket leaves the rails as they are.

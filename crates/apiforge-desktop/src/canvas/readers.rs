@@ -1,12 +1,14 @@
 //! Chips at the reader (LAY-23): a value many steps read draws a quiet chip
 //! `← cartId` beside each reader's input instead of a long wire.
 //!
-//! A data wire becomes a chip when its output port is read by
-//! [`MIN_READERS`] or more steps of the document, or is a variable's
-//! (LAY-25), and its reader is not beside the source: in the next column of the source's row, or in the
-//! source's own column. The source's port says how many steps read it. The
-//! wire comes back while its chip or its input is pointed at and while its
-//! reader or its source is selected.
+//! An output port is drawn with chips when [`MIN_READERS`] or more steps of
+//! the document read it, or when it is a variable's (LAY-25) and one of its
+//! readers is not beside it: in the next column of the source's row, or in
+//! the source's own column. Then every reader of the port has a chip, the
+//! one beside it too: a value shown as a chip is read only through chips,
+//! and a port never shows a count and a line (LAY-32). The source's port
+//! says how many steps read it. The wire comes back while its chip or its
+//! input is pointed at and while its reader or its source is selected.
 //!
 //! It is a rendering rule only. Nothing here is saved, no card's box
 //! changes, Tidy up and the router's other wires do not depend on it: the
@@ -163,32 +165,44 @@ pub fn far(cards: &[Card], from: &Card, to: &Card) -> bool {
     !beside(&rows(cards), from.rect(), to.rect())
 }
 
-/// The wires of `wires` that are chips, decided on `cards` where they rest.
-/// A wire from a proxy the person placed stays a wire: the proxy is there
-/// to shorten it.
+/// The wires of `wires` that are chips, decided on `cards` where they rest:
+/// every wire of a port drawn with chips (LAY-32). A wire from a proxy the
+/// person placed stays a wire: the proxy is there to shorten it.
 pub fn chipped(graph: &Graph, cards: &[Card], wires: &[BoardWire]) -> HashSet<String> {
     let readers = readers_by_port(graph);
     let rows = rows(cards);
-    wires
-        .iter()
-        .filter(|wire| !wire.control)
-        .filter_map(|wire| {
-            let Start::Output { card, port } = &wire.start else {
-                return None;
+    // The data wires of each output port, as the board draws them.
+    let mut ports: HashMap<(usize, &str), Vec<&BoardWire>> = HashMap::new();
+    for wire in wires.iter().filter(|wire| !wire.control) {
+        if let Start::Output { card, port } = &wire.start {
+            ports.entry((*card, port.as_str())).or_default().push(wire);
+        }
+    }
+    ports
+        .into_iter()
+        .filter(|((card, port), port_wires)| {
+            let Some(source) = cards.get(*card) else {
+                return false;
             };
-            let (source, target) = (cards.get(*card)?, cards.get(wire.target)?);
             let count = readers
-                .get(&(source.id.clone(), port.clone()))
+                .get(&(source.id.clone(), (*port).to_owned()))
                 .map_or(0, BTreeSet::len);
-            // A variable's far reader is a chip whatever the count: saving a
-            // value is how a person says "do not wire this" (LAY-25).
+            // A variable read far is read through chips whatever the count:
+            // saving a value is how a person says "do not wire this" (LAY-25).
             let saved = graph
                 .nodes
                 .iter()
                 .any(|node| node.id == source.id && node.is_variable());
-            ((count >= MIN_READERS || saved) && !beside(&rows, source.rect(), target.rect()))
-                .then(|| wire.id.clone())
+            let far = || {
+                port_wires.iter().any(|wire| {
+                    cards
+                        .get(wire.target)
+                        .is_some_and(|target| !beside(&rows, source.rect(), target.rect()))
+                })
+            };
+            count >= MIN_READERS || (saved && far())
         })
+        .flat_map(|(_, port_wires)| port_wires.into_iter().map(|wire| wire.id.clone()))
         .collect()
 }
 
