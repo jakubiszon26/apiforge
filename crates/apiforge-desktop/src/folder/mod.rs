@@ -60,7 +60,7 @@ use apiforge_project::{
     ExternalConflict, ExternalOutcome, ModelState, Origin, ProjectSession, Registration,
     RegistryState, Unavailable,
 };
-use apiforge_script::{Diagnostic, Severity};
+use apiforge_script::{Diagnostic, Severity, line_column};
 use apiforge_storage::{
     CodeDraft, DraftTarget,
     project::{CameraState, FieldRecovery, TextSelection, TrashIndex, WorkspaceState},
@@ -2134,22 +2134,6 @@ fn count(count: usize, noun: &str) -> String {
     } else {
         format!("{count} {noun}s")
     }
-}
-
-/// One-based line and column of a byte offset, counting characters.
-fn line_column(text: &str, offset: usize) -> (usize, usize) {
-    let mut offset = offset.min(text.len());
-    while !text.is_char_boundary(offset) {
-        offset -= 1;
-    }
-    let before = &text[..offset];
-    let line = before.matches('\n').count() + 1;
-    let column = before
-        .rsplit('\n')
-        .next()
-        .map_or(0, |line| line.chars().count())
-        + 1;
-    (line, column)
 }
 
 /// A kept selection that no longer fits the text moves to its end.

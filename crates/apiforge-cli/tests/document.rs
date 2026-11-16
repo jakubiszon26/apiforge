@@ -332,3 +332,92 @@ fn applying_a_new_statement_places_it_clear_of_the_other_blocks() {
         );
     }
 }
+
+/// An error on line 3; a warning on line 1 after three two-byte characters,
+/// at character column 17 (byte column 20).
+const MIXED: &str = "scenario \"Żółw\" // c\n{\n  other = )\n}\n";
+
+/// The 1-based line and the column, counted in characters, of `offset`.
+fn line_column(text: &str, offset: usize) -> (usize, usize) {
+    let before = &text[..offset];
+    let line = before.matches('\n').count() + 1;
+    let column = before.rsplit('\n').next().unwrap().chars().count() + 1;
+    (line, column)
+}
+
+/// Whether a line of output carries a byte range, `\d+\.\.\d+`.
+fn has_byte_range(line: &str) -> bool {
+    line.as_bytes()
+        .windows(4)
+        .any(|w| w[0].is_ascii_digit() && w[1] == b'.' && w[2] == b'.' && w[3].is_ascii_digit())
+}
+
+/// #346, criterion 2: `check --workspace … <file.afs>` prints
+/// `path:line:column: severity: message` with the path as given.
+#[test]
+fn issue346_criterion_2_workspace_check_of_a_file_prints_path_line_and_column() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.json");
+    let source = directory.path().join("źródło.afs");
+    fs::write(&path, serde_json::to_vec(&fixture()).unwrap()).unwrap();
+    fs::write(&source, MIXED).unwrap();
+    let output = run("check", &path, None, Some(&source));
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let lines: Vec<&str> = stderr.lines().collect();
+    let shown = source.display();
+    assert!(
+        lines.contains(&format!("{shown}:3:11: error: Expected an expression").as_str()),
+        "{stderr}"
+    );
+    assert!(
+        lines.contains(
+            &format!(
+                "{shown}:1:17: warning: {}",
+                apiforge_script::UNATTACHED_COMMENT
+            )
+            .as_str()
+        ),
+        "{stderr}"
+    );
+    assert!(!lines.iter().any(|line| has_byte_range(line)), "{stderr}");
+    assert_eq!(output.status.code(), Some(1));
+}
+
+/// #346, criterion 2: `check --workspace` without a file checks text that has
+/// no file, so its lines are `line:column: severity: message`.
+#[test]
+fn issue346_criterion_2_workspace_check_without_a_file_prints_line_and_column() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.json");
+    let mut workspace = fixture();
+    let active = workspace.active_id.clone();
+    let project = workspace
+        .projects
+        .iter_mut()
+        .find(|p| p.id == active)
+        .unwrap();
+    let node = project.scenarios[0]
+        .graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.inputs.contains_key("id"))
+        .expect("a node with an `id` input");
+    node.inputs.insert(
+        "id".into(),
+        apiforge_core::format::Binding::Environment {
+            name: "missing".into(),
+        },
+    );
+    let printed = print_scenario(project, &project.scenarios[0]).unwrap();
+    let (line, column) = line_column(&printed, printed.find("env.missing").unwrap());
+    fs::write(&path, serde_json::to_vec(&workspace).unwrap()).unwrap();
+    let output = run("check", &path, None, None);
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let lines: Vec<&str> = stderr.lines().collect();
+    assert!(
+        lines.contains(&format!("{line}:{column}: error: Unknown environment name").as_str()),
+        "{stderr}"
+    );
+    assert!(!lines.iter().any(|line| has_byte_range(line)), "{stderr}");
+    assert_eq!(output.status.code(), Some(1));
+}

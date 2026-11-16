@@ -1017,15 +1017,19 @@ mod lay26 {
         directory
     }
 
-    /// The ranges of the lines of stderr that say `message`.
-    fn ranges(stderr: &str, message: &str) -> Vec<(usize, usize)> {
+    /// The byte offsets in `text` where the lines of stderr that say
+    /// `message` start: each line is `path:line:column: warning: message`
+    /// (#346), the column counted in characters.
+    fn starts(stderr: &str, text: &str, message: &str) -> Vec<usize> {
         stderr
             .lines()
-            .filter_map(|line| line.strip_suffix(&format!(": {message}")))
+            .filter_map(|line| line.strip_suffix(&format!(": warning: {message}")))
             .map(|start| {
-                let range = start.strip_prefix("Warning ").expect("a warning");
-                let (from, to) = range.split_once("..").unwrap();
-                (from.parse().unwrap(), to.parse().unwrap())
+                let start = start
+                    .strip_prefix(&format!("{SCENARIO}:"))
+                    .expect("the file's registered path");
+                let (line, column) = start.split_once(':').unwrap();
+                super::offset(text, line.parse().unwrap(), column.parse().unwrap())
             })
             .collect()
     }
@@ -1036,26 +1040,97 @@ mod lay26 {
         let directory = shop(&text);
         let output = run(directory.path(), "check", &[]);
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-        let found = ranges(&stderr, apiforge_script::FAR_READ);
+        let found = starts(&stderr, &text, apiforge_script::FAR_READ);
         assert_eq!(found.len(), 15, "{stderr}");
-        for (start, end) in found {
-            let read = &text[start..end];
+        for start in found {
+            let read = &text[start..];
             assert!(
-                ["cart.id", "cart.productId", "session.body.currency"].contains(&read),
-                "a far read: {read}"
+                ["cart.id", "cart.productId", "session.body.currency"]
+                    .iter()
+                    .any(|far| read.starts_with(far)),
+                "a far read: {}",
+                &read[..read.len().min(30)]
             );
         }
-        let saved = shop(&fixture("far-value-saved"));
-        let without = run(saved.path(), "check", &[]);
+        let saved = fixture("far-value-saved");
+        let saved_shop = shop(&saved);
+        let without = run(saved_shop.path(), "check", &[]);
         assert!(
-            ranges(
+            starts(
                 &String::from_utf8_lossy(&without.stderr),
+                &saved,
                 apiforge_script::FAR_READ
             )
             .is_empty()
         );
         assert_eq!(output.status.code(), without.status.code());
         assert_eq!(output.status.code(), Some(0), "warnings only pass");
+    }
+}
+
+/// The byte offset of a 1-based line and a column counted in characters.
+fn offset(text: &str, line: usize, column: usize) -> usize {
+    let start: usize = text
+        .split_inclusive('\n')
+        .take(line - 1)
+        .map(str::len)
+        .sum();
+    start
+        + text[start..]
+            .chars()
+            .take(column - 1)
+            .map(char::len_utf8)
+            .sum::<usize>()
+}
+
+/// Whether a line of output carries a byte range, `\d+\.\.\d+` (#346).
+fn has_byte_range(line: &str) -> bool {
+    line.as_bytes()
+        .windows(4)
+        .any(|w| w[0].is_ascii_digit() && w[1] == b'.' && w[2] == b'.' && w[3].is_ascii_digit())
+}
+
+/// #346, criterion 1: `apiforge check --folder … --file x.afs` prints each
+/// diagnostic as `path:line:column: severity: message`, the path as given,
+/// the start only, the column counted in characters.
+mod issue346 {
+    use super::{has_byte_range, run};
+    use apiforge_project::prepare_project;
+    use std::{ffi::OsStr, fs};
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    /// An error on line 3; a warning on line 1 after three two-byte
+    /// characters, at character column 17 (byte column 20).
+    const TEXT: &str = "scenario \"Żółw\" // c\n{\n  other = )\n}\n";
+
+    #[test]
+    fn issue346_criterion_1_folder_check_prints_path_line_and_character_column() {
+        let directory = tempfile::tempdir().unwrap();
+        prepare_project(directory.path(), &apiforge_core::demos::shop_project()).unwrap();
+        fs::write(directory.path().join(SCENARIO), TEXT).unwrap();
+        let output = run(
+            directory.path(),
+            "check",
+            &[OsStr::new("--file"), OsStr::new(SCENARIO)],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let lines: Vec<&str> = stderr.lines().collect();
+        assert!(
+            lines.contains(&format!("{SCENARIO}:3:11: error: Expected an expression").as_str()),
+            "{stderr}"
+        );
+        assert!(
+            lines.contains(
+                &format!(
+                    "{SCENARIO}:1:17: warning: {}",
+                    apiforge_script::UNATTACHED_COMMENT
+                )
+                .as_str()
+            ),
+            "{stderr}"
+        );
+        assert!(!lines.iter().any(|line| has_byte_range(line)), "{stderr}");
+        assert_eq!(output.status.code(), Some(1));
     }
 }
 
