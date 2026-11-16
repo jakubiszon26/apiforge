@@ -7,9 +7,10 @@
   LANG-12 (#385) and LANG-14 (#390)
 - Risk: `default` (what runs after an error), `format` (the manifest, what a
   valid `.afs` is)
-- State: **analysis, waits for the owner**: three decisions in
-  [Owner decisions needed](#owner-decisions-needed), four consequences in
-  [To confirm at approval](#to-confirm-at-approval)
+- State: **decided by the owner on 2026-11-16**: the three
+  [decisions](#owner-decisions-2026-11-16), each on the recommended option.
+  The four consequences of [To confirm at approval](#to-confirm-at-approval)
+  still wait.
 - Part B (loops, block results, scopes, the board) is LANG-16 (#413)
 
 ## Goal
@@ -19,7 +20,9 @@ under it were left open, and LANG-13 rewrites every file, so they are
 settled first: what the chain does after an error, how a project says which
 language it is written in, which operation may change which part of a
 file's text, and whether a chain is written with `@after` or by the order
-of its lines.
+of its lines. The last is decided: **by the order of its lines**
+([section 4](#4-after-against-the-order-of-the-lines)); FLOW-00's
+decisions 2 and 8 and its consequence 1 are replaced.
 
 The owner's frame (2026-11-16): breaking changes are allowed in the 0.x
 series; no build reads several language versions, there is no migration
@@ -106,7 +109,7 @@ Measured with the released 0.1.0 binary: the manifest is read strictly
 Either way 0.1.0 reads nothing wrongly. Only the second message is true,
 and adding a field **is** a change of the manifest's format.
 
-Proposed rules:
+The rules (decisions 2 and 3 below are taken):
 
 1. `languageVersion` is a whole number in the manifest, raised only when a
    file that was valid means something else or becomes invalid. An addition
@@ -326,9 +329,11 @@ the 5.
 | Cost | LANG-13 M + LANG-12 S–M as estimated; nothing reversed | LANG-13 M, LANG-12 not needed; lowering adds the edge from the step above, the writer drops the attribute; the generated-graph round-trip test is limited to chains | A plus B |
 | Decisions touched | none | FLOW-00 decisions 2 and 8 and consequence 1 are replaced; 1, 3–7 stand; ADR 0005's "line order means nothing" is amended (FLOW-00 amends it anyway) | — |
 
-### Recommendation: B
+### Decided: B, the order written
 
-Not because it is shorter. Once a step may follow only one step and be
+The owner chose B on 2026-11-16, on the condition checked in
+[Room for running in parallel](#room-for-running-in-parallel). The reasons,
+as recommended: not because it is shorter. Once a step may follow only one step and be
 followed by one, `@after(previous)` and the order of the lines carry the
 same fact twice, and two copies of a fact can disagree: E2 and E5 are that
 disagreement, as an error in one case and as a file that reads in the wrong
@@ -346,9 +351,10 @@ What B costs, plainly:
   **deletes** `@after` lines and touches nothing else, when the file is
   written in the order it runs — every repository file is.
 - LANG-14 keeps what it does at run time (a step after an `if` waits for
-  the branch taken) and its braces rule; its spelling `@after(x)` would live
-  for one sprint. LANG-14 is not blocked; if B is chosen before it merges,
-  it skips the spelling.
+  the branch taken) and its braces rule. Its spelling `@after(x)` lives
+  until LANG-13: before that there is no other way to write the step, so
+  LANG-14 goes ahead as approved and is not blocked; LANG-13 keeps its
+  lowering and removes the spelling with every other `@after`.
 - A step can no longer be on the board and outside the flow. DIAG-06's
   mock-up shows where a dropped step lands.
 - A statement that runs nowhere today (F2 of FLOW-00) would start running
@@ -361,25 +367,71 @@ What B costs, plainly:
 C is rejected in both cases: two spellings of one flow is what an agent and
 a formatter handle worst.
 
-If the owner keeps A, it needs two things it lacks today: Format sorts the
-steps into chain order, and `check` warns when they are not (E5).
+### The rules of language 2
 
-## Owner decisions needed
+They replace rules 1–4 of [FLOW-00](FLOW-00.md#the-rules); its rules 5 and
+6 stand.
 
-Recommended option first.
+1. **A flow with a step has a `start`**, and it is the first step written.
+2. **The steps of a block run in the order they are written.** The blocks
+   of today are all of this kind: the body of a scenario or a component, a
+   branch of an `if`, the cleanup.
+3. **A step written in a block runs.** There is no step outside the flow.
+4. **`@after` is not part of the language.** In a source it is an error
+   with a fix; a stored revision is still read with it.
+5. **Checks and values stand anywhere in their block** and run when what
+   they read exists.
+6. **The step written after an `if` runs after the whole `if`**, whichever
+   branch ran (LANG-14's rule, without its spelling).
 
-1. **How a chain is written** (section 4).
-   **A** the order written: `@after` leaves the language; LANG-12 is not
-   needed. **B** `@after` stays as FLOW-00 approved, with Format sorting
-   the steps and a warning when the lines disagree with the run.
-2. **How the manifest carries the language version** (section 2).
-   **A** `formatVersion: 2` with `languageVersion`: 0.1.0 answers
-   *Unsupported folder format version*. **B** the field alone under
-   `formatVersion: 1`: 0.1.0 answers *Invalid folder project metadata*, as
-   for a damaged file.
-3. **A project in the older language, opened by a newer build** (section 2).
-   **A** opens, is checked and edited, runs only after the fix. **B** runs
-   at once with the new meaning, with a notice.
+### Room for running in parallel
+
+The owner's condition: the order written must not shut out a later,
+explicit way to run steps side by side, such as a `parallel { … }` block.
+Nothing is designed here. Checked in the code and the ADRs:
+
+- **The document stays a graph.** A scenario is nodes and ordering edges
+  (`OrderEdge { source, target, branch }`, `apiforge-core/src/format.rs`); rule 2 only says how
+  a block's text becomes edges. A step may still have several edges out and
+  several in — a join after an `if` already has two in.
+- **The scheduler already runs a graph.** It takes any node whose
+  dependencies have finished and runs it; it is serial because it takes one
+  at a time (`engine.rs`). A join waits until every source has finished or
+  was skipped.
+- **A block is one statement with one way in and one way out.** `if` is;
+  a loop will be; a block whose braces mean "side by side" instead of "one
+  after another" fits the same place in a chain. Rule 2 is therefore
+  written for the blocks of today, not for every pair of braces.
+- **Errors and values need nothing new.** After section 1 a step is held
+  back only by a value that does not exist, so each lane goes on or stops
+  on its own; the block is finished when its lanes are; the step after it
+  reads their values, which then exist. `StepStatus::Cancelled` exists for
+  stopping the rest under `on_error stop`.
+
+What a design would have to decide then, and what this decision leaves
+open: the run's one random source and the numbering of `uuid()` in a
+simulation follow the order the run reaches them; the run journal numbers
+its entries in one sequence; "checks before the next step" (RUN-03) is said
+of one chain; the board gives a *Next* port one wire, so a parallel block
+would be drawn as a container, as an `if` is. None is made harder by
+writing order as lines.
+
+One condition this puts on LANG-13: it changes lowering, printing and
+validation, **not the model** — the document does not become a list of
+steps.
+
+Not verified: any of this in a running build; it is read from the code.
+
+## Owner decisions (2026-11-16)
+
+Taken in a quiz, the recommended option first; all three are the
+recommendation.
+
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | How a chain is written | **The order written.** `@after` leaves the language; LANG-12 is not needed. Approved on the condition above, which holds |
+| 2 | How the manifest carries the language version | **`formatVersion: 2` with `languageVersion`**; 0.1.0 answers *Unsupported folder format version* |
+| 3 | A project in the older language, opened by a newer build | **It opens, is checked and edited, and runs only after the fix** |
 
 ## To confirm at approval
 
@@ -402,8 +454,8 @@ Recommended option first.
 | --- | --- | --- | --- |
 | 1 | **RUN-01** #126 | Section 1 in the runner and in the reference | M · 20 min · `default` |
 | 2 | **LANG-15** #412 | Section 2: the manifest, the three refusals, the reference's first line | S–M · 20 min · `format` |
-| 3 | **LANG-13** #386 | The chain as decided in 1, with the fix; `apiforge fix`; the repository's files | M · 30 min · `format` |
-| 4 | **LANG-12** #385 | Only if `@after` stays | S–M · 20 min · `format` |
+| 3 | **LANG-13** #386 | The rules of language 2, with the fix; `apiforge fix`; the repository's files | M · 30 min · `format` |
+| — | **LANG-12** #385 | Not needed: in a file nothing can be followed by two steps. Proposed for closing | — |
 | 5 | **DIAG-06** #391 | The board keeps the chain; mock-up first | from the mock-up |
 | — | **LANG-06** #143 with **KTLO-37** #211 | Format keeps free comments; one attribute order | S · 15 min · `format` |
 
