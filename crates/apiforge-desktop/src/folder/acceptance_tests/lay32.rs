@@ -219,3 +219,41 @@ fn lay32_criterion_4_below_the_threshold_and_brought_back() {
     select(&mut harness, &id, &[]);
     assert!(revealed(&harness, &id).is_empty());
 }
+
+/// The review views for the owner: at 1600 × 1000 `fan-out` at 60 % on
+/// `quantity`, beside `cartId` and `itemId`, which reads both through chips;
+/// at 960 × 540 `shop-30` at 60 % on the port with the most readers. Each
+/// asserts a card in view.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay32() {
+    for (name, size, label) in [
+        ("fan-out", WIDE, "lay32-fan-out-quantity-60-1600"),
+        ("shop-30", crate::testing::MINIMUM, "lay32-shop-30-60-960"),
+    ] {
+        let (_project, mut harness, id) = tidied(name, size, Checks::Collapsed);
+        let centre = if name == "fan-out" {
+            "quantity".to_owned()
+        } else {
+            let graph = graph(&harness, &id);
+            let count = board(&harness, &id)
+                .debug_counts()
+                .iter()
+                .max_by_key(|count| count.count.readers)
+                .cloned()
+                .expect("shop-30 counts readers");
+            handle_of(&graph, &count.count.source)
+        };
+        show(&mut harness, &id, &centre, 0.6);
+        let canvas = board(&harness, &id);
+        let focus = canvas.debug_focus();
+        assert!(
+            canvas
+                .debug_cards()
+                .iter()
+                .any(|(_, rect)| focus.contains_rect(*rect)),
+            "{label}: a card is in view"
+        );
+        crate::testing::capture(&mut harness, label, None);
+    }
+}
