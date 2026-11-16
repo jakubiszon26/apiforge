@@ -2915,7 +2915,13 @@ fn mcp23_criterion_5_values_match_the_output_schema_and_are_described() {
     initialize(&mut server);
 
     let passed = assert_run_result(&call(&mut server, 2, "run", json!({ "path": SCENARIO })));
-    assert!(passed["steps"][0]["outputs"].is_object(), "{passed}");
+    let product_step = passed["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["handle"] == "product")
+        .unwrap();
+    assert!(product_step["outputs"].is_object(), "{passed}");
 
     let product = json!({
         "id": 123,
