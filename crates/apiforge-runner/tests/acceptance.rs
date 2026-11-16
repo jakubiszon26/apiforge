@@ -892,3 +892,100 @@ async fn lang10_criterion_4_a_live_run_gives_random_ids() {
     assert_eq!(output(&first, "one", None), output(&second, "one", None));
     assert_eq!(output(&first, "two", None), output(&second, "two", None));
 }
+
+// LANG-14 (#390) --------------------------------------------------------------
+
+/// `later`, written first, follows the whole `if`; `then` is a chain of two
+/// requests with the given sample lines, and `otherwise` the `else` braces.
+fn after_the_whole_if(taken: bool, made: &str, second: &str, otherwise: &str) -> String {
+    format!(
+        r#"scenario "After the whole if" {{
+  on_error continue
+  param taken = {taken}
+  @after(choice)
+  later = GET "/later" {{
+    sample 200 {{}}
+  }}
+  begin = start
+  @after(begin)
+  choice = if param.taken == true {{
+    made = POST "/made" {{
+      {made}
+    }}
+    @after(made)
+    second = GET "/second" {{
+      {second}
+    }}
+  }}{otherwise}
+}}
+"#
+    )
+}
+
+const MADE: &str = "sample 201 {}";
+const SECOND: &str = "sample 200 {}";
+const OTHER: &str = r#" else {
+    other = GET "/other" {
+      sample 200 {}
+    }
+  }"#;
+
+/// Criterion 1: after the last step of `then` when it is taken.
+#[tokio::test]
+async fn lang14_criterion_1_after_the_whole_if_waits_for_then() {
+    for otherwise in ["", OTHER] {
+        let (project, scenario) = lowered(&after_the_whole_if(true, MADE, SECOND, otherwise));
+        let run = simulate(project, &scenario).await;
+        assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+        let order = ["choice", "made", "second", "later"].map(|handle| position(&run, handle));
+        assert!(order.is_sorted(), "{order:?}: {run:#?}");
+        assert_eq!(by_handle(&run, "later").status, StepStatus::Passed);
+    }
+}
+
+/// Criterion 1: after the last step of `else`, or after the condition when
+/// the branch taken holds no step.
+#[tokio::test]
+async fn lang14_criterion_1_after_the_whole_if_waits_for_else_or_runs_at_once() {
+    let (project, scenario) = lowered(&after_the_whole_if(false, MADE, SECOND, OTHER));
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+    assert!(position(&run, "other") < position(&run, "later"));
+    assert_eq!(by_handle(&run, "later").status, StepStatus::Passed);
+
+    let (project, scenario) = lowered(&after_the_whole_if(false, MADE, SECOND, ""));
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+    for handle in ["made", "second"] {
+        assert_eq!(
+            by_handle(&run, handle).status,
+            StepStatus::Skipped,
+            "{handle}"
+        );
+    }
+    assert!(position(&run, "choice") < position(&run, "later"));
+    assert_eq!(by_handle(&run, "later").status, StepStatus::Passed);
+}
+
+/// Criterion 2: the step after the `if` does not run when the branch taken
+/// ended in a step that errored or was blocked.
+#[tokio::test]
+async fn lang14_criterion_2_after_a_broken_branch_the_step_does_not_run() {
+    let id = |run: &RunResult, handle: &str| by_handle(run, handle).node_id.clone();
+    // Without a sample `second` errors; without one for `made`, `second` is blocked.
+    for (made, second, last) in [
+        (MADE, "", StepStatus::Error),
+        ("", SECOND, StepStatus::Blocked),
+    ] {
+        let (project, scenario) = lowered(&after_the_whole_if(true, made, second, OTHER));
+        let run = simulate(project, &scenario).await;
+        assert_eq!(by_handle(&run, "second").status, last, "{run:#?}");
+        assert_eq!(by_handle(&run, "later").status, StepStatus::Blocked);
+        assert_eq!(
+            by_handle(&run, "later").cause,
+            Some(NotRunCause::BlockedBy {
+                step: id(&run, "second")
+            })
+        );
+    }
+}
