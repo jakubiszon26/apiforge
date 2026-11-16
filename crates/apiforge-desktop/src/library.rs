@@ -4,7 +4,7 @@ use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
     block::Block,
-    format::{Binding, Project},
+    format::{Binding, Component, Project},
     graph::latest_components,
     operator::{Operator, OperatorGroup},
 };
@@ -42,6 +42,16 @@ fn basic_steps(component: bool) -> impl Iterator<Item = Block> {
         .filter(move |block| block.offered(component))
 }
 
+/// The newest revision of every component a board may call, as the library
+/// and *Add step* offer them: on a component's board (`editing`, its ID)
+/// every component but that one, which would call itself (UX-22).
+pub fn offered_components<'a>(project: &'a Project, editing: Option<&str>) -> Vec<&'a Component> {
+    latest_components(project)
+        .into_iter()
+        .filter(|component| Some(component.id.as_str()) != editing)
+        .collect()
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum Section {
     #[default]
@@ -74,7 +84,8 @@ pub struct Context<'a> {
     pub variables: Vec<(String, String)>,
     /// Parameters of the scenario, or arguments of the component being edited.
     pub parameters: Vec<String>,
-    pub editing_component: bool,
+    /// The ID of the component whose board this is; `None` on a scenario's.
+    pub editing_component: Option<&'a str>,
     pub running: bool,
     pub document_locked: bool,
     /// The *Examples* entry opens demo scenarios into the workspace; the folder
@@ -161,7 +172,7 @@ impl Library {
         trailing: impl FnOnce(&mut egui::Ui),
         enabled: bool,
     ) -> Vec<Action> {
-        let components = latest_components(context.project);
+        let components = offered_components(context.project, context.editing_component);
         ui.horizontal(|ui| {
             let heading = ui.label(
                 RichText::new("BLOCK LIBRARY")
@@ -176,7 +187,8 @@ impl Library {
             });
             ui.label(
                 RichText::new(
-                    (basic_steps(context.editing_component).count() + components.len()).to_string(),
+                    (basic_steps(context.editing_component.is_some()).count() + components.len())
+                        .to_string(),
                 )
                 .size(11.0)
                 .color(theme::MUTED),
@@ -197,7 +209,7 @@ impl Library {
         enabled: bool,
     ) -> Vec<Action> {
         let mut actions = Vec::new();
-        let components = latest_components(context.project);
+        let components = offered_components(context.project, context.editing_component);
         if !enabled {
             ui.disable();
         }
@@ -260,7 +272,7 @@ impl Library {
                 if context.document_locked {
                     ui.disable();
                 }
-                if show_blocks && !context.editing_component && context.show_examples {
+                if show_blocks && context.editing_component.is_none() && context.show_examples {
                     widgets::action_menu(
                         ui,
                         widgets::action(Icon::Layers, "Examples").quiet(),
@@ -287,7 +299,7 @@ impl Library {
                 }
                 if show_blocks {
                     widgets::subcaption(ui, "BASIC STEPS");
-                    for block in basic_steps(context.editing_component) {
+                    for block in basic_steps(context.editing_component.is_some()) {
                         if matches(&format!("{} {}", block.label(), block.description())) {
                             let payload = Payload::Node {
                                 block,
@@ -383,7 +395,7 @@ impl Library {
             ));
         }
         for name in &context.parameters {
-            let kind = if context.editing_component {
+            let kind = if context.editing_component.is_some() {
                 "argument"
             } else {
                 "parameter"

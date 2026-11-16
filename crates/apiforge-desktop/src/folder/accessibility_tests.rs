@@ -122,7 +122,6 @@ fn stage_ii_screens_and_dialogs_name_every_control() {
             "new document",
             Some(Prompt::NewDocument {
                 kind: DocumentKind::Scenario,
-                folder: None,
                 name: "new.afs".into(),
                 error: None,
             }),

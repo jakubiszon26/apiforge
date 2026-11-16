@@ -226,10 +226,9 @@ pub(super) enum Action {
         folder: String,
     },
     Delete(String),
-    NewDocument {
-        kind: DocumentKind,
-        folder: String,
-    },
+    /// A new scenario or component, which goes into its kind's folder
+    /// whatever row is selected (UX-22, decision 13).
+    NewDocument(DocumentKind),
     NewFolder(String),
     Import(String),
     Register(String),
@@ -639,10 +638,9 @@ impl FolderApp {
                 }
             }
             Action::Delete(path) => self.request_delete(vec![path]),
-            Action::NewDocument { kind, folder } => {
+            Action::NewDocument(kind) => {
                 self.prompt = Some(Prompt::NewDocument {
                     kind,
-                    folder: Some(folder),
                     name: String::new(),
                     error: None,
                 });
@@ -890,16 +888,10 @@ fn new_items_menu(ui: &mut egui::Ui, folder: &str, actions: &mut Vec<Action>) {
         },
     );
     if ui.button("New scenario").clicked() {
-        actions.push(Action::NewDocument {
-            kind: DocumentKind::Scenario,
-            folder: folder.to_owned(),
-        });
+        actions.push(Action::NewDocument(DocumentKind::Scenario));
     }
     if ui.button("New component").clicked() {
-        actions.push(Action::NewDocument {
-            kind: DocumentKind::Component,
-            folder: folder.to_owned(),
-        });
+        actions.push(Action::NewDocument(DocumentKind::Component));
     }
     if ui.button("New folder").clicked() {
         actions.push(Action::NewFolder(folder.to_owned()));
