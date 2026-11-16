@@ -193,10 +193,10 @@ fn the_code_side_of_split_keeps_its_own_hint() {
 }
 
 /// Criterion 5: the board's other hints are unchanged — a text file's hint
-/// keeps the board to itself, justified across it as it is today. Its board
-/// is a few points shorter than an empty one, whose tab strip holds no tab,
-/// so what is measured is the hint itself. Since KTLO-11 the panel with the
-/// project's files stays beside it, so the board starts at the panel's edge.
+/// keeps the board to itself, centred across it. Since KTLO-11 the panel with
+/// the project's files stays beside it, so the board starts at the panel's
+/// edge; since UX-23 (decision 15) *Show code* is under the hint, so the hint
+/// is no longer one label justified across the whole board.
 #[test]
 fn the_text_file_hint_keeps_the_board_to_itself() {
     let project = shop_project();
@@ -215,9 +215,10 @@ fn the_text_file_hint_keeps_the_board_to_itself() {
         "a text file's hint keeps the board to itself"
     );
     let window = harness.ctx.content_rect();
+    let button = rect(&harness, "Show code");
     assert!(
-        hint.height() > 200.0,
-        "the text-file hint at {hint:?} is no longer justified across its board"
+        button.top() >= hint.bottom() && hint.x_range().contains(button.center().x),
+        "*Show code* at {button:?} is under the hint at {hint:?}"
     );
     let board_left = harness
         .get_by_label("Resize block library")
@@ -227,10 +228,16 @@ fn the_text_file_hint_keeps_the_board_to_itself() {
     // The harness's own central panel insets the window by its margin.
     let margin = egui::Frame::central_panel(&harness.ctx.global_style()).inner_margin;
     let board_right = window.right() - margin.rightf();
+    let centre = (board_left + board_right) / 2.0;
     assert!(
-        (hint.left() - board_left).abs() <= 1.0 && (hint.right() - board_right).abs() <= 1.0,
-        "the text-file hint at {hint:?} no longer spans the board from the panel's edge \
+        (hint.center().x - centre).abs() <= 1.0 && hint.left() > board_left,
+        "the text-file hint at {hint:?} is not centred on the board from the panel's edge \
          {board_left} to {board_right}"
+    );
+    let middle = (hint.top() + button.bottom()) / 2.0;
+    assert!(
+        (middle - window.center().y).abs() < 60.0,
+        "the hint and *Show code* at {hint:?}, {button:?} are not in the board's middle"
     );
 }
 

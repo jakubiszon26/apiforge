@@ -597,7 +597,8 @@ pub struct RunArguments {
     /// written in code fill the rest. A scenario takes none.
     #[serde(default)]
     pub inputs: Option<Map<String, Value>>,
-    /// The runner's complete JSON report instead of the compact steps.
+    /// The runner's JSON report instead of the compact steps: every step's
+    /// inputs, outputs, request and response, without the board snapshot.
     #[serde(default)]
     pub full: bool,
     /// Real requests to the project's API, journalled before each is sent.
@@ -666,9 +667,23 @@ pub struct Step {
     /// Why a step that did not run did not run; absent for a step that ran.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cause: Option<NotRunCause>,
+    /// What a component call or a component's export that ran gave, by
+    /// output name: a call's exports, an export's `value`. Absent for other
+    /// steps, for a step that did not run, and when larger than 4 KiB
+    /// (then `outputs_omitted_bytes`). `full: true` has every step's values
+    /// and the responses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outputs: Option<Map<String, Value>>,
+    /// The size in bytes of `outputs` left out whole because their JSON
+    /// exceeds 4 KiB; a value is never cut. `full: true` has them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outputs_omitted_bytes: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Step>>,
 }
+
+/// The largest `outputs` a compact step carries, as compact JSON.
+pub const MAX_STEP_OUTPUT_BYTES: usize = 4 * 1024;
 
 /// Why a step did not run. A step is named by its handle.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -711,7 +726,8 @@ pub struct RunReport {
     /// The compact steps; absent with `full`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Step>>,
-    /// The runner's complete JSON report; only with `full`.
+    /// The runner's JSON report, every step's inputs, outputs, request and
+    /// response, without the board snapshot; only with `full`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub report: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1142,11 +1158,7 @@ pub(crate) fn execute(
             redacted: true,
             step_count: count(&report.steps),
             steps: (!arguments.full).then(|| steps(report)),
-            report: arguments
-                .full
-                .then(|| serde_json::to_value(report))
-                .transpose()
-                .map_err(|error| ToolError::new(ErrorCode::InvalidText, error.to_string()))?,
+            report: arguments.full.then(|| full_report(report)).transpose()?,
             error: report.error.clone(),
             notice: report.notice.clone(),
             request_id: arguments.request_id.clone(),
@@ -1345,6 +1357,37 @@ const MAY_HAVE_HAPPENED: &str = "The API may have performed this request.";
 /// The runner's sentence on a failed request that never left the process.
 const NOTHING_SENT: &str = "Nothing was sent to the API.";
 
+/// The runner's report as `full: true` returns it: without the board
+/// snapshot, which a model reads through `read_source` or `print` (MCP-23).
+fn full_report(report: &RunResult) -> Result<Value, ToolError> {
+    let mut value = serde_json::to_value(report)
+        .map_err(|error| ToolError::new(ErrorCode::InvalidText, error.to_string()))?;
+    if let Some(fields) = value.as_object_mut() {
+        fields.remove("snapshot");
+    }
+    Ok(value)
+}
+
+/// The `outputs` of a compact step, or the size of those left out whole
+/// (MCP-23): only a component call or a component's export that ran.
+fn outputs(found: &StepResult) -> (Option<Map<String, Value>>, Option<usize>) {
+    use apiforge_core::model::NodeKind;
+    if !matches!(found.kind, NodeKind::Component | NodeKind::Export) || found.cause.is_some() {
+        return (None, None);
+    }
+    let outputs: Map<String, Value> = found
+        .outputs
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    let size = serde_json::to_vec(&outputs).map_or(usize::MAX, |bytes| bytes.len());
+    if size > MAX_STEP_OUTPUT_BYTES {
+        (None, Some(size))
+    } else {
+        (Some(outputs), None)
+    }
+}
+
 /// The compact steps of a report.
 pub fn steps(report: &RunResult) -> Vec<Step> {
     let live = report.mode == apiforge_core::run::RunMode::Live;
@@ -1403,6 +1446,7 @@ fn step(found: &StepResult, live: bool, siblings: &[StepResult]) -> Step {
         }
         _ => (None, None),
     };
+    let (outputs, outputs_omitted_bytes) = outputs(found);
     Step {
         handle: found.handle.clone(),
         label: found.label.clone(),
@@ -1423,6 +1467,8 @@ fn step(found: &StepResult, live: bool, siblings: &[StepResult]) -> Step {
         actual,
         may_have_reached_api: may_have_reached_api(found, live),
         cause: cause(found, siblings),
+        outputs,
+        outputs_omitted_bytes,
         steps: found.children.as_ref().map(|children| {
             children
                 .iter()

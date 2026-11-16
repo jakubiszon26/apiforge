@@ -1,8 +1,20 @@
 name: CI
 
+# #407: a pull request runs Linux once; Windows runs on a push to main, on a
+# pull request labelled `ci:windows`, and by hand (workflow_dispatch).
 on:
   push:
+    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+# A newer commit on the same pull request cancels the older run; main's runs
+# all finish. Adding any label other than `ci:windows` gets a group of its own,
+# so it cancels nothing, and its job is skipped below.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}${{ github.event.action == 'labeled' && github.event.label.name != 'ci:windows' && format('-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Minimal read-only permissions for repository contents
 permissions:
@@ -14,16 +26,15 @@ env:
 jobs:
   build-and-test:
     name: Build & Test (${{ matrix.os }})
+    if: github.event.action != 'labeled' || github.event.label.name == 'ci:windows'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-24.04
-            binary_path: target/release/apiforge-desktop
-          - os: windows-2022
-            binary_path: target/release/apiforge-desktop.exe
+        os: ${{ fromJSON(github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'ci:windows') && '["ubuntu-24.04"]' || '["ubuntu-24.04", "windows-2022"]') }}
+    env:
+      BINARY_PATH: ${{ matrix.os == 'windows-2022' && 'target/release/apiforge-desktop.exe' || 'target/release/apiforge-desktop' }}
 
     steps:
       - name: Checkout repository
@@ -147,7 +158,7 @@ jobs:
       - name: Validate workspace using the native release binary
         shell: bash
         run: |
-          output="$(./${{ matrix.binary_path }} --check fixtures/workspace.json)"
+          output="$(./${{ env.BINARY_PATH }} --check fixtures/workspace.json)"
           printf '%s\n' "$output"
           if [[ ! "$output" =~ ^Valid\ v[0-9]+\ document:\ [0-9]+\ project\(s\)$ ]]; then
             echo "::error::--check did not print one Valid v<n> document line"
@@ -177,10 +188,10 @@ jobs:
           export XDG_RUNTIME_DIR="$(mktemp -d)"
           trap 'rm -rf "$XDG_RUNTIME_DIR"' EXIT
           xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
-            timeout --kill-after=5s 45s ./${{ matrix.binary_path }} \
+            timeout --kill-after=5s 45s ./${{ env.BINARY_PATH }} \
             --smoke-test fixtures/workspace.json
           xvfb-run --auto-servernum --server-args='-screen 0 1920x1200x24' \
-            timeout --kill-after=5s 45s ./${{ matrix.binary_path }} \
+            timeout --kill-after=5s 45s ./${{ env.BINARY_PATH }} \
             --screenshot test-results/native-window.png \
             --project fixtures/workspace.json \
             --select 'Cena po promocji'
@@ -206,7 +217,7 @@ jobs:
           }
           function Invoke-NativeProbe([string[]] $ProbeArguments) {
             $failures = Join-Path $env:RUNNER_TEMP "native-probe-$([guid]::NewGuid()).err.log"
-            $process = Start-Process -FilePath './${{ matrix.binary_path }}' `
+            $process = Start-Process -FilePath './${{ env.BINARY_PATH }}' `
               -ArgumentList $ProbeArguments -NoNewWindow -PassThru -RedirectStandardError $failures
             # Keep the process handle so ExitCode remains available after exit.
             $null = $process.Handle
@@ -258,7 +269,7 @@ jobs:
           done
           test -n "${VK_DRIVER_FILES:-}"
           mkdir -p test-results
-          binary="$PWD/${{ matrix.binary_path }}"
+          binary="$PWD/${{ env.BINARY_PATH }}"
           export XDG_RUNTIME_DIR="$(mktemp -d)"
           scratch="$(mktemp -d)"
           trap 'rm -rf "$XDG_RUNTIME_DIR" "$scratch"' EXIT
@@ -458,7 +469,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force test-results | Out-Null
-          $binary = './${{ matrix.binary_path }}'
+          $binary = './${{ env.BINARY_PATH }}'
           # The same known folder dirs::data_dir() asks for.
           $roaming = [Environment]::GetFolderPath('ApplicationData')
           if ([string]::IsNullOrWhiteSpace($roaming)) {
@@ -1061,5 +1072,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apiforge-desktop-${{ matrix.os }}
-          path: ${{ matrix.binary_path }}
+          path: ${{ env.BINARY_PATH }}
           if-no-files-found: error
