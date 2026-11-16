@@ -359,6 +359,24 @@
         ]
       },
       {
+        "nodeId": "priority",
+        "handle": "priorytet_wysoki",
+        "label": "Priorytet wysoki",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "high",
+          "expected": "high"
+        },
+        "outputs": {
+          "value": "high",
+          "passed": true
+        },
+        "actual": "high",
+        "expected": "high"
+      },
+      {
         "nodeId": "open",
         "handle": "sprawdz_otwarte_zgloszenie",
         "label": "Sprawdź otwarte zgłoszenie",
@@ -423,24 +441,6 @@
             }
           }
         ]
-      },
-      {
-        "nodeId": "priority",
-        "handle": "priorytet_wysoki",
-        "label": "Priorytet wysoki",
-        "kind": "assert",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "actual": "high",
-          "expected": "high"
-        },
-        "outputs": {
-          "value": "high",
-          "passed": true
-        },
-        "actual": "high",
-        "expected": "high"
       }
     ]
   }

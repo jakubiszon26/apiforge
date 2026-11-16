@@ -281,6 +281,20 @@
         "expected": 80
       },
       {
+        "nodeId": "reads-failed",
+        "handle": "reads_failed",
+        "label": "reads-failed",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": 100
+        },
+        "outputs": {
+          "value": 100
+        }
+      },
+      {
         "nodeId": "after",
         "handle": "after",
         "kind": "request",
@@ -320,20 +334,6 @@
           "method": "GET",
           "url": "https://api.example.test/v1/independent",
           "headers": {}
-        }
-      },
-      {
-        "nodeId": "reads-failed",
-        "handle": "reads_failed",
-        "label": "reads-failed",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": 100
-        },
-        "outputs": {
-          "value": 100
         }
       },
       {

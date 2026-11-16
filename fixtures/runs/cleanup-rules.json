@@ -404,6 +404,32 @@
     "hasError": false,
     "steps": [
       {
+        "nodeId": "broken",
+        "handle": "broken",
+        "kind": "value",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "gate",
+        "handle": "gate",
+        "kind": "condition",
+        "status": "blocked",
+        "phase": "main",
+        "inputs": {
+          "actual1": 1,
+          "expected1": 2
+        },
+        "outputs": {
+          "value": 1,
+          "passed": false
+        },
+        "actual": 1,
+        "expected": 2
+      },
+      {
         "nodeId": "create",
         "handle": "create",
         "kind": "request",
@@ -449,32 +475,6 @@
         },
         "actual": "item-7",
         "expected": "other"
-      },
-      {
-        "nodeId": "broken",
-        "handle": "broken",
-        "kind": "value",
-        "status": "error",
-        "phase": "main",
-        "inputs": {},
-        "outputs": {}
-      },
-      {
-        "nodeId": "gate",
-        "handle": "gate",
-        "kind": "condition",
-        "status": "blocked",
-        "phase": "main",
-        "inputs": {
-          "actual1": 1,
-          "expected1": 2
-        },
-        "outputs": {
-          "value": 1,
-          "passed": false
-        },
-        "actual": 1,
-        "expected": 2
       },
       {
         "nodeId": "read",

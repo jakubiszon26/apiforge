@@ -1806,7 +1806,9 @@ fn mcp14_criterion_1_simulated_run_results_match_the_output_schema() {
     assert_eq!(passed["replayed"], false);
     assert_eq!(passed["journal_unreadable"], false);
     assert!(
-        passed["steps"][0]["steps"].is_array(),
+        passed["steps"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| step["steps"].is_array())),
         "a component's steps nested: {passed}"
     );
     assert!(

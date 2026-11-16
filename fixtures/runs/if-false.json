@@ -363,6 +363,16 @@
         "outputs": {}
       },
       {
+        "nodeId": "checks-yes",
+        "handle": "checks_yes",
+        "label": "checks-yes",
+        "kind": "assert",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
         "nodeId": "yes-next",
         "handle": "yes_next",
         "label": "yes-next",
@@ -392,6 +402,29 @@
           "url": "https://api.example.test/v1/no",
           "headers": {}
         }
+      },
+      {
+        "nodeId": "no-side",
+        "handle": "no_side",
+        "label": "no-side",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": "no"
+        },
+        "outputs": {
+          "value": "no"
+        }
+      },
+      {
+        "nodeId": "mixed",
+        "handle": "mixed",
+        "kind": "value",
+        "status": "blocked",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
       },
       {
         "nodeId": "no-next",
@@ -442,39 +475,6 @@
         "label": "uses-yes",
         "kind": "request",
         "status": "skipped",
-        "phase": "main",
-        "inputs": {},
-        "outputs": {}
-      },
-      {
-        "nodeId": "checks-yes",
-        "handle": "checks_yes",
-        "label": "checks-yes",
-        "kind": "assert",
-        "status": "skipped",
-        "phase": "main",
-        "inputs": {},
-        "outputs": {}
-      },
-      {
-        "nodeId": "no-side",
-        "handle": "no_side",
-        "label": "no-side",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": "no"
-        },
-        "outputs": {
-          "value": "no"
-        }
-      },
-      {
-        "nodeId": "mixed",
-        "handle": "mixed",
-        "kind": "value",
-        "status": "blocked",
         "phase": "main",
         "inputs": {},
         "outputs": {}

@@ -395,6 +395,26 @@
         }
       },
       {
+        "nodeId": "flow-body",
+        "handle": "produkty_do_dodania",
+        "label": "Produkty do dodania",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": {
+            "productId": 123,
+            "quantity": 2
+          }
+        },
+        "outputs": {
+          "value": {
+            "productId": 123,
+            "quantity": 2
+          }
+        }
+      },
+      {
         "nodeId": "flow-if",
         "handle": "if_response_200",
         "label": "IF response = 200",
@@ -411,6 +431,16 @@
         },
         "actual": 200,
         "expected": 200
+      },
+      {
+        "nodeId": "flow-else",
+        "handle": "zglos_brak_cen_bez_tworzenia_koszyka",
+        "label": "Zgłoś brak cen — bez tworzenia koszyka",
+        "kind": "assert",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
       },
       {
         "nodeId": "flow-cart",
@@ -440,26 +470,6 @@
             "Content-Type": "application/json"
           },
           "body": {}
-        }
-      },
-      {
-        "nodeId": "flow-body",
-        "handle": "produkty_do_dodania",
-        "label": "Produkty do dodania",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": {
-            "productId": 123,
-            "quantity": 2
-          }
-        },
-        "outputs": {
-          "value": {
-            "productId": 123,
-            "quantity": 2
-          }
         }
       },
       {
@@ -522,16 +532,6 @@
         },
         "actual": 160,
         "expected": 160
-      },
-      {
-        "nodeId": "flow-else",
-        "handle": "zglos_brak_cen_bez_tworzenia_koszyka",
-        "label": "Zgłoś brak cen — bez tworzenia koszyka",
-        "kind": "assert",
-        "status": "skipped",
-        "phase": "main",
-        "inputs": {},
-        "outputs": {}
       },
       {
         "nodeId": "flow-cleanup",

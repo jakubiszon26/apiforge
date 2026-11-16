@@ -558,12 +558,12 @@ const DEMO_BASE_URL: &str = "http://127.0.0.1:4318/demo/shop";
 
 /// Every top-level step of the demo scenario, the cleanup's last.
 const DEMO_STEPS: [&str; 8] = [
-    "product",
-    "active_promotion",
     "expected_price",
+    "product",
+    "field_inna_nazwa",
+    "active_promotion",
     "add_to_cart",
     "promotional_price",
-    "field_inna_nazwa",
     "delete_cart",
     "cart_was_deleted",
 ];
@@ -935,9 +935,9 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
     assert_eq!(report.step_count, 18);
     assert_eq!(count(steps), 18, "as `apiforge run` prints 18 lines");
     assert_eq!(handles(steps), DEMO_STEPS);
-    assert_eq!(steps[0].label.as_deref(), Some("Product"));
+    assert_eq!(steps[1].label.as_deref(), Some("Product"));
     assert_eq!(
-        handles(steps[0].steps.as_deref().unwrap()),
+        handles(steps[1].steps.as_deref().unwrap()),
         ["fetch_product", "product"],
         "a component's steps nested beneath it"
     );

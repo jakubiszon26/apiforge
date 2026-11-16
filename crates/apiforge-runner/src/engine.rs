@@ -3,7 +3,9 @@
 //!
 //! Operations run one at a time and each is awaited. A node becomes ready when all
 //! its data and ordering dependencies inside the graph have finished; among ready
-//! nodes the order of `graph.nodes` decides. Ordering edges activate a path (IF
+//! nodes a data statement (a value, a check, a condition, an export) goes before a
+//! step, so a step's checks run before the next request, call or IF, and within
+//! each the order of `graph.nodes` decides. Ordering edges activate a path (IF
 //! branches select one, alternatives merge with OR); data references additionally
 //! require producers whose results are usable. A graph without Start keeps the
 //! legacy behaviour where every root runs.
@@ -22,7 +24,8 @@ use apiforge_core::{
     format::{Binding, Component, Graph, Node, OptionalJson, Project, Scenario, TemplatePart},
     graph::{
         BODY_INPUT, HEADERS_INPUT, QUERY_INPUT, URL_INPUT, VALUE_INPUT, ancestors_and_self,
-        component_definition, condition_inputs, condition_predicates, input_ports, predicate,
+        component_definition, condition_inputs, condition_predicates, input_ports, next_ready,
+        predicate,
     },
     journal::{EffectState, JournalEntry, JournalRun, JournalSink},
     js::{self, js_key_order},
@@ -542,13 +545,12 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             // The step whose failure stopped this graph under the policy Stop.
             let mut stopped: Option<String> = None;
             while !pending.is_empty() {
-                let index = pending
-                    .iter()
-                    .position(|node| {
-                        plan.dependencies_of(&node.id)
-                            .all(|id| !graph_ids.contains(id) || context.outputs.contains_key(id))
-                    })
-                    .ok_or(StepError::Unresolvable)?;
+                // A step's checks and values run before the next step (RUN-03).
+                let index = next_ready(&pending, |node| {
+                    plan.dependencies_of(&node.id)
+                        .all(|id| !graph_ids.contains(id) || context.outputs.contains_key(id))
+                })
+                .ok_or(StepError::Unresolvable)?;
                 let node = pending.remove(index);
                 let bypass_gate = self.request.single_node_id.as_deref() == Some(node.id.as_str())
                     && selected.is_some_and(|selected| selected.len() == 1);
