@@ -61,11 +61,14 @@ fn lay32_criterion_1_a_port_with_a_count_draws_no_line() {
                     .cloned()
                     .collect();
                 if !lines.is_empty() {
-                    both.push(format!("{name} {checks:?}: {} and {lines:?}", count.count.label));
+                    both.push(format!(
+                        "{name} {checks:?}: {} and {lines:?}",
+                        count.count.label
+                    ));
                 }
             }
             let (lines, crossings, pairs) = measures(&harness, &id);
-            eprintln!(
+            errln!(
                 "LAY-32 {name} {checks:?}: {lines} lines, {crossings} crossings, \
                  {pairs} coincident pairs, {} chips",
                 board(&harness, &id).debug_tags().len()

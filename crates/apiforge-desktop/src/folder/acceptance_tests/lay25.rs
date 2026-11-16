@@ -1151,9 +1151,10 @@ fn lay25_criterion_10_a_variable_is_read_through_chips() {
         "quantity reads cartId through its chip: {wires:?}"
     );
     assert!(
-        board(&harness, &id).debug_tags().iter().any(|tag| {
-            handle(&tag.tag.reader) == "quantity" && tag.tag.text == "cartId"
-        }),
+        board(&harness, &id)
+            .debug_tags()
+            .iter()
+            .any(|tag| { handle(&tag.tag.reader) == "quantity" && tag.tag.text == "cartId" }),
         "quantity carries a chip of cartId"
     );
 
