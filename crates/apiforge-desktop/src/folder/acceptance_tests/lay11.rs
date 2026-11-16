@@ -130,7 +130,11 @@ fn lay11_criterion_1_a_failed_check_is_visible_collapsed() {
             "checkout is drawn at {zoom}"
         );
         let text = aggregate(&harness, "checkout");
-        assert!(text.starts_with("✕ 1/3 failed"), "at {zoom}: {text}");
+        // The numbers of the folded checks first (LAY-27).
+        assert!(
+            text.starts_with("19–21 · ✕ 1/3 failed"),
+            "at {zoom}: {text}"
+        );
         if zoom >= 0.6 {
             assert!(
                 lines(&harness, "checkout").contains(&text),
@@ -153,9 +157,10 @@ fn lay11_criterion_1_a_failed_check_is_visible_collapsed() {
 fn lay11_criterion_2_no_tick_before_a_run() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
     show(&mut harness, "cart", 0.6);
-    assert_eq!(aggregate(&harness, "cart"), "3 checks");
-    assert_eq!(aggregate(&harness, "checkout"), "3 checks");
-    assert_eq!(aggregate(&harness, "login"), "2 checks");
+    // Each line starts with the numbers of its folded checks (LAY-27).
+    assert_eq!(aggregate(&harness, "cart"), "13–14, 26 · 3 checks");
+    assert_eq!(aggregate(&harness, "checkout"), "19–21 · 3 checks");
+    assert_eq!(aggregate(&harness, "login"), "3–4 · 2 checks");
     for node in graph(&harness).nodes {
         if let Some(text) = canvas(&harness).debug_aggregate(&node.id) {
             assert!(
@@ -168,7 +173,7 @@ fn lay11_criterion_2_no_tick_before_a_run() {
     assert!(canvas(&harness).debug_marked().is_empty());
 
     simulate(&mut harness);
-    assert_eq!(aggregate(&harness, "login"), "✓ 2 checks");
+    assert_eq!(aggregate(&harness, "login"), "3–4 · ✓ 2 checks");
     // The run as it stood when `logged_in` had passed and `known_user` had
     // not run yet.
     let known_user = id_of(&harness, "known_user");
@@ -188,9 +193,9 @@ fn lay11_criterion_2_no_tick_before_a_run() {
     app(&mut harness).debug_cut_run(&id, |step| kept.contains(&step.node_id));
     settle(&mut harness);
     show(&mut harness, "login", 0.6);
-    assert_eq!(aggregate(&harness, "login"), "1 ✓ · 1 waiting");
+    assert_eq!(aggregate(&harness, "login"), "3–4 · 1 ✓ · 1 waiting");
     assert!(
-        lines(&harness, "login").contains(&"1 ✓ · 1 waiting".to_owned()),
+        lines(&harness, "login").contains(&"3–4 · 1 ✓ · 1 waiting".to_owned()),
         "{:?}",
         lines(&harness, "login")
     );
@@ -329,8 +334,9 @@ fn lay11_criterion_6_a_shared_check_is_counted_twice() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
     show(&mut harness, "cart", 0.6);
     assert!(hidden(&harness, "receipt_total"));
-    assert_eq!(aggregate(&harness, "cart"), "3 checks");
-    assert_eq!(aggregate(&harness, "receipt"), "1 check");
+    // 26 is `receipt_total`'s number, in both lines (LAY-27).
+    assert_eq!(aggregate(&harness, "cart"), "13–14, 26 · 3 checks");
+    assert_eq!(aggregate(&harness, "receipt"), "26 · 1 check");
 
     open_aggregate(&mut harness, "receipt");
     assert_eq!(selected(&harness), vec![id_of(&harness, "receipt")]);

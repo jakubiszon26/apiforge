@@ -537,59 +537,174 @@ fn execution(step: &StepResult) -> (String, Color32) {
     )
 }
 
-/// The checks pill under a card's name at Overview (Q5 = A): what became of
-/// the step's checks, red when one failed. Drawn only where it fits.
-fn pill(
+/// The checks pill under a card's name at Overview (Q5 = A), as it would be
+/// drawn: its box, its text and its font; `None` where it has no room.
+struct Pill {
+    rect: Rect,
+    text: String,
+    font: FontId,
+}
+
+impl Pill {
+    /// The pill under a name whose row ends at `top`, under a centred name
+    /// or at the left under a name at the left. Wider than its card, it
+    /// reads the numbers of the folded checks alone (LAY-27).
+    fn layout(
+        painter: &Painter,
+        card: Rect,
+        top: f32,
+        centred: bool,
+        zoom: f32,
+        aggregate: &Aggregate,
+    ) -> Option<Self> {
+        let mut text = aggregate.text();
+        if text.is_empty() || zoom < LABELS_FROM {
+            return None;
+        }
+        let font = FontId::proportional(min_on_screen(LINE_TEXT, zoom, LINE_MIN));
+        let measure = |text: &str| {
+            painter
+                .layout_no_wrap(text.to_owned(), font.clone(), theme::MUTED)
+                .size()
+        };
+        let mut size = measure(&text);
+        if size.x + 10.0 > card.width() - 10.0 && !aggregate.numbers.is_empty() {
+            text = aggregate.numbers_text();
+            size = measure(&text);
+        }
+        let width = (size.x + 10.0).min(card.width() - 10.0);
+        let left = if centred {
+            card.center().x - width / 2.0
+        } else {
+            card.left() + 5.0
+        };
+        let rect = Rect::from_min_size(pos2(left, top), vec2(width, size.y + 2.0));
+        if rect.bottom() > card.bottom() - 1.0 || rect.width() < 12.0 {
+            return None;
+        }
+        Some(Self { rect, text, font })
+    }
+
+    /// Draws the pill, red when a check failed.
+    fn draw(self, painter: &Painter, drawn: &mut Drawn, aggregate: &Aggregate) {
+        let color = if aggregate.failed() {
+            theme::DANGER
+        } else {
+            theme::MUTED
+        };
+        painter.rect_filled(
+            self.rect,
+            self.rect.height() / 2.0,
+            if aggregate.failed() {
+                theme::DANGER.gamma_multiply(0.12)
+            } else {
+                theme::FIELD
+            },
+        );
+        drawn.label(
+            painter,
+            self.rect.shrink2(vec2(5.0, 0.0)),
+            &self.text,
+            TextKind::Result,
+            self.font,
+            color,
+            egui::Align::Min,
+        );
+    }
+}
+
+/// What a name keeps on screen before its ellipsis when the numbers of the
+/// folded checks share its row: two letters at the smallest name (LAY-27).
+const NAME_KEEPS: f32 = 2.0 * NAME_MIN;
+
+/// Where a card's checks pill has no room (LAY-27, Q1 = A): the numbers of
+/// its folded checks, muted (red where a check failed), at the right end of
+/// the name's row `row`. The numbers are always whole and the name gives
+/// way, keeping [`NAME_KEEPS`] before its ellipsis; where both do not fit
+/// the list loses numbers from its end and ends with `…`, the first kept.
+/// Returns what is left of the row for the name.
+fn numbers_on_name_row(
     painter: &Painter,
     drawn: &mut Drawn,
     card: Rect,
-    top: f32,
-    // Under a centred name, or at the left under a name at the left.
-    centred: bool,
+    row: Rect,
+    name: (&str, &FontId),
     zoom: f32,
     aggregate: &Aggregate,
-) {
-    let text = aggregate.text();
-    if text.is_empty() || zoom < LABELS_FROM {
-        return;
+) -> Rect {
+    /// The space between the name and the numbers, and between the numbers
+    /// and the card's edge, where its sockets are.
+    const GAP: f32 = 4.0;
+    const EDGE: f32 = 5.0;
+    let parts = aggregate.number_parts();
+    if parts.is_empty() {
+        return row;
     }
+    let row = Rect::from_min_max(
+        row.left_top(),
+        pos2(row.right().min(card.right() - EDGE), row.bottom()),
+    );
     let font = FontId::proportional(min_on_screen(LINE_TEXT, zoom, LINE_MIN));
     let color = if aggregate.failed() {
         theme::DANGER
     } else {
         theme::MUTED
     };
-    let size = painter
-        .layout_no_wrap(text.clone(), font.clone(), color)
-        .size();
-    let width = (size.x + 10.0).min(card.width() - 10.0);
-    let left = if centred {
-        card.center().x - width / 2.0
-    } else {
-        card.left() + 5.0
+    let width = |text: &str, font: &FontId| {
+        painter
+            .layout_no_wrap(text.to_owned(), font.clone(), color)
+            .size()
+            .x
     };
-    let rect = Rect::from_min_size(pos2(left, top), vec2(width, size.y + 2.0));
-    if rect.bottom() > card.bottom() - 1.0 || rect.width() < 12.0 {
-        return;
+    // The name's cell keeps the first letters that make 22 px with the
+    // ellipsis after them, or the whole name where it is narrower.
+    let (name, name_font) = name;
+    let mut prefix = String::new();
+    for letter in name.chars() {
+        if width(&prefix, name_font) >= NAME_KEEPS {
+            break;
+        }
+        prefix.push(letter);
     }
-    painter.rect_filled(
-        rect,
-        rect.height() / 2.0,
-        if aggregate.failed() {
-            theme::DANGER.gamma_multiply(0.12)
-        } else {
-            theme::FIELD
-        },
+    let whole = width(name, name_font);
+    let keeps = if prefix.len() == name.len() {
+        whole
+    } else {
+        // A point to spare, as the label measures the ellipsis itself.
+        (width(&format!("{prefix}…"), name_font) + 1.0).min(whole)
+    };
+    let room = row.width() - keeps - GAP;
+    let shortened = |count: usize| {
+        let mut text = parts[..count].join(", ");
+        if count < parts.len() {
+            text.push_str(", …");
+        }
+        text
+    };
+    let text = (1..=parts.len())
+        .rev()
+        .map(shortened)
+        .find(|text| width(text, &font) <= room)
+        .unwrap_or_else(|| shortened(1));
+    let text_width = width(&text, &font);
+    // Half a point more than the text, so the label never cuts a digit.
+    let numbers = Rect::from_min_max(
+        pos2(row.right() - text_width - 0.5, row.top()),
+        row.right_bottom(),
     );
     drawn.label(
         painter,
-        rect.shrink2(vec2(5.0, 0.0)),
+        numbers,
         &text,
         TextKind::Result,
         font,
         color,
-        egui::Align::Min,
+        egui::Align::Max,
     );
+    Rect::from_min_max(
+        row.left_top(),
+        pos2((numbers.left() - GAP).max(row.left()), row.bottom()),
+    )
 }
 
 /// The border of a failed or blocked step: 2 px at every zoom, while the
@@ -904,6 +1019,21 @@ pub fn card(
                 area.center() - vec2(0.0, pill_height / 2.0),
                 vec2(area.width(), height),
             );
+            let pill = aggregate.and_then(|aggregate| {
+                Pill::layout(&clipped, rect, name.bottom() + 1.0, true, z, aggregate)
+            });
+            let name = match aggregate {
+                Some(aggregate) if pill.is_none() => numbers_on_name_row(
+                    &clipped,
+                    &mut drawn,
+                    rect,
+                    name,
+                    (&card.name, &name_font),
+                    z,
+                    aggregate,
+                ),
+                _ => name,
+            };
             name_rect = Some(name);
             drawn.label(
                 &clipped,
@@ -914,16 +1044,8 @@ pub fn card(
                 theme::TEXT,
                 egui::Align::Center,
             );
-            if let Some(aggregate) = aggregate {
-                pill(
-                    &clipped,
-                    &mut drawn,
-                    rect,
-                    name.bottom() + 1.0,
-                    true,
-                    z,
-                    aggregate,
-                );
+            if let (Some(pill), Some(aggregate)) = (pill, aggregate) {
+                pill.draw(&clipped, &mut drawn, aggregate);
             }
         }
     } else {
@@ -1281,6 +1403,26 @@ pub fn compact_card(
             || (name.bottom() <= rect.bottom() - 1.0 && name.width() >= 2.0 * NAME_MIN))
             .then_some(name)
     };
+    // At Overview the checks pill under the name, or the numbers of the
+    // folded checks on the name's row where it has no room (LAY-27).
+    let aggregate_at_overview = aggregate.filter(|_| !legible);
+    let pill = name
+        .zip(aggregate_at_overview)
+        .and_then(|(name, aggregate)| {
+            Pill::layout(&clipped, rect, name.bottom() + 1.0, false, z, aggregate)
+        });
+    let name = match (name, aggregate_at_overview) {
+        (Some(row), Some(aggregate)) if pill.is_none() => Some(numbers_on_name_row(
+            &clipped,
+            &mut drawn,
+            rect,
+            row,
+            (&card.name, &name_font),
+            z,
+            aggregate,
+        )),
+        _ => name,
+    };
     if let Some(name) = name {
         drawn.label(
             &clipped,
@@ -1291,17 +1433,9 @@ pub fn compact_card(
             theme::TEXT,
             egui::Align::Min,
         );
-        if !legible && let Some(aggregate) = aggregate {
-            pill(
-                &clipped,
-                &mut drawn,
-                rect,
-                name.bottom() + 1.0,
-                false,
-                z,
-                aggregate,
-            );
-        }
+    }
+    if let (Some(pill), Some(aggregate)) = (pill, aggregate_at_overview) {
+        pill.draw(&clipped, &mut drawn, aggregate);
     }
 
     let small = min_on_screen(LINE_TEXT, z, LINE_MIN);
