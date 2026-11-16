@@ -2165,6 +2165,39 @@ fn centred_hint(ui: &mut egui::Ui, text: &str) {
     ui.centered_and_justified(|ui| widgets::hint(ui, text));
 }
 
+/// A hint with one button under it, the pair centred in the area. Returns
+/// whether the button was clicked.
+fn centred_hint_with_action(ui: &mut egui::Ui, text: &str, action: &str) -> bool {
+    let area = ui.available_rect_before_wrap();
+    let gap = theme::SPACE_SM;
+    let line = ui
+        .painter()
+        .layout(
+            text.to_owned(),
+            egui::FontId::proportional(theme::FONT_LABEL),
+            theme::MUTED,
+            area.width(),
+        )
+        .size()
+        .y;
+    let height = line + gap + ui.spacing().interact_size.y;
+    let top = (area.center().y - height / 2.0).max(area.top());
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_max(
+                egui::pos2(area.left(), top),
+                area.max,
+            ))
+            .layout(egui::Layout::top_down(egui::Align::Center)),
+        |ui| {
+            widgets::hint(ui, text);
+            ui.add_space(gap);
+            ui.button(action).clicked()
+        },
+    )
+    .inner
+}
+
 /// Names a painted decoration so that a test can measure where it is, and
 /// hides it from assistive technology: a sleeping dog says nothing a screen
 /// reader needs, and KTLO-20 asks that only the hint be announced. AccessKit's
