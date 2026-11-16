@@ -5,7 +5,7 @@
 //! file is in a muted notice instead of an error banner, leaving the open tab
 //! as it was. A text file such as `.gitignore` opened in Diagram says it has
 //! no diagram and offers *Show code*, which shows it in Code.
-use super::ux31::{by_path, window};
+use super::ux31::window;
 use super::*;
 use crate::testing::{MINIMUM, capture};
 
