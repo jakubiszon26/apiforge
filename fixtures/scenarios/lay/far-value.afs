@@ -17,47 +17,47 @@ scenario "Far value" {
   product = product@1(id: catalogue.body.items[0].id)
   cart = add_to_cart@1(product: product, quantity: 2)
   @after(cart)
-  quantity = PATCH "/carts/{{cart.cart.id}}/items/{{cart.cart.productId}}" {
+  quantity = PATCH "/carts/{{cart.id}}/items/{{cart.productId}}" {
     body { quantity: 3 }
     sample 200 { id: "c-1", quantity: 3 }
   }
   quantity_ok = assert quantity.status == 200
   @after(quantity_ok)
-  apply_coupon = POST "/carts/{{cart.cart.id}}/coupon" {
+  apply_coupon = POST "/carts/{{cart.id}}/coupon" {
     body { code: param.coupon }
     sample 200 { id: "c-1", coupon: "WELCOME10" }
   }
   coupon_ok = assert apply_coupon.status == 200
   @after(coupon_ok)
-  note = PUT "/carts/{{cart.cart.id}}/items/{{cart.cart.productId}}/note" {
+  note = PUT "/carts/{{cart.id}}/items/{{cart.productId}}/note" {
     body { text: "Gift wrap" }
     sample 200 { ok: true }
   }
   note_ok = assert note.status == 200
   @after(note_ok)
-  stock = GET "/carts/{{cart.cart.id}}/items/{{cart.cart.productId}}/stock" {
+  stock = GET "/carts/{{cart.id}}/items/{{cart.productId}}/stock" {
     sample 200 { available: 12 }
   }
   in_stock = assert stock.body.available > 2
   @after(in_stock)
-  shipping = PUT "/carts/{{cart.cart.id}}/shipping" {
-    body { method: "courier", item: cart.cart.productId }
+  shipping = PUT "/carts/{{cart.id}}/shipping" {
+    body { method: "courier", item: cart.productId }
     sample 200 { ok: true }
   }
   shipping_ok = assert shipping.status == 200
   @after(shipping_ok)
-  remove_coupon = DELETE "/carts/{{cart.cart.id}}/coupon" {
+  remove_coupon = DELETE "/carts/{{cart.id}}/coupon" {
     sample 200 { id: "c-1" }
   }
   removed_ok = assert remove_coupon.status == 200
   @after(removed_ok)
-  view = GET "/carts/{{cart.cart.id}}" {
+  view = GET "/carts/{{cart.id}}" {
     sample 200 { id: "c-1", items: [{ id: 123, quantity: 3 }] }
   }
-  same_item = assert view.body.items[0].id == cart.cart.productId
+  same_item = assert view.body.items[0].id == cart.productId
   @after(same_item)
   checkout = POST "/checkout" {
-    body { cartId: cart.cart.id, itemId: cart.cart.productId, currency: session.body.currency, email: param.email, payment: "card" }
+    body { cartId: cart.id, itemId: cart.productId, currency: session.body.currency, email: param.email, payment: "card" }
     sample 201 { id: "o-1", orderNumber: "N-0001", state: "new" }
   }
   checkout_ok = condition all {
@@ -67,7 +67,7 @@ scenario "Far value" {
   }
   @after(checkout_ok)
   lookup = GET "/orders/by-number/{{checkout.body.orderNumber}}" {
-    query { email: param.email, cart: cart.cart.id, currency: session.body.currency }
+    query { email: param.email, cart: cart.id, currency: session.body.currency }
     sample 200 { id: "o-1", orderNumber: "N-0001", state: "paid" }
   }
   lookup_ok = condition all {

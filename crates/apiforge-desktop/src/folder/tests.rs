@@ -481,11 +481,11 @@ fn new_documents_start_from_valid_sources_with_unused_paths() {
     let directory = shop();
     let (context, mut app) = open(directory.path());
     for _ in 0..2 {
-        app.create_document(DocumentKind::Scenario, None, "Checkout \"fast\" path")
+        app.create_document(DocumentKind::Scenario, "Checkout \"fast\" path")
             .unwrap();
         wait_storage(&mut app, &context);
     }
-    app.create_document(DocumentKind::Component, None, "3d secure check")
+    app.create_document(DocumentKind::Component, "3d secure check")
         .unwrap();
     wait_storage(&mut app, &context);
     settle(&mut app, &context);

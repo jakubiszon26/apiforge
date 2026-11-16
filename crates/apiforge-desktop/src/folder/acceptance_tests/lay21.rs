@@ -164,11 +164,21 @@ fn lay21_criterion_1_satellites_are_shorter_than_requests() {
     let mut measured = 0;
     for node in graph(&harness).nodes {
         let height = world_of(&harness, &node.handle).height();
+        // Since #349 the line is 8 px taller with two wired inputs and 28 px
+        // with three, so that their sockets are 20 px apart
+        // (`issue349_criterion_2` holds each card to its number).
+        let sockets = [0.0, 8.0, 28.0];
         match node.kind {
-            NodeKind::Value => assert_eq!(height, VALUE, "{} is a header and a line", node.handle),
-            NodeKind::Assert => {
-                assert_eq!(height, CHECK, "{} is a header and two lines", node.handle)
-            }
+            NodeKind::Value => assert!(
+                sockets.contains(&(height - VALUE)),
+                "{} ({height} px) is a header and a line",
+                node.handle
+            ),
+            NodeKind::Assert => assert!(
+                sockets.contains(&(height - CHECK)),
+                "{} ({height} px) is a header and two lines",
+                node.handle
+            ),
             _ => {}
         }
         if satellite(node.kind) {
