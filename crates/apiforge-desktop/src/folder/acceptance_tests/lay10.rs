@@ -503,3 +503,56 @@ fn lay10_criterion_6_a_check_rings_its_subjects() {
     assert_ne!(address, check_colour(), "address is not a subject");
     assert_ne!(address, theme::ACCENT, "nor the selection");
 }
+
+/// The views of the owner's acceptance: `shop-30` tidied with its checks
+/// drawn, after a failed simulation, the Run results folded; `cart`
+/// selected at 60 % at 1600 × 1000 and 960 × 540, and `begin` selected
+/// with its ordering wire into `login`.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay10() {
+    let assert_a_card_in_view = |harness: &FolderHarness, context: &str| {
+        let board = canvas(harness);
+        let view = board.debug_focus().expand(0.5);
+        assert!(
+            board
+                .debug_cards()
+                .iter()
+                .any(|(_, card)| view.contains_rect(*card)),
+            "{context}: a whole card is in the view"
+        );
+    };
+    for (size, selected, name) in [
+        (WIDE, "cart", "lay10-cart-60-1600"),
+        (crate::testing::MINIMUM, "cart", "lay10-cart-60-960"),
+        (WIDE, "begin", "lay10-begin-60-1600"),
+    ] {
+        let project = crate::testing::shop_project();
+        fs::write(
+            project
+                .path()
+                .join("scenarios/promotion-and-cart-price.afs"),
+            failing(),
+        )
+        .unwrap();
+        fs::remove_file(project.path().join(".apiforge/diagram.json")).unwrap();
+        let (_project, mut harness, gate) = lay07::opened(project, size, true);
+        let document = document(&harness);
+        app(&mut harness).selections.insert(document, Vec::new());
+        settle(&mut harness);
+        choose(&mut harness, "Tidy up");
+        harness.step();
+        lay07::simulate(&mut harness, &gate);
+        // The board as tall as the window lets it be.
+        harness.get_by_label("Run results").click();
+        settle(&mut harness);
+        select(&mut harness, &[selected]);
+        show(&mut harness, selected, 0.6);
+        assert_a_card_in_view(&harness, name);
+        assert!(
+            canvas(&harness).debug_handles(&id_of(&harness, selected)),
+            "{name}: the selection is drawn"
+        );
+        crate::testing::capture(&mut harness, name, None);
+    }
+}

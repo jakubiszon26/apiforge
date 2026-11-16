@@ -50,7 +50,7 @@ fn tidied(source: &str, size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, 
     (project, harness, gate)
 }
 
-fn opened(
+pub(super) fn opened(
     project: tempfile::TempDir,
     size: egui::Vec2,
     checks: bool,
