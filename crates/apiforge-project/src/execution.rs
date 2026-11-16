@@ -199,14 +199,28 @@ impl ProjectSession {
 /// revisions its calls pin, by component ID: a publication of any revision
 /// of one of them makes the run stale.
 fn calls(snapshot: &LastValidSnapshot) -> std::collections::BTreeSet<String> {
-    use apiforge_core::model::NodeKind;
+    pinned_calls(snapshot_graphs(snapshot), snapshot.context())
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// The graphs of a snapshot's own definition.
+fn snapshot_graphs(snapshot: &LastValidSnapshot) -> Vec<&apiforge_core::format::Graph> {
     use apiforge_storage::project::IdentityBase;
-    let context = snapshot.context();
-    let mut graphs = match snapshot.document() {
+    match snapshot.document() {
         IdentityBase::Scenario(scenario) => vec![&scenario.graph, &scenario.cleanup],
         IdentityBase::Component(component) => vec![&component.graph],
-    };
-    let mut calls = std::collections::BTreeSet::new();
+    }
+}
+
+/// Every call of `graphs`, and of the revisions in `context` those calls
+/// pin, transitively: (component ID, pinned revision), each once.
+fn pinned_calls<'a>(
+    mut graphs: Vec<&'a apiforge_core::format::Graph>,
+    context: &'a apiforge_core::format::Project,
+) -> std::collections::BTreeSet<(String, Option<u32>)> {
+    use apiforge_core::model::NodeKind;
     let mut visited = std::collections::BTreeSet::new();
     while let Some(graph) = graphs.pop() {
         for node in &graph.nodes {
@@ -216,7 +230,6 @@ fn calls(snapshot: &LastValidSnapshot) -> std::collections::BTreeSet<String> {
             let Some(id) = &node.config.component_id else {
                 continue;
             };
-            calls.insert(id.clone());
             let revision = node.config.revision;
             if visited.insert((id.clone(), revision)) {
                 graphs.extend(
@@ -231,5 +244,57 @@ fn calls(snapshot: &LastValidSnapshot) -> std::collections::BTreeSet<String> {
             }
         }
     }
-    calls
+    visited
+}
+
+/// The published revisions in `context` that `graphs` call, directly or
+/// through the revisions their calls pin: (component ID, revision). A call
+/// that resolves to no revision of the context adds nothing.
+fn called_revisions(
+    graphs: Vec<&apiforge_core::format::Graph>,
+    context: &apiforge_core::format::Project,
+) -> std::collections::BTreeSet<(String, u32)> {
+    pinned_calls(graphs, context)
+        .into_iter()
+        .filter_map(|(id, revision)| {
+            let revision = revision?;
+            context
+                .components
+                .iter()
+                .any(|component| component.id == id && component.revision == revision)
+                .then_some((id, revision))
+        })
+        .collect()
+}
+
+impl PreparedRun {
+    /// The published revisions the run calls, directly or through the
+    /// revisions its calls pin, as (component ID, revision) (MCP-21). A
+    /// component run on its own does not call its own revisions.
+    pub fn called_revisions(&self) -> std::collections::BTreeSet<(String, u32)> {
+        called_revisions(snapshot_graphs(&self.snapshot), self.snapshot.context())
+    }
+}
+
+impl ProjectSession {
+    /// The published revisions `text` calls in the project's context,
+    /// directly or through the revisions its calls pin, as (component ID,
+    /// revision) (MCP-21). A text with errors still gives the calls that
+    /// resolve; a call that resolves to no published revision adds nothing.
+    pub fn called_revisions(&self, text: &str) -> std::collections::BTreeSet<(String, u32)> {
+        if text.len() > apiforge_storage::project::MAX_SOURCE_BYTES {
+            return std::collections::BTreeSet::new();
+        }
+        let tree = apiforge_script::parse(text);
+        let lowered =
+            apiforge_script::lower(&tree, &apiforge_script::LowerContext::folder(&self.context));
+        let graphs = match &lowered.document {
+            Some(apiforge_script::Document::Scenario(scenario)) => {
+                vec![&scenario.graph, &scenario.cleanup]
+            }
+            Some(apiforge_script::Document::Component(component)) => vec![&component.graph],
+            None => Vec::new(),
+        };
+        called_revisions(graphs, &self.context)
+    }
 }

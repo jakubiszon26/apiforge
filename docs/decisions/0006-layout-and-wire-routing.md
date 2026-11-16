@@ -2,8 +2,9 @@
 
 - Status: accepted and implemented, with the deviations recorded under
   *As implemented*
-- Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn) and
-  2026-11-12 (LAY-06, shape D and the rail)
+- Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn),
+  2026-11-12 (LAY-06, shape D and the rail), 2026-11-15 (LAY-03, the gap
+  between lines) and 2026-11-16 (LAY-28, the order of lines in a corridor)
 - Scope: new crate `apiforge-layout`, the desktop board
 - Plan: [scenario code and canvas](../roadmap.md)
 
@@ -205,6 +206,39 @@ therefore **150 ms** from this amendment on: it runs once when a board
 changes, not per frame, and `shop-50` with every wire and check drawn (56
 cards, 107 wires) routes in 30 ms. The board wired at random takes 0.9 s
 (0.3 s before). The bench prints all three.
+
+### The order of lines in a corridor (LAY-28)
+
+Amended by LAY-28 (2026-11-16). The router gives each line the nearest
+free track in the order it routes them, so the lines of a corridor lie in
+an order nobody chose, and a line leaving the others crosses the ones in
+its way. After every wire has its route and before the bridges are marked,
+a pass over the board puts that right (`order::untangle`):
+
+1. **A move** takes one piece of a line that lies between two others to
+   another track of its corridor, or lets two pieces of two lines in one
+   corridor change tracks. The two pieces it joins get longer or shorter;
+   a line keeps its ports, its bends and the side it passes each card on.
+   The corridor of a piece is the room between the nearest card on either
+   side of it, less the gap; the tracks are the multiples of the gap, up
+   to 12 away.
+2. **A move is made** when the board has fewer crossings for it and it
+   breaks nothing: no breach of the gap (`packed`) that was not there for
+   the pieces moved, no line into the mouth of another port. Of a piece's
+   moves the one that saves most is taken, then the shortest.
+3. **It ends** because every move takes a crossing off the board: rounds
+   over the wires in their order until none moves, at most 8, and at most
+   60 000 moves weighed, which only a board wired at random reaches. The
+   result is deterministic.
+4. Lines that stay while others are brought back (`route_among`) are
+   counted and not moved. Tidy up's measuring pass routes each wire alone
+   and has nothing to order. `Routing::ordered` switches the pass off.
+
+It does not look for another route: a crossing that needs one stays. On
+the reference boards it takes 15 to 30 % of the crossings off where every
+wire or every check is drawn. **Cost:** the budget's board routes in
+132 ms (122 ms before, budget 150 ms), `shop-50` with every wire and check
+in 35 ms (31 ms).
 
 ## As implemented
 

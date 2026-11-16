@@ -256,7 +256,7 @@ fn texts(
         let last = field.rsplit('.').next().filter(|last| !last.is_empty());
         let text = format!("{}.{}", source_node.handle, last.unwrap_or(&port));
         // As the code writes it: a step with one output port is named
-        // without it (`cart.cart.id`, not `cart.<port>.cart.id`).
+        // without it (`cart.id`, not `cart.<port>.id`).
         let port = if graph::output_ports(source_node, project).len() == 1 {
             ""
         } else {

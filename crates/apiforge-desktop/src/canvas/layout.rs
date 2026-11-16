@@ -370,6 +370,11 @@ pub const COMPACT_ROW: f32 = 24.0;
 const COMPACT_SUBTITLE: f32 = 22.0;
 const COMPACT_RESULT: f32 = 26.0;
 const COMPACT_END: f32 = 6.0;
+/// Two sockets on one side of a compact row are this far apart, the gap the
+/// board's lines keep from each other (`apiforge_layout::GAP`), and the first
+/// and the last this far from the row's edges.
+pub const SOCKET_GAP: f32 = apiforge_layout::GAP;
+const SOCKET_END: f32 = 6.0;
 /// The tray of the ports a compact card hides: its narrowest width, which
 /// fits the 96 px column gap Tidy up leaves, its widest, and its gap from the
 /// card.
@@ -951,39 +956,47 @@ fn compact(card: &Card, node: &Node, reference_graph: &Graph, project: &Project)
     let rows = rows
         .into_iter()
         .map(|pending| {
-            let middle = top + pending.height / 2.0;
-            // The wired inputs of a row share its height evenly, so their
-            // wires end apart; an input with a literal value takes the middle.
-            let spread = |items: Vec<usize>, sockets: Vec<usize>| -> Vec<(usize, f32)> {
-                items
-                    .into_iter()
-                    .map(|item| {
-                        let y = sockets.iter().position(|s| *s == item).map_or(middle, |k| {
-                            top + pending.height * (k + 1) as f32 / (sockets.len() + 1) as f32
-                        });
-                        (item, y)
-                    })
-                    .collect()
-            };
             let wired_inputs: Vec<usize> = pending
                 .inputs
                 .iter()
                 .copied()
                 .filter(|index| wired(*index))
                 .collect();
+            // The sockets on one side of a row are a line's gap apart, so the
+            // lines into them are (#349), and the row is as tall as that
+            // takes: 24 px for one socket, 32 for two, 52 for three.
+            let sockets = wired_inputs.len().max(pending.outputs.len());
+            let height = pending
+                .height
+                .max(sockets.saturating_sub(1) as f32 * SOCKET_GAP + SOCKET_END * 2.0);
+            let middle = top + height / 2.0;
+            // An input with a literal value takes the middle.
+            let spread = |items: Vec<usize>, sockets: Vec<usize>| -> Vec<(usize, f32)> {
+                let first = middle - sockets.len().saturating_sub(1) as f32 * SOCKET_GAP / 2.0;
+                items
+                    .into_iter()
+                    .map(|item| {
+                        let y = sockets
+                            .iter()
+                            .position(|s| *s == item)
+                            .map_or(middle, |k| first + k as f32 * SOCKET_GAP);
+                        (item, y)
+                    })
+                    .collect()
+            };
             let inputs = spread(pending.inputs, wired_inputs);
             let outputs = spread(pending.outputs.clone(), pending.outputs);
             let row = CompactRow {
                 role: pending.role,
                 top,
-                height: pending.height,
+                height,
                 text: pending.text,
                 full_text: pending.full_text,
                 inputs,
                 outputs,
                 missing: pending.missing,
             };
-            top += pending.height;
+            top += height;
             row
         })
         .collect();

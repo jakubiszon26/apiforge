@@ -725,19 +725,11 @@ fn lay23_criterion_7_fewer_crossings_per_line() {
             let (_project, harness, id) = tidied(name, WIDE, checks);
             let (lines, crossings, pairs) = measures(&harness, &id);
             let per_line = crossings as f32 / lines as f32;
-            // Since LAY-03 the lines of `fan-out` with its checks drawn run
-            // 20 px apart instead of on each other, and cross where one
-            // leaves the others: 35 crossings on 32 lines (16 before). The
-            // order of lines in a corridor is LAY-05's.
-            // Since LAY-32 every reader of a port with chips has a chip, the
-            // neighbour's too: `shop-30` with its checks drawn keeps its 13
-            // crossings on 19 lines instead of 30, as the lines left are the
-            // rails and the checks' wires that cross them.
-            let most = match (name, checks) {
-                ("fan-out", Checks::Expanded) => 1.1,
-                ("shop-30", Checks::Expanded) => 0.7,
-                _ => 0.6,
-            };
+            // LAY-03 put the lines of `fan-out` with its checks drawn 20 px
+            // apart, where a line leaving the others crosses them (limit
+            // 1.1); LAY-28 orders the lines of a corridor and the limit is
+            // the first one again.
+            let most = 0.6;
             assert!(
                 per_line <= most,
                 "{name} {checks:?}: {crossings} crossings on {lines} lines"
@@ -982,15 +974,15 @@ fn lay23_criterion_4_a_selected_wire_stays_drawn() {
 }
 
 /// #340: a chip of a component's output states the reference as the code
-/// writes it: `cart.cart.id`, the call's one output port left out, never
-/// `cart.cart.cart.id`.
+/// writes it: `cart.id`, the call's one output port left out, never
+/// `cart.cart.id`.
 #[test]
 fn lay23_a_component_output_is_stated_as_written() {
     let text = fixture("fan-out")
-        .replace("  var cartId = cart.cart.id\n", "")
-        .replace("{{cartId}}", "{{cart.cart.id}}")
-        .replace("cartId: cartId", "cartId: cart.cart.id")
-        .replace("cart: cartId", "cart: cart.cart.id");
+        .replace("  var cartId = cart.id\n", "")
+        .replace("{{cartId}}", "{{cart.id}}")
+        .replace("cartId: cartId", "cartId: cart.id")
+        .replace("cart: cartId", "cart: cart.id");
     assert!(!text.contains("var cartId"));
     let (_project, harness, id) = tidied_text(&text, WIDE, Checks::Collapsed);
     let cart = id_of(&harness, &id, "cart");
@@ -1002,12 +994,11 @@ fn lay23_a_component_output_is_stated_as_written() {
         .collect();
     assert!(
         statements.len() >= 3,
-        "cart.cart.id is read far by several steps: {statements:?}"
+        "cart.id is read far by several steps: {statements:?}"
     );
     for statement in &statements {
         assert!(
-            statement.starts_with("cart.cart.id → ")
-                || statement.starts_with("cart.cart.productId → "),
+            statement.starts_with("cart.id → ") || statement.starts_with("cart.productId → "),
             "stated as the code writes it: {statement}"
         );
     }

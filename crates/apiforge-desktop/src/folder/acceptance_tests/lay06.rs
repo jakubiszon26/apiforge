@@ -746,14 +746,11 @@ fn lay06_criterion_11_no_more_crossings_than_today() {
         let per_wire = crossings as f32 / wires.len() as f32;
         let routes: Vec<&[egui::Pos2]> = wires.iter().map(|wire| wire.points.as_slice()).collect();
         let pairs = coincident(&routes);
-        // Since LAY-03 lines that lay on each other run 20 px apart, and a
-        // line leaving such a bundle crosses its neighbours: with the checks
-        // drawn `shop-30` has 118 crossings on 57 wires (112 before). The
-        // order of lines in a corridor is LAY-05's.
-        let most = match checks {
-            Checks::Collapsed => 2.05,
-            Checks::Expanded => 2.1,
-        };
+        // LAY-03 put lines that lay on each other 20 px apart, where a line
+        // leaving the others crosses them (118 crossings on 57 wires with
+        // the checks drawn, limit 2.1); since LAY-28 orders the lines of a
+        // corridor the board has 105 and the limit is the first one again.
+        let most = 2.05;
         assert!(
             per_wire <= most,
             "{checks:?}: {crossings} crossings on {} wires",

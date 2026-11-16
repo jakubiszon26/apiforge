@@ -278,9 +278,10 @@ pub struct Input<'a> {
     /// moves, nothing is added, moved, wired or changed. An observing folder
     /// window shows it so (MCP-08a); a disabled board needs nothing more.
     pub read_only: bool,
-    /// The board is a component's: *Add step* offers *Export* and neither
-    /// *Start* nor *Data condition* (UX-21, decision 12).
-    pub component: bool,
+    /// The ID of the component whose board this is: *Add step* offers
+    /// *Export* and neither *Start* nor *Data condition* (UX-21, decision 12),
+    /// nor the component itself (UX-22). `None` on a scenario's board.
+    pub component: Option<&'a str>,
     /// A component's declared inputs, shown in the INPUTS strip under the
     /// header row (UX-31); `None` for a board without the strip.
     pub inputs: Option<&'a [Port]>,
@@ -4654,7 +4655,7 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 read_only: false,
-                                component: false,
+                                component: None,
                                 header_leading: None,
                                 library: None,
                                 inputs: None,
@@ -4710,7 +4711,7 @@ mod tests {
                                 context: "test",
                                 library_in_view: true,
                                 read_only: false,
-                                component: false,
+                                component: None,
                                 header_leading: None,
                                 library: None,
                                 inputs: None,
@@ -4790,7 +4791,7 @@ mod tests {
                             context: "test",
                             library_in_view: true,
                             read_only: false,
-                            component: false,
+                            component: None,
                             header_leading: None,
                             library: None,
                             inputs: Some(&component.inputs),

@@ -506,11 +506,9 @@ Two quiz rounds on the analysis above; the recommended option every time
    step whose `body.token` has chips may still wire its `status` to a
    neighbour. A variable with at least one far reader has a chip at every
    reader; one read only beside it, by fewer than three steps, stays wired.
-   On `shop-30` (tidied, compact, 1600 × 1000) the lines drawn and their
-   crossings go from 19 · 5 to 13 · 4 with checks collapsed and from
-   30 · 13 to 19 · 13 with checks drawn; criterion 7's bound for the latter
-   is 0.7 crossings per line, as the lines left are rails and checks'
-   wires.
+   On `shop-30` (tidied, compact, 1600 × 1000, after LAY-28) the lines
+   drawn and their crossings go from 19 · 4 to 13 · 4 with checks collapsed
+   and from 30 · 10 to 19 · 6 with checks drawn.
 4. **The `@after` rail into the next step.** A mark on the card
    (`after quantity_ok`) is mocked up as LAY-24 (#334) and decided on the
    capture; this ticket leaves the rails as they are.
