@@ -583,6 +583,10 @@ pub(crate) struct DrawnWire {
     pub revealed: bool,
     /// Where its label was drawn, on the board.
     pub label_box: Option<Rect>,
+    /// A wire of the selected step, at full strength (LAY-10).
+    pub lit: bool,
+    /// Drawn at a quarter of its strength while a step is selected.
+    pub dimmed: bool,
 }
 
 /// The arrow at a step's badge as the last frame drew it (LAY-24).
@@ -834,6 +838,42 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_selected(&self, id: &str) -> bool {
         self.debug_drawn(id).is_some_and(|drawn| drawn.selected)
+    }
+
+    /// Whether the card `id` was drawn in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_is_drawn(&self, id: &str) -> bool {
+        self.debug_drawn(id).is_some()
+    }
+
+    /// Whether the card `id` was dimmed in the last frame (LAY-10).
+    #[cfg(test)]
+    pub(crate) fn debug_dimmed(&self, _id: &str) -> bool {
+        false
+    }
+
+    /// The colour over the card `id` that dimmed it in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_veil(&self, _id: &str) -> Option<Color32> {
+        None
+    }
+
+    /// The colour of the halo around the card `id` in the last frame.
+    #[cfg(test)]
+    pub(crate) fn debug_ring(&self, _id: &str) -> Option<Color32> {
+        None
+    }
+
+    /// Whether the card `id` drew the selection's handles.
+    #[cfg(test)]
+    pub(crate) fn debug_handles(&self, _id: &str) -> bool {
+        false
+    }
+
+    /// The ports ringed in the last frame: the card and the port on screen.
+    #[cfg(test)]
+    pub(crate) fn debug_ringed_ports(&self) -> Vec<(String, Pos2)> {
+        Vec::new()
     }
 
     /// A box on the board, on screen in the last frame.
@@ -1830,6 +1870,8 @@ impl Canvas {
                     bridges: bridged.get(&wire.id).copied().unwrap_or_default(),
                     revealed: revealed.contains(&wire.id),
                     label_box: label_boxes.get(&wire.id).copied(),
+                    lit: false,
+                    dimmed: false,
                 })
                 .collect();
         }

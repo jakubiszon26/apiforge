@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 
-fn fixture(name: &str) -> String {
+pub(super) fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/scenarios/lay")
         .join(format!("{name}.afs"));
@@ -26,7 +26,7 @@ fn fixture(name: &str) -> String {
 
 /// `source` on the board of the demo shop as a new install opens it, with
 /// the runner of `gate`: compact cards, checks collapsed unless `checks`.
-fn open(
+pub(super) fn open(
     source: &str,
     size: egui::Vec2,
     checks: bool,
@@ -73,7 +73,7 @@ fn opened(
 /// the publication it was given, so a real run stops at any point and the
 /// window's frames can be looked at in between.
 #[derive(Default)]
-struct Gate {
+pub(super) struct Gate {
     state: Mutex<GateState>,
     changed: Condvar,
 }
@@ -146,7 +146,7 @@ impl Gate {
 /// Starts a simulation and holds it at the publication that announces
 /// `handle` started: the runner names it running and has not executed it,
 /// and the window has drawn one frame since.
-fn run_until_started(harness: &mut FolderHarness, gate: &Gate, handle: &str) {
+pub(super) fn run_until_started(harness: &mut FolderHarness, gate: &Gate, handle: &str) {
     let target = id_of(harness, handle);
     gate.hold();
     choose(harness, "Run simulation");
@@ -166,7 +166,7 @@ fn run_until_started(harness: &mut FolderHarness, gate: &Gate, handle: &str) {
 }
 
 /// Lets a held run end and waits for its last report.
-fn finish(harness: &mut FolderHarness, gate: &Gate) {
+pub(super) fn finish(harness: &mut FolderHarness, gate: &Gate) {
     gate.open();
     let deadline = Instant::now() + Duration::from_secs(30);
     while folder(harness).runs.handle.is_some() {
@@ -178,7 +178,7 @@ fn finish(harness: &mut FolderHarness, gate: &Gate) {
     harness.step();
 }
 
-fn simulate(harness: &mut FolderHarness, gate: &Gate) {
+pub(super) fn simulate(harness: &mut FolderHarness, gate: &Gate) {
     gate.open();
     choose(harness, "Run simulation");
     finish(harness, gate);
