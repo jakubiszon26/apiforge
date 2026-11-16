@@ -1682,6 +1682,14 @@ impl Canvas {
             })
             .flat_map(|tag| tag.wires.iter().cloned())
             .collect();
+        // The wires chips stand for: the lines at rest keep the mouths of
+        // their sockets free, whether a wire is brought back now or not, so
+        // that a selection moves no line (LAY-29).
+        let reserved_wires: Vec<routing::BoardWire> = board_wires
+            .iter()
+            .filter(|wire| tagged.contains(wire.id.as_str()))
+            .cloned()
+            .collect();
         let (mut revealed_wires, board_wires): (Vec<routing::BoardWire>, Vec<routing::BoardWire>) =
             board_wires
                 .into_iter()
@@ -1757,6 +1765,7 @@ impl Canvas {
                 style: self.wire_style,
                 bridges: self.bridges,
                 among: &[],
+                reserved: &reserved_wires,
             };
             #[cfg(test)]
             {
@@ -1799,6 +1808,7 @@ impl Canvas {
                 style: self.wire_style,
                 bridges: self.bridges,
                 among: &at_rest,
+                reserved: &[],
             };
             let routed = self.revealed_router.routes(&request).to_vec();
             for wire in &routed {

@@ -12,7 +12,7 @@
 use super::layout::{Card, CardDensity, Chip};
 use super::readers::{self, WireMode};
 use super::routing::{self, WireStyle};
-use super::{after, collapsible, folded_wires};
+use super::{collapsible, folded_wires};
 use apiforge_core::format::{Graph, Project};
 use apiforge_layout as layout;
 use std::collections::{HashMap, HashSet};
@@ -48,8 +48,9 @@ pub struct Drawn<'a> {
     pub lines: Lines,
 }
 
-/// What the router is given for the board at rest: the rectangles of the
-/// cards drawn, then of the proxy chips, and the wires as ports on them.
+/// What Tidy up measures a board by: the rectangles of the cards drawn,
+/// then of the proxy chips, and as ports on them the wires the board draws
+/// at rest and the rails it brings back for a selection.
 pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
     let graph = board.graph;
     let mut cards: Vec<Card> = graph
@@ -79,11 +80,11 @@ pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
     }
     let (mut wires, _) = folded_wires(graph, &cards, &chips, &folded);
     if board.lines.wires == WireMode::Chips {
-        // A rail into the next step is an arrow at the step's badge (LAY-24).
-        let arrows: HashSet<String> = after::marks(graph, board.later, &cards, &wires)
-            .into_iter()
-            .flat_map(|mark| mark.wires)
-            .collect();
+        // A rail into the next step is an arrow at the step's badge (LAY-24)
+        // and comes back while a card at either end is selected. It stays
+        // among the lines measured here, so that Tidy up leaves it room:
+        // it leaves the socket at the bottom of its card (LAY-29), where a
+        // satellite hung under the card leaves 24 px and no more.
         let chipped = readers::chipped(graph, &cards, &wires);
         if !chipped.is_empty() {
             let (tags, _) = readers::plan(graph, board.project, &cards, &wires, &chipped);
@@ -93,7 +94,6 @@ pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
                 .collect();
             wires.retain(|wire| !tagged.contains(wire.id.as_str()));
         }
-        wires.retain(|wire| !arrows.contains(&wire.id));
     }
     routing::geometry(&routing::Request {
         cards: &cards,
@@ -103,5 +103,6 @@ pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
         style: WireStyle::Orthogonal,
         bridges: false,
         among: &[],
+        reserved: &[],
     })
 }

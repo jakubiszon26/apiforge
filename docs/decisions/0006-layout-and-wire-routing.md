@@ -267,6 +267,17 @@ out of the card from nowhere.
    port inside a foreign card is. The guarantee's one exception covers
    both, and `violations` judges both the same.
 
+4. **Lines brought back have their room.** A selection brings back the
+   wires chips stand for and the rails into the next step (LAY-23,
+   LAY-24), among lines that had the first pick. Two things keep the gap
+   for them. The lines at rest keep off the sockets of the wires chips
+   stand for (`route_reserving`): no line runs or turns within two tracks
+   in front of such a socket, and only the line of a wire's port on the
+   socket's own card passes it. And Tidy up measures the rails it does
+   not draw with the lines it does, so a rail has its 20 px under its
+   card, where a satellite hangs 24 px below. The lines at rest do not
+   move when a selection changes.
+
 `apiforge_layout::under_own` lists the wires with a piece inside a card
 they join, past such a stub: none on the 24 reference boards and on
 generated tidied boards, and none on the generated piles of cards, where
@@ -277,7 +288,9 @@ crossings for 4, the board 60 px taller, Fit at 1600 × 1000 49 % for
 51 %. With every wire drawn `shop-30` has 82 crossings for 75 with its
 checks folded and 106 for 105 with them drawn; `shop-50` and `fan-out`
 with every wire and check drawn have fewer than before (315 for 340, 79
-for 90). **Cost:** none measurable; the budget's board
+for 90). The room for the rails makes `fan-out` in the default view 40 px
+taller and 20 px wider (Fit 58 % for 59 %), 116 px taller with its checks
+drawn (52 % for 56 %); `shop-30` is as above. **Cost:** none measurable; the budget's board
 routes in 133 ms (132 ms before, budget 150 ms).
 
 ## As implemented

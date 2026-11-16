@@ -1230,20 +1230,20 @@ card 1140 1244 280 142 shipping
 card 1140 1426 280 70 cheapest
 card 1140 1536 280 96 cheap_enough
 card 1520 1244 280 142 address
-card 0 1712 280 190 checkout
-card 380 1712 280 166 order
-card 760 1712 280 94 paid
-card 1140 1712 280 166 payment
-card 1520 1712 280 166 receipt
-card 0 2206 280 142 confirmation
-card 380 2206 280 142 notify
-card 760 2206 280 118 cancel
-card 1140 2206 280 166 invoice
-card 1520 2206 280 166 history
-card 0 2580 280 166 refund
-card 380 2580 280 166 refunded_order
-card 760 2580 280 118 logout
-card 1140 2580 280 166 logged_out
+card 0 1732 280 190 checkout
+card 380 1732 280 166 order
+card 760 1732 280 94 paid
+card 1140 1732 280 166 payment
+card 1520 1732 280 166 receipt
+card 0 2226 280 142 confirmation
+card 380 2226 280 142 notify
+card 760 2226 280 118 cancel
+card 1140 2226 280 166 invoice
+card 1520 2226 280 166 history
+card 0 2600 280 166 refund
+card 380 2600 280 166 refunded_order
+card 760 2600 280 118 logout
+card 1140 2600 280 166 logged_out
 wire 16 bottom 70 17 top 140
 wire 24 bottom 70 25 top 140
 wire 24 bottom 70 26 top 140
@@ -1273,8 +1273,8 @@ wire 25 right 122 26 left 51
 mark 1808 20 80 24
 mark 1808 598 88 24
 mark 1808 1264 104 24
-mark 1808 1732 120 24
-mark 1808 2226 88 24
+mark 1808 1752 120 24
+mark 1808 2246 88 24
 end
 board shop-50 compact expanded 56 chips
 card 0 0 280 132 begin
@@ -1310,29 +1310,29 @@ card 1140 1384 280 142 shipping
 card 1140 1566 280 70 cheapest
 card 1140 1676 280 96 cheap_enough
 card 1540 1384 280 142 address
-card 0 1852 280 190 checkout
-card 0 2082 280 104 checkout_total
-card 380 1852 280 166 order
-card 380 2058 280 104 order_status
-card 760 1852 280 94 paid
-card 1140 1852 280 166 payment
-card 1540 1852 280 166 receipt
-card 1540 2078 280 104 receipt_total
-card 0 2398 280 142 confirmation
-card 380 2398 280 142 notify
-card 380 2222 280 96 not_created
-card 760 2398 280 118 cancel
-card 1140 2398 280 166 invoice
-card 1140 2604 280 104 invoice_total
-card 1540 2398 280 166 history
-card 1540 2604 280 96 in_history
-card 0 2788 280 166 refund
-card 0 2994 280 104 refund_amount
-card 380 2788 280 166 refunded_order
-card 380 2994 280 96 refunded
-card 760 2788 280 118 logout
-card 1140 2788 280 166 logged_out
-card 1140 2994 280 96 rejected
+card 0 1872 280 190 checkout
+card 0 2102 280 104 checkout_total
+card 380 1872 280 166 order
+card 380 2078 280 104 order_status
+card 760 1872 280 94 paid
+card 1140 1872 280 166 payment
+card 1540 1872 280 166 receipt
+card 1540 2098 280 104 receipt_total
+card 0 2418 280 142 confirmation
+card 380 2418 280 142 notify
+card 380 2242 280 96 not_created
+card 760 2418 280 118 cancel
+card 1140 2418 280 166 invoice
+card 1140 2624 280 104 invoice_total
+card 1540 2418 280 166 history
+card 1540 2624 280 96 in_history
+card 0 2808 280 166 refund
+card 0 3034 280 104 refund_amount
+card 380 2808 280 166 refunded_order
+card 380 3014 280 96 refunded
+card 760 2808 280 118 logout
+card 1140 2808 280 166 logged_out
+card 1140 3014 280 96 rejected
 wire 25 bottom 70 26 top 140
 wire 25 bottom 70 27 top 140
 wire 25 bottom 210 28 top 140
@@ -1389,8 +1389,8 @@ wire 54 right 98 55 left 52
 mark 1828 20 80 24
 mark 1828 650 88 24
 mark 1828 1404 104 24
-mark 1828 1872 120 24
-mark 1828 2418 88 24
+mark 1828 1892 120 24
+mark 1828 2438 88 24
 end
 board fan-out compact collapsed 26 all
 card 0 0 280 132 begin
@@ -1652,18 +1652,18 @@ card 380 0 280 142 catalogue
 card 380 166 280 70 first
 card 760 0 280 142 product
 card 1140 0 280 166 cart
-card 1140 226 280 70 cartId
-card 1140 320 280 70 itemId
-card 1520 0 280 166 quantity
-card 0 470 280 166 apply_coupon
-card 380 470 280 166 note
-card 760 470 280 142 stock
-card 1140 470 280 166 shipping
-card 1520 470 280 142 remove_coupon
-card 0 836 280 142 view
-card 380 836 280 190 checkout
-card 380 1198 280 70 orderNumber
-card 760 836 280 190 lookup
+card 1140 266 280 70 cartId
+card 1140 360 280 70 itemId
+card 1540 0 280 166 quantity
+card 0 510 280 166 apply_coupon
+card 380 510 280 166 note
+card 760 510 280 142 stock
+card 1140 510 280 166 shipping
+card 1540 510 280 142 remove_coupon
+card 0 876 280 142 view
+card 380 876 280 190 checkout
+card 380 1238 280 70 orderNumber
+card 760 876 280 190 lookup
 wire 1 right 98 2 left 52
 wire 2 right 52 3 left 74
 wire 3 right 98 4 left 74
@@ -1673,36 +1673,36 @@ wire 5 right 52 7 left 51
 wire 6 right 52 7 left 51
 wire 14 right 98 15 left 52
 wire 15 right 52 16 left 51
-mark 1808 20 120 24
-mark 1808 490 72 24
+mark 1828 20 120 24
+mark 1828 530 72 24
 end
 board fan-out compact expanded 26 chips
 card 0 0 280 132 begin
 card 380 0 280 142 catalogue
 card 380 166 280 70 first
-card 820 0 280 142 product
-card 1200 0 280 166 cart
-card 1200 226 280 70 cartId
-card 1200 320 280 70 itemId
-card 1600 0 280 166 quantity
-card 1600 206 280 96 quantity_ok
-card 0 470 280 166 apply_coupon
-card 0 676 280 96 coupon_ok
-card 380 470 280 166 note
-card 380 676 280 96 note_ok
-card 820 470 280 142 stock
-card 820 652 280 96 in_stock
-card 1200 470 280 166 shipping
-card 1200 676 280 96 shipping_ok
-card 1600 470 280 142 remove_coupon
-card 1600 652 280 96 removed_ok
-card 0 852 280 142 view
-card 0 1034 280 104 same_item
-card 380 852 280 190 checkout
-card 380 1142 280 124 checkout_ok
-card 380 1290 280 70 orderNumber
-card 820 852 280 190 lookup
-card 820 1102 280 124 lookup_ok
+card 840 0 280 142 product
+card 1220 0 280 166 cart
+card 1220 266 280 70 cartId
+card 1220 360 280 70 itemId
+card 1640 0 280 166 quantity
+card 1640 206 280 96 quantity_ok
+card 0 510 280 166 apply_coupon
+card 0 716 280 96 coupon_ok
+card 380 510 280 166 note
+card 380 716 280 96 note_ok
+card 840 510 280 142 stock
+card 840 692 280 96 in_stock
+card 1220 510 280 166 shipping
+card 1220 716 280 96 shipping_ok
+card 1640 510 280 142 remove_coupon
+card 1640 692 280 96 removed_ok
+card 0 892 280 142 view
+card 0 1074 280 104 same_item
+card 380 892 280 190 checkout
+card 380 1162 280 124 checkout_ok
+card 380 1406 280 70 orderNumber
+card 840 892 280 190 lookup
+card 840 1142 280 124 lookup_ok
 wire 1 right 98 2 left 52
 wire 2 right 52 3 left 74
 wire 3 right 98 4 left 74
@@ -1725,6 +1725,6 @@ wire 23 right 52 24 left 51
 wire 24 right 122 25 left 46
 wire 24 right 98 25 left 66
 wire 23 right 52 25 left 86
-mark 1888 20 120 24
-mark 1888 490 72 24
+mark 1928 20 120 24
+mark 1928 530 72 24
 end
