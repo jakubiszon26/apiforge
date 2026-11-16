@@ -1,6 +1,6 @@
 //! Syntax to document semantics. Temporary node identities are handles; only
 //! reconciliation allocates persistent identities and positions.
-use crate::ast::*;
+use crate::{ast::*, branches::Branches};
 use apiforge_core::{format::*, graph, model::*, operator::Operator, path::JsonPath};
 use serde_json::{Value, json};
 use std::{
@@ -441,6 +441,7 @@ impl Lower<'_> {
         // the document's proxies back, as it does positions.
         let mut result = Graph::default();
         self.walk(statements, cleanup, component, None, &mut result);
+        after_whole_ifs(&mut result);
         result
     }
     fn walk(
@@ -1146,6 +1147,37 @@ impl Lower<'_> {
             return None;
         }
         Some(Binding::reference(name, port, field_path(&fields)))
+    }
+}
+/// `@after(x)` on an `if` follows the whole `if`: the edge `walk` wrote from
+/// the `if` without a branch becomes an edge from the end of each branch, in
+/// its place.
+fn after_whole_ifs(graph: &mut Graph) {
+    let ends: HashMap<String, Vec<(String, Option<Branch>)>> = {
+        let branches = Branches::new(graph);
+        graph
+            .edges
+            .iter()
+            .filter(|edge| edge.branch.is_none())
+            .filter_map(|edge| {
+                let ends = branches.ends(&edge.source)?;
+                let ends = ends.iter().map(|&(s, b)| (s.to_owned(), b)).collect();
+                Some((edge.source.clone(), ends))
+            })
+            .collect()
+    };
+    if ends.is_empty() {
+        return;
+    }
+    for edge in std::mem::take(&mut graph.edges) {
+        match ends.get(&edge.source).filter(|_| edge.branch.is_none()) {
+            Some(ends) => {
+                for (source, branch) in ends {
+                    add_edge(graph, source, &edge.target, *branch);
+                }
+            }
+            None => add_edge(graph, &edge.source, &edge.target, edge.branch),
+        }
     }
 }
 fn add_edge(graph: &mut Graph, source: &str, target: &str, branch: Option<Branch>) {

@@ -112,6 +112,7 @@ const SECOND_OUTSIDE: &str = r#"scenario "Whole if" {
 
 /// A step in each branch, and a nested `if` as the last step of `then`.
 const NESTED: &str = r#"scenario "Nested" {
+  on_error stop
   begin = start
   @after(begin)
   cart = POST "/carts" {

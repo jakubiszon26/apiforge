@@ -2,6 +2,7 @@
 //! presence is semantic but whose normal spelling intentionally uses defaults.
 use crate::{
     ast::*,
+    branches::Branches,
     format::print_file,
     lower::{Document, LowerContext, lower, validate_document_model},
     parse,
@@ -339,54 +340,25 @@ impl Printer<'_> {
             range: 0..0,
         }
     }
-    fn parent<'a>(&self, graph: &'a Graph, node: &Node) -> Option<(&'a str, Branch)> {
-        let incoming: Vec<_> = graph.edges.iter().filter(|e| e.target == node.id).collect();
-        match incoming.as_slice() {
-            [edge]
-                if self
-                    .nodes
-                    .get(edge.source.as_str())
-                    .is_some_and(|n| n.kind == NodeKind::If) =>
-            {
-                edge.branch.map(|branch| (edge.source.as_str(), branch))
-            }
-            _ => None,
-        }
-    }
-    /// The same rule as `parent`, for every node of a graph at once.
-    fn parents<'g>(&self, graph: &'g Graph) -> HashMap<&'g str, (&'g str, Branch)> {
-        let mut incoming: HashMap<&str, Vec<&OrderEdge>> = HashMap::new();
-        for edge in &graph.edges {
-            incoming.entry(edge.target.as_str()).or_default().push(edge);
-        }
-        incoming
-            .into_iter()
-            .filter_map(|(target, edges)| match edges.as_slice() {
-                [edge]
-                    if self
-                        .nodes
-                        .get(edge.source.as_str())
-                        .is_some_and(|n| n.kind == NodeKind::If) =>
-                {
-                    edge.branch
-                        .map(|branch| (target, (edge.source.as_str(), branch)))
-                }
-                _ => None,
-            })
-            .collect()
-    }
     fn statements(&self, graph: &Graph, parent: Option<(&str, Branch)>) -> Vec<Statement> {
+        self.block(graph, &Branches::new(graph), parent)
+    }
+    fn block(
+        &self,
+        graph: &Graph,
+        branches: &Branches<'_>,
+        parent: Option<(&str, Branch)>,
+    ) -> Vec<Statement> {
         // Each block is ordered on its own: a member depends on another when
         // anything nested in it does. A global order filtered per block is not
         // enough, because a nested statement may depend on a later outer one.
         // Lowering keeps text order, and this greedy choice reproduces an order
         // it produced, so print -> lower -> print is a fixed point. Dependency
         // cycles between blocks fall back to document order.
-        let parents = self.parents(graph);
         let members: Vec<&Node> = graph
             .nodes
             .iter()
-            .filter(|n| parents.get(n.id.as_str()).copied() == parent)
+            .filter(|n| branches.parent(&n.id) == parent)
             .collect();
         let position: HashMap<&str, usize> = members
             .iter()
@@ -400,7 +372,7 @@ impl Printer<'_> {
                 if let Some(&index) = position.get(current) {
                     return Some(index);
                 }
-                current = parents.get(current)?.0;
+                current = branches.parent(current)?.0;
             }
             None
         };
@@ -425,11 +397,11 @@ impl Printer<'_> {
                 .or_else(|| remaining.next())
                 .expect("a member remains");
             done[next] = true;
-            ordered.push(self.statement(members[next], graph));
+            ordered.push(self.statement(members[next], graph, branches));
         }
         ordered
     }
-    fn statement(&self, node: &Node, graph: &Graph) -> Statement {
+    fn statement(&self, node: &Node, graph: &Graph, branches: &Branches<'_>) -> Statement {
         let mut attributes = vec![];
         if let Some(label) = &node.label {
             attributes.push(attribute("label", vec![literal(&json!(label))]));
@@ -444,13 +416,22 @@ impl Printer<'_> {
                 attributes.push(attribute("note", vec![literal(&json!(note))]));
             }
         }
-        let order: Vec<_> = graph
+        // The braces a statement stands in write their own edge; the end of
+        // an `if` is written as the `if`.
+        let braces = branches.parent(&node.id).map(|(x, b)| (x, Some(b)));
+        let sources = graph
             .edges
             .iter()
-            .filter(|e| e.target == node.id && self.parent(graph, node).is_none())
-            .map(|e| {
-                let root = expr(ExprKind::Name(self.nodes[e.source.as_str()].handle.clone()));
-                e.branch.map_or(root.clone(), |b| {
+            .filter(|e| e.target == node.id)
+            .map(|e| (e.source.as_str(), e.branch))
+            .filter(|&source| Some(source) != braces)
+            .collect();
+        let order: Vec<_> = branches
+            .shorten(sources)
+            .into_iter()
+            .map(|(source, branch)| {
+                let root = expr(ExprKind::Name(self.nodes[source].handle.clone()));
+                branch.map_or(root.clone(), |b| {
                     field(root, if b == Branch::True { "then" } else { "else" }, false)
                 })
             })
@@ -492,9 +473,10 @@ impl Printer<'_> {
                 if node.kind == NodeKind::If {
                     Form::If {
                         check,
-                        then: self.statements(graph, Some((&node.id, Branch::True))),
+                        then: self.block(graph, branches, Some((&node.id, Branch::True))),
                         otherwise: {
-                            let nodes = self.statements(graph, Some((&node.id, Branch::False)));
+                            let nodes =
+                                self.block(graph, branches, Some((&node.id, Branch::False)));
                             (!nodes.is_empty()).then_some(nodes)
                         },
                     }

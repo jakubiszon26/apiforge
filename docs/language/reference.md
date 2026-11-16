@@ -158,9 +158,9 @@ scenario "Ordering" {
 }
 ```
 
-`@after(check.then)` and `@after(check.else)` order a statement after the
-condition of an `if`, on one of its branches (see
-[Branches](#branches-if-and-else)).
+`@after(check)` on an `if` orders a statement after the whole `if`;
+`@after(check.then)` and `@after(check.else)` order it after the condition,
+on one of its branches (see [Branches](#branches-if-and-else)).
 
 ## Requests
 
@@ -458,30 +458,36 @@ scenario "Branches" {
     receipt = GET "/carts/{{cart.body.id}}" {
       sample 200 { id: "c-1" }
     }
+    @after(receipt)
+    items = GET "/carts/{{cart.body.id}}/items" {
+      sample 200 { items: [] }
+    }
   } else {
     failed = assert cart.status == 201
   }
-  @after(created.then, receipt)
-  thanks = "Cart {{cart.body.id}} is ready"
+  @after(created)
+  logout = POST "/logout" {
+    sample 204 {}
+  }
 }
 ```
 
 - `else { … }` is optional. Statements in a branch may use values from
   outside it; their handles are unique in the whole file.
+- The braces place the first statement of a branch. A further statement of
+  the same braces writes `@after` with the statement it follows, here
+  `@after(receipt)`, and stays inside the braces: the window prints it there
+  and `apiforge fmt` keeps it there.
+- `@after(created)` runs a statement after the whole `if`: after the last
+  step of the branch that was taken, here `items` when `then` is taken, or
+  right after the condition when that branch holds no step, as `else` here.
+  When that last step failed with an error or was blocked, the statement
+  does not run, as after any such step.
 - `@after(created.then)` orders a statement outside the braces after the
-  condition, on the `then` branch; `.else` on the other. A statement whose
+  condition, on the `then` branch; `.else` on the other. It waits for the
+  condition only, not for the statements inside the branch. A statement whose
   only ordering is one branch is printed inside that branch's braces by the
   window.
-- `@after(created.then)` waits for the condition only, not for the statements
-  inside the branch. Among the statements ready to run, the one written first
-  in the file runs first, so their order rests on where the lines stand.
-- To run after a branch's statements, name the last statement of that branch
-  and the other branch: `@after(last_in_then, x.else)`, here
-  `@after(receipt, created.else)`. The statement waits until every source it
-  names has run or been skipped with its branch, so it runs after `receipt`
-  when `then` is taken and after the condition when `else` is.
-- `@after(created)`, with no branch, is an error: name `created.then` or
-  `created.else`.
 - `if` has the outputs `created.passed` and `created.value`, like `assert`.
 
 ## Cleanup
@@ -720,10 +726,6 @@ messages you will meet most:
 - **`Export blocks belong in components`**, **`Only Value blocks may be marked
   var`**, **`Ordering must stay in its graph and branches need an IF`**: the
   form is in a place that does not allow it.
-- **`` `@after` an if names a branch, `x.then` or `x.else` ``**: ordering
-  after an `if` goes through a branch. To wait for the branch's statements,
-  write `@after(last_in_then, x.else)` (see
-  [Branches](#branches-if-and-else)).
 - **`Graph contains a data/control cycle`**: two statements need each other,
   through values or `@after`. Remove one direction.
 - **`The value's type does not match this input`** (warning): a value of one
