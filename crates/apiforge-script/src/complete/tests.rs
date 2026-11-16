@@ -230,6 +230,21 @@ fn an_operator_carries_its_signature() {
     );
 }
 
+/// LANG-10 (#354), criterion 2: `uuid` is offered; it takes nothing, so the
+/// caret lands after its parentheses.
+#[test]
+fn lang10_criterion_2_uuid_is_offered_without_operands() {
+    let found = script("scenario \"S\" {\n  id = uu|\n}");
+    let uuid = found
+        .iter()
+        .find(|found| found.label == "uuid")
+        .unwrap_or_else(|| panic!("uuid is offered: {:?}", labels(&found)));
+    assert_eq!(uuid.kind, Kind::Operator);
+    assert_eq!(uuid.insert, "uuid()");
+    assert_eq!(uuid.caret, "uuid()".len());
+    assert_eq!(uuid.detail.as_deref(), Some("New UUID() → string"));
+}
+
 #[test]
 fn a_check_offers_the_predicates() {
     let found = script("scenario \"S\" {\n  ok = assert products.status |\n}");

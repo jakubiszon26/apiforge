@@ -18,7 +18,7 @@ use apiforge_core::{
     model::{Branch, NodeKind},
     run::{NotRunCause, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
-use apiforge_runner::{HttpTransport, RunOptions, RunRequest, run_scenario};
+use apiforge_runner::{HttpTransport, RunOptions, RunRequest, SeededRandom, run_scenario};
 use apiforge_script::{Document, LowerContext, format, lower, parse};
 use serde_json::Value;
 use std::{collections::BTreeSet, fs, path::Path};
@@ -714,4 +714,181 @@ async fn lang11_criterion_1_after_the_other_branch_runs_when_it_is_taken() {
     }
     assert_eq!(by_handle(&run, "later").status, StepStatus::Passed);
     assert!(position(&run, "choice") < position(&run, "later"));
+}
+
+// LANG-10 (#354) --------------------------------------------------------------
+
+/// A value read by two requests, and a call in each request's body.
+const SENT_IDS: &str = r#"scenario "Sent ids" {
+  order = uuid()
+  @after(order)
+  first = POST "/orders" {
+    body { orderId: order, lineId: uuid() }
+    sample 201 {}
+  }
+  @after(first)
+  second = POST "/orders" {
+    body { orderId: order, lineId: uuid() }
+    sample 201 {}
+  }
+}
+"#;
+
+/// A component whose export is a new id, called between two values.
+const TAGGER: &str = r#"component Tagger "Tagger" {
+  export tag: string = uuid()
+}
+"#;
+
+const NESTED_IDS: &str = r#"scenario "Nested ids" {
+  before = uuid()
+  @after(before)
+  tagged = Tagger@1()
+  @after(tagged)
+  after = uuid()
+}
+"#;
+
+/// Two values that are never sent, for a live run with no API.
+const LIVE_IDS: &str = r#"scenario "Live ids" {
+  one = uuid()
+  @after(one)
+  two = uuid()
+}
+"#;
+
+/// The `n`-th value `uuid()` gives in a simulation.
+fn placeholder(n: u64) -> Value {
+    Value::String(format!("00000000-0000-4000-8000-{n:012}"))
+}
+
+/// `xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx` in lowercase hexadecimal.
+fn is_uuid_v4(value: &Value) -> bool {
+    let Some(text) = value.as_str() else {
+        return false;
+    };
+    let bytes = text.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_digit() || (b'a'..=b'f').contains(byte),
+        })
+        && bytes[14] == b'4'
+        && b"89ab".contains(&bytes[19])
+}
+
+/// The body a step's request carried, as the report shows it.
+fn sent_body(run: &RunResult, handle: &str) -> Value {
+    let step = serde_json::to_value(by_handle(run, handle)).expect("a step serialises");
+    step["request"]["body"].clone()
+}
+
+/// The single output of a value step, or the named output of another step.
+fn output(run: &RunResult, handle: &str, port: Option<&str>) -> Value {
+    let outputs = &by_handle(run, handle).outputs;
+    match port {
+        Some(port) => outputs[port].clone(),
+        None => outputs.values().next().cloned().expect("an output"),
+    }
+}
+
+/// `NESTED_IDS` in the demo shop project, with `Tagger` published as revision 1.
+fn nested_ids() -> (Project, Scenario) {
+    let mut project = shop_project();
+    let result = lower(&parse(TAGGER), &LowerContext::folder(&project));
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let Some(Document::Component(mut tagger)) = result.document else {
+        panic!("not a component");
+    };
+    tagger.id = "tagger".into();
+    tagger.revision = 1;
+    project.components.push(tagger);
+    let result = lower(&parse(NESTED_IDS), &LowerContext::folder(&project));
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let Some(Document::Scenario(scenario)) = result.document else {
+        panic!("not a scenario");
+    };
+    project.scenarios.push(scenario.clone());
+    (project, scenario)
+}
+
+async fn live(project: Project, scenario: &Scenario, options: RunOptions) -> RunResult {
+    run_scenario(
+        RunRequest::new(project, scenario.id.clone(), RunMode::Live),
+        options,
+        CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .expect("the run starts")
+}
+
+/// Criterion 3: a value block read by two requests sends the same id twice;
+/// a call in each request sends a different one.
+#[tokio::test]
+async fn lang10_criterion_3_a_value_read_twice_sends_one_id_and_two_calls_two() {
+    let (project, scenario) = lowered(SENT_IDS);
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+    let (first, second) = (sent_body(&run, "first"), sent_body(&run, "second"));
+    assert_eq!(first["orderId"], second["orderId"], "{first} {second}");
+    assert_ne!(first["lineId"], second["lineId"], "{first} {second}");
+    assert_eq!(output(&run, "order", None), first["orderId"]);
+}
+
+/// Criterion 4 (owner decision 1 A): a simulation gives the numbered
+/// placeholders in evaluation order, the same in every simulation.
+#[tokio::test]
+async fn lang10_criterion_4_a_simulation_numbers_the_ids_in_order() {
+    let (project, scenario) = lowered(SENT_IDS);
+    let run = simulate(project.clone(), &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+    assert_eq!(output(&run, "order", None), placeholder(1));
+    assert_eq!(sent_body(&run, "first")["lineId"], placeholder(2));
+    assert_eq!(sent_body(&run, "second")["lineId"], placeholder(3));
+    for n in 1..=3 {
+        assert!(is_uuid_v4(&placeholder(n)), "{}", placeholder(n));
+    }
+    let again = simulate(project, &scenario).await;
+    assert_eq!(normalised(&again), normalised(&run));
+}
+
+/// Criterion 4: a component called in the run shares the count.
+#[tokio::test]
+async fn lang10_criterion_4_a_nested_component_call_shares_the_count() {
+    let (project, scenario) = nested_ids();
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+    assert_eq!(output(&run, "before", None), placeholder(1));
+    assert_eq!(output(&run, "tagged", Some("tag")), placeholder(2));
+    assert_eq!(output(&run, "after", None), placeholder(3));
+}
+
+/// Criterion 4: a live run gives random version 4 ids, not the placeholders;
+/// with a fixed seed the same ones.
+#[tokio::test]
+async fn lang10_criterion_4_a_live_run_gives_random_ids() {
+    let (project, scenario) = lowered(LIVE_IDS);
+    let transport = || HttpTransport::new().expect("client builds");
+    let run = live(project.clone(), &scenario, RunOptions::new(transport())).await;
+    assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
+    let (one, two) = (output(&run, "one", None), output(&run, "two", None));
+    assert!(is_uuid_v4(&one) && is_uuid_v4(&two), "{one} {two}");
+    assert_ne!(one, two);
+    for value in [&one, &two] {
+        assert!(
+            !value.as_str().unwrap().starts_with("00000000-"),
+            "{value} is a placeholder"
+        );
+    }
+
+    let seeded = || {
+        let mut options = RunOptions::new(transport());
+        options.random = Box::new(SeededRandom::new(7));
+        options
+    };
+    let first = live(project.clone(), &scenario, seeded()).await;
+    let second = live(project, &scenario, seeded()).await;
+    assert_eq!(output(&first, "one", None), output(&second, "one", None));
+    assert_eq!(output(&first, "two", None), output(&second, "two", None));
 }
