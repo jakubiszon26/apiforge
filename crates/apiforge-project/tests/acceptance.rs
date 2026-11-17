@@ -1095,3 +1095,398 @@ fn ktlo_26_the_same_rewiring_typed_as_source_seals_a_checkpoint_that_describes_i
     assert_eq!(ids_of(&after), ids_of(&saved));
     assert_eq!(after, saved, "the reload restores the saved model exactly");
 }
+
+/// LAY-34 (#396): an edit on the board changes only the statement edited.
+/// The window keeps what the author wrote (owner, 2026-11-16): a board edit
+/// replaces or inserts the text of the statement it edits and writes nothing
+/// else from the model. A statement added from the board is written directly
+/// after the step it follows, inside the same braces (owner, 2026-11-17).
+mod lay34 {
+    use super::*;
+    use apiforge_core::{
+        block::Block,
+        edit::{OutputRef, add_node},
+        format::{Binding, Graph, Position},
+        graph::{ORDER_PORT, delete_nodes},
+        model::{ErrorPolicy, NodeKind},
+    };
+    use apiforge_script::ast::{Form, Statement};
+    use std::{collections::HashSet, ops::Range};
+
+    /// The one file of the repository that does not lower: a file with
+    /// errors holds the board, so no board edit can be made on it.
+    const INVALID: &str = "docs/qa/2026-10-24/p1-p4-native/alpha-invalid.afs";
+
+    /// Every `.afs` file of the repository, by its path from the root.
+    fn repository_sources() -> Vec<(String, String)> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut found = vec![];
+        let mut pending = vec![root.join("fixtures"), root.join("docs")];
+        while let Some(directory) = pending.pop() {
+            for entry in std::fs::read_dir(&directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "afs") {
+                    let name = path
+                        .strip_prefix(&root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    found.push((name, std::fs::read_to_string(&path).unwrap()));
+                }
+            }
+        }
+        found.sort();
+        assert!(found.len() >= 12, "the repository's sources are found");
+        found
+    }
+
+    fn source(name: &str) -> String {
+        repository_sources()
+            .into_iter()
+            .find(|(path, _)| path.ends_with(name))
+            .unwrap_or_else(|| panic!("{name} is in the repository"))
+            .1
+    }
+
+    /// `text` registered in the prepared demo shop, whose components the
+    /// reference scenarios call.
+    fn opened(text: &str) -> (tempfile::TempDir, ProjectSession, String) {
+        let directory = prepared_demo();
+        let mut session = ProjectSession::open(directory.path()).unwrap();
+        let kind = if text.trim_start().starts_with("component") {
+            DocumentKind::Component
+        } else {
+            DocumentKind::Scenario
+        };
+        let id = session
+            .create_document(kind, "lay34/edited.afs", text)
+            .unwrap();
+        (directory, session, id)
+    }
+
+    fn text(session: &ProjectSession, id: &str) -> String {
+        session.document(id).unwrap().text().to_owned()
+    }
+
+    fn model(session: &ProjectSession, id: &str) -> Document {
+        session.document(id).unwrap().model().unwrap().clone()
+    }
+
+    fn main_graph(document: &mut Document) -> &mut Graph {
+        match document {
+            Document::Scenario(scenario) => &mut scenario.graph,
+            Document::Component(component) => &mut component.graph,
+        }
+    }
+
+    fn id_of(document: &mut Document, handle: &str) -> String {
+        main_graph(document)
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+            .unwrap_or_else(|| panic!("a block {handle}"))
+            .id
+            .clone()
+    }
+
+    /// The board's edit that adds a request from the *Next* of `source`, or
+    /// unconnected without one, and the new request's handle and identifier.
+    fn with_request(document: &Document, source: Option<&str>) -> (Document, String, String) {
+        let mut next = document.clone();
+        let graph = main_graph(&mut next);
+        let added = add_node(
+            graph,
+            Block::Request,
+            Position { x: 40.0, y: 40.0 },
+            None,
+            source.map(|node_id| OutputRef {
+                node_id,
+                port: ORDER_PORT,
+            }),
+        )
+        .expect("the request is added");
+        *graph = added.graph;
+        let handle = graph
+            .nodes
+            .iter()
+            .find(|node| node.id == added.node_id)
+            .unwrap()
+            .handle
+            .clone();
+        (next, handle, added.node_id)
+    }
+
+    fn without(document: &Document, id: &str) -> Document {
+        let mut next = document.clone();
+        let graph = main_graph(&mut next);
+        *graph = delete_nodes(graph, &HashSet::from([id]));
+        next
+    }
+
+    /// The lines `before` and `after` do not share at their start and end:
+    /// `(before[changed], after[changed])` as line ranges.
+    fn changed(before: &str, after: &str) -> (Range<usize>, Range<usize>) {
+        let before: Vec<&str> = before.split_inclusive('\n').collect();
+        let after: Vec<&str> = after.split_inclusive('\n').collect();
+        let prefix = before
+            .iter()
+            .zip(&after)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let suffix = before[prefix..]
+            .iter()
+            .rev()
+            .zip(after[prefix..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        (prefix..before.len() - suffix, prefix..after.len() - suffix)
+    }
+
+    /// The lines `after` adds to `before`, when it adds one run of lines and
+    /// changes nothing else, byte for byte.
+    fn inserted(before: &str, after: &str) -> Vec<String> {
+        let (removed, added) = changed(before, after);
+        assert!(
+            removed.is_empty(),
+            "the edit changes lines it did not add; before:\n{before}\nafter:\n{after}"
+        );
+        after.split_inclusive('\n').collect::<Vec<_>>()[added]
+            .iter()
+            .map(|line| line.to_string())
+            .collect()
+    }
+
+    /// The lines that begin a statement (`handle = …`, `var …`, `export …`).
+    fn statement_lines(lines: &[String]) -> Vec<&String> {
+        lines
+            .iter()
+            .filter(|line| {
+                let line = line.trim_start();
+                let word: String = line
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                !word.is_empty()
+                    && (line[word.len()..].starts_with(" = ") || word == "var" || word == "export")
+            })
+            .collect()
+    }
+
+    fn find<'a>(statements: &'a [Statement], handle: &str) -> Option<&'a Statement> {
+        statements.iter().find_map(|statement| {
+            if statement.handle == handle {
+                return Some(statement);
+            }
+            match &statement.form {
+                Form::If {
+                    then, otherwise, ..
+                } => find(then, handle)
+                    .or_else(|| otherwise.as_deref().and_then(|o| find(o, handle))),
+                _ => None,
+            }
+        })
+    }
+
+    /// The lines, zero-based and end exclusive, that `handle`'s statement
+    /// spans in `text`.
+    fn lines_of(text: &str, handle: &str) -> Range<usize> {
+        let tree = apiforge_script::parse(text);
+        let file = tree.file.as_ref().expect("the text parses");
+        let statement = find(&file.statements, handle)
+            .or_else(|| file.cleanup.as_deref().and_then(|c| find(c, handle)))
+            .unwrap_or_else(|| panic!("{handle} is written:\n{text}"));
+        let line = |offset: usize| text[..offset].matches('\n').count();
+        line(statement.range.start)..line(statement.range.end) + 1
+    }
+
+    /// Criterion 1, for every `.afs` file of the repository: a layout change
+    /// leaves the text as it is; a request added from the board is one run of
+    /// new lines and nothing else changes; deleting it, as a second edit or
+    /// by *Undo*, gives back the file byte for byte; a change to one
+    /// statement rewrites that statement's lines only.
+    #[test]
+    fn lay34_criterion_1_a_board_edit_and_its_undo_leave_every_repository_file_as_it_was() {
+        let mut skipped = vec![];
+        for (path, original) in repository_sources() {
+            let (_directory, mut session, id) = opened(&original);
+            if session.document(&id).unwrap().model().is_none() {
+                skipped.push(path);
+                continue;
+            }
+            let before = model(&session, &id);
+
+            // Text → window → text, without an edit.
+            let mut moved = before.clone();
+            for node in &mut main_graph(&mut moved).nodes {
+                node.position.x += 40.0;
+            }
+            session.apply_model_edit(&id, moved, Origin(7)).unwrap();
+            assert_eq!(text(&session, &id), original, "{path}: a layout change");
+            let before = model(&session, &id);
+
+            // One request, from the Next of the first step, when there is one.
+            let step = main_graph(&mut before.clone())
+                .nodes
+                .iter()
+                .find(|node| matches!(node.kind, NodeKind::Request | NodeKind::Component))
+                .map(|node| node.id.clone());
+            let (added, handle, new_id) = with_request(&before, step.as_deref());
+            session.apply_model_edit(&id, added, Origin(7)).unwrap();
+            let after = text(&session, &id);
+            let lines = inserted(&original, &after);
+            let starts = statement_lines(&lines);
+            assert!(
+                starts.len() == 1 && starts[0].trim_start().starts_with(&format!("{handle} = ")),
+                "{path}: the new lines are the new request's statement only: {lines:?}"
+            );
+
+            // Deleted again as a second edit, then by Undo of both edits.
+            let current = model(&session, &id);
+            session
+                .apply_model_edit(&id, without(&current, &new_id), Origin(7))
+                .unwrap();
+            assert_eq!(text(&session, &id), original, "{path}: deleted again");
+            assert!(session.undo(&id, Origin(7)).unwrap());
+            assert_eq!(text(&session, &id), after, "{path}: the delete undone");
+            assert!(session.undo(&id, Origin(7)).unwrap());
+            assert_eq!(text(&session, &id), original, "{path}: the add undone");
+
+            // One statement changed: a request's address or a value.
+            let mut edited = model(&session, &id);
+            let graph = main_graph(&mut edited);
+            let node = match graph
+                .nodes
+                .iter()
+                .position(|node| node.kind == NodeKind::Request)
+            {
+                Some(index) => {
+                    let node = &mut graph.nodes[index];
+                    node.inputs.insert(
+                        "url".into(),
+                        Binding::Literal {
+                            value: "/lay34".into(),
+                        },
+                    );
+                    node.handle.clone()
+                }
+                None => {
+                    let node = graph
+                        .nodes
+                        .iter_mut()
+                        .find(|node| node.kind == NodeKind::Value)
+                        .unwrap_or_else(|| panic!("{path} has a request or a value"));
+                    node.inputs
+                        .insert("value".into(), Binding::Literal { value: 34.into() });
+                    node.handle.clone()
+                }
+            };
+            session.apply_model_edit(&id, edited, Origin(7)).unwrap();
+            let after = text(&session, &id);
+            let (removed, added) = changed(&original, &after);
+            let (was, is) = (lines_of(&original, &node), lines_of(&after, &node));
+            assert!(
+                !removed.is_empty()
+                    && was.start <= removed.start
+                    && removed.end <= was.end
+                    && is.start <= added.start
+                    && added.end <= is.end,
+                "{path}: only the lines of {node} change; before:\n{original}\nafter:\n{after}"
+            );
+        }
+        assert_eq!(skipped, [INVALID], "only the file with errors has no board");
+    }
+
+    /// Criterion 2: a scenario without `on_error` gets none from a board
+    /// edit, one that has it keeps it; the window's error policy switch
+    /// writes that one line.
+    #[test]
+    fn lay34_criterion_2_on_error_is_written_only_where_the_author_wrote_it() {
+        let original = source("fixtures/scenarios/lay/shop-30.afs");
+        assert!(!original.contains("on_error"));
+        let (_directory, mut session, id) = opened(&original);
+        let mut before = model(&session, &id);
+        let cart = id_of(&mut before, "cart");
+        let (added, _, _) = with_request(&before, Some(&cart));
+        session.apply_model_edit(&id, added, Origin(7)).unwrap();
+        let after = text(&session, &id);
+        assert!(!after.contains("on_error"), "no on_error added:\n{after}");
+        inserted(&original, &after);
+
+        assert!(session.undo(&id, Origin(7)).unwrap());
+        let Document::Scenario(mut continued) = model(&session, &id) else {
+            panic!("a scenario")
+        };
+        continued.error_policy = ErrorPolicy::Continue;
+        session
+            .apply_model_edit(&id, Document::Scenario(continued), Origin(7))
+            .unwrap();
+        assert_eq!(
+            inserted(&original, &text(&session, &id)),
+            ["  on_error continue\n"],
+            "the policy switch writes its own line and nothing else"
+        );
+
+        let original = source("fixtures/scripts/checkout.afs");
+        assert!(original.contains("  on_error stop\n"));
+        let (_directory, mut session, id) = opened(&original);
+        let mut before = model(&session, &id);
+        let products = id_of(&mut before, "products");
+        let (added, _, _) = with_request(&before, Some(&products));
+        session.apply_model_edit(&id, added, Origin(7)).unwrap();
+        let after = text(&session, &id);
+        assert_eq!(after.matches("on_error").count(), 1, "kept once:\n{after}");
+        inserted(&original, &after);
+    }
+
+    /// The owner's decision of 2026-11-17: a statement added from a step's
+    /// *Next* is written directly after that step (after the checks and
+    /// values that follow it, before the next step), inside the same
+    /// braces. On `shop-30`, which writes `refund` outside the braces of
+    /// `paid` and has no `on_error`, as reported at the checkpoint (#296).
+    #[test]
+    fn lay34_a_statement_added_from_a_step_is_written_after_it_inside_its_braces() {
+        let original = source("fixtures/scenarios/lay/shop-30.afs");
+        let lines: Vec<&str> = original.split_inclusive('\n').collect();
+        let (_directory, mut session, id) = opened(&original);
+        let mut before = model(&session, &id);
+
+        let payment = id_of(&mut before, "payment");
+        let (added, handle, _) = with_request(&before, Some(&payment));
+        session.apply_model_edit(&id, added, Origin(7)).unwrap();
+        let after = text(&session, &id);
+        let new = inserted(&original, &after);
+        let at = changed(&original, &after).0.start;
+        assert_eq!(
+            at,
+            lines_of(&original, "payment").end,
+            "written directly after payment:\n{after}"
+        );
+        assert!(lines[at].starts_with("    receipt = "), "before receipt");
+        assert!(
+            statement_lines(&new)[0].starts_with(&format!("    {handle} = ")),
+            "inside the braces of paid, as payment is: {new:?}"
+        );
+        assert!(after.contains("  @after(paid.then)\n  refund = "));
+        assert!(session.undo(&id, Origin(7)).unwrap());
+        assert_eq!(text(&session, &id), original);
+
+        let cart = id_of(&mut before, "cart");
+        let (added, handle, _) = with_request(&before, Some(&cart));
+        session.apply_model_edit(&id, added, Origin(7)).unwrap();
+        let after = text(&session, &id);
+        let new = inserted(&original, &after);
+        let at = changed(&original, &after).0.start;
+        assert_eq!(
+            at,
+            lines_of(&original, "cart_total").end,
+            "written after cart and the checks that follow it:\n{after}"
+        );
+        assert!(lines[at].starts_with("  cart_view = "), "before cart_view");
+        assert!(
+            statement_lines(&new)[0].starts_with(&format!("  {handle} = ")),
+            "{new:?}"
+        );
+    }
+}
