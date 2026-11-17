@@ -40,15 +40,28 @@ pub fn edit_folder_document(
     previous: &Document,
     document: &Document,
 ) -> Result<String, Vec<Diagnostic>> {
-    if printable(project, document, true) {
-        let tree = parse(source);
-        if let Some(text) = edited(project, &tree, previous, document)
-            && verify(project, document, true, &text).is_ok()
-        {
-            return Ok(text);
-        }
+    match edit_in_place(project, source, previous, document) {
+        Some(text) => Ok(text),
+        None => print_folder_document(project, document),
     }
-    print_folder_document(project, document)
+}
+
+/// As [`edit_folder_document`], without the fallback: the edited text when
+/// the edit can be written into `source` and reads back as `document`. A
+/// caller that must warn before the whole file is printed again (comments
+/// that belong to no statement are dropped by it) asks only on `None`.
+pub fn edit_in_place(
+    project: &Project,
+    source: &str,
+    previous: &Document,
+    document: &Document,
+) -> Option<String> {
+    if !printable(project, document, true) {
+        return None;
+    }
+    let tree = parse(source);
+    edited(project, &tree, previous, document)
+        .filter(|text| verify(project, document, true, text).is_ok())
 }
 
 /// Where a statement is written: the main flow or the cleanup, or a branch
