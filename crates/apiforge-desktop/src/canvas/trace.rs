@@ -15,6 +15,10 @@
 //! them and everything that ends a wire's selection ends its trace. Only
 //! data wires are traced: an ordering line already says `after …`.
 //!
+//! A reader count's list of the fields read (LAY-18) stands in the same box:
+//! at the count while it is pointed at, and while its port's wires are drawn
+//! by a click on it.
+//!
 //! Rendering only: nothing is saved, and no card, route or camera moves.
 
 use super::{
@@ -164,8 +168,9 @@ impl Memory {
     }
 
     /// Paints the statement of what is pointed at (`pointed`, from a chip, a
-    /// row or a line) and the statement of each click kept, every box whole
-    /// inside `board`.
+    /// count, a row or a line), the statement of each click kept and the list
+    /// of the count clicked (`listed`, LAY-18), every box whole inside
+    /// `board`.
     #[allow(clippy::too_many_arguments)]
     pub fn paint(
         &mut self,
@@ -174,6 +179,7 @@ impl Memory {
         camera: Camera,
         trace: &Trace,
         pointed: Option<&(String, Rect)>,
+        listed: Option<&(String, Rect)>,
         tags: &[readers::Tag],
         laid: &[readers::Laid],
     ) {
@@ -220,10 +226,10 @@ impl Memory {
                 boxes.push((text, near));
             }
         }
-        if let Some((text, near)) = pointed
-            && !boxes.iter().any(|(kept, _)| kept == text)
-        {
-            boxes.push((text.clone(), *near));
+        for (text, near) in listed.into_iter().chain(pointed) {
+            if !boxes.iter().any(|(kept, _)| kept == text) {
+                boxes.push((text.clone(), *near));
+            }
         }
         #[cfg(test)]
         {
