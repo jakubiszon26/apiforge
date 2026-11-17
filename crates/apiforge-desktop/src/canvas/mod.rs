@@ -1586,6 +1586,14 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &folded);
+        // A kept wire the board no longer has, after an edit, an Undo or a
+        // fold, is no longer kept: it does not come back kept (LAY-14).
+        let kept = self.selected_wires.len();
+        self.selected_wires
+            .retain(|id| board_wires.iter().any(|wire| &wire.id == id));
+        if self.selected_wires.len() != kept {
+            ui.ctx().request_repaint();
+        }
         // One selected step rings what it is related to and dims the rest
         // (LAY-10); its wires are lit, every other wire is dimmed.
         let focus = Focus::of(input.graph, input.selection, &board_wires, &cards);
@@ -1701,6 +1709,9 @@ impl Canvas {
                         .iter()
                         .any(|wire| self.selected_wires.contains(wire))
                     || pointed_tag.is_some_and(|index| shown_tags[index] == **tag)
+                    || pointed_wire
+                        .as_ref()
+                        .is_some_and(|(wire, _)| tag.wires.contains(wire))
                     || pointed_input.as_ref().is_some_and(|(reader, name, _)| {
                         &tag.reader == reader && &tag.input == name
                     })
@@ -2057,6 +2068,9 @@ impl Canvas {
                 let ids = if selection.contains(card.id.as_str()) {
                     input.selection.to_vec()
                 } else {
+                    // As a click on it does, a new selection ends a kept
+                    // wire (LAY-14).
+                    self.selected_wires.clear();
                     commands.push(Command::Select(vec![card.id.clone()]));
                     vec![card.id.clone()]
                 };
@@ -2269,6 +2283,9 @@ impl Canvas {
                 let ids = if selection.contains(chip.id()) {
                     input.selection.to_vec()
                 } else {
+                    // As a click on it does, a new selection ends a kept
+                    // wire (LAY-14).
+                    self.selected_wires.clear();
                     commands.push(Command::Select(vec![chip.id().to_owned()]));
                     vec![chip.id().to_owned()]
                 };
