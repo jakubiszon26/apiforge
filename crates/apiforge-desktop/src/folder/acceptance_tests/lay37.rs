@@ -226,3 +226,35 @@ fn lay37_chips_keep_apart_from_chips_cards_and_lines_after_tidy_up() {
         failures.len()
     );
 }
+
+/// The review views for the owner: `shop-30` tidied, checks folded, at Fit
+/// in 1600 × 1000 and 960 × 540, and at 100 % on `order`, the card of the
+/// report, cropped to the gap left of it: `← login` and `← cart.id` at its
+/// inputs, `→ 3` at `checkout`'s port across the gap.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay37() {
+    for (size, width) in [(WIDE, 1600), (crate::testing::MINIMUM, 960)] {
+        let (_project, mut harness, id) = tidied_text(&fixture("shop-30"), size, Checks::Collapsed);
+        choose(&mut harness, "Fit the view");
+        harness.step();
+        crate::testing::capture(&mut harness, &format!("lay37-shop-30-fit-{width}"), None);
+        super::lay23::show(&mut harness, &id, "order", 1.0);
+        let order = super::lay23::id_of(&harness, &id, "order");
+        let card = board(&harness, &id)
+            .debug_cards()
+            .iter()
+            .find(|(card, _)| *card == order)
+            .map(|(_, rect)| *rect)
+            .expect("order is drawn");
+        let region = Rect::from_min_max(
+            egui::pos2(card.left() - 280.0, card.top() - 40.0),
+            egui::pos2(card.left() + 120.0, card.top() + 200.0),
+        );
+        crate::testing::capture(
+            &mut harness,
+            &format!("lay37-shop-30-order-{width}"),
+            Some(region),
+        );
+    }
+}
