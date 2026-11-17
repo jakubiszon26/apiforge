@@ -2,10 +2,11 @@
 
 - Size: S · Owner review: 10 min · Risk: `default` (the place of *Start* in
   the run's order, [to confirm](#to-confirm-at-approval))
-- State: Analysis · issue
+- State: Implemented, awaiting acceptance (the owner confirmed *Start* first
+  on 2026-11-17) · issue
   [#418](https://github.com/jakubiszon26/apiforge/issues/418) · LAY sprint,
   engine track · follow-up of RUN-03 (#389)
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -137,7 +138,10 @@ Tests first, in their own commit, in a new file
    (`crates/apiforge-desktop/src/folder/component_run_tests.rs`,
    `NOTES_SOURCE`) no longer writes `@after(echoed, fallback)` on a value:
    `size` stands inside the `else` braces, its comment says so, and the
-   KTLO-27 tests pass with their assertions unchanged. `fixtures/README.md`
+   KTLO-27 tests pass with their assertions unchanged. *Implemented as
+   `@after(given)` (after the whole `if`, LANG-14) instead: the run with a
+   note also reads `size`, so inside `else` it would not run and
+   `ktlo27_a_typed_optional_value_is_passed_and_kept` would fail.* `fixtures/README.md`
    says that the step order in `fixtures/runs` is produced by
    `graph::sequence`, the code under test, so `run_corpus` proves
    statuses and values, not order; the order is proved by the RUN-03 and
@@ -147,6 +151,10 @@ Tests first, in their own commit, in a new file
    *Continue*: `BlockedBy` stays) and, once LAY-19 (#422) is on `main`,
    `lay19_criterion_8_a_failure_before_start`, whose assertions hold
    before and after; only its comment's "before *Start*" is reworded.
+   *One exception found at implementation: `lay19_criterion_2` asserted
+   that at least eight of the eleven steps carry `BlockedBy`, the defect
+   of criterion 1; it now asserts none does. Its cards' words are
+   unchanged.*
 
 ## Not in scope
 
