@@ -689,7 +689,10 @@ pub const MAX_STEP_OUTPUT_BYTES: usize = 4 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NotRunCause {
-    /// The run stopped, under the policy Stop, after `by` failed.
+    /// The run stopped, under the policy Stop, after `by` failed. Every step
+    /// the run did not reach after it carries this cause, except a step on
+    /// a branch that was not taken and a step that reads an output it
+    /// cannot use.
     Stopped { by: String },
     /// `step`, which this step waits for, failed or did not run itself.
     BlockedBy { step: String },
