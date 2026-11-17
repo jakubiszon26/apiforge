@@ -569,7 +569,9 @@ impl<'s, 'd> Edit<'s, 'd> {
 
     /// The tokens that start at or after `from`.
     fn after(&self, from: usize) -> impl Iterator<Item = &'s Token> {
-        let start = self.tokens.partition_point(|token| token.range.start < from);
+        let start = self
+            .tokens
+            .partition_point(|token| token.range.start < from);
         self.tokens[start..].iter()
     }
 

@@ -334,7 +334,10 @@ fn a_graphical_edit_rewrites_its_statement_and_retires_its_text_history() {
     frame(&mut app, &context, vec![]);
     let reprinted = text(&app, &scenario);
     assert!(reprinted.contains("Renamed product"), "{reprinted}");
-    assert!(reprinted.starts_with('\n'), "the blank line stays: {reprinted}");
+    assert!(
+        reprinted.starts_with('\n'),
+        "the blank line stays: {reprinted}"
+    );
     assert_eq!(first_node(&app, &scenario).id, node.id);
 
     // Undoing in the text cannot type back the source the graph replaced.

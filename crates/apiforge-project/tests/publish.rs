@@ -299,15 +299,15 @@ fn comments_that_belong_to_no_statement_need_a_decision_before_a_reprint() {
         .apply_model_edit(&id, Document::Component(component), Origin(1))
         .unwrap();
     assert!(
-        !session
+        session
             .document(&id)
             .unwrap()
             .text()
-            .contains("a loose note"),
-        "the accepted reprint drops it"
+            .starts_with("// a loose note\n\n"),
+        "a board edit rewrites only what it changes and keeps the comment (LAY-34)"
     );
 
-    // A new unattached comment is a new decision.
+    // An edit of the source is a new decision.
     let reprinted = session.document(&id).unwrap().text().to_owned();
     session
         .edit_source(&id, &format!("// another\n\n{reprinted}"), Origin(1))
@@ -315,7 +315,7 @@ fn comments_that_belong_to_no_statement_need_a_decision_before_a_reprint() {
     session.settle(&id).unwrap();
     assert!(matches!(
         session.publish(&id, Origin(1)),
-        Err(Error::CommentsWouldBeLost { comments: 1 })
+        Err(Error::CommentsWouldBeLost { comments: 2 })
     ));
     session.accept_comment_loss(&id).unwrap();
     session.publish(&id, Origin(1)).unwrap();

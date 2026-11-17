@@ -5,8 +5,7 @@
 //! Run: cargo run -p apiforge-script --example fuzz_semantics --release -- 60 2718281828
 use apiforge_core::{ImportLimits, format::*, import_document};
 use apiforge_script::{
-    Document, LowerContext, edit_folder_document, lower, parse, print_scenario, reconcile,
-    semantic,
+    Document, LowerContext, edit_folder_document, lower, parse, print_scenario, reconcile, semantic,
 };
 use std::time::{Duration, Instant};
 
@@ -115,7 +114,11 @@ fn verify_edit(source: &str, previous: &Document, document: &Document, project: 
     }
     if let Ok(text) = edit_folder_document(project, source, previous, document) {
         let again = lower(&parse(&text), &LowerContext::folder(project));
-        assert!(!again.has_errors(), "{:?}\n{source}\n---\n{text}", again.diagnostics);
+        assert!(
+            !again.has_errors(),
+            "{:?}\n{source}\n---\n{text}",
+            again.diagnostics
+        );
         assert_eq!(
             semantic(&again.document.unwrap(), project),
             semantic(document, project),
