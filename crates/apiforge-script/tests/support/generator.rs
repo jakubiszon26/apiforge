@@ -122,7 +122,8 @@ impl Generator {
             _ => format!("{a} > {}", self.leaf(cleanup)),
         }
     }
-    /// Ordering towards earlier statements of the same graph only: acyclic.
+    /// Ordering towards earlier statements of the same braces only: acyclic,
+    /// and never the `if` whose braces hold the statement, which is an error.
     fn after(&mut self, cleanup: bool, available: &[(String, Kind)]) -> String {
         if available.is_empty() || !self.chance(35) {
             return String::new();
@@ -130,8 +131,9 @@ impl Generator {
         let mut orders = BTreeSet::new();
         for _ in 0..=self.pick(2) {
             let (name, kind) = available[self.pick(available.len())].clone();
+            // An `if` is followed on one branch or, without one, as a whole.
             orders.insert(if kind == Kind::If {
-                format!("{name}.{}", ["then", "else"][self.pick(2)])
+                format!("{name}{}", ["", ".then", ".else"][self.pick(3)])
             } else {
                 name
             });

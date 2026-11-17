@@ -50,7 +50,7 @@ const MASKED_LEAKS: &[(&str, &str, &str)] = &[(
     // the query as a form, so `my+session secret` becomes `my+session+secret`, which
     // none of the recording's three masked forms matches.
     "redaction",
-    "/steps/0/request/url",
+    "/steps/2/request/url",
     "my+session+secret",
 )];
 
