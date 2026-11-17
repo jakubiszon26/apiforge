@@ -491,6 +491,11 @@ fn lay29_criterion_1_no_route_passes_under_its_own_card_on_piled_boards() {
             [],
             "seed {seed}: a route passes under a card it joins"
         );
+        assert_eq!(
+            apiforge_layout::violations(&routes, &wires, &cards),
+            [],
+            "seed {seed}: a route touches a card past what ADR 0006 allows"
+        );
         wires_routed += wires.len();
         incomplete.extend(
             routes

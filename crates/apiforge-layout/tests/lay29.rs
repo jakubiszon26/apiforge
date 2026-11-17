@@ -214,6 +214,34 @@ fn lay29_criterion_1_a_card_over_one_port_is_left_through_the_stub_only() {
     assert_eq!(under_own(&routes, &wires, &cards), []);
 }
 
+/// Criterion 1, a pile over one port that reaches the other card: on a
+/// piled `fan-out` the top port of a card lies under two cards whose pile
+/// reaches past the bottom of the wire's other card, right above it. No
+/// stub can leave the pile without passing under the other card, so the
+/// route leaves the pile inside it and then goes round; it has a route,
+/// touches no card past the cards over its port, and no piece lies inside
+/// a card it joins.
+#[test]
+fn lay29_criterion_1_a_pile_over_a_port_is_left_however_it_lies() {
+    let cards = [
+        card(760.0, 630.0, 280.0, 142.0),
+        card(660.0, 440.0, 280.0, 166.0),
+        card(804.0, 536.0, 280.0, 190.0),
+        card(876.0, 584.0, 280.0, 190.0),
+        card(516.0, 344.0, 280.0, 166.0),
+    ];
+    let wires = [wire((0, Side::Top, 140.0), (1, Side::Top, 140.0))];
+    let routes = route(&cards, &wires, &Routing::default());
+    assert!(routes[0].complete, "{:?}", routes[0].points);
+    assert_eq!(
+        violations(&routes, &wires, &cards),
+        [],
+        "{:?}",
+        routes[0].points
+    );
+    assert_eq!(under_own(&routes, &wires, &cards), []);
+}
+
 /// Criterion 5: the budget of ADR 0006. The reference boards route within
 /// it by a wide margin; the budget's own board is `bench`'s.
 #[test]

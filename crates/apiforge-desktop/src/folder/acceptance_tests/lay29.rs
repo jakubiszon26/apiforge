@@ -95,6 +95,11 @@ fn under_own_in_the_window(harness: &FolderHarness, id: &str) -> (Vec<(usize, us
     let (cards, wires) = board(harness, id).debug_geometry().clone();
     assert!(!wires.is_empty(), "the board draws lines");
     let routes = apiforge_layout::route(&cards, &wires, &Routing::default());
+    assert_eq!(
+        apiforge_layout::violations(&routes, &wires, &cards),
+        [],
+        "no line touches a card the guarantee keeps it off"
+    );
     let incomplete = routes.iter().filter(|route| !route.complete).count();
     (under_own(&routes, &wires, &cards), incomplete)
 }
@@ -121,8 +126,8 @@ fn drawn(harness: &FolderHarness, id: &str) -> (Vec<Route>, Vec<Block>) {
 
 /// Criterion 3: the window draws no line under a card it joins. On
 /// `shop-30` and `fan-out` with cards piled on each other, in both *Wires*
-/// modes, no line has a piece inside a card it joins and every line has a
-/// route (`begin` into `login` on `shop-30`, which starts 12 px under
+/// modes, no line has a piece inside a card it joins, none breaks the
+/// guarantee of ADR 0006 and every line has a route (`begin` into `login` on `shop-30`, which starts 12 px under
 /// `login`, had none at first); tidied, the same boards have none under
 /// their cards, every line has a route and the gap of LAY-03 holds.
 #[test]
