@@ -7,7 +7,8 @@
 //! the source's own column. Then every reader of the port has a chip, the
 //! one beside it too: a value shown as a chip is read only through chips,
 //! and a port never shows a count and a line (LAY-32). The source's port
-//! says how many steps read it. The wire comes back while its chip or its
+//! says how many steps read it; pointing at the count lists the fields read
+//! and who reads each (LAY-18). The wire comes back while its chip or its
 //! input is pointed at and while its reader or its source is selected.
 //!
 //! It is a rendering rule only. Nothing here is saved, no card's box
@@ -30,6 +31,7 @@ use crate::theme;
 use apiforge_core::{
     format::{Binding, Graph, Project},
     graph::{self, WireKind, wires as document_wires},
+    run::StepResult,
 };
 use eframe::egui::{FontId, Galley, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, pos2, vec2};
 use std::{
@@ -277,6 +279,144 @@ pub(super) fn texts(
         .collect::<Vec<_>>()
         .join(".");
     (text, short, format!("{whole} → {target}"))
+}
+
+/// How many readers a line of a count's list names (LAY-18); the Inspector
+/// lists them all.
+const NAMED: usize = 6;
+
+/// How long a value from the last run may be in a count's list (LAY-18).
+const VALUE: usize = 28;
+
+/// A field of an output port the document reads: as the code writes it
+/// (`login.body.token`), its path in the port's value, and its readers in
+/// the document's order, each with whether it is a check.
+struct Field {
+    name: String,
+    path: String,
+    readers: Vec<(String, bool)>,
+}
+
+/// The fields of `source`'s port `port` the document reads, most read first.
+fn fields_read(graph: &Graph, project: &Project, source: &str, port: &str) -> Vec<Field> {
+    let Some(source_node) = graph.nodes.iter().find(|node| node.id == source) else {
+        return Vec::new();
+    };
+    // As a chip writes the reference: a variable, or a step with one output
+    // port, is named without it.
+    let named_port =
+        if source_node.is_variable() || graph::output_ports(source_node, project).len() == 1 {
+            ""
+        } else {
+            port
+        };
+    let mut fields: Vec<Field> = Vec::new();
+    for wire in document_wires(graph) {
+        if wire.kind != WireKind::Data
+            || wire.source != source
+            || wire.source_port.as_deref() != Some(port)
+        {
+            continue;
+        }
+        let Some(reader) = graph.nodes.iter().find(|node| node.id == wire.target) else {
+            continue;
+        };
+        let leaf = wire
+            .target_input
+            .as_ref()
+            .and_then(|input| reader.inputs.get(input))
+            .and_then(|binding| binding.at(&wire.operand_path));
+        let path = match leaf {
+            Some(Binding::Reference { path, .. }) => path.clone(),
+            _ => String::new(),
+        };
+        let entry = (reader.handle.clone(), reader.kind.is_check());
+        match fields.iter_mut().find(|field| field.path == path) {
+            Some(field) => {
+                if !field.readers.contains(&entry) {
+                    field.readers.push(entry);
+                }
+            }
+            None => fields.push(Field {
+                name: [source_node.handle.as_str(), named_port, path.as_str()]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("."),
+                path,
+                readers: vec![entry],
+            }),
+        }
+    }
+    fields.sort_by(|a, b| b.readers.len().cmp(&a.readers.len()));
+    fields
+}
+
+/// The value of `path` in `source`'s port `port` in the last run, as JSON
+/// cut to [`VALUE`] characters; a secret is as the run report has it.
+fn run_value(steps: &[StepResult], source: &str, port: &str, path: &str) -> Option<String> {
+    let output = steps
+        .iter()
+        .find(|step| step.node_id == source)?
+        .outputs
+        .get(port)?;
+    let value = if path.is_empty() {
+        output.clone()
+    } else {
+        apiforge_core::path::resolve(output, path)?.into_owned()
+    };
+    let text = value.to_string();
+    Some(if text.chars().count() > VALUE {
+        format!("{}…", text.chars().take(VALUE).collect::<String>())
+    } else {
+        text
+    })
+}
+
+/// What pointing at a count shows (LAY-18): one line per field of its port
+/// the document reads, most read first, with the number of its readers and
+/// the first [`NAMED`] of them, `login.body.token → 10 readers: catalogue,
+/// …, +4 more`; a field only checks read counts checks. After a run, `steps`,
+/// each line names the field's value before the arrow.
+pub fn field_list(
+    graph: &Graph,
+    project: &Project,
+    steps: Option<&[StepResult]>,
+    count: &Count,
+) -> String {
+    fields_read(graph, project, &count.source, &count.port)
+        .into_iter()
+        .map(|field| {
+            let checks = field.readers.iter().all(|(_, check)| *check);
+            let unit = match (checks, field.readers.len()) {
+                (true, 1) => "check",
+                (true, _) => "checks",
+                (false, 1) => "reader",
+                (false, _) => "readers",
+            };
+            let mut names: Vec<&str> = field
+                .readers
+                .iter()
+                .take(NAMED)
+                .map(|(name, _)| name.as_str())
+                .collect();
+            let more = field.readers.len().saturating_sub(NAMED);
+            let more = format!("+{more} more");
+            if field.readers.len() > NAMED {
+                names.push(&more);
+            }
+            let value = steps
+                .and_then(|steps| run_value(steps, &count.source, &count.port, &field.path))
+                .map_or_else(String::new, |value| format!(" = {value}"));
+            format!(
+                "{}{value} → {} {unit}: {}",
+                field.name,
+                field.readers.len(),
+                names.join(", ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The chips and counts of the wires in `chipped`, at the cards as they are
