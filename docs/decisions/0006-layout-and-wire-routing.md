@@ -339,6 +339,11 @@ is opened. `quality` prints for every reference board the cards hung under
 a step, the mean and the worst gap above one, and the lines of other cards
 inside a group (`hung`, `gap_mean`, `gap_worst`, `intruders`).
 
+**Cost:** the budget's board, which has no group, routes in 132 ms
+(budget 150 ms); `shop-50` with every wire and check in 36 ms (35 ms
+before). Tidy up of `shop-50` with its checks drawn takes 29 ms with chips
+and 131 ms with every wire, its frame included.
+
 ## As implemented
 
 The decisions above hold, with these corrections found while building it:
