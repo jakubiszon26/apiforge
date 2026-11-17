@@ -89,6 +89,17 @@ impl NodeKind {
         self == Self::Value
     }
 
+    /// Data statements: a value, a check, a condition, an export. Among the
+    /// nodes ready at the same time they run before the steps (a start, a
+    /// request, a component call, an `if`), so a step's checks and values are
+    /// computed before the next step starts (RUN-03).
+    pub fn is_data(self) -> bool {
+        matches!(
+            self,
+            Self::Value | Self::Assert | Self::Condition | Self::Export
+        )
+    }
+
     /// Kinds whose `actual`/`expected` inputs are compared by a predicate.
     pub fn is_check(self) -> bool {
         matches!(self, Self::Assert | Self::Condition | Self::If)
@@ -541,29 +552,51 @@ pub fn dependency_index(graph: &Graph) -> HashMap<&str, IndexSet<&str>> {
 
 /// The steps in the order the engine reaches them, without executing anything.
 ///
-/// The runner's loop takes the first step of the document whose dependencies
-/// have finished, and every step finishes whatever its result: a skipped branch
-/// or a stopped run still takes its turn. So the order is static. Dependencies
-/// outside `graph` do not hold a step back, as a Cleanup step reading the main
-/// graph. Steps of a cycle, which the engine refuses, keep their document order
-/// at the end, so every step has a place.
+/// The runner's loop takes, among the nodes whose dependencies have finished,
+/// the first data statement of the document ([`NodeKind::is_data`]), or else
+/// the first step; and every node finishes whatever its result: a skipped
+/// branch or a stopped run still takes its turn. So the order is static.
+/// Dependencies outside `graph` do not hold a step back, as a Cleanup step
+/// reading the main graph. Steps of a cycle, which the engine refuses, keep
+/// their document order at the end, so every step has a place.
 pub fn sequence(graph: &Graph) -> Vec<&str> {
     let index = dependency_index(graph);
-    let mut pending: Vec<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();
-    let known: HashSet<&str> = pending.iter().copied().collect();
+    let mut pending: Vec<&Node> = graph.nodes.iter().collect();
+    let known: HashSet<&str> = pending.iter().map(|node| node.id.as_str()).collect();
     let mut done: HashSet<&str> = HashSet::with_capacity(pending.len());
     let mut order = Vec::with_capacity(pending.len());
-    while let Some(ready) = pending.iter().position(|id| {
-        index[id]
+    while let Some(ready) = next_ready(&pending, |node| {
+        index[node.id.as_str()]
             .iter()
             .all(|source| !known.contains(source) || done.contains(source))
     }) {
-        let id = pending.remove(ready);
+        let id = pending.remove(ready).id.as_str();
         done.insert(id);
         order.push(id);
     }
-    order.extend(pending);
+    order.extend(pending.into_iter().map(|node| node.id.as_str()));
     order
+}
+
+/// The position in `pending` of the node to run next among those `ready`
+/// accepts: the first data statement, or else the first step (RUN-03). The
+/// runner and [`sequence`] both choose with it.
+pub fn next_ready<N: std::borrow::Borrow<Node>>(
+    pending: &[N],
+    mut ready: impl FnMut(&Node) -> bool,
+) -> Option<usize> {
+    let mut first_step = None;
+    for (index, node) in pending.iter().enumerate() {
+        let node = node.borrow();
+        if !ready(node) {
+            continue;
+        }
+        if node.kind.is_data() {
+            return Some(index);
+        }
+        first_step.get_or_insert(index);
+    }
+    first_step
 }
 
 /// A step a check verifies: a request or a component call it reads directly.

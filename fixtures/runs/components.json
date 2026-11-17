@@ -751,6 +751,24 @@
         },
         "children": [
           {
+            "nodeId": "broken",
+            "handle": "broken",
+            "kind": "value",
+            "status": "error",
+            "phase": "main",
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "nodeId": "create-then-fail-export-missing",
+            "handle": "missing",
+            "kind": "export",
+            "status": "blocked",
+            "phase": "main",
+            "inputs": {},
+            "outputs": {}
+          },
+          {
             "nodeId": "create",
             "handle": "create",
             "kind": "request",
@@ -777,15 +795,6 @@
             }
           },
           {
-            "nodeId": "broken",
-            "handle": "broken",
-            "kind": "value",
-            "status": "error",
-            "phase": "main",
-            "inputs": {},
-            "outputs": {}
-          },
-          {
             "nodeId": "create-then-fail-export-id",
             "handle": "id",
             "kind": "export",
@@ -797,15 +806,6 @@
             "outputs": {
               "value": "new"
             }
-          },
-          {
-            "nodeId": "create-then-fail-export-missing",
-            "handle": "missing",
-            "kind": "export",
-            "status": "blocked",
-            "phase": "main",
-            "inputs": {},
-            "outputs": {}
           }
         ]
       },

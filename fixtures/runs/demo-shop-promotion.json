@@ -625,6 +625,20 @@
     "hasError": false,
     "steps": [
       {
+        "nodeId": "expected",
+        "handle": "oczekiwana_cena",
+        "label": "Oczekiwana cena",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": 80
+        },
+        "outputs": {
+          "value": 80
+        }
+      },
+      {
         "nodeId": "product",
         "handle": "produkt",
         "label": "Produkt",
@@ -715,6 +729,22 @@
             }
           }
         ]
+      },
+      {
+        "nodeId": "field",
+        "handle": "pole_inna_nazwa",
+        "label": "Pole inna_nazwa",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "Oferta jesienna"
+        },
+        "outputs": {
+          "value": "Oferta jesienna",
+          "passed": true
+        },
+        "actual": "Oferta jesienna"
       },
       {
         "nodeId": "active",
@@ -816,20 +846,6 @@
             }
           }
         ]
-      },
-      {
-        "nodeId": "expected",
-        "handle": "oczekiwana_cena",
-        "label": "Oczekiwana cena",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": 80
-        },
-        "outputs": {
-          "value": 80
-        }
       },
       {
         "nodeId": "cart",
@@ -1001,22 +1017,6 @@
         },
         "actual": 80,
         "expected": 80
-      },
-      {
-        "nodeId": "field",
-        "handle": "pole_inna_nazwa",
-        "label": "Pole inna_nazwa",
-        "kind": "assert",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "actual": "Oferta jesienna"
-        },
-        "outputs": {
-          "value": "Oferta jesienna",
-          "passed": true
-        },
-        "actual": "Oferta jesienna"
       },
       {
         "nodeId": "delete-cart",
