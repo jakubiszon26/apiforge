@@ -261,12 +261,13 @@ unchanged.
    wire joins can face each other closer than a stub, or a third card can
    bury both ports between them; the stub then ends inside the wire's
    other card and no route can start. The last attempt, with no
-   clearance, stops each stub short of the cards left and halfway to the
-   other card when that card is nearer, and lets the wire run inside a
-   card that lies over one of its ports. A card over both ports may then
-   hold the whole route, a widening of the exception that `violations`
-   knows. Only a wire with no way at all has no route, is marked
-   incomplete and drawn as the plain corner of an enclosed port.
+   clearance, lets each stub leave the cards over its port, then stops it
+   short of the cards left and halfway to the other card when that card
+   is nearer. A card over one port only stays in the route's way past
+   the stub; a card over both ports is no obstacle and may hold the whole
+   route, a widening of the exception that `violations` knows. Only a
+   wire with no way at all has no route, is marked incomplete and drawn
+   as the plain corner of an enclosed port.
 
 `apiforge_layout::under_own` lists the wires with a piece inside a card
 they join, past such a stub: none on the 24 reference boards and on

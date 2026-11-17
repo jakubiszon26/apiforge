@@ -101,7 +101,7 @@ The analysis found two causes (both on #382):
   own cards are gone; `clear_stub` leaves the wire's other card when it
   lies over the port; `violations` counts that stub as the exception;
   a last attempt (`near_stub`) stops the stubs between cards closer than a
-  stub and lets the wire run inside a card over its port; `under_own` is
+  stub and lets the wire run inside a card over both its ports; `under_own` is
   the measure. `canvas/` is unchanged.
 - ADR 0006 amended.
 - Tests: `crates/apiforge-layout/tests/lay29.rs`,

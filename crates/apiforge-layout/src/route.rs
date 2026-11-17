@@ -250,10 +250,11 @@ pub fn route_among(
                 None => (margin, 0.0),
             };
             // The last attempt lets the wire run inside a card that lies over
-            // one of its ports: the stub could not leave it without passing
-            // under a card the wire joins (LAY-29).
+            // both its ports: the stubs could not leave it without passing
+            // under a card the wire joins (LAY-29). A card over one port only
+            // stays in the way; the stub leaves it (`near_stub`).
             let blocking = |card: &&Rect| {
-                !close || !(card.contains_strictly(start) || card.contains_strictly(end))
+                !close || !(card.contains_strictly(start) && card.contains_strictly(end))
             };
             let mut obstacles: Vec<Rect> = foreign
                 .iter()
@@ -554,11 +555,14 @@ fn clear_stub(
 }
 
 /// The stub of the last attempt (LAY-29). Two cards a wire joins can face
-/// each other closer than a stub, or a pile can bury both ports: the stub
-/// [`clear_stub`] gives then ends in the wire's other card, where no route
-/// may start. This one stops short of the obstacles left, and halfway to
-/// the other card when that card is nearer, so the route starts between
-/// the two. A port inside the other card leaves it as in [`clear_stub`].
+/// each other closer than a stub, or a pile can bury a port between them:
+/// the stub [`clear_stub`] gives then ends in the wire's other card, where
+/// no route may start. This one leaves the cards over the port, as
+/// [`clear_stub`] does, and then stops short of the obstacles left, and
+/// halfway to the other card when that card is nearer, so the route starts
+/// between the two. Where the cards over the port reach into the other
+/// card, the stub ends in it and the attempt finds no route. A port inside
+/// the other card leaves it as in [`clear_stub`].
 fn near_stub(
     point: Point,
     side: Side,
@@ -569,14 +573,30 @@ fn near_stub(
     if let Some(card) = other.filter(|card| card.contains_strictly(point)) {
         return clear_stub(point, side, &[], obstacles, Some((card, card)), settings);
     }
+    // The far side of the cards over the port: four rounds leave a pile.
+    let mut out = 0.0f32;
+    for _ in 0..4 {
+        let end = step(point, side, out);
+        let far = obstacles
+            .iter()
+            .filter(|obstacle| obstacle.contains_strictly(end))
+            .map(|obstacle| far_side(point, side, obstacle))
+            .fold(out, f32::max);
+        if far <= out {
+            break;
+        }
+        out = far;
+    }
+    let from = step(point, side, out);
     let free = obstacles
         .iter()
-        .filter_map(|obstacle| entry_distance(point, side, obstacle))
+        .filter_map(|obstacle| entry_distance(from, side, obstacle))
         .fold(settings.stub, f32::min)
         .max(0.0);
     let distance = match other.and_then(|card| entry_distance(point, side, &card)) {
-        Some(other) if other < free => other / 2.0,
-        _ => free,
+        Some(other) if other <= out => out,
+        Some(other) if other < out + free => (out + other) / 2.0,
+        _ => out + free,
     };
     step(point, side, distance)
 }
