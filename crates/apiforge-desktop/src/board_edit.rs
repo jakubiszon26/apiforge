@@ -65,7 +65,7 @@ const ROOM_ROUNDS: usize = 24;
 /// up to [`canvas::LANE`]; where lines run down the gap past it, it may
 /// stand beyond them, its stub across them. So each needs a stretch of the
 /// gap that wide between the lines that pass it, short of a line's gap from
-/// the lane of a count or a chip facing it across the gap.
+/// the lane of a count or a chip facing it across the gap, level with it.
 fn lane_room(
     hanging: &apiforge_layout::Hanging<'_>,
     plan: &canvas::shape::Plan,
@@ -93,14 +93,27 @@ fn lane_room(
             })?;
         Some((spine / per, spine % per))
     };
-    let sides = |input: bool| -> HashSet<(usize, usize)> {
-        lanes
-            .iter()
-            .filter(|lane| lane.input == input)
-            .filter_map(|lane| place(index(&lane.node)?))
-            .collect()
+    // The heights of the chips, or of the counts, of each stack.
+    let sides = |input: bool| -> HashMap<(usize, usize), Vec<f32>> {
+        let mut sides: HashMap<(usize, usize), Vec<f32>> = HashMap::new();
+        for lane in lanes.iter().filter(|lane| lane.input == input) {
+            if let Some(at) = index(&lane.node).and_then(place) {
+                sides.entry(at).or_default().push(lane.anchor.y);
+            }
+        }
+        sides
     };
     let (tagged, counted) = (sides(true), sides(false));
+    // A chip and a count face each other across a gap only where they are
+    // level: a chip of a card hung low in a stack (LAY-31) does not face the
+    // count at its neighbour's port up at the step.
+    let level = |side: &HashMap<(usize, usize), Vec<f32>>, at: (usize, usize), y: f32| {
+        side.get(&at).is_some_and(|heights| {
+            heights
+                .iter()
+                .any(|other| (other - y).abs() < 2.0 * half + step)
+        })
+    };
     // The left and right edges of the spine step at a row and column.
     let spine = |row: usize, column: usize| {
         let step = *plan
@@ -133,14 +146,14 @@ fn lane_room(
             else {
                 continue;
             };
-            let facing = counted.contains(&(row, column - 1));
+            let facing = level(&counted, (row, column - 1), lane.anchor.y);
             let from = left + if facing { canvas::LANE + step } else { clear };
             (column - 1, from, placed[node].x - stub + clear)
         } else {
             let Some((right, _)) = spine(row, column + 1) else {
                 continue;
             };
-            let facing = tagged.contains(&(row, column + 1));
+            let facing = level(&tagged, (row, column + 1), lane.anchor.y);
             let to = right - if facing { canvas::LANE + step } else { clear };
             (column, placed[node].x + size.width + stub - clear, to)
         };
@@ -358,27 +371,38 @@ impl Board<'_> {
         for _ in 0..ASKING_ROUNDS {
             let (placed, rows) = apiforge_layout::hang_with(&hanging, &room);
             let ((cards, wires), _) = drawn(&placed);
+            // A step and the cards hung under it are one group, which the
+            // lines of other cards go round (LAY-31).
+            let groups = apiforge_layout::groups(&cards);
             let wanted: Vec<apiforge_layout::Route> = wires
                 .iter()
-                .flat_map(|wire| apiforge_layout::route(&cards, &[*wire], &alone))
+                .flat_map(|wire| {
+                    apiforge_layout::route_grouped(&cards, &groups, &[*wire], &alone, &[])
+                })
                 .collect();
-            if !apiforge_layout::make_room(
-                &hanging, &placed, &rows, &wanted, &hidden, gap, &mut room,
-            ) {
+            if !apiforge_layout::make_room(&hanging, &placed, &rows, &wanted, gap, &mut room) {
                 break;
             }
         }
         // Then what is left: the board is routed as it will be drawn, and
         // each place where a line still runs within the gap widens the gap
         // it lies in, as does each place where a chip or a count has no room
-        // beside its card clear of the lines (LAY-37). Gaps only grow, so
-        // this ends; the limit is for a board whose lines no room separates.
+        // beside its card clear of the lines (LAY-37). Inside a group a line
+        // need not keep the gap, so a breach there widens nothing (LAY-31).
+        // Gaps only grow, so this ends; the limit is for a board whose lines
+        // no room separates.
         for _ in 0..ROOM_ROUNDS {
             let (placed, rows) = apiforge_layout::hang_with(&hanging, &room);
             let ((cards, wires), lanes) = drawn(&placed);
-            let routes =
-                apiforge_layout::route(&cards, &wires, &apiforge_layout::Routing::default());
-            let found = apiforge_layout::packed(&routes, &cards, gap);
+            let groups = apiforge_layout::groups(&cards);
+            let routes = apiforge_layout::route_grouped(
+                &cards,
+                &groups,
+                &wires,
+                &apiforge_layout::Routing::default(),
+                &[],
+            );
+            let found = apiforge_layout::packed_outside_groups(&routes, &cards, &groups, gap);
             let lines = !found.is_empty()
                 && apiforge_layout::widen(
                     &hanging, &placed, &rows, &found, &hidden, gap, &mut room,

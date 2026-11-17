@@ -6,7 +6,7 @@
 use super::*;
 use crate::canvas::{Command, WireMode};
 use apiforge_core::format::Graph;
-use apiforge_layout::{Breach, GAP, Point, Rect as Block, Route, packed};
+use apiforge_layout::{Breach, GAP, Point, Rect as Block, Route, groups, packed_outside_groups};
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 const DIAGRAM: &str = ".apiforge/diagram.json";
@@ -102,7 +102,9 @@ fn drawn(harness: &FolderHarness, id: &str) -> (Vec<Route>, Vec<Block>) {
     (routes, canvas.debug_geometry().0.clone())
 }
 
-/// The breaches of the gap among the lines drawn (criterion 1).
+/// The breaches of the gap among the lines drawn (criterion 1). Inside a
+/// group, a step and the cards hung under it, a line of the group need not
+/// keep the gap (LAY-31): those are not counted.
 fn breaches(harness: &FolderHarness, id: &str) -> Vec<Breach> {
     let (routes, cards) = drawn(harness, id);
     assert!(!routes.is_empty(), "the board draws lines");
@@ -115,7 +117,7 @@ fn breaches(harness: &FolderHarness, id: &str) -> Vec<Breach> {
             );
         }
     }
-    packed(&routes, &cards, GAP)
+    packed_outside_groups(&routes, &cards, &groups(&cards), GAP)
 }
 
 fn assert_apart(harness: &FolderHarness, id: &str, label: &str) {

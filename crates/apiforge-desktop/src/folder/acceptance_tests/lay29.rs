@@ -10,7 +10,9 @@
 use super::*;
 use crate::canvas::{Command, WireMode};
 use apiforge_core::format::{Graph, Position};
-use apiforge_layout::{GAP, Point, Rect as Block, Route, Routing, packed, under_own};
+use apiforge_layout::{
+    GAP, Point, Rect as Block, Route, Routing, groups, packed_outside_groups, under_own,
+};
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 const DIAGRAM: &str = ".apiforge/diagram.json";
@@ -143,7 +145,11 @@ fn lay29_criterion_3_the_window_draws_no_line_under_its_own_card() {
         assert_eq!(under, [], "{label}, tidied: lines under a card they join");
         assert_eq!(incomplete, 0, "{label}, tidied: every line has a route");
         let (routes, cards) = drawn(&harness, &id);
-        assert_eq!(packed(&routes, &cards, GAP), [], "{label}: the gap holds");
+        assert_eq!(
+            packed_outside_groups(&routes, &cards, &groups(&cards), GAP),
+            [],
+            "{label}: the gap holds"
+        );
 
         pile(&mut harness, &id);
         let (under, incomplete) = under_own_in_the_window(&harness, &id);

@@ -47,7 +47,17 @@
 //!   in them. A scenario read from code has no chips yet: they are placed by hand
 //!   and live in the document, so `chips` says how many were measured;
 //! - `clearance`: route segments closer than 20 px to a card or chip the wire does
-//!   not end on, the router's `Routing::margin`.
+//!   not end on, the router's `Routing::margin`, other than a card of the wire's own
+//!   group (LAY-31);
+//! - `hung`: the cards hung under a step, the card file marks them with the card
+//!   above them in their stack; `gap_mean`, `gap_worst`: the free space above them,
+//!   24 px with the checks drawn (LAY-31); `intruders`: lines of other cards with a
+//!   piece inside a stack's box, its cards and the gaps between them.
+//!
+//! A step and the cards hung under it are one group (LAY-31,
+//! `apiforge_layout::groups`): the reference boards are routed with their groups,
+//! as the desktop routes them, and `packed` does not count a line of a group near
+//! that group's own cards (`apiforge_layout::packed_outside_groups`).
 //!
 //! The generated boards use the full card's geometry (`canvas/layout.rs`), which
 //! this crate cannot depend on; the reference boards carry the desktop's own.
@@ -55,8 +65,8 @@
 mod support;
 
 use apiforge_layout::{
-    Block, Edge, GAP, Graph, Point, Port, Rect, Route, Routing, Side, Size, Wire, layers_of,
-    packed, route, tidy,
+    Block, Edge, GAP, Graph, Point, Port, Rect, Route, Routing, Side, Size, Wire, groups,
+    layers_of, packed_outside_groups, route, route_grouped, tidy,
 };
 use std::{fmt::Write, process::ExitCode};
 use support::Random;
@@ -180,6 +190,9 @@ struct Tidied {
     /// `all`, or `chips` (LAY-23).
     drawn: String,
     cards: Vec<Rect>,
+    /// For each card, the card above it in its stack when it hangs under a
+    /// step (LAY-31).
+    under: Vec<Option<usize>>,
     chips: Vec<Rect>,
     /// The continuation marks, which count in the board's size only.
     marks: Vec<Rect>,
@@ -224,6 +237,7 @@ fn boards(text: &str) -> Result<Vec<Tidied>, String> {
                 steps: number(Some(&word()?))? as usize,
                 drawn: word()?,
                 cards: Vec::new(),
+                under: Vec::new(),
                 chips: Vec::new(),
                 marks: Vec::new(),
                 wires: Vec::new(),
@@ -235,7 +249,17 @@ fn boards(text: &str) -> Result<Vec<Tidied>, String> {
         }
         let board = result.last_mut().ok_or("a line before the first board")?;
         match kind {
-            "card" => board.cards.push(rect(&mut words)?),
+            "card" => {
+                board.cards.push(rect(&mut words)?);
+                // The name, then `under <card>` for a card hung under a step.
+                let _ = words.next();
+                let under = match words.next() {
+                    Some("under") => Some(number(words.next())? as usize),
+                    Some(other) => return Err(format!("not a card's ending: {other}")),
+                    None => None,
+                };
+                board.under.push(under);
+            }
             "chip" => board.chips.push(rect(&mut words)?),
             "mark" => board.marks.push(rect(&mut words)?),
             "wire" => {
@@ -352,14 +376,18 @@ fn distance(point: Point, rectangle: &Rect) -> f32 {
 }
 
 /// Route segments closer than the clearance to a rectangle their wire does not end
-/// on, sampled every 2 px. A route that found no way around the cards is not judged.
+/// on and that is not in a group with one it ends on (LAY-31), sampled every 2 px.
+/// A route that found no way around the cards is not judged.
 fn clearance_violations(routes: &[Route], wires: &[Wire], rectangles: &[Rect]) -> usize {
+    let group = groups(rectangles);
     let mut violations = 0;
     for (route, wire) in routes.iter().zip(wires).filter(|(route, _)| route.complete) {
+        let own = [group[wire.from.block], group[wire.to.block]];
         let others: Vec<&Rect> = rectangles
             .iter()
             .enumerate()
             .filter(|(index, _)| *index != wire.from.block && *index != wire.to.block)
+            .filter(|(index, _)| !own.contains(&group[*index]))
             .map(|(_, rectangle)| rectangle)
             .collect();
         for (from, to) in route.segments() {
@@ -407,7 +435,8 @@ impl Measures {
             coincident: coincident as f64,
             long: laid.long as f64,
             incomplete: routes.iter().filter(|r| !r.complete).count() as f64,
-            packed: packed(routes, &laid.cards, GAP).len() as f64,
+            packed: packed_outside_groups(routes, &laid.cards, &groups(&laid.cards), GAP).len()
+                as f64,
         }
     }
 
@@ -451,6 +480,54 @@ fn fit(area: Size, width: f32, height: f32) -> f32 {
     (area.width / width).min(area.height / height).min(1.0)
 }
 
+/// The stacks of a reference board (LAY-31): how many cards hang under a
+/// step, the mean and the worst free space above one, and how many lines of
+/// other cards have a piece inside a stack's box.
+fn stacks(board: &Tidied, routes: &[Route]) -> (usize, f32, f32, usize) {
+    let top = |mut card: usize| {
+        while let Some(Some(above)) = board.under.get(card) {
+            card = *above;
+        }
+        card
+    };
+    let gaps: Vec<f32> = board
+        .under
+        .iter()
+        .enumerate()
+        .filter_map(|(card, above)| Some(board.cards[card].min.y - board.cards[(*above)?].max.y))
+        .collect();
+    let mut members: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
+    for card in 0..board.cards.len() {
+        members.entry(top(card)).or_default().push(card);
+    }
+    members.retain(|_, cards| cards.len() > 1);
+    let mut intruders = 0;
+    for cards in members.values() {
+        let Some(area) = Rect::bounding(cards.iter().map(|card| board.cards[*card])) else {
+            continue;
+        };
+        for (route, wire) in routes.iter().zip(&board.wires) {
+            if cards.contains(&wire.from.block) || cards.contains(&wire.to.block) {
+                continue;
+            }
+            let inside = route.segments().any(|(from, to)| {
+                from.x.min(to.x) < area.max.x - 0.5
+                    && from.x.max(to.x) > area.min.x + 0.5
+                    && from.y.min(to.y) < area.max.y - 0.5
+                    && from.y.max(to.y) > area.min.y + 0.5
+            });
+            intruders += usize::from(inside);
+        }
+    }
+    let worst = gaps.iter().copied().fold(0.0, f32::max);
+    let mean = if gaps.is_empty() {
+        0.0
+    } else {
+        gaps.iter().sum::<f32>() / gaps.len() as f32
+    };
+    (gaps.len(), mean, worst, intruders)
+}
+
 fn generated_table(text: &mut String, routing: &Routing) {
     let _ = writeln!(
         text,
@@ -476,15 +553,22 @@ fn reference_table(text: &mut String, routing: &Routing) -> Result<(), String> {
     let _ = writeln!(
         text,
         "\nreference scenarios, tidied by the desktop, at the sizes it draws\n\n\
-         scenario   density checks    drawn steps cards wires crossings  bends straight  close coincident incomplete packed width height fit_1600 fit_960 chips card_hits chip_hits clearance"
+         scenario   density checks    drawn steps cards wires crossings  bends straight  close coincident incomplete packed width height fit_1600 fit_960 chips card_hits chip_hits clearance hung gap_mean gap_worst intruders"
     );
     for board in boards(BOARDS)? {
         let rectangles: Vec<Rect> = board.cards.iter().chain(&board.chips).copied().collect();
         let laid = Laid {
             cards: rectangles.clone(),
-            routes: route(&rectangles, &board.wires, routing),
+            routes: route_grouped(
+                &rectangles,
+                &groups(&rectangles),
+                &board.wires,
+                routing,
+                &[],
+            ),
             long: 0,
         };
+        let (hung, gap_mean, gap_worst, intruders) = stacks(&board, &laid.routes);
         let measures = Measures::of(&laid);
         let everything: Vec<Rect> = rectangles.iter().chain(&board.marks).copied().collect();
         let left = everything.iter().map(|r| r.min.x).fold(f32::MAX, f32::min);
@@ -495,7 +579,7 @@ fn reference_table(text: &mut String, routing: &Routing) -> Result<(), String> {
         let (card_hits, chip_hits) = collisions(&board.cards, &board.chips);
         let _ = writeln!(
             text,
-            "{:<10} {:<7} {:<9} {:<5} {:>5} {:>5} {:>5} {:>9} {:>6} {:>8} {:>6} {:>10} {:>10} {:>6} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9}",
+            "{:<10} {:<7} {:<9} {:<5} {:>5} {:>5} {:>5} {:>9} {:>6} {:>8} {:>6} {:>10} {:>10} {:>6} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9} {hung:>4} {gap_mean:>8.1} {gap_worst:>9.1} {intruders:>9}",
             board.name,
             board.density,
             board.checks,

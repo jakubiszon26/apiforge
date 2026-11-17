@@ -19,8 +19,9 @@ use apiforge_core::{
 use std::collections::{HashMap, HashSet};
 
 /// The space between a subject and the checks hung under it, and between
-/// those checks: twice the router's 12 px clearance, so a wire still passes.
-pub const HANG_GAP: f32 = 24.0;
+/// those checks: Tidy up's stack gap, so *Expand checks here* hangs them as
+/// Tidy up does and they are one group with their subject (LAY-31).
+pub const HANG_GAP: f32 = apiforge_layout::STACK_GAP;
 
 /// A check the board can fold into its subjects' footers.
 #[derive(Clone, Debug, PartialEq, Eq)]

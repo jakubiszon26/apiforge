@@ -2151,6 +2151,16 @@ impl Canvas {
                     commands.push(Command::Select(vec![card.id.clone()]));
                     vec![card.id.clone()]
                 };
+                // A step takes the cards hung under it along (LAY-31).
+                let placed: Vec<Card> = input
+                    .graph
+                    .nodes
+                    .iter()
+                    .map(|node| {
+                        Card::build(node, input.reference_graph, input.project, self.density)
+                    })
+                    .collect();
+                let ids = with_hung(ids, &placed);
                 self.drag = Some(Drag::Nodes {
                     ids,
                     offset: Vec2::ZERO,
@@ -4343,6 +4353,29 @@ fn shapes<'a>(cards: &'a [Card], chips: &'a [Chip], marks: &'a [Rect]) -> Shapes
         chips,
         marks,
     }
+}
+
+/// What dragging `ids` moves (LAY-31, the owner's decision 2 = A): a spine
+/// step takes the cards hung under it along, its folded checks among them,
+/// so its group stays one; a card hung under a step and dragged alone
+/// leaves the stack until the next Tidy up. `cards` are every block's card
+/// where the document places it.
+fn with_hung(mut ids: Vec<String>, cards: &[Card]) -> Vec<String> {
+    let groups = shape::groups(cards);
+    let steps: Vec<usize> = cards
+        .iter()
+        .enumerate()
+        .filter(|(_, card)| shape::on_spine(card.kind) && ids.contains(&card.id))
+        .map(|(index, _)| index)
+        .collect();
+    for step in steps {
+        for (index, card) in cards.iter().enumerate() {
+            if shape::hung_under(cards, &groups, step, index) && !ids.contains(&card.id) {
+                ids.push(card.id.clone());
+            }
+        }
+    }
+    ids
 }
 
 /// The positions a drag leaves behind, for the blocks and proxies it moved.

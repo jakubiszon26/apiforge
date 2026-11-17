@@ -6,7 +6,7 @@
 use super::*;
 use crate::canvas::WireMode;
 use apiforge_core::format::Graph;
-use apiforge_layout::{GAP, Point, Rect as Block, Route, crossing, packed};
+use apiforge_layout::{GAP, Point, Rect as Block, Route, crossing, groups, packed_outside_groups};
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 const DIAGRAM: &str = ".apiforge/diagram.json";
@@ -95,16 +95,17 @@ fn crossings(routes: &[Route]) -> usize {
 }
 
 /// Criterion 5: the window draws the ordered boards. `shop-30` with every
-/// wire has at most 75 crossings with its checks folded and 105 with them
-/// drawn (82 and 123 without the order); with chips and the checks drawn,
-/// `shop-30` has at most 10 (17) and `fan-out` 5 (7). The bridges the board
-/// draws are those crossings, and no line is nearer than 20 px to another
-/// or to a card.
+/// wire has at most 76 crossings with its checks folded and 116 with them
+/// drawn (82 and 123 without the order; 75 and 105 before LAY-31, whose
+/// groups keep their own lines inside them); with chips and the checks
+/// drawn, `shop-30` has at most 10 (17) and `fan-out` 5 (7). The bridges
+/// the board draws are those crossings, and no line is nearer than 20 px to
+/// another or to a card, but inside a group (LAY-31).
 #[test]
 fn lay28_criterion_5_the_window_draws_the_ordered_boards() {
     for (name, wires, expanded, most) in [
-        ("shop-30", WireMode::All, false, 75),
-        ("shop-30", WireMode::All, true, 105),
+        ("shop-30", WireMode::All, false, 76),
+        ("shop-30", WireMode::All, true, 116),
         ("shop-30", WireMode::Chips, true, 10),
         ("fan-out", WireMode::Chips, true, 5),
     ] {
@@ -120,7 +121,11 @@ fn lay28_criterion_5_the_window_draws_the_ordered_boards() {
             .map(|wire| wire.bridges)
             .sum();
         assert_eq!(bridges, found, "{label}: a bridge at every crossing");
-        assert_eq!(packed(&routes, &cards, GAP), [], "{label}: the gap holds");
+        assert_eq!(
+            packed_outside_groups(&routes, &cards, &groups(&cards), GAP),
+            [],
+            "{label}: the gap holds"
+        );
     }
 }
 

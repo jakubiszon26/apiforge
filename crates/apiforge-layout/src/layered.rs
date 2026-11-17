@@ -13,7 +13,7 @@
 use crate::geometry::{Block, Edge, Point, Rect, Size, compare};
 use crate::packed::Breach;
 use crate::route::Route;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 
 /// Spacing of the layered layout, in pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -650,6 +650,11 @@ fn coordinates(graph: &Graph<'_>, layers: &[usize], order: &Order) -> Vec<Point>
     positions
 }
 
+/// The free space between a card and a card hung under it: twice the
+/// router's first clearance (LAY-06). A step and the cards hung under it,
+/// this far apart, are one group (LAY-31, [`crate::groups`]).
+pub const STACK_GAP: f32 = 24.0;
+
 /// The geometry of shape D (LAY-06): a spine in rows, satellites under it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rows {
@@ -660,7 +665,9 @@ pub struct Rows {
     pub column_width: f32,
     /// Free space between two columns, where the data wires run.
     pub column_gap: f32,
-    /// Free space between a card and the satellite hung under it.
+    /// Free space between a card and the satellite hung under it,
+    /// [`STACK_GAP`]. It never grows: a step and the cards hung under it are
+    /// one group, and lines of other cards go round it (LAY-31).
     pub stack_gap: f32,
     /// Free space between the lowest card of a row and the next row, which
     /// holds the rail the next row's ordering wires run on.
@@ -678,7 +685,7 @@ impl Default for Rows {
             width: 5.0 * column_width + 4.0 * column_gap,
             column_width,
             column_gap,
-            stack_gap: 24.0,
+            stack_gap: STACK_GAP,
             // Three lines under a row; most rows need no more.
             row_gap: 80.0,
         }
@@ -732,16 +739,15 @@ pub fn hang(hanging: &Hanging<'_>) -> (Vec<Point>, Vec<Row>) {
 }
 
 /// The room a board in shape D has beyond [`Rows`]' gaps (LAY-03): what its
-/// lines need to run a gap apart. Tidy up finds it with [`widen`].
+/// lines need to run a gap apart. Tidy up finds it with [`widen`]. The gap
+/// above a satellite has none: a stack is one group, which lines of other
+/// cards go round (LAY-31).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Room {
     /// After each column of every row, left to right.
     pub columns: Vec<f32>,
     /// Under each row, top to bottom.
     pub rows: Vec<f32>,
-    /// Above a satellite: by the place of its spine block in the spine and
-    /// its own place in the stack, the first satellite being 1.
-    pub stacks: BTreeMap<(usize, usize), f32>,
 }
 
 impl Room {
@@ -751,10 +757,6 @@ impl Room {
 
     fn row(&self, row: usize) -> f32 {
         self.rows.get(row).copied().unwrap_or(0.0)
-    }
-
-    fn stack(&self, spine: usize, place: usize) -> f32 {
-        self.stacks.get(&(spine, place)).copied().unwrap_or(0.0)
     }
 }
 
@@ -813,19 +815,17 @@ fn density(mut spans: Vec<(f32, f32)>, pad: f32) -> usize {
 
 /// Gives `room` what the lines of a board ask for (LAY-03). `wanted` are the
 /// routes its wires take when each is routed alone, so they lie on each
-/// other wherever several want the same corridor: between two columns,
-/// under a row, between a card and the satellite under it. A corridor that
-/// `n` of them share gets room for `n` lines `gap` apart, `gap` from the
-/// cards on either side. `positions` and `rows` are what [`hang_with`] gave
-/// for `room`; `hidden` are the blocks the board does not draw, folded
-/// checks, which keep their places and are in no line's way. Returns whether
-/// any gap grew.
+/// other wherever several want the same corridor: between two columns or
+/// under a row. A corridor that `n` of them share gets room for `n` lines
+/// `gap` apart, `gap` from the cards on either side. The gap between a card
+/// and the satellite under it is a stack's own and grows for no line
+/// (LAY-31). `positions` and `rows` are what [`hang_with`] gave for `room`.
+/// Returns whether any gap grew.
 pub fn make_room(
     hanging: &Hanging<'_>,
     positions: &[Point],
     rows: &[Row],
     wanted: &[Route],
-    hidden: &BTreeSet<usize>,
     gap: f32,
     room: &mut Room,
 ) -> bool {
@@ -833,7 +833,6 @@ pub fn make_room(
         return false;
     };
     let per = hanging.rows.columns();
-    let rect = |block: usize| Rect::from_size(positions[block], hanging.blocks[block].size);
     let lefts: Vec<f32> = stacks
         .iter()
         .take(per)
@@ -902,21 +901,6 @@ pub fn make_room(
         }
         grow(&mut room.rows[row], more);
     }
-    for (spine, stack) in stacks.iter().enumerate() {
-        for (upper, lower, place) in drawn_pairs(stack, hidden) {
-            let (upper, lower) = (rect(upper), rect(lower));
-            // A line squeezed between the two runs on the edge of one.
-            let spans = level(
-                upper.max.y - 0.5,
-                lower.min.y + 0.5,
-                upper.min.x.min(lower.min.x),
-                upper.max.x.max(lower.max.x),
-            );
-            let more = short(density(spans, pad), lower.min.y - upper.max.y);
-            grow(room.stacks.entry((spine, place)).or_default(), more);
-        }
-    }
-    room.stacks.retain(|_, more| *more > 0.0);
     grew
 }
 
@@ -924,10 +908,13 @@ pub fn make_room(
 /// lies in by `step`, once however many breaches lie there. A breach between
 /// two upright segments, or beside a card, widens the gap between two
 /// columns; one between two level segments, or above or under a card, widens
-/// the gap above a satellite or the gap under a row. `positions` and `rows`
-/// are what [`hang_with`] gave for `room`. A breach outside the rows and
-/// columns, where the board is open, widens nothing. `hidden` is as in
-/// [`make_room`]. Returns whether anything was widened.
+/// the gap under a row. A level breach between two cards of a stack widens
+/// nothing: a stack is one group, and the lines in it are its own (LAY-31).
+/// `positions` and `rows` are what [`hang_with`] gave for `room`. A breach
+/// outside the rows and columns, where the board is open, widens nothing.
+/// `hidden` are the blocks the board does not draw, folded checks, which
+/// keep their places and are in no line's way. Returns whether anything was
+/// widened.
 pub fn widen(
     hanging: &Hanging<'_>,
     positions: &[Point],
@@ -954,7 +941,6 @@ pub fn widen(
         .collect();
     let mut columns = BTreeSet::new();
     let mut under = BTreeSet::new();
-    let mut above = BTreeSet::new();
     for breach in breaches {
         let centre = breach.area.center();
         if !breach.horizontal {
@@ -1003,9 +989,7 @@ pub fn widen(
                     })
             });
         match between {
-            Some(place) => {
-                above.insert(place);
-            }
+            Some(_) => {}
             None if row + 1 < rows.len() => {
                 under.insert(row);
             }
@@ -1024,10 +1008,7 @@ pub fn widen(
         }
         room.rows[*row] += step;
     }
-    for place in &above {
-        *room.stacks.entry(*place).or_default() += step;
-    }
-    !(columns.is_empty() && under.is_empty() && above.is_empty())
+    !(columns.is_empty() && under.is_empty())
 }
 
 /// [`hang`], with `room` added to the gaps.
@@ -1057,7 +1038,7 @@ pub fn hang_with(hanging: &Hanging<'_>, room: &Room) -> (Vec<Point>, Vec<Row>) {
             let mut y = top;
             for (place, &block) in stack.iter().enumerate() {
                 if place > 0 {
-                    y += rows.stack_gap + room.stack(number * per + column, place);
+                    y += rows.stack_gap;
                 }
                 let size = blocks[block].size;
                 positions[block] = Point::new(left + (rows.column_width - size.width) * 0.5, y);

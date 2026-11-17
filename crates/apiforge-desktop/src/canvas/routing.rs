@@ -347,7 +347,10 @@ fn route_all(request: &Request<'_>, prepared: &[Prepared], key: &Key) -> Vec<Rou
             ..layout::Route::default()
         })
         .collect();
-    let routes = layout::route_among(&cards, &wires, &layout::Routing::default(), &fixed);
+    // A step and the cards hung under it are one group (LAY-31).
+    let groups = layout::groups(&cards);
+    let routes =
+        layout::route_grouped(&cards, &groups, &wires, &layout::Routing::default(), &fixed);
     let _ = key;
     prepared
         .iter()
@@ -359,6 +362,7 @@ fn route_all(request: &Request<'_>, prepared: &[Prepared], key: &Key) -> Vec<Rou
 /// Reroutes the wires of the dragged cards in place, within the frame budget.
 fn reroute_moving(request: &Request<'_>, prepared: &[Prepared], routes: &mut [Routed]) {
     let cards = rectangles(request);
+    let groups = layout::groups(&cards);
     let started = Instant::now();
     let mut over_budget = false;
     for (index, wire) in prepared.iter().enumerate() {
@@ -382,7 +386,13 @@ fn reroute_moving(request: &Request<'_>, prepared: &[Prepared], routes: &mut [Ro
             );
             continue;
         }
-        let routed = layout::route(&cards, &[wire.wire], &layout::Routing::default());
+        let routed = layout::route_grouped(
+            &cards,
+            &groups,
+            &[wire.wire],
+            &layout::Routing::default(),
+            &[],
+        );
         routes[index] = match routed.into_iter().next() {
             Some(route) => finish(request, &cards, wire, route),
             None => Routed::direct(

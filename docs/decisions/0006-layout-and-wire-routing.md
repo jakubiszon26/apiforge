@@ -4,8 +4,9 @@
   *As implemented*
 - Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn),
   2026-11-12 (LAY-06, shape D and the rail), 2026-11-15 (LAY-03, the gap
-  between lines) and 2026-11-16 (LAY-28, the order of lines in a corridor;
-  LAY-29, no line under its own card)
+  between lines), 2026-11-16 (LAY-28, the order of lines in a corridor;
+  LAY-29, no line under its own card) and 2026-11-17 (LAY-31, a step and
+  its checks are one group)
 - Scope: new crate `apiforge-layout`, the desktop board
 - Plan: [scenario code and canvas](../roadmap.md)
 
@@ -287,6 +288,61 @@ route. No wire of a tidied board reaches the last attempt.
 The reference boards route as before. **Cost:** none measurable; the
 budget's board routes in 133 ms (133 ms with the router of `main`,
 budget 150 ms).
+
+### A step and its checks are one group (LAY-31)
+
+Amended by LAY-31 (2026-11-17, the owner's decisions of 2026-11-16 and
+2026-11-17 on #384). Rule 4 of the gap between lines made the gap above a
+hung card a corridor that Tidy up widened by 20 px for every line that
+wanted it, and the line that wanted it most often was the group's own: a
+check 300 px under its step on the owner's board.
+
+1. **The group.** A step and the cards hung under it — its checks, and the
+   values and data conditions that hang the same way — are one group. The
+   group is told by where the cards lie (`apiforge_layout::groups`): two
+   cards one above the other, sharing more than half of the narrower one's
+   width and at most the stack gap apart (`STACK_GAP`, 24 px), are in one
+   group, and so is a chain of them. A tidied board's stacks are its
+   groups; a board placed by hand follows the same rule. A check with
+   several subjects stays under its latest subject.
+2. **The gap above a hung card is 24 px** and never grows: `Room` has no
+   room above a satellite, `make_room` asks none for it and `widen` widens
+   nothing for a breach between two cards of a stack. *Expand checks here*
+   hangs checks at the same constant.
+3. **Lines go round a group.** For a wire with neither end in a group, the
+   group's box — its cards and the gaps between them — is in its way like a
+   card, on every attempt of the search, the last ones included, unless a
+   port of the wire lies inside it (`route_grouped`).
+4. **Inside a group the 20 px rule does not hold.** A wire with an end in a
+   group keeps 10 px from the group's other cards, and from its own two
+   when both are in the group, so it can run in a 24 px gap.
+   `packed_outside_groups` is the measure of LAY-03 with that exception: a
+   breach beside a card of the line's own group, or between two lines of
+   one group within the gap round its box, is not counted, and Tidy up
+   widens nothing for it. Everywhere else a line keeps 20 px from every
+   card and line, as before.
+5. **A card hung under its source reads it through a chip** (decision 1 =
+   A). In *Chips for shared values* the port of a step read by a card hung
+   under it is drawn with chips (LAY-23), whatever the count: the card has
+   a chip at its input and the port counts its readers, `1 reader` for one;
+   pointing at the chip or selecting either card draws the line. *All
+   wires* draws every line, inside the group as rule 4 allows.
+6. **Dragging a step takes its group along** (decision 2 = A): the cards
+   hung under it move with it, its folded checks too, in one undo step. A
+   card hung under a step and dragged alone leaves the stack and stays where
+   it is put until the next Tidy up; it is then drawn as any card that is
+   not under its subject.
+
+Not changed: an ordering line that leaves a hung card (`@after`) leaves
+through the group's gap; a board with saved positions is not moved when it
+is opened. `quality` prints for every reference board the cards hung under
+a step, the mean and the worst gap above one, and the lines of other cards
+inside a group (`hung`, `gap_mean`, `gap_worst`, `intruders`).
+
+**Cost:** the budget's board, which has no group, routes in 132 ms
+(budget 150 ms); `shop-50` with every wire and check in 36 ms (35 ms
+before). Tidy up of `shop-50` with its checks drawn takes 29 ms with chips
+and 131 ms with every wire, its frame included.
 
 ## As implemented
 
