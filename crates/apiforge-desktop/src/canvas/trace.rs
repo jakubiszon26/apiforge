@@ -38,6 +38,7 @@ pub enum Anchor {
 }
 
 /// What tracing keeps from one frame to the next.
+#[derive(Default)]
 pub struct Memory {
     /// The data wires the last frame drew, in board coordinates: what the
     /// pointer is tested against.
@@ -49,20 +50,7 @@ pub struct Memory {
     boxes: Vec<(String, Rect)>,
     /// The board's area on screen in the last frame.
     #[cfg(test)]
-    board: Rect,
-}
-
-impl Default for Memory {
-    fn default() -> Self {
-        Self {
-            routes: Vec::new(),
-            kept: Vec::new(),
-            #[cfg(test)]
-            boxes: Vec::new(),
-            #[cfg(test)]
-            board: Rect::NOTHING,
-        }
-    }
+    board: Option<Rect>,
 }
 
 /// The board as tracing reads it.
@@ -240,7 +228,7 @@ impl Memory {
         #[cfg(test)]
         {
             self.boxes.clear();
-            self.board = board;
+            self.board = Some(board);
         }
         for (text, near) in boxes {
             let _shown = readers::paint_statement(painter, near, &text, board);
@@ -409,6 +397,6 @@ impl super::Canvas {
     /// The board's area on screen in the last frame.
     #[cfg(test)]
     pub(crate) fn debug_board(&self) -> Rect {
-        self.trace.board
+        self.trace.board.unwrap_or(Rect::NOTHING)
     }
 }
