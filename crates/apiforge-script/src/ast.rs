@@ -78,7 +78,21 @@ pub struct File {
     pub action_contract: Option<String>,
     pub statements: Vec<Statement>,
     pub cleanup: Option<Vec<Statement>>,
+    /// Where each part of the file other than a statement was written, in
+    /// text order. A board edit rewrites only the parts it changes (LAY-34).
+    pub items: Vec<(Item, Range<usize>)>,
     pub range: Range<usize>,
+}
+
+/// A part of a file that is not a statement.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Item {
+    Description,
+    OnError,
+    Parameter(String),
+    Input(String),
+    Action,
+    Cleanup,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -105,6 +119,9 @@ pub struct Statement {
     pub note: Option<String>,
     pub form: Form,
     pub range: Range<usize>,
+    /// The statement with the comments that make its note: `range` widened
+    /// to the first comment before it and the comment after it on its line.
+    pub extent: Range<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

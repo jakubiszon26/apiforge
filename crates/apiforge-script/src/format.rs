@@ -43,34 +43,65 @@ fn key(name: &str) -> String {
 }
 
 pub(crate) fn print_file(file: &File) -> String {
-    let mut out = match &file.kind {
-        FileKind::Scenario { name } => format!("scenario {} {{\n", quote(name)),
-        FileKind::Component { handle, name } => format!("component {handle} {} {{\n", quote(name)),
-    };
+    let mut out = opening(&file.kind);
+    out.push('\n');
+    for (_, text) in head(file) {
+        for text in text.lines() {
+            line(&mut out, 1, text);
+        }
+    }
+    statements(&mut out, &file.statements, 1);
+    if let Some(cleanup) = &file.cleanup {
+        line(&mut out, 1, "cleanup {");
+        statements(&mut out, cleanup, 2);
+        line(&mut out, 1, "}");
+    }
+    out.push_str("}\n");
+    out
+}
+
+/// The first line of a file, up to its opening brace.
+pub(crate) fn opening(kind: &FileKind) -> String {
+    match kind {
+        FileKind::Scenario { name } => format!("scenario {} {{", quote(name)),
+        FileKind::Component { handle, name } => format!("component {handle} {} {{", quote(name)),
+    }
+}
+
+/// The parts of the file before its statements, in the formatter's order,
+/// each with its text at depth 0: `description`, `on_error`, `param` lines,
+/// `input` lines with their attributes, `action`.
+pub(crate) fn head(file: &File) -> Vec<(Item, String)> {
+    let mut parts = vec![];
     if let Some(description) = &file.description {
-        line(&mut out, 1, &format!("description {}", quote(description)));
+        parts.push((
+            Item::Description,
+            format!("description {}", quote(description)),
+        ));
     }
     if let Some(policy) = &file.on_error {
-        line(&mut out, 1, &format!("on_error {policy}"));
+        parts.push((Item::OnError, format!("on_error {policy}")));
     }
     for (name, value) in &file.parameters {
-        line(
-            &mut out,
-            1,
-            &format!("param {} = {}", key(name), expression(value)),
-        );
+        parts.push((
+            Item::Parameter(name.clone()),
+            format!("param {} = {}", key(name), expression(value)),
+        ));
     }
     for input in &file.inputs {
-        attributes(&mut out, &input.attributes, 1);
+        let mut out = String::new();
+        attributes(&mut out, &input.attributes, 0);
         let default = input
             .default
             .as_ref()
             .map_or(String::new(), |value| format!(" = {}", expression(value)));
         line(
             &mut out,
-            1,
+            0,
             &format!("input {}: {}{default}", key(&input.name), input.value_type),
         );
+        out.pop();
+        parts.push((Item::Input(input.name.clone()), out));
     }
     if let Some(action) = &file.action {
         let value_type = file
@@ -81,20 +112,12 @@ pub(crate) fn print_file(file: &File) -> String {
             .action_contract
             .as_ref()
             .map_or(String::new(), |c| format!(" contract {}", quote(c)));
-        line(
-            &mut out,
-            1,
-            &format!("action {}{value_type}{contract}", key(action)),
-        );
+        parts.push((
+            Item::Action,
+            format!("action {}{value_type}{contract}", key(action)),
+        ));
     }
-    statements(&mut out, &file.statements, 1);
-    if let Some(cleanup) = &file.cleanup {
-        line(&mut out, 1, "cleanup {");
-        statements(&mut out, cleanup, 2);
-        line(&mut out, 1, "}");
-    }
-    out.push_str("}\n");
-    out
+    parts
 }
 
 fn line(out: &mut String, depth: usize, text: &str) {
@@ -122,7 +145,7 @@ fn attributes(out: &mut String, attributes: &[Attribute], depth: usize) {
     }
 }
 
-fn statements(out: &mut String, nodes: &[Statement], depth: usize) {
+pub(crate) fn statements(out: &mut String, nodes: &[Statement], depth: usize) {
     for node in nodes {
         if let Some(note) = &node.note {
             for note in note.split('\n') {
