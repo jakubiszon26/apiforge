@@ -1425,6 +1425,16 @@ impl Canvas {
             &folded.keys().map(String::as_str).collect(),
             &numbers,
         );
+        // The steps a failure kept from running, on the card that holds it:
+        // a folded check's on its subject (LAY-19).
+        let costs = input
+            .steps
+            .map(|steps| {
+                crate::not_run::costs(steps, |id| {
+                    folded.get(id).map(|(subject, _)| subject.as_str())
+                })
+            })
+            .unwrap_or_default();
         #[cfg(test)]
         {
             self.hidden = folded.keys().cloned().collect();
@@ -2062,6 +2072,14 @@ impl Canvas {
                     .previous
                     .and_then(|steps| steps.iter().find(|step| step.node_id == card.id)),
                 clear_of: &chip_boxes,
+                // A Value or an IF card keeps its line (LAY-19, 3 A).
+                steps: input
+                    .steps
+                    .filter(|_| !matches!(card.kind, NodeKind::Value | NodeKind::If)),
+                cost: costs
+                    .get(card.id.as_str())
+                    .copied()
+                    .filter(|_| !matches!(card.kind, NodeKind::Value | NodeKind::If)),
             };
             let reveal = Reveal::of(
                 card,
