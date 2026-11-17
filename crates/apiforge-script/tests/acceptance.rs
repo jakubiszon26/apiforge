@@ -288,3 +288,36 @@ fn lang14_after_an_if_in_or_after_a_cycle_reports_the_cycle() {
         );
     }
 }
+
+/// `@after(x)` written inside `x`'s own braces, at any depth, stays an error,
+/// as under LANG-11: a statement of the `if` cannot run after the whole `if`.
+/// The message names the statement and the `if`.
+#[test]
+fn lang14_after_the_if_from_inside_its_braces_is_an_error() {
+    let project = apiforge_core::demos::shop_project();
+    for (source, statement, x) in [
+        (
+            "scenario \"Inside\" {\n  x = if true {\n    a = GET \"/a\" {\n      sample 200 {}\n    }\n    @after(x)\n    s = GET \"/s\" {\n      sample 200 {}\n    }\n  }\n}\n",
+            "s",
+            "x",
+        ),
+        (
+            "scenario \"Inside\" {\n  x = if true {\n  } else {\n    y = if false {\n      @after(x)\n      t = GET \"/t\" {\n        sample 200 {}\n      }\n    }\n  }\n}\n",
+            "t",
+            "x",
+        ),
+    ] {
+        let lowered = lower(&parse(source), &LowerContext::folder(&project));
+        let errors: Vec<_> = lowered
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "{source}\n{:#?}", lowered.diagnostics);
+        assert_eq!(&source[errors[0].range.clone()], x, "{source}");
+        let message = &errors[0].message;
+        for part in [format!("`{statement}`"), format!("`{x}`")] {
+            assert!(message.contains(&part), "{part} in {message:?}");
+        }
+    }
+}
