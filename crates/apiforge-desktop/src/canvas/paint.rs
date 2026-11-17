@@ -6,11 +6,16 @@ use super::{
     layout::{CHIP_HEIGHT, COMPACT_HEADER, Card, CardDetail, Chip, CompactRole, RowValue, WIDTH},
     routing::Routed,
 };
-use crate::{icons::Icon, theme, widgets::paint_label as label};
+use crate::{
+    icons::Icon,
+    not_run::{self, Cost, NotRun},
+    theme,
+    widgets::paint_label as label,
+};
 use apiforge_core::{
     format::Graph,
     model::{Branch, NodeKind},
-    run::{StepResult, StepStatus},
+    run::{CauseEnds, StepResult, StepStatus},
 };
 use eframe::egui::{
     self, Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2,
@@ -512,6 +517,13 @@ pub struct CardRun<'a> {
     /// The chips and counts on screen (LAY-23), which the badge keeps
     /// clear of.
     pub clear_of: &'a [Rect],
+    /// The run's cause ends, from which the card says why its step did not
+    /// run (LAY-19); `None` on a Value or an IF card, which keeps its line
+    /// (3 A).
+    pub ends: Option<&'a CauseEnds>,
+    /// The steps the card's step, or a check folded into it, kept from
+    /// running (LAY-19).
+    pub cost: Option<Cost>,
 }
 
 impl CardRun<'_> {
@@ -519,6 +531,19 @@ impl CardRun<'_> {
     /// result muted and marked as such, or `idle`.
     fn line(&self, idle: &str) -> (String, Color32) {
         if let Some(step) = self.step {
+            // A step that did not run names its cause, without a duration;
+            // a false *Data condition* reads *Not met* (LAY-19).
+            if let Some(ends) = self.ends {
+                if let Some(not_run) = NotRun::of(step, ends) {
+                    return (not_run.words(), status_color(step.status));
+                }
+                if not_run::unmet(step) {
+                    return (
+                        format!("Not met · {} ms", step.duration_ms),
+                        status_color(step.status),
+                    );
+                }
+            }
             return execution(step);
         }
         if self.running {
@@ -645,6 +670,107 @@ fn execution(step: &StepResult) -> (String, Color32) {
         format!("{what} · {} ms", step.duration_ms),
         status_color(step.status),
     )
+}
+
+/// The colour of a count: the failure's red, or amber for a false *Data
+/// condition*.
+fn cost_color(cost: Cost) -> Color32 {
+    if cost.unmet {
+        theme::WARNING
+    } else {
+        theme::DANGER
+    }
+}
+
+/// Draws the count of the steps a failure kept from running at the right
+/// end of a result line in `area` (LAY-19), whole, in bold. Returns what is
+/// left of the line for its words: room for their first word and an
+/// ellipsis, or the count's shorter form where the line has no room for
+/// both.
+fn count_on_line(
+    painter: &Painter,
+    drawn: &mut Drawn,
+    area: Rect,
+    line: &str,
+    size: f32,
+    cost: Option<Cost>,
+) -> Rect {
+    const GAP: f32 = 6.0;
+    let Some(cost) = cost else {
+        return area;
+    };
+    let color = cost_color(cost);
+    let bold = FontId::new(size, theme::bold_family());
+    let measure = |text: &str, font: FontId| {
+        painter
+            .layout_no_wrap(text.to_owned(), font, color)
+            .size()
+            .x
+    };
+    let first = line.split(' ').next().unwrap_or_default();
+    let least = measure(&format!("{first} …"), FontId::proportional(size));
+    let long = not_run::count_text(cost.count);
+    let text = if measure(&long, bold.clone()) + GAP + least <= area.width() {
+        long
+    } else {
+        not_run::short_count_text(cost.count)
+    };
+    // A point to spare, so the count is never cut by rounding.
+    let width = measure(&text, bold.clone()) + 1.0;
+    let left = (area.right() - width).max(area.left());
+    drawn.label(
+        painter,
+        Rect::from_min_max(pos2(left, area.top()), area.max),
+        &text,
+        TextKind::Result,
+        bold,
+        color,
+        egui::Align::Max,
+    );
+    Rect::from_min_max(area.min, pos2((left - GAP).max(area.left()), area.bottom()))
+}
+
+/// The count's shorter form under a card's name at Overview (LAY-19), from
+/// `top`, only where its text of at least 9 px has room in the card.
+fn count_under(
+    painter: &Painter,
+    drawn: &mut Drawn,
+    card: Rect,
+    top: f32,
+    centred: bool,
+    zoom: f32,
+    cost: Option<Cost>,
+) {
+    let Some(cost) = cost.filter(|_| zoom >= LABELS_FROM) else {
+        return;
+    };
+    let text = not_run::short_count_text(cost.count);
+    let font = FontId::new(
+        min_on_screen(LINE_TEXT, zoom, LINE_MIN),
+        theme::bold_family(),
+    );
+    let size = painter
+        .layout_no_wrap(text.clone(), font.clone(), cost_color(cost))
+        .size()
+        + vec2(1.0, 0.0);
+    let left = if centred {
+        card.center().x - size.x / 2.0
+    } else {
+        card.left() + 10.0
+    };
+    let area = Rect::from_min_size(pos2(left, top), size);
+    if area.bottom() > card.bottom() - 4.0 || size.x > card.width() - 14.0 {
+        return;
+    }
+    drawn.label(
+        painter,
+        area,
+        &text,
+        TextKind::Result,
+        font,
+        cost_color(cost),
+        egui::Align::Min,
+    );
 }
 
 /// The checks pill under a card's name at Overview (Q5 = A), as it would be
@@ -1143,9 +1269,13 @@ pub fn card(
                 theme::TEXT,
                 egui::Align::Center,
             );
+            let below = pill
+                .as_ref()
+                .map_or(name.bottom(), |pill| pill.rect.bottom());
             if let (Some(pill), Some(aggregate)) = (pill, aggregate) {
                 pill.draw(&clipped, &mut drawn, aggregate);
             }
+            count_under(&clipped, &mut drawn, rect, below + 1.0, true, z, run.cost);
         }
     } else {
         let full = detail == CardDetail::Full;
@@ -1318,6 +1448,16 @@ pub fn card(
         );
         {
             let (mut status, mut color) = run.line("Ready");
+            // The count of the steps the failure kept from running, at the
+            // right end of the line (LAY-19).
+            let status_rect = count_on_line(
+                &clipped,
+                &mut drawn,
+                status_rect,
+                &status,
+                line(11.0),
+                run.cost,
+            );
             // The checks' result is a second statement after the step's own.
             if let Some(aggregate) = aggregate {
                 status = format!("{status} · {}", aggregate.text());
@@ -1534,8 +1674,17 @@ pub fn compact_card(
             egui::Align::Min,
         );
     }
+    let below = pill
+        .as_ref()
+        .map(|pill| pill.rect.bottom())
+        .or(name.map(|name| name.bottom()));
     if let (Some(pill), Some(aggregate)) = (pill, aggregate_at_overview) {
         pill.draw(&clipped, &mut drawn, aggregate);
+    }
+    // At Overview a card that did not run keeps its band without a word;
+    // the failure's count goes under its name where it has room (LAY-19).
+    if let Some(below) = below.filter(|_| !legible) {
+        count_under(&clipped, &mut drawn, rect, below + 1.0, false, z, run.cost);
     }
 
     let small = min_on_screen(LINE_TEXT, z, LINE_MIN);
@@ -1544,7 +1693,7 @@ pub fn compact_card(
         Icon::ExternalLink.paint(&clipped, button.shrink(5.0 * z), theme::MUTED);
     }
     for row in &compact.rows {
-        let area = cell(14.0, row.top, WIDTH - 14.0, row.top + row.height);
+        let mut area = cell(14.0, row.top, WIDTH - 14.0, row.top + row.height);
         let text = if full { &row.full_text } else { &row.text };
         if row.role == CompactRole::Branches {
             // *Yes* and *No* over their sockets on the bottom edge.
@@ -1621,6 +1770,9 @@ pub fn compact_card(
                     Stroke::new(0.75, theme::BORDER),
                 );
                 let (text, color) = run.line("Not run");
+                if legible {
+                    area = count_on_line(&clipped, &mut drawn, area, &text, small, run.cost);
+                }
                 (
                     Cow::Owned(text),
                     FontId::proportional(small),

@@ -6,18 +6,23 @@
 //! inputs and HTTP request snapshot.
 
 use crate::icons::Icon;
-use crate::{dnd::Payload, labels, theme, widgets};
+use crate::{
+    dnd::Payload,
+    labels,
+    not_run::{self, NotRun},
+    theme, widgets,
+};
 use apiforge_core::{
     format::{Binding, Graph, Node, OptionalJson, Project},
     graph::{component_definition, condition_predicates, predicate},
     js::{json_stringify, type_name},
     model::{ErrorPolicy, Match, NodeKind, Predicate},
     path::JsonPath,
-    run::{Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
+    run::{CauseEnds, Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 const RESERVED_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
 
@@ -52,6 +57,9 @@ pub struct CheckedField {
 /// Everything the report panel needs to draw one frame.
 pub struct Context<'a> {
     pub run: Option<&'a RunResult>,
+    /// The run's cause ends, resolved once per run (LAY-19); `None`
+    /// resolves them from the run.
+    pub ends: Option<&'a CauseEnds>,
     pub selected_node_id: Option<&'a str>,
     pub error_policy: ErrorPolicy,
     pub running: bool,
@@ -221,6 +229,47 @@ pub struct StepRow<'a> {
     /// The node ids of the component calls that hold the step, outermost
     /// first; empty at the top level.
     pub calls: Vec<&'a str>,
+}
+
+impl StepRow<'_> {
+    /// The cause ends of the step's own graph: the run's, or those of the
+    /// component calls that hold it (LAY-19).
+    fn level<'e>(&self, ends: &'e CauseEnds) -> Option<&'e CauseEnds> {
+        self.calls
+            .iter()
+            .try_fold(ends, |ends, call| ends.within(call))
+    }
+
+    /// Why the step did not run; `None` for a step that ran.
+    fn not_run<'e>(&self, ends: &'e CauseEnds) -> Option<NotRun<'e>> {
+        NotRun::of(self.step, self.level(ends)?)
+    }
+
+    /// The step's first word: its cause's kind for a step that did not run,
+    /// *Not met* for a false *Data condition*, otherwise its status
+    /// (LAY-19).
+    fn word(&self, ends: &CauseEnds) -> &'static str {
+        match self.not_run(ends) {
+            Some(not_run) => not_run.word(),
+            None if not_run::unmet(self.step) => "Not met",
+            None => self.step.status.label(),
+        }
+    }
+
+    /// What the row says of the step: what its card says, the steps it kept
+    /// from running after a step that ran (LAY-19).
+    fn words(&self, ends: &CauseEnds) -> String {
+        if let Some(not_run) = self.not_run(ends) {
+            return not_run.words();
+        }
+        match self
+            .level(ends)
+            .map_or(0, |level| level.kept(&self.step.node_id))
+        {
+            0 => self.word(ends).to_owned(),
+            count => format!("{} · {}", self.word(ends), not_run::count_text(count)),
+        }
+    }
 }
 
 /// Flattens top-level steps and any nested component steps in execution order.
@@ -833,7 +882,15 @@ impl ReportPanel {
         context: &Context<'_>,
         actions: &mut Vec<Action>,
     ) {
-        header_row(ui, run, context.files_busy, actions);
+        let resolved;
+        let ends = match context.ends {
+            Some(ends) => ends,
+            None => {
+                resolved = CauseEnds::of(&run.steps);
+                &resolved
+            }
+        };
+        header_row(ui, run, ends, context.files_busy, actions);
         if run.diagnostic {
             ui.label(
                 RichText::new(
@@ -879,7 +936,7 @@ impl ReportPanel {
                 egui::vec2(300.0, height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    self.step_list(ui, &rows, selected.as_ref(), actions);
+                    self.step_list(ui, &rows, selected.as_ref(), ends, actions);
                 },
             );
             ui.separator();
@@ -899,6 +956,7 @@ impl ReportPanel {
                                 ui,
                                 &run.id,
                                 selected.as_ref(),
+                                ends,
                                 requirement,
                                 !context.document_locked,
                                 context.component,
@@ -915,6 +973,7 @@ impl ReportPanel {
         ui: &mut Ui,
         rows: &[StepRow<'_>],
         selected: Option<&StepRow<'_>>,
+        ends: &CauseEnds,
         actions: &mut Vec<Action>,
     ) {
         egui::ScrollArea::vertical()
@@ -935,7 +994,7 @@ impl ReportPanel {
                         ui.add_space(2.0);
                     }
                     let is_active = selected.is_some_and(|active| active.key == row.key);
-                    if step_row_button(ui, row, is_active).clicked() {
+                    if step_row_button(ui, row, is_active, ends).clicked() {
                         self.selected_key = Some(row.key.clone());
                         actions.push(Action::SelectNode(row.root_id.clone()));
                     }
@@ -949,6 +1008,7 @@ impl ReportPanel {
         ui: &mut Ui,
         run_id: &str,
         selected: Option<&StepRow<'_>>,
+        ends: &CauseEnds,
         requirement: Option<Requirement>,
         editable: bool,
         component: bool,
@@ -982,11 +1042,17 @@ impl ReportPanel {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                widgets::pill(ui, step.status.label(), status_color(step.status));
+                widgets::pill(ui, selected.word(ends), status_color(step.status));
             });
         });
 
-        if let Some(message) = &step.message {
+        // A step that did not run says why from its cause, never from the
+        // engine's message (LAY-19).
+        let message = match selected.not_run(ends) {
+            Some(not_run) => Some(Cow::Owned(not_run.sentence())),
+            None => step.message.as_deref().map(Cow::Borrowed),
+        };
+        if let Some(message) = message {
             let color = status_color(step.status);
             egui::Frame::new()
                 .fill(color.gamma_multiply(0.08))
@@ -995,7 +1061,11 @@ impl ReportPanel {
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new(message).size(12.0).color(theme::TEXT));
+                    ui.label(
+                        RichText::new(message.as_ref())
+                            .size(12.0)
+                            .color(theme::TEXT),
+                    );
                 });
         }
 
@@ -1413,7 +1483,13 @@ pub(crate) fn mode_pill(mode: RunMode) -> (&'static str, Color32) {
     }
 }
 
-fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<Action>) {
+fn header_row(
+    ui: &mut Ui,
+    run: &RunResult,
+    ends: &CauseEnds,
+    files_busy: bool,
+    actions: &mut Vec<Action>,
+) {
     ui.horizontal(|ui| {
         let (text, colour) = mode_pill(run.mode);
         widgets::pill(ui, text, colour);
@@ -1441,32 +1517,30 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
             {
                 actions.push(Action::ExportReport);
             }
-            let passed = run
-                .steps
-                .iter()
-                .filter(|step| step.status == StepStatus::Passed)
-                .count();
-            let failed = run
-                .steps
-                .iter()
-                .filter(|step| matches!(step.status, StepStatus::Failed | StepStatus::Error))
-                .count();
-            if failed > 0 {
-                ui.label(
-                    RichText::new(format!("{failed} failed"))
-                        .size(12.0)
-                        .strong()
-                        .color(theme::DANGER),
-                );
+            // Every step in one group, the steps that did not run by their
+            // cause (LAY-19); right to left, so the last group first.
+            for (group, count) in not_run::summary(&run.steps, ends).into_iter().rev() {
+                group_label(ui, group, count);
             }
-            ui.label(
-                RichText::new(format!("{passed} passed"))
-                    .size(12.0)
-                    .strong()
-                    .color(theme::SUCCESS),
-            );
         });
     });
+}
+
+/// One group of the summary, `11 stopped`.
+fn group_label(ui: &mut Ui, group: not_run::Group, count: usize) {
+    use not_run::Group;
+    let color = match group {
+        Group::Passed => theme::SUCCESS,
+        Group::Failed => theme::DANGER,
+        Group::NotMet | Group::Blocked | Group::Cancelled => theme::WARNING,
+        Group::Stopped | Group::Skipped => theme::MUTED,
+    };
+    ui.label(
+        RichText::new(format!("{count} {}", group.label()))
+            .size(12.0)
+            .strong()
+            .color(color),
+    );
 }
 
 fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
@@ -1515,7 +1589,12 @@ fn compact_json(value: &Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| json_stringify(value))
 }
 
-fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Response {
+fn step_row_button(
+    ui: &mut Ui,
+    row: &StepRow<'_>,
+    active: bool,
+    ends: &CauseEnds,
+) -> egui::Response {
     let indent = row.depth as f32 * 14.0;
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 42.0), Sense::click());
@@ -1550,11 +1629,14 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     name.wrap.max_rows = 1;
     let galley = painter.layout_job(name);
     painter.galley(egui::pos2(text_left, rect.top() + 5.0), galley, name_color);
+    let words = row.words(ends);
     let sub = if row.depth > 0 {
-        format!("Inside component · {}", row.step.status.label())
+        format!("Inside component · {words}")
     } else {
-        row.step.status.label().to_owned()
+        words.clone()
     };
+    // A step that did not run took no time (LAY-19).
+    let ran = row.step.cause.is_none();
     painter.text(
         egui::pos2(text_left, rect.top() + 29.0),
         egui::Align2::LEFT_CENTER,
@@ -1562,19 +1644,24 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
         egui::FontId::proportional(11.0),
         theme::MUTED,
     );
-    painter.text(
-        egui::pos2(rect.right() - 8.0, rect.center().y),
-        egui::Align2::RIGHT_CENTER,
-        format!("{} ms", row.step.duration_ms),
-        egui::FontId::monospace(10.5),
-        theme::MUTED,
-    );
-    let a11y_label = format!(
-        "{} · {} · {} ms",
-        row.step.display_name(),
-        row.step.status.label(),
-        row.step.duration_ms
-    );
+    if ran {
+        painter.text(
+            egui::pos2(rect.right() - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{} ms", row.step.duration_ms),
+            egui::FontId::monospace(10.5),
+            theme::MUTED,
+        );
+    }
+    let a11y_label = if ran {
+        format!(
+            "{} · {words} · {} ms",
+            row.step.display_name(),
+            row.step.duration_ms
+        )
+    } else {
+        format!("{} · {words}", row.step.display_name())
+    };
     response.widget_info(move || {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
     });
@@ -1819,6 +1906,7 @@ mod tests {
         };
         let context = Context {
             run: None,
+            ends: None,
             selected_node_id: None,
             error_policy: ErrorPolicy::Continue,
             running: false,
@@ -1931,6 +2019,7 @@ mod tests {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let empty = Context {
                     run: None,
+                    ends: None,
                     selected_node_id: None,
                     error_policy: ErrorPolicy::Continue,
                     running: false,
@@ -1949,6 +2038,7 @@ mod tests {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let populated = Context {
                     run: Some(&run),
+                    ends: None,
                     selected_node_id: Some("comp-1"),
                     error_policy: ErrorPolicy::Stop,
                     running: false,
@@ -2006,6 +2096,7 @@ mod tests {
                 let mut out = ctx.run_ui(input, |ui| {
                     let context = Context {
                         run: Some(&run),
+                        ends: None,
                         selected_node_id: Some("comp-1"),
                         error_policy: ErrorPolicy::Continue,
                         running: false,
@@ -2057,6 +2148,7 @@ mod tests {
         };
         let report_context = Context {
             run: None,
+            ends: None,
             selected_node_id: None,
             error_policy: ErrorPolicy::Continue,
             running: false,
@@ -2118,6 +2210,7 @@ mod tests {
             };
             let report_context = Context {
                 run: None,
+                ends: None,
                 selected_node_id: None,
                 error_policy: ErrorPolicy::Continue,
                 running: false,
@@ -2182,6 +2275,7 @@ mod tests {
             };
             let report_context = Context {
                 run: None,
+                ends: None,
                 selected_node_id: None,
                 error_policy: ErrorPolicy::Continue,
                 running: false,

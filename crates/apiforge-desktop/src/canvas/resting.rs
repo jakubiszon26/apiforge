@@ -7,7 +7,9 @@
 //! at each far reader instead of a wire (LAY-23), and a rail into the next
 //! step is an arrow at its badge (LAY-24). [`resting`] gives the
 //! router's input for a graph as the board draws it with nothing selected,
-//! pointed at or dragged, from the same parts the board itself is drawn from.
+//! pointed at or dragged, from the same parts the board itself is drawn from,
+//! and the chips and counts that stand in the gaps, which Tidy up makes room
+//! for too (LAY-37).
 
 use super::layout::{Card, CardDensity, Chip};
 use super::readers::{self, WireMode};
@@ -15,6 +17,7 @@ use super::routing::{self, WireStyle};
 use super::{after, collapsible, folded_wires};
 use apiforge_core::format::{Graph, Project};
 use apiforge_layout as layout;
+use eframe::egui;
 use std::collections::{HashMap, HashSet};
 
 /// Which lines a board draws: the *Wires* setting and *Collapse checks*.
@@ -48,9 +51,68 @@ pub struct Drawn<'a> {
     pub lines: Lines,
 }
 
+/// The room a count or a chip takes beside its card, across a gap between
+/// two columns: its text shortens to fit it at any zoom (LAY-23).
+pub const LANE: f32 = readers::GAP;
+
+/// A chip at a reader's input or a count at a source's port on a board at
+/// rest (LAY-23): what stands in the gap left or right of a card, which
+/// Tidy up makes room for (LAY-37).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lane {
+    /// The step it stands beside, by node id.
+    pub node: String,
+    /// The socket or the port, on the board.
+    pub anchor: egui::Pos2,
+    /// A chip, left of the card; else a count, right of it.
+    pub input: bool,
+}
+
 /// What the router is given for the board at rest: the rectangles of the
-/// cards drawn, then of the proxy chips, and the wires as ports on them.
-pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
+/// cards drawn, then of the proxy chips, and the wires as ports on them; and
+/// the chips and counts the board draws instead of some wires.
+pub fn resting(board: &Drawn<'_>) -> ((Vec<layout::Rect>, Vec<layout::Wire>), Vec<Lane>) {
+    let rest = at_rest(board);
+    let lanes = rest
+        .tags
+        .iter()
+        .map(|tag| Lane {
+            node: tag.reader.clone(),
+            anchor: tag.anchor,
+            input: true,
+        })
+        .chain(rest.counts.iter().map(|count| Lane {
+            node: count.source.clone(),
+            anchor: count.anchor,
+            input: false,
+        }))
+        .collect();
+    (geometry(&rest), lanes)
+}
+
+fn geometry(rest: &Rest) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
+    routing::geometry(&routing::Request {
+        cards: &rest.cards,
+        chips: &rest.chips,
+        wires: &rest.wires,
+        moving: &HashSet::new(),
+        style: WireStyle::Orthogonal,
+        bridges: false,
+        among: &[],
+    })
+}
+
+/// A board at rest: its cards and proxy chips, the wires drawn, and the
+/// chips and counts that stand for the others.
+struct Rest {
+    cards: Vec<Card>,
+    chips: Vec<Chip>,
+    wires: Vec<routing::BoardWire>,
+    tags: Vec<readers::Tag>,
+    counts: Vec<readers::Count>,
+}
+
+fn at_rest(board: &Drawn<'_>) -> Rest {
     let graph = board.graph;
     let mut cards: Vec<Card> = graph
         .nodes
@@ -78,6 +140,7 @@ pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
         cards.retain(|card| !folded.contains_key(&card.id));
     }
     let (mut wires, _) = folded_wires(graph, &cards, &chips, &folded);
+    let (mut tags, mut counts) = (Vec::new(), Vec::new());
     if board.lines.wires == WireMode::Chips {
         // A rail into the next step is an arrow at the step's badge (LAY-24).
         let arrows: HashSet<String> = after::marks(graph, board.later, &cards, &wires)
@@ -86,7 +149,7 @@ pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
             .collect();
         let chipped = readers::chipped(graph, &cards, &wires);
         if !chipped.is_empty() {
-            let (tags, _) = readers::plan(graph, board.project, &cards, &wires, &chipped);
+            (tags, counts) = readers::plan(graph, board.project, &cards, &wires, &chipped);
             let tagged: HashSet<&str> = tags
                 .iter()
                 .flat_map(|tag| tag.wires.iter().map(String::as_str))
@@ -95,13 +158,11 @@ pub fn resting(board: &Drawn<'_>) -> (Vec<layout::Rect>, Vec<layout::Wire>) {
         }
         wires.retain(|wire| !arrows.contains(&wire.id));
     }
-    routing::geometry(&routing::Request {
-        cards: &cards,
-        chips: &chips,
-        wires: &wires,
-        moving: &HashSet::new(),
-        style: WireStyle::Orthogonal,
-        bridges: false,
-        among: &[],
-    })
+    Rest {
+        cards,
+        chips,
+        wires,
+        tags,
+        counts,
+    }
 }

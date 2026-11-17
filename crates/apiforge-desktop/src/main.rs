@@ -48,6 +48,7 @@ mod inspector;
 mod labels;
 mod library;
 mod navigator;
+mod not_run;
 mod persistence;
 mod preferences;
 mod report;

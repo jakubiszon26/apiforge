@@ -38,6 +38,9 @@ const HIT: f32 = 16.0;
 /// badge.
 const BADGE_HALF: f32 = 10.0;
 const BADGE_HALF_LEAST: f32 = 7.5;
+/// Half the widest badge Fit allows for at the least size: a number of two
+/// digits is wider than the circle.
+const BADGE_HALF_WIDEST: f32 = 10.0;
 
 /// The rails into one step that the board does not draw.
 #[derive(Clone, Debug, PartialEq)]
@@ -142,7 +145,7 @@ pub fn marks(
 /// the farther it reaches on the board.
 pub fn bounds(marks: &[Mark], cards: &[Card], zoom: f32) -> Vec<Rect> {
     let zoom = zoom.max(f32::EPSILON);
-    let left = (BADGE_HALF * zoom).max(BADGE_HALF_LEAST) + GAP + (LENGTH * zoom).max(SHORTEST);
+    let left = (BADGE_HALF * zoom).max(BADGE_HALF_WIDEST) + GAP + (LENGTH * zoom).max(SHORTEST);
     let (above, below) = (2.0 * HALF + 2.0 * GAP, HALF + GAP);
     marks
         .iter()
@@ -154,6 +157,16 @@ pub fn bounds(marks: &[Mark], cards: &[Card], zoom: f32) -> Vec<Rect> {
             )
         })
         .collect()
+}
+
+/// A card's top-left corner on screen at `zoom`, where its badge stands
+/// and, left of it, the arrow into the step: what a chip moved up from its
+/// socket keeps clear of (LAY-37).
+pub fn corner(card: Rect, zoom: f32) -> Rect {
+    let half = (BADGE_HALF * zoom).max(BADGE_HALF_LEAST);
+    let left = half + GAP + (LENGTH * zoom).max(SHORTEST);
+    let corner = card.left_top();
+    Rect::from_min_max(corner - vec2(left, half), corner + vec2(half, half))
 }
 
 /// An arrow laid out on screen.
