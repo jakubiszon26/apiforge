@@ -797,8 +797,9 @@ impl ProjectSession {
         self.apply_analysis(analysis)
     }
 
-    /// A graphical edit. Semantic changes reprint canonical source and mark it
-    /// dirty; a pure layout change leaves the source untouched.
+    /// A graphical edit. A semantic change rewrites the source of what it
+    /// changes and nothing else (LAY-34) and marks it dirty; a pure layout
+    /// change leaves the source untouched.
     pub fn apply_model_edit(
         &mut self,
         document_id: &str,
@@ -883,8 +884,15 @@ impl ProjectSession {
             self.require_comment_decision(index)?;
         }
         let (model, text) = if semantic {
-            let text = apiforge_script::print_folder_document(&self.context, &model)
-                .map_err(|_| Error::Unprintable)?;
+            // The edit changes the text of what it changes and nothing else
+            // (LAY-34).
+            let text = apiforge_script::edit_folder_document(
+                &self.context,
+                document.text(),
+                previous,
+                &model,
+            )
+            .map_err(|_| Error::Unprintable)?;
             // Keep the model the printed text reads back, with the edited
             // model's identities and positions: a board edit may store blocks
             // or inputs in an order the source cannot state, and the
