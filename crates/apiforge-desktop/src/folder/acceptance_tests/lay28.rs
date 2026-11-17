@@ -95,18 +95,17 @@ fn crossings(routes: &[Route]) -> usize {
 }
 
 /// Criterion 5: the window draws the ordered boards. `shop-30` with every
-/// wire has at most 82 crossings with its checks folded and 106 with them
-/// drawn; with chips and the checks drawn, `shop-30` has at most 12 and
-/// `fan-out` 5. The limits were 75, 105, 10 and 5 until LAY-29 (#382), by
-/// which an ordering line leaves its socket at the bottom and goes round
-/// its card. The bridges the board draws are those crossings, and no line
-/// is nearer than 20 px to another or to a card.
+/// wire has at most 75 crossings with its checks folded and 105 with them
+/// drawn (82 and 123 without the order); with chips and the checks drawn,
+/// `shop-30` has at most 10 (17) and `fan-out` 5 (7). The bridges the board
+/// draws are those crossings, and no line is nearer than 20 px to another
+/// or to a card.
 #[test]
 fn lay28_criterion_5_the_window_draws_the_ordered_boards() {
     for (name, wires, expanded, most) in [
-        ("shop-30", WireMode::All, false, 82),
-        ("shop-30", WireMode::All, true, 106),
-        ("shop-30", WireMode::Chips, true, 12),
+        ("shop-30", WireMode::All, false, 75),
+        ("shop-30", WireMode::All, true, 105),
+        ("shop-30", WireMode::Chips, true, 10),
         ("fan-out", WireMode::Chips, true, 5),
     ] {
         let (_project, harness, id) = tidied(name, WIDE, expanded, wires);

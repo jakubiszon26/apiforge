@@ -354,14 +354,13 @@ fn rows_of(graph: &Graph, cards: &BTreeMap<String, egui::Rect>) -> HashMap<Strin
     rows
 }
 
-/// Criterion 4, as LAY-29 changed it (owner decision A of 2026-11-16): an
-/// `@after` or an `if`'s branch between two spine steps of a row leaves the
-/// socket at the bottom of its source downwards, goes round the card to the
-/// rail above the row and drops into the top of its target. Before, it
-/// rose from the top edge of its source, where no socket is drawn. Every
-/// ordering wire is dashed, and one that reaches a spine card arrives from
-/// above its row. A wire into a card hung right under its source drops
-/// straight into it.
+/// Criterion 4: no ordering wire runs through the gap between two cards of
+/// a row, where the data wires run: an `@after` or an `if`'s branch between
+/// two spine steps of a row rises from the top of its source to the rail
+/// above the row and drops into the top of its target, every point of it
+/// at or above the row's top. Every ordering wire is dashed, and one that
+/// reaches a spine card arrives from above its row. Only a wire into a card
+/// hung right under its source drops straight into it.
 #[test]
 fn lay06_criterion_4_order_wires_on_the_rail() {
     for name in ["order-flow", "shop-30"] {
@@ -400,12 +399,9 @@ fn lay06_criterion_4_order_wires_on_the_rail() {
                     && top == other
                 {
                     railed += 1;
-                    let (first, next) = (wire.points[0], wire.points[1]);
                     assert!(
-                        (first.y - from.bottom()).abs() < 0.5
-                            && (next.x - first.x).abs() < 0.5
-                            && next.y > first.y,
-                        "{context} leaves the socket at the bottom downwards"
+                        wire.points.iter().all(|point| point.y <= top + 0.5),
+                        "{context} stays above its row"
                     );
                     assert!(
                         wire.points.iter().any(|point| point.y < top - 0.5),
@@ -501,9 +497,7 @@ fn lay06_criterion_6_deterministic() {
 }
 
 /// Criteria 8 and 12: `shop-30` with its checks collapsed, as LAY-11's
-/// preference folds them by default, fits 1600 × 1000 at 0.48 or more
-/// (0.50 before LAY-29: the owner accepted 49 % for ordering lines that
-/// leave their sockets, decision A of 2026-11-16 on #382).
+/// preference folds them by default, fits 1600 × 1000 at 0.50 or more.
 /// Expanded, the fit is not asserted (0.49 when written); the quality
 /// example reports it. Since LAY-03 the board has the room its lines need,
 /// so this is the board a new install shows, with chips for shared values;
@@ -522,7 +516,7 @@ fn lay06_criterion_8_fit_at_least_half_collapsed() {
     );
     choose(&mut harness, FIT);
     let collapsed = board(&harness, &id).debug_zoom();
-    assert!(collapsed >= 0.48, "shop-30 collapsed fits at {collapsed}");
+    assert!(collapsed >= 0.50, "shop-30 collapsed fits at {collapsed}");
 }
 
 /// Criterion 9: Tidy up ends with the board in view. The camera is moved

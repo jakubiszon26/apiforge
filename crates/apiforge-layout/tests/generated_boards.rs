@@ -467,11 +467,11 @@ fn tidying_a_selection_keeps_off_the_cards_outside_it() {
     }
 }
 
-/// LAY-29 criterion 4: on piles of cards no complete route passes under a
+/// LAY-29 criterion 1: on piles of cards no complete route passes under a
 /// card it joins, past the stub out of a port the other card lies over. A
 /// wire with no way round has no route, and those are few.
 #[test]
-fn lay29_criterion_4_no_route_passes_under_its_own_card_on_piled_boards() {
+fn lay29_criterion_1_no_route_passes_under_its_own_card_on_piled_boards() {
     let routing = Routing::default();
     let (mut wires_routed, mut incomplete) = (0, 0);
     for seed in 1..=40u64 {

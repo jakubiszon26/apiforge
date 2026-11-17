@@ -288,13 +288,11 @@ fn lay28_criterion_3_the_reference_boards_cross_less() {
             .1
     };
     // What `quality` printed before this ticket, with the inputs of #349:
-    // 82, 123, 17, 7, 38 and 130. The first three limits were 75, 105 and
-    // 10 until LAY-29 (#382): an ordering line leaves its socket at the
-    // bottom and goes round its card.
+    // 82, 123, 17, 7, 38 and 130.
     for (name, most) in [
-        ("shop-30 compact collapsed 30 all", 82),
-        ("shop-30 compact expanded 30 all", 106),
-        ("shop-30 compact expanded 30 chips", 12),
+        ("shop-30 compact collapsed 30 all", 75),
+        ("shop-30 compact expanded 30 all", 105),
+        ("shop-30 compact expanded 30 chips", 10),
         ("fan-out compact expanded 26 chips", 5),
         ("shop-50 compact expanded 56 chips", 26),
         ("fan-out compact expanded 26 all", 90),

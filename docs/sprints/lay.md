@@ -1238,7 +1238,7 @@ does with a file that is not in its printed form (#396).
 | LAY-10 #294 focus on selection | S–M · 20 | cards · `canvas/{mod,paint}.rs` | `ready:opus` |
 | LAY-32 #387 one form per source: chips or wires | S · 20 | cards · `canvas/readers.rs` | `ready:opus` |
 | LAY-28 #348 with #349 lines in a corridor cross less | M | layout · `apiforge-layout`, `canvas/routing.rs` | in progress |
-| LAY-29 #382 no wire under its own card | M · 20 | layout · `route.rs`, `canvas/routing.rs` | decision A taken (ordering lines leave their sockets at the bottom); pull request #405 |
+| LAY-29 #382 no wire under its own card | S–M · 15 | layout · `route.rs` | narrowed by the owner on 2026-11-17 to cards that lie on each other (the Start fan waits for LANG-13); pull request #405 |
 | LAY-31 #384 a step and its checks are one group | M · 20 | layout · `layered.rs`, `route.rs` | after LAY-29; a before-and-after capture first |
 | LAY-30 #383 checks expanded by default, the switch on the bar and per step | S–M · 20 | `preferences.rs`, `canvas/` | after LAY-31; mock-up and one decision first |
 | RUN-03 #389 checks and values run before the next step | M · 20 | engine · `apiforge-runner/src/engine.rs`, `apiforge-core/src/graph.rs`, `fixtures/runs` | `ready:opus`; before LAY-19 |

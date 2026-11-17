@@ -151,8 +151,6 @@ spine and satellites:
    is. A wire into a card hung right under its source still leaves from the
    socket at the bottom. The router routes wires between two top ports
    first, so a data wire coming down into the row crosses a rail once.
-   *Changed by LAY-29, below: every ordering wire leaves its socket at the
-   bottom.*
 5. **Continuation mark.** The last spine card of a row carries a mark,
    `↳ <next step>`, naming the first card of the row below. It is drawn under
    the wires and is no obstacle to them.
@@ -245,40 +243,29 @@ in 35 ms (31 ms).
 
 ### No line under its own card (LAY-29)
 
-Amended by LAY-29 (2026-11-16, the owner's note on #382 and decision A on
-its mock-ups). A card is painted over its lines, so a line that begins
-where the card draws no socket, or passes under the card, seems to come
-out of the card from nowhere.
+Amended by LAY-29 (2026-11-16, the owner's note on #382; narrowed by the
+owner on 2026-11-17 to the part that does not depend on the language). A
+card is painted over its lines, so a piece of a line inside a card it
+joins is not seen, and the line seems to come out of the card from
+nowhere. Where an ordering wire leaves its card (rule 4 of shape D) is
+unchanged.
 
-1. **An ordering wire leaves its socket.** *Next*, *Yes* and *No* are on
-   the bottom edge, and every ordering wire starts there, downwards for a
-   stub, and goes round its card: to the rail above the row when its
-   target stands in the row, as rule 4 of shape D sent it, or down into a
-   card hung under it. Rule 4's start on the top edge, above the socket,
-   is withdrawn. The top edge of a card only receives. Tidy up makes the
-   room the lines under a row take, as for any line (LAY-03).
-2. **A wire's own two cards are in its way on every attempt** of the
+1. **A wire's own two cards are in its way on every attempt** of the
    search, at the clearance of the attempt. The last attempts, which let a
    wire under a card it joins where nothing else was found, are gone: such
    a wire has no route, is marked incomplete and drawn as the plain corner
    of an enclosed port.
-3. **A port inside the wire's other card** — cards lie on each other — is
+2. **A port inside the wire's other card** — cards lie on each other — is
    left through its stub, long enough to leave that card, exactly as a
    port inside a foreign card is. The guarantee's one exception covers
    both, and `violations` judges both the same.
 
 `apiforge_layout::under_own` lists the wires with a piece inside a card
 they join, past such a stub: none on the 24 reference boards and on
-generated tidied boards, and none on the generated piles of cards, where
-71 of 256 wires had one and 3 now have no route.
-
-**Price**, accepted by the owner on `shop-30` in the default view: 6
-crossings for 4, the board 60 px taller, Fit at 1600 × 1000 49 % for
-51 %. With every wire drawn `shop-30` has 82 crossings for 75 with its
-checks folded and 106 for 105 with them drawn; `shop-50` and `fan-out`
-with every wire and check drawn have fewer than before (315 for 340, 79
-for 90). **Cost:** none measurable; the budget's board
-routes in 133 ms (132 ms before, budget 150 ms).
+generated tidied boards, before and after, and none on the generated
+piles of cards, where 71 of 256 wires had one and 3 now have no route.
+The reference boards route as before. **Cost:** none measurable; the
+budget's board routes in BENCH.
 
 ## As implemented
 

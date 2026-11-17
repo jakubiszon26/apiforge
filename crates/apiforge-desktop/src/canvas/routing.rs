@@ -238,6 +238,10 @@ fn prepare(request: &Request<'_>) -> Vec<Prepared> {
             let target = request.cards.get(wire.target)?;
             let end = target.input_anchor(&wire.input, &wire.operand_path)?;
             let (source, start, source_rect) = match &wire.start {
+                Start::Output { card, port } if wire.control => {
+                    let source = request.cards.get(*card)?;
+                    (*card, rail_anchor(source, port, target)?, source.rect())
+                }
                 Start::Output { card, port } => {
                     let source = request.cards.get(*card)?;
                     (*card, source.output_anchor(port)?, source.rect())
@@ -264,6 +268,23 @@ fn prepare(request: &Request<'_>) -> Vec<Prepared> {
             })
         })
         .collect()
+}
+
+/// Where an ordering wire leaves its source (LAY-06): from the top edge,
+/// above its control socket, so that it rises to the rail above the row and
+/// runs there instead of through the gap between two cards where the data
+/// wires run. A wire to a card hung right under the source still leaves
+/// from the socket at the bottom: it only drops into that card.
+fn rail_anchor(source: &Card, port: &str, target: &Card) -> Option<Pos2> {
+    let below = source.output_anchor(port)?;
+    let (from, to) = (source.rect(), target.rect());
+    let under =
+        to.top() >= from.bottom() - 0.5 && to.left() < from.right() && from.left() < to.right();
+    Some(if under {
+        below
+    } else {
+        pos2(below.x, from.top())
+    })
 }
 
 /// What the router is given for a board: the rectangles of its cards and

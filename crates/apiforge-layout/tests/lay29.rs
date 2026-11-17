@@ -1,17 +1,15 @@
 //! LAY-29 (#382): a wire never runs under its own card.
 //!
-//! Two things. An ordering line leaves the socket its card draws for it, on
-//! the bottom edge, and goes round the card to the step it orders (owner
-//! decision A of 2026-11-16; before, it began on the top edge, above the
-//! socket, where nothing is drawn). And the router never lets a wire under a
-//! card it joins: its own two cards are in its way on every attempt, a port
-//! that lies inside the wire's other card is left through its stub, and a
-//! wire with no way round has no route. `under_own` is the measure; the
-//! reference boards are the desktop's own (`examples/support/boards.txt`).
+//! The router never lets a wire under a card it joins: its own two cards
+//! are in its way on every attempt, a port that lies inside the wire's
+//! other card is left through its stub, and a wire with no way round has
+//! no route. `under_own` is the measure; the reference boards are the
+//! desktop's own (`examples/support/boards.txt`). Where an ordering line
+//! leaves its card is not this ticket's: the owner narrowed it on
+//! 2026-11-17 to the part that does not depend on the language.
 
 use apiforge_layout::{
-    GAP, Point, Port, Rect, Route, Routing, Side, Size, Wire, crossing, packed, route, under_own,
-    violations,
+    GAP, Point, Port, Rect, Routing, Side, Size, Wire, packed, route, under_own, violations,
 };
 use std::time::{Duration, Instant};
 
@@ -26,21 +24,6 @@ fn wire(from: (usize, Side, f32), to: (usize, Side, f32)) -> Wire {
         Port::new(from.0, from.1, from.2),
         Port::new(to.0, to.1, to.2),
     )
-}
-
-/// How often two of the lines cross.
-fn crossings(routes: &[Route]) -> usize {
-    let mut count = 0;
-    for (index, a) in routes.iter().enumerate() {
-        for b in &routes[index + 1..] {
-            for (a1, a2) in a.segments() {
-                for (b1, b2) in b.segments() {
-                    count += usize::from(crossing(a1, a2, b1, b2).is_some());
-                }
-            }
-        }
-    }
-    count
 }
 
 /// A board of `examples/support/boards.txt`: its name, its cards and chips,
@@ -86,69 +69,12 @@ fn reference() -> Vec<Board> {
     boards
 }
 
-/// Whether a point of the route lies on the top edge of `card`.
-fn touches_top(route: &Route, card: &Rect) -> bool {
-    route.segments().any(|(from, to)| {
-        from.y.min(to.y) <= card.min.y + 0.01
-            && from.y.max(to.y) >= card.min.y - 0.01
-            && from.x.min(to.x) <= card.max.x + 0.01
-            && from.x.max(to.x) >= card.min.x - 0.01
-    })
-}
-
-/// Criterion 1: five steps ordered after *Start*, in a row and one under
-/// it, as Tidy up puts them. Every ordering line of *Start* leaves its
-/// *Next* socket on the bottom edge downwards, goes round and enters its
-/// step from above; none touches the top edge of *Start* or lies inside a
-/// card it joins.
+/// Criterion 2: on every reference board no piece of a line lies inside
+/// a card it joins, every wire has a route, the gap of LAY-03 holds and no
+/// line touches another card.
 #[test]
-fn lay29_criterion_1_the_lines_of_start_leave_its_socket_and_go_round() {
-    let mut cards = vec![card(0.0, 0.0, 280.0, 132.0)];
-    cards.extend((1..5).map(|column| card(column as f32 * 380.0, 0.0, 280.0, 110.0)));
-    cards.push(card(0.0, 312.0, 280.0, 110.0));
-    let wires: Vec<Wire> = (1..=5)
-        .map(|step| wire((0, Side::Bottom, 140.0), (step, Side::Top, 140.0)))
-        .collect();
-    let routes = route(&cards, &wires, &Routing::default());
-    for (index, line) in routes.iter().enumerate() {
-        assert!(line.complete, "wire {index} has a route");
-        let (start, next) = (line.points[0], line.points[1]);
-        assert_eq!(start, Point::new(140.0, 132.0), "wire {index}: at Next");
-        assert!(
-            (next.x - start.x).abs() < 0.01 && next.y >= start.y + GAP - 0.01,
-            "wire {index} leaves downwards for a stub: {:?}",
-            line.points
-        );
-        assert!(
-            !touches_top(line, &cards[0]),
-            "wire {index} keeps off the top edge of Start: {:?}",
-            line.points
-        );
-        let last = line.points.len() - 1;
-        assert!(
-            line.points[last - 1].y < line.points[last].y,
-            "wire {index} enters its step from above: {:?}",
-            line.points
-        );
-    }
-    assert_eq!(under_own(&routes, &wires, &cards), []);
-    assert_eq!(violations(&routes, &wires, &cards), []);
-    assert_eq!(packed(&routes, &cards, GAP), [], "the gap holds");
-    assert_eq!(crossings(&routes), 0, "{routes:?}");
-}
-
-/// Criterion 2: on every reference board each line begins at a socket its
-/// card draws (none leaves a top edge, which only receives) and no piece
-/// of a line lies inside a card it joins.
-#[test]
-fn lay29_criterion_2_every_line_begins_at_a_socket_and_none_is_under_its_card() {
+fn lay29_criterion_2_on_the_reference_boards_no_line_is_under_its_card() {
     for board in reference() {
-        let from_top = board
-            .wires
-            .iter()
-            .filter(|wire| wire.from.side == Side::Top)
-            .count();
-        assert_eq!(from_top, 0, "{}: lines leaving a top edge", board.name);
         let routes = route(&board.cards, &board.wires, &Routing::default());
         assert_eq!(
             under_own(&routes, &board.wires, &board.cards),
@@ -162,18 +88,6 @@ fn lay29_criterion_2_every_line_begins_at_a_socket_and_none_is_under_its_card() 
             "{}: every wire has a route",
             board.name
         );
-    }
-}
-
-/// Criterion 3: the gap of LAY-03 and the guarantee of ADR 0006 hold on
-/// every reference board, and the price the owner accepted is not
-/// exceeded: `shop-30` in the default view has at most 6 crossings (4
-/// before), with every wire and check drawn at most 106 (105).
-#[test]
-fn lay29_criterion_3_the_gap_holds_and_the_price_is_the_one_accepted() {
-    let mut found: Vec<(String, usize)> = Vec::new();
-    for board in reference() {
-        let routes = route(&board.cards, &board.wires, &Routing::default());
         assert_eq!(
             packed(&routes, &board.cards, GAP),
             [],
@@ -186,28 +100,14 @@ fn lay29_criterion_3_the_gap_holds_and_the_price_is_the_one_accepted() {
             "{}",
             board.name
         );
-        found.push((board.name, crossings(&routes)));
-    }
-    let of = |name: &str| -> usize {
-        found
-            .iter()
-            .find(|(board, _)| board == name)
-            .unwrap_or_else(|| panic!("a board {name}"))
-            .1
-    };
-    for (name, most) in [
-        ("shop-30 compact collapsed 30 chips", 6),
-        ("shop-30 compact expanded 30 all", 106),
-    ] {
-        assert!(of(name) <= most, "{name}: {} crossings", of(name));
     }
 }
 
-/// Criterion 4, the port inside the other card: two cards lie on each
+/// Criterion 1, the port inside the other card: two cards lie on each
 /// other and the port of one is inside the other. The wire leaves through
 /// its stub, which is the only piece of it inside a card it joins.
 #[test]
-fn lay29_criterion_4_a_port_inside_the_other_card_is_left_through_its_stub() {
+fn lay29_criterion_1_a_port_inside_the_other_card_is_left_through_its_stub() {
     let cards = [
         card(0.0, 0.0, 280.0, 120.0),
         card(100.0, 100.0, 280.0, 120.0),
@@ -236,11 +136,11 @@ fn lay29_criterion_4_a_port_inside_the_other_card_is_left_through_its_stub() {
     assert_eq!(under_own(&routes, &wires, &cards), []);
 }
 
-/// Criterion 4, cards that touch: the port at the bottom of one card
+/// Criterion 1, cards that touch: the port at the bottom of one card
 /// opens onto the top edge of the wire's other card. The wire runs along
 /// the edge between them or has no route; it never passes under either.
 #[test]
-fn lay29_criterion_4_between_cards_that_touch_the_wire_is_not_under_them() {
+fn lay29_criterion_1_between_cards_that_touch_the_wire_is_not_under_them() {
     let cards = [
         card(100.0, 0.0, 280.0, 120.0),
         card(0.0, 120.0, 480.0, 120.0),
@@ -261,10 +161,10 @@ fn lay29_criterion_4_between_cards_that_touch_the_wire_is_not_under_them() {
     }
 }
 
-/// Criterion 7: the budget of ADR 0006. The reference boards route within
+/// Criterion 5: the budget of ADR 0006. The reference boards route within
 /// it by a wide margin; the budget's own board is `bench`'s.
 #[test]
-fn lay29_criterion_7_the_reference_boards_route_in_time() {
+fn lay29_criterion_5_the_reference_boards_route_in_time() {
     let board = reference()
         .into_iter()
         .find(|board| board.name == "shop-50 compact expanded 56 all")
