@@ -1,49 +1,21 @@
-//! LAY-29 (#382): a wire never runs under its own card. An ordering line
-//! leaves the socket its card draws for it, *Next*, *Yes* or *No* on the
-//! bottom edge, and goes round the card to the step it orders (owner
-//! decision A of 2026-11-16); before, it began on the top edge above the
-//! socket, where nothing is drawn, as if it came out from under the card.
-//! The window draws what the layout crate's `lay29` tests measure, on a
-//! scenario with five steps ordered after *Start* and on the reference
-//! scenarios of `fixtures/scenarios/lay/`. `review_lay29` renders the views
-//! of the pull request.
+//! LAY-29 (#382): a wire never runs under its own card. Where cards lie on
+//! each other — a card dragged onto another, or a board not tidied — the
+//! router keeps a wire's own two cards in its way on every attempt and
+//! leaves a port the other card lies over through its stub; a line with no
+//! way round at all is drawn as the plain corner of an enclosed port. The
+//! window draws what the layout crate's `lay29` tests measure. Where an
+//! ordering line leaves its card is not this ticket's: the owner narrowed
+//! it on 2026-11-17 to the part that does not depend on the language.
+//! `review_lay29` renders the views of the pull request.
 use super::*;
-use crate::canvas::WireMode;
-use apiforge_core::format::Graph;
-use apiforge_layout::{GAP, Point, Rect as Block, Route, Side, crossing, packed, under_own};
+use crate::canvas::{Command, WireMode};
+use apiforge_core::format::{Graph, Position};
+use apiforge_layout::{GAP, Point, Rect as Block, Route, Routing, packed, under_own};
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 const DIAGRAM: &str = ".apiforge/diagram.json";
 const TIDY: &str = "Tidy up";
 const FIT: &str = "Fit the view";
-
-/// Five steps ordered after *Start*, as on the owner's board.
-const FIVE: &str = r#"scenario "Five after start" {
-  begin = start
-  @after(begin)
-  login = POST "/login" {
-    body { user: "demo", password: "demo" }
-    sample 200 { token: "t-1" }
-  }
-  @after(begin)
-  products = GET "/products" {
-    sample 200 { items: [{ id: "p-1", price: 12.5 }] }
-  }
-  @after(begin)
-  cart = POST "/cart" {
-    body { items: [] }
-    sample 201 { id: "c-1", total: 28.0 }
-  }
-  @after(begin)
-  profile = GET "/profile" {
-    sample 200 { name: "demo" }
-  }
-  @after(begin)
-  orders = GET "/orders" {
-    sample 200 { items: [] }
-  }
-}
-"#;
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -92,14 +64,39 @@ fn graph(harness: &FolderHarness, id: &str) -> Graph {
     graph_of(snapshot.model.as_ref().unwrap(), false).clone()
 }
 
-fn id_of(harness: &FolderHarness, id: &str, handle: &str) -> String {
-    graph(harness, id)
+/// Lays every third step of the board over the same place, each a little
+/// lower and to the right of the one before, as the layout crate's piles
+/// of cards are made: a board where cards lie on each other.
+fn pile(harness: &mut FolderHarness, id: &str) {
+    let moves: Vec<(String, Position)> = graph(harness, id)
         .nodes
         .iter()
-        .find(|node| node.handle == handle)
-        .unwrap_or_else(|| panic!("a step {handle}"))
-        .id
-        .clone()
+        .enumerate()
+        .step_by(3)
+        .map(|(index, node)| {
+            (
+                node.id.clone(),
+                Position {
+                    x: 300.0 + index as f64 * 24.0,
+                    y: 200.0 + index as f64 * 16.0,
+                },
+            )
+        })
+        .collect();
+    app(harness).active_board_command(Command::Move(moves));
+    settle(harness);
+    harness.step();
+}
+
+/// What the board at rest gave the router, routed again as the window
+/// routes it: the wires with a piece under a card they join, and how many
+/// wires have no route at all.
+fn under_own_in_the_window(harness: &FolderHarness, id: &str) -> (Vec<(usize, usize)>, usize) {
+    let (cards, wires) = board(harness, id).debug_geometry().clone();
+    assert!(!wires.is_empty(), "the board draws lines");
+    let routes = apiforge_layout::route(&cards, &wires, &Routing::default());
+    let incomplete = routes.iter().filter(|route| !route.complete).count();
+    (under_own(&routes, &wires, &cards), incomplete)
 }
 
 /// The lines the last frame drew, as routes, and the rectangles of its
@@ -122,179 +119,66 @@ fn drawn(harness: &FolderHarness, id: &str) -> (Vec<Route>, Vec<Block>) {
     (routes, canvas.debug_geometry().0.clone())
 }
 
-fn crossings(routes: &[Route]) -> usize {
-    let mut count = 0;
-    for (index, a) in routes.iter().enumerate() {
-        for b in &routes[index + 1..] {
-            for (a1, a2) in a.segments() {
-                for (b1, b2) in b.segments() {
-                    count += usize::from(crossing(a1, a2, b1, b2).is_some());
-                }
-            }
-        }
-    }
-    count
-}
-
-/// Where every card stands, by its id.
-fn positions(harness: &FolderHarness, id: &str) -> Vec<(String, [i32; 4])> {
-    let mut cards: Vec<(String, [i32; 4])> = board(harness, id)
-        .debug_cards()
-        .iter()
-        .map(|(card, rect)| {
-            (
-                card.clone(),
-                [
-                    rect.min.x.round() as i32,
-                    rect.min.y.round() as i32,
-                    rect.max.x.round() as i32,
-                    rect.max.y.round() as i32,
-                ],
-            )
-        })
-        .collect();
-    cards.sort();
-    cards
-}
-
-/// Criteria 1 and 5: five steps ordered after *Start*, tidied, with every
-/// wire drawn. Each of the five dashed lines of *Start* begins at its
-/// *Next* socket on the bottom edge and leaves downwards; none has a point
-/// on the top edge of *Start*; none lies inside a card it joins. The board
-/// draws a bridge at every crossing, keeps the gap, and Tidy up a second
-/// time gives the same board.
+/// Criterion 3: the window draws no line under a card it joins. On
+/// `shop-30` and `fan-out` with cards piled on each other, in both *Wires*
+/// modes, no line has a piece inside a card it joins, and few have no
+/// route; tidied, the same boards have none under their cards, every line
+/// has a route and the gap of LAY-03 holds.
 #[test]
-fn lay29_criterion_1_the_lines_of_start_leave_its_next_socket() {
-    let (_project, mut harness, id) = tidied(FIVE, WIDE, false, WireMode::All);
-    let begin = id_of(&harness, &id, "begin");
-    let canvas = board(&harness, &id);
-    let start = canvas.debug_world(&begin).expect("Start is drawn");
-    let lines: Vec<&crate::canvas::DrawnWire> = canvas
-        .debug_wires()
-        .iter()
-        .filter(|wire| wire.dashed && wire.source.as_deref() == Some(begin.as_str()))
-        .collect();
-    assert_eq!(lines.len(), 5, "the five ordering lines of Start");
-    for line in &lines {
-        let (first, next) = (line.points[0], line.points[1]);
-        assert!(
-            (first.y - start.bottom()).abs() < 0.5
-                && (first.x - start.center().x).abs() < 0.5,
-            "the line into {} begins at Next, at the middle of the bottom edge: {:?}",
-            line.target,
-            line.points
-        );
-        assert!(
-            (next.x - first.x).abs() < 0.5 && next.y > first.y,
-            "the line into {} leaves downwards: {:?}",
-            line.target,
-            line.points
-        );
-        let on_top = line.points.windows(2).any(|pair| {
-            pair[0].y.min(pair[1].y) <= start.top() + 0.5
-                && pair[0].y.max(pair[1].y) >= start.top() - 0.5
-                && pair[0].x.min(pair[1].x) <= start.right() + 0.5
-                && pair[0].x.max(pair[1].x) >= start.left() - 0.5
-        });
-        assert!(
-            !on_top,
-            "the line into {} keeps off the top edge of Start: {:?}",
-            line.target,
-            line.points
-        );
-    }
-    let (cards, wires) = canvas.debug_geometry().clone();
-    assert!(
-        wires.iter().all(|wire| wire.from.side != Side::Top),
-        "no line leaves a top edge"
-    );
-    let routed = apiforge_layout::route(&cards, &wires, &apiforge_layout::Routing::default());
-    assert_eq!(under_own(&routed, &wires, &cards), []);
-    let (routes, cards) = drawn(&harness, &id);
-    let bridges: usize = canvas.debug_wires().iter().map(|wire| wire.bridges).sum();
-    assert_eq!(bridges, crossings(&routes), "a bridge at every crossing");
-    assert_eq!(packed(&routes, &cards, GAP), [], "the gap holds");
-
-    let before = positions(&harness, &id);
-    choose(&mut harness, TIDY);
-    settle(&mut harness);
-    harness.step();
-    assert_eq!(positions(&harness, &id), before, "Tidy up twice");
-}
-
-/// Criteria 2 and 3 in the window: on `shop-30` and `fan-out`, tidied, no
-/// line leaves a top edge and none lies inside a card it joins; the gap
-/// holds; `shop-30` in the default view has at most 6 crossings and fits
-/// 1600 × 1000 at 48 % or more, and with every wire and check drawn it has
-/// at most 106 crossings.
-#[test]
-fn lay29_criteria_2_and_3_the_reference_boards_in_the_window() {
-    for (name, mode, expanded, most, fit) in [
-        ("shop-30", WireMode::Chips, false, Some(6), Some(0.48)),
-        ("shop-30", WireMode::All, true, Some(106), None),
-        ("fan-out", WireMode::All, false, None, None),
-        ("fan-out", WireMode::Chips, true, None, None),
+fn lay29_criterion_3_the_window_draws_no_line_under_its_own_card() {
+    for (name, mode) in [
+        ("shop-30", WireMode::Chips),
+        ("shop-30", WireMode::All),
+        ("fan-out", WireMode::All),
     ] {
-        let (_project, mut harness, id) = tidied(&fixture(name), WIDE, expanded, mode);
-        let label = format!("{name}, {mode:?}, checks drawn: {expanded}");
-        let canvas = board(&harness, &id);
-        let (cards, wires) = canvas.debug_geometry().clone();
-        assert!(
-            wires.iter().all(|wire| wire.from.side != Side::Top),
-            "{label}: no line leaves a top edge"
-        );
-        let routed = apiforge_layout::route(&cards, &wires, &apiforge_layout::Routing::default());
-        assert_eq!(under_own(&routed, &wires, &cards), [], "{label}");
+        let (_project, mut harness, id) = tidied(&fixture(name), WIDE, false, mode);
+        let label = format!("{name}, {mode:?}");
+        let (under, incomplete) = under_own_in_the_window(&harness, &id);
+        assert_eq!(under, [], "{label}, tidied: lines under a card they join");
+        assert_eq!(incomplete, 0, "{label}, tidied: every line has a route");
         let (routes, cards) = drawn(&harness, &id);
-        assert!(!routes.is_empty(), "{label}: the board draws lines");
         assert_eq!(packed(&routes, &cards, GAP), [], "{label}: the gap holds");
-        let found = crossings(&routes);
-        if let Some(most) = most {
-            assert!(found <= most, "{label}: {found} crossings");
-        }
-        if let Some(least) = fit {
-            choose(&mut harness, FIT);
-            harness.step();
-            let zoom = board(&harness, &id).debug_zoom();
-            assert!(zoom >= least, "{label}: Fit shows the board at {zoom}");
-        }
+
+        pile(&mut harness, &id);
+        let (under, incomplete) = under_own_in_the_window(&harness, &id);
+        let wires = board(&harness, &id).debug_geometry().1.len();
+        assert_eq!(under, [], "{label}, piled: lines under a card they join");
+        assert!(
+            incomplete * 10 <= wires,
+            "{label}, piled: {incomplete} of {wires} lines have no route"
+        );
     }
 }
 
-/// Criterion 6: the views of the pull request, each asserting a card in
-/// view: the five steps after *Start* at 100 % in the smallest window, and
-/// `shop-30` at Fit and at its `if` in the large one.
+/// Criterion 4: the views of the pull request, each asserting a card in
+/// view: `shop-30` with every wire and its cards piled on each other, at
+/// Fit and at 100 % on `receipt` in the large window, where the lines from
+/// `order` into `receipt` and `refund` ran under both cards before, and at
+/// 100 % on `login` in the smallest one, where the ordering line from
+/// `begin` ran under `login` and now has no way round.
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_lay29() {
-    let five = FIVE.to_owned();
     let shop = fixture("shop-30");
-    // (capture, scenario, wires, the card the view is centred on at 100 %
-    // or Fit, the window)
+    // (capture, the window, the card shown at 100 %)
     let views = [
-        (
-            "five-960",
-            &five,
-            WireMode::Chips,
-            Some("begin"),
-            crate::testing::MINIMUM,
-        ),
-        ("five-1600", &five, WireMode::All, None, WIDE),
-        ("shop-30-1600", &shop, WireMode::Chips, None, WIDE),
-        (
-            "if-960",
-            &shop,
-            WireMode::Chips,
-            Some("paid"),
-            crate::testing::MINIMUM,
-        ),
+        ("piled-1600", WIDE, None),
+        ("piled-receipt-1600", WIDE, Some("receipt")),
+        ("piled-login-960", crate::testing::MINIMUM, Some("login")),
     ];
-    for (label, text, wires, centre, size) in views {
-        let (_project, mut harness, id) = tidied(text, size, false, wires);
+    for (label, size, close) in views {
+        let (_project, mut harness, id) = tidied(&shop, size, false, WireMode::All);
+        pile(&mut harness, &id);
         choose(&mut harness, FIT);
         harness.step();
-        if let Some(handle) = centre {
-            let node = id_of(&harness, &id, handle);
+        if let Some(handle) = close {
+            let node = graph(&harness, &id)
+                .nodes
+                .iter()
+                .find(|node| node.handle == handle)
+                .unwrap_or_else(|| panic!("a step {handle}"))
+                .id
+                .clone();
             app(&mut harness)
                 .canvases
                 .get_mut(&id)
@@ -303,14 +187,12 @@ fn review_lay29() {
             settle(&mut harness);
             harness.step();
         }
+        let (under, incomplete) = under_own_in_the_window(&harness, &id);
         let canvas = board(&harness, &id);
-        let (routes, cards) = drawn(&harness, &id);
         println!(
-            "LAY29 {label}: lines {} crossings {} bends {} packed {} zoom {:.3}",
-            routes.len(),
-            crossings(&routes),
-            routes.iter().map(Route::bends).sum::<usize>(),
-            packed(&routes, &cards, GAP).len(),
+            "LAY29 {label}: lines {} under their own card {} without a route {incomplete} zoom {:.3}",
+            canvas.debug_geometry().1.len(),
+            under.len(),
             canvas.debug_zoom(),
         );
         let focus = canvas.debug_focus();
@@ -324,3 +206,4 @@ fn review_lay29() {
         crate::testing::capture(&mut harness, &format!("lay29-{label}"), None);
     }
 }
+
