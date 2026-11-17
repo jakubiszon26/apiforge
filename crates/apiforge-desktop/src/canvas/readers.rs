@@ -836,3 +836,217 @@ pub fn paint_statement(painter: &Painter, near: Rect, text: &str) {
     );
     painter.galley(rect.min + vec2(6.0, 3.0), galley, theme::TEXT);
 }
+
+#[cfg(test)]
+mod tests {
+    //! LAY-37 review findings: a chip or a count placed anywhere its search
+    //! reaches keeps [`CLEAR`] from everything in `clear`, also beyond the
+    //! band it was first looked for in; only the fallback place, where no
+    //! clear place was found, may come nearer.
+    use super::*;
+    use eframe::egui::{Context, LayerId, RawInput, Vec2};
+
+    const SOCKET: Pos2 = pos2(1000.0, 500.0);
+
+    fn camera() -> Camera {
+        Camera {
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+        }
+    }
+
+    fn with_painter<T>(run: impl FnOnce(&Painter) -> T) -> T {
+        let context = Context::default();
+        let mut out = None;
+        let mut run = Some(run);
+        let mut output = context.run_ui(RawInput::default(), |ui| {
+            if let Some(run) = run.take() {
+                out = Some(run(&ui.ctx().layer_painter(LayerId::background())));
+            }
+        });
+        output.textures_delta.clear();
+        out.expect("a frame")
+    }
+
+    fn tag(anchor: Pos2) -> Tag {
+        Tag {
+            reader: "reader".into(),
+            card: 0,
+            source: "cart".into(),
+            port: "body".into(),
+            input: "query".into(),
+            path: Vec::new(),
+            text: "cart.id".into(),
+            short: "cart".into(),
+            statement: "cart.id → reader.query".into(),
+            wires: vec!["w".into()],
+            anchor,
+            slot: 0,
+        }
+    }
+
+    fn count(anchor: Pos2) -> Count {
+        Count {
+            source: "source".into(),
+            card: 0,
+            port: "body".into(),
+            readers: 3,
+            label: "source.body → 3 readers".into(),
+            wires: vec!["w".into()],
+            anchor,
+        }
+    }
+
+    /// The distance between a box and a segment, 0 where they meet.
+    fn apart(rect: Rect, [a, b]: [Pos2; 2]) -> f32 {
+        if crosses(rect, a, b) {
+            return 0.0;
+        }
+        (0..=100)
+            .map(|step| a.lerp(b, step as f32 / 100.0))
+            .map(|at| rect.distance_to_pos(at))
+            .fold(f32::INFINITY, f32::min)
+    }
+
+    /// Panics where `laid` comes nearer than [`CLEAR`] to something in
+    /// `clear` without standing at `fallback`, the place it takes when no
+    /// clear place is found.
+    fn assert_clear(laid: &Laid, clear: &Clear<'_>, fallback: Rect, context: &str) {
+        let at_fallback = (laid.rect.center() - fallback.center()).length() < 0.5;
+        if at_fallback {
+            return;
+        }
+        let near = CLEAR - 0.5 - 0.01;
+        for other in clear.boxes {
+            let gap = laid.rect.distance_to_pos(other.clamp(laid.rect.center()));
+            let gap = gap.min(apart(*other, [laid.rect.left_top(), laid.rect.right_top()]));
+            let gap = gap.min(apart(
+                *other,
+                [laid.rect.left_bottom(), laid.rect.right_bottom()],
+            ));
+            assert!(
+                gap >= near,
+                "{context}: {:?} is {gap} px from the box {other:?}",
+                laid.rect
+            );
+        }
+        for line in clear.lines {
+            for pair in line.windows(2) {
+                let gap = apart(laid.rect, [pair[0], pair[1]]);
+                assert!(
+                    gap >= near,
+                    "{context}: {:?} is {gap} px from the line {pair:?}",
+                    laid.rect
+                );
+            }
+        }
+    }
+
+    /// Vertical lines down the gap past `SOCKET`, each just where the chip
+    /// stood beside the one before, until the chip would stand beyond the
+    /// band it was looked for in; then a line just past that place.
+    fn walls(width: f32, side: f32) -> Vec<Vec<Pos2>> {
+        let stub = stub_length(1.0);
+        let room = GAP - stub - 2.0;
+        let band = stub + 2.0 * (room + CLEAR);
+        let line = |x: f32| vec![pos2(x, SOCKET.y - 300.0), pos2(x, SOCKET.y + 300.0)];
+        let mut lines = Vec::new();
+        // The near edge of the chip as it stands, its far edge from the
+        // socket.
+        let mut edge = stub;
+        while edge + width < band {
+            let x = edge + width / 2.0;
+            lines.push(line(SOCKET.x + side * x));
+            edge = x + CLEAR;
+        }
+        // Beyond the band: just past the far edge of the last place.
+        lines.push(line(SOCKET.x + side * (edge + width + 1.0)));
+        lines
+    }
+
+    /// Finding 1: a chip set left of lines that hug its card, beyond the
+    /// band, keeps clear of a line there.
+    #[test]
+    fn a_chip_beyond_the_band_keeps_clear_of_a_line_there() {
+        with_painter(|painter| {
+            let tags = [tag(SOCKET)];
+            let alone = lay_tags(
+                painter,
+                &tags,
+                camera(),
+                &Clear {
+                    boxes: &[],
+                    lines: &[],
+                },
+            );
+            let fallback = alone[0].rect;
+            let lines = walls(fallback.width(), -1.0);
+            let clear = Clear {
+                boxes: &[],
+                lines: &lines,
+            };
+            let laid = lay_tags(painter, &tags, camera(), &clear);
+            assert_clear(&laid[0], &clear, fallback, "a chip");
+        });
+    }
+
+    /// Finding 1, for a count set right of lines that leave its port.
+    #[test]
+    fn a_count_beyond_the_band_keeps_clear_of_a_line_there() {
+        with_painter(|painter| {
+            let source = count(SOCKET);
+            let counts = [&source];
+            let none = Clear {
+                boxes: &[],
+                lines: &[],
+            };
+            let alone = lay_counts(painter, &counts, camera(), &none, &[]);
+            let fallback = alone[0].rect;
+            let lines = walls(fallback.width(), 1.0);
+            let clear = Clear {
+                boxes: &[],
+                lines: &lines,
+            };
+            let laid = lay_counts(painter, &counts, camera(), &clear, &[]);
+            assert_clear(&laid[0], &clear, fallback, "a count");
+        });
+    }
+
+    /// Finding 2: a chip pushed down by the chip above it to the end of its
+    /// reach keeps clear of a card just below there.
+    #[test]
+    fn a_chip_at_the_end_of_its_reach_keeps_clear_of_what_is_below() {
+        with_painter(|painter| {
+            let tags = [tag(SOCKET), tag(SOCKET + vec2(0.0, 1.0))];
+            let none = Clear {
+                boxes: &[],
+                lines: &[],
+            };
+            let stacked = lay_tags(painter, &tags, camera(), &none);
+            let (above, fallback) = (stacked[0].rect, stacked[1].rect);
+            let height = fallback.height();
+            // Where the second chip may stand: from under the first to its
+            // reach below that.
+            let start = fallback.center().y;
+            let last = start + (REACH * height / NUDGE).ceil() * NUDGE;
+            let lane = (SOCKET.x - GAP, SOCKET.x - stub_length(1.0) + 1.0);
+            // A card over every place but the last, clear of the first chip,
+            // and one 2 px under the last.
+            let blocked = Rect::from_min_max(
+                pos2(lane.0, above.bottom() + CLEAR),
+                pos2(lane.1, last - height / 2.0 - CLEAR),
+            );
+            let below = Rect::from_min_max(
+                pos2(lane.0, last + height / 2.0 + 2.0),
+                pos2(lane.1, last + height / 2.0 + 40.0),
+            );
+            let boxes = [blocked, below];
+            let clear = Clear {
+                boxes: &boxes,
+                lines: &[],
+            };
+            let laid = lay_tags(painter, &tags, camera(), &clear);
+            assert_clear(&laid[1], &clear, fallback, "the second chip");
+        });
+    }
+}
