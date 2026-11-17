@@ -1646,7 +1646,12 @@ impl Canvas {
         let mark_screens: Vec<Rect> = marks.iter().map(|mark| camera.rect(mark.rect)).collect();
         let laid_counts: Vec<readers::Laid> = shown_counts
             .iter()
-            .map(|count| readers::lay_count(&painter, count, camera, &mark_screens))
+            .map(|count| {
+                let value = (self.mock18 == readers::Mock18::CountValue)
+                    .then(|| readers::count_value(input.graph, input.project, count, input.steps))
+                    .flatten();
+                readers::lay_count(&painter, count, camera, &mark_screens, value)
+            })
             .collect();
         // A step's badge keeps clear of the chips and counts (LAY-07).
         let chip_boxes: Vec<Rect> = laid_tags
@@ -1923,8 +1928,10 @@ impl Canvas {
                 continue;
             }
             let lit = lit
-                || (self.mock18 == readers::Mock18::List
-                    && hover.is_some_and(|pointer| laid.rect.contains(pointer)));
+                || (matches!(
+                    self.mock18,
+                    readers::Mock18::List | readers::Mock18::ListValues
+                ) && hover.is_some_and(|pointer| laid.rect.contains(pointer)));
             readers::paint(&board_painter, laid, lit);
         }
         #[cfg(test)]
@@ -2471,14 +2478,25 @@ impl Canvas {
             &laid_tags,
         );
 
-        if self.mock18 == readers::Mock18::List {
+        if matches!(
+            self.mock18,
+            readers::Mock18::List | readers::Mock18::ListValues
+        ) {
+            let steps = input
+                .steps
+                .filter(|_| self.mock18 == readers::Mock18::ListValues);
             for (count, laid) in shown_counts.iter().zip(&laid_counts) {
                 let pointed = hover.is_some_and(|pointer| laid.rect.contains(pointer));
                 let kept =
                     self.shown_port.as_ref() == Some(&(count.source.clone(), count.port.clone()));
                 if pointed || kept {
-                    let text =
-                        readers::field_list(input.graph, input.project, &count.source, &count.port);
+                    let text = readers::field_list(
+                        input.graph,
+                        input.project,
+                        &count.source,
+                        &count.port,
+                        steps,
+                    );
                     readers::paint_statement(&painter, laid.rect, &text, overlays.board);
                 }
             }

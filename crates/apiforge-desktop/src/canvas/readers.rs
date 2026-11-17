@@ -25,6 +25,7 @@ use super::{
     shape::on_spine,
 };
 use crate::theme;
+use apiforge_core::run::StepResult;
 use apiforge_core::{
     format::{Binding, Graph, Project},
     graph::{self, WireKind, wires as document_wires},
@@ -483,7 +484,13 @@ pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera) -> Vec<Laid> {
 /// The count at a source's port, right of it in the gap. Where it would
 /// cover something in `avoid` (a continuation mark, on screen) it stands
 /// under it and its stub bends up to the port.
-pub fn lay_count(painter: &Painter, count: &Count, camera: Camera, avoid: &[Rect]) -> Laid {
+pub fn lay_count(
+    painter: &Painter,
+    count: &Count,
+    camera: Camera,
+    avoid: &[Rect],
+    value: Option<(String, String)>,
+) -> Laid {
     let anchor = camera.to_screen(count.anchor);
     let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
     let font_id = FontId::proportional(font);
@@ -491,11 +498,20 @@ pub fn lay_count(painter: &Painter, count: &Count, camera: Camera, avoid: &[Rect
     let room = GAP * camera.zoom - stub - 2.0;
     let (shown, galley) = fitting(
         painter,
-        &[
-            format!("→ {} readers", count.readers),
-            format!("→ {}", count.readers),
-            "→".to_owned(),
-        ],
+        &value
+            .iter()
+            .flat_map(|(name, value)| {
+                [
+                    format!("→ {} · {name} {value}", count.readers),
+                    format!("→ {} · {value}", count.readers),
+                ]
+            })
+            .chain([
+                format!("→ {} readers", count.readers),
+                format!("→ {}", count.readers),
+                "→".to_owned(),
+            ])
+            .collect::<Vec<_>>(),
         &font_id,
         room,
     );
@@ -651,6 +667,12 @@ pub enum Mock18 {
     List,
     /// Option B: one count per field in the gap.
     PerField,
+    /// Question 3, placement 1: the list, each field with the last run's
+    /// value.
+    ListValues,
+    /// Question 3, placement 2: the last run's value of the most read
+    /// field beside the count.
+    CountValue,
 }
 
 /// MOCK (LAY-18): the fields of `port` the document reads, as the code
@@ -711,11 +733,21 @@ pub fn fields_read(
 }
 
 /// MOCK (LAY-18, option A): the list a count shows, one line per field.
-pub fn field_list(graph: &Graph, project: &Project, source: &str, port: &str) -> String {
+pub fn field_list(
+    graph: &Graph,
+    project: &Project,
+    source: &str,
+    port: &str,
+    steps: Option<&[StepResult]>,
+) -> String {
     const NAMED: usize = 6;
     fields_read(graph, project, source, port)
         .into_iter()
         .map(|(field, readers)| {
+            let field = match run_value(graph, steps, source, port, &field, 28) {
+                Some(value) => format!("{field} = {value}"),
+                None => field,
+            };
             let checks = readers.iter().all(|(_, check)| *check);
             let unit = match (checks, readers.len()) {
                 (true, 1) => "check",
@@ -788,4 +820,48 @@ pub fn lay_fields(
         });
     }
     laid
+}
+
+/// MOCK (LAY-18, question 3): the last run's value of `field` (as
+/// [`fields_read`] names it) of `port`, written short.
+pub fn run_value(
+    graph: &Graph,
+    steps: Option<&[StepResult]>,
+    source: &str,
+    port: &str,
+    field: &str,
+    most: usize,
+) -> Option<String> {
+    let step = steps?.iter().find(|step| step.node_id == source)?;
+    let mut value = step.outputs.get(port)?;
+    let handle = &graph.nodes.iter().find(|node| node.id == source)?.handle;
+    let rest = field.strip_prefix(handle.as_str())?;
+    let rest = rest.strip_prefix('.').unwrap_or(rest);
+    let rest = rest.strip_prefix(port).unwrap_or(rest);
+    for key in rest.split(['.', '[', ']']).filter(|key| !key.is_empty()) {
+        value = match key.parse::<usize>() {
+            Ok(index) if value.is_array() => value.get(index)?,
+            _ => value.get(key)?,
+        };
+    }
+    let text = value.to_string();
+    Some(if text.chars().count() > most {
+        format!("{}…", text.chars().take(most).collect::<String>())
+    } else {
+        text
+    })
+}
+
+/// MOCK (LAY-18, question 3): the most read field of a count and its value.
+pub fn count_value(
+    graph: &Graph,
+    project: &Project,
+    count: &Count,
+    steps: Option<&[StepResult]>,
+) -> Option<(String, String)> {
+    let (field, _) = fields_read(graph, project, &count.source, &count.port)
+        .into_iter()
+        .next()?;
+    let value = run_value(graph, steps, &count.source, &count.port, &field, 8)?;
+    Some((field.rsplit('.').next()?.to_owned(), value))
 }

@@ -1,10 +1,12 @@
 # LAY-18: A reader count names the fields read — `login.body.token → 10 readers`
 
 - Size: S · Owner review: 10 min · Risk: `visible UI`
-- State: Analysis, re-checked against `main` at 514f06a on 2026-11-17; the
-  mock-up and four decisions wait for the owner (issue #302,
-  `decision-needed`). Was M · 20 min, *Compact shows the data in use*:
-  LAY-16, LAY-23, LAY-32, LAY-27/31 and LAY-14 delivered most of it.
+- State: Analysis, re-checked against `main` at 514f06a on 2026-11-17.
+  The owner chose the shape and approved the mock-up the same day
+  (decisions 1, 2 and 4); decision 3 waits for him with its own mock-up
+  (issue #302, `decision-needed`). Was M · 20 min, *Compact shows the data
+  in use*: LAY-16, LAY-23, LAY-32, LAY-27/31 and LAY-14 delivered most of
+  it. Implementation after LAY-37 (#423).
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -53,20 +55,26 @@ shows the sentence *Draw every wire of this value*.
 
 ## Decisions
 
-Open, recommended option first (the mock-up shows each):
+Taken by the owner on 2026-11-17 (quiz on the mock-up at 9409004):
 
-1. **The shape.** **A** the list at the count, shown by pointing and kept by
-   a click. · **B** one count per field in the gap (`id → 3`, `total → 2`):
-   always visible, but at 60 % the gap has no room for a name longer than
-   two letters (`login` shows `→ 10` and `→ 1`), the stack covers the
-   `+ var` mark and the next output's row, and it competes for the gap with
-   the chips LAY-37 spaces apart. · **C** close LAY-18 as delivered: the
-   count and its click stay as they are.
-2. **A grey line *Nothing reads this step*.** **A** not added: a card with
-   no output row and no count already says so. · **B** added.
-3. **The last run's value beside the count at Full.** **A** not added: Run
-   results and the Inspector show it. · **B** added.
-4. **The mock-up as a whole**: approved, or sent back.
+1. **The shape: A**, the list at the count, shown by pointing and kept by
+   a click. Not B (one count per field in the gap), not C (close as
+   delivered).
+2. **No** grey line *Nothing reads this step*.
+4. **The mock-up is approved** for the above.
+
+Open, recommended option first (captures `lay18-value-*`, `shop-30` at
+Full after a simulation):
+
+3. **The last run's value.** **A** in the list: after a run each line names
+   the field's value, `cart.body.id = "c-1" → 3 readers: …`, at either
+   density; nothing is added at rest. A secret stays as the run report has
+   it (`login.body.token = "[REDACTED]"`). · **B** beside the count at
+   Full, the most read field's value (`→ 5 · id "c-1"`): always visible,
+   but the gap holds about eight characters, so `login`'s count stays
+   `→ 11 readers` and `catalogue`'s reads `→ 3 · [{"id":1…`; it needs the
+   gap LAY-37 gives the chips. · **C** not shown: Run results and the
+   Inspector have it. With A the review grows to 15 minutes.
 
 ## Mock-up
 
@@ -82,6 +90,13 @@ Not yet approved. Design-review captures of `review_lay18` on
 | `cart` at 100 % | `lay18-cart-100-point-before-960` | `lay18-cart-100-point-a-list-960` | `lay18-cart-100-rest-b-fields-1600` |
 
 The gestures: pointing at a count; a click on it; Esc.
+
+Decision 3, `login` and `cart` at Full after a simulation
+(`review_lay18_run_value`): not shown `lay18-value-100-rest-none-1600`,
+`lay18-value-100-list-none-1600`, `-960`; in the list
+`lay18-value-100-list-p1-1600`, `-960`, `lay18-value-cart-100-list-p1-960`;
+beside the count `lay18-value-100-rest-p2-1600`,
+`lay18-value-cart-100-rest-p2-1600`, `lay18-value-60-rest-p2-960`.
 
 ## Acceptance criteria
 
@@ -105,11 +120,15 @@ Compact, checks folded.
 5. The count keeps its accessible name (`login.body → 11 readers`), so the
    tests of LAY-23 and LAY-32 pass unchanged.
 
+6. Only if decision 3 = A: after a run, each line names the field's value
+   from the report, cut to 28 characters, before the arrow; without a run,
+   or for a field the report has no value for, the line is as in
+   criterion 1. Test: `lay18_criterion_6_the_list_names_the_run_value`.
+
 ## Not in scope
 
 Anything on the card itself: a line per field in place of the output rows,
-the grey line and the last run's value (decisions 2 and 3; dropped unless
-the owner chooses B there). A port-model change. Naming every reader
+and the grey line (decision 2). A port-model change. Naming every reader
 beyond six (the Inspector lists them, LAY-10's relations). Relations out of
 view (LAY-15). Descriptions (DIAG-01).
 

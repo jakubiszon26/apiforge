@@ -114,3 +114,42 @@ fn review_lay18() {
         }
     }
 }
+
+/// Question 3: the last run's value at a count, at Full density after a
+/// simulation: not shown, in the list, beside the count.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay18_run_value() {
+    for (size, suffix) in [(WIDE, "1600"), (MINIMUM, "960")] {
+        let (_project, mut harness, id) = tidied("shop-30", size, Checks::Collapsed);
+        app(&mut harness).switch_density(crate::canvas::CardDensity::Full);
+        settle(&mut harness);
+        choose(&mut harness, "Tidy up");
+        settle(&mut harness);
+        choose(&mut harness, "Run simulation");
+        finish_run(&mut harness);
+        choose(&mut harness, "Diagram");
+        settle(&mut harness);
+        assert!(!board(&harness, &id).debug_compact());
+        for (step, zoom, tag) in [
+            ("login", 1.0, "100"),
+            ("login", 0.6, "60"),
+            ("cart", 1.0, "cart-100"),
+        ] {
+            show(&mut harness, &id, step, zoom);
+            let at = count(&harness, &id, step).center();
+            away(&mut harness);
+            save(&mut harness, &format!("lay18-value-{tag}-rest-none-{suffix}"));
+            mock(&mut harness, &id, Mock18::List);
+            hover(&mut harness, at);
+            save(&mut harness, &format!("lay18-value-{tag}-list-none-{suffix}"));
+            mock(&mut harness, &id, Mock18::ListValues);
+            hover(&mut harness, at);
+            save(&mut harness, &format!("lay18-value-{tag}-list-p1-{suffix}"));
+            mock(&mut harness, &id, Mock18::CountValue);
+            away(&mut harness);
+            save(&mut harness, &format!("lay18-value-{tag}-rest-p2-{suffix}"));
+            mock(&mut harness, &id, Mock18::Off);
+        }
+    }
+}
