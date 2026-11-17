@@ -960,6 +960,14 @@ fn wire_color(selected: bool, control: bool, branch: Option<Branch>) -> Color32 
     }
 }
 
+/// Mock of LAY-13: a dashed line with its arrowhead, on screen.
+pub fn band_wire(painter: &Painter, line: &[Pos2], color: Color32, zoom: f32) {
+    dashes(painter, line, Stroke::new(1.6, color), zoom);
+    let end = line[line.len() - 1];
+    let direction = (end - line[line.len() - 2]).normalized();
+    arrowhead(painter, end, direction, color, zoom);
+}
+
 fn arrowhead(painter: &Painter, end: Pos2, direction: Vec2, color: Color32, zoom: f32) {
     let normal = vec2(-direction.y, direction.x);
     let size = 6.0 * zoom.max(0.6);

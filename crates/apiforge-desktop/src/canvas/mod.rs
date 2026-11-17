@@ -5,6 +5,7 @@
 //! wires being drawn and the camera are view state only.
 
 mod after;
+pub mod bands;
 mod collapse;
 mod layout;
 mod menu;
@@ -1606,7 +1607,34 @@ impl Canvas {
         // Wires go under the cards. They are routed around the cards and chips, so
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
-        let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &folded);
+        let (mut board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &folded);
+        // Mock of LAY-13: the bands, and one wire of each branch, to its
+        // first step drawn.
+        let band_variant = bands::variant();
+        let branch_bands: Vec<bands::Band> = band_variant.map_or_else(Vec::new, |variant| {
+            let places: Vec<(String, NodeKind, Rect)> = cards
+                .iter()
+                .map(|card| (card.id.clone(), card.kind, card.rect()))
+                .collect();
+            bands::bands(input.graph, &places, variant == 'a')
+        });
+        let mut band_entries: HashMap<String, usize> = HashMap::new();
+        for (index, band) in branch_bands.iter().enumerate() {
+            let of_band = |wire: &routing::BoardWire| {
+                wire.branch == Some(band.branch)
+                    && matches!(&wire.start, routing::Start::Output { card, .. } if cards[*card].id == band.source)
+            };
+            let first = band.members.iter().find_map(|member| {
+                board_wires
+                    .iter()
+                    .find(|wire| of_band(wire) && cards[wire.target].id == *member)
+                    .map(|wire| wire.id.clone())
+            });
+            if let Some(first) = first {
+                board_wires.retain(|wire| !of_band(wire) || wire.id == first);
+                band_entries.insert(first, index);
+            }
+        }
         // A kept wire the board no longer has, after an edit, an Undo or a
         // fold, is no longer kept: it does not come back kept (LAY-14).
         let kept = self.selected_wires.len();
@@ -1838,6 +1866,13 @@ impl Canvas {
         let selected_wires: HashSet<String> = self.selected_wires.iter().cloned().collect();
         // A continuation mark is drawn under the wires: a wire that passes
         // it stays whole, and the mark is no obstacle to route around.
+        let band_shapes: Vec<Vec<(Rect, Vec<(f32, f32, f32)>, f32)>> = branch_bands
+            .iter()
+            .map(|band| bands::screen(band, camera, &chip_boxes))
+            .collect();
+        for (band, shapes) in branch_bands.iter().zip(&band_shapes) {
+            bands::paint(&board_painter, band, shapes, camera, input.steps);
+        }
         for mark in &marks {
             paint::continuation_mark(&board_painter, mark, camera);
         }
@@ -1864,6 +1899,39 @@ impl Canvas {
             for wire in routed {
                 if wire.routed {
                     at_rest.push(wire.points.clone());
+                }
+                if let Some(band) = band_entries.get(&wire.id)
+                    && wire.routed
+                {
+                    let target = board_wires
+                        .iter()
+                        .find(|other| other.id == wire.id)
+                        .map(|other| cards[other.target].id.clone());
+                    let into = branch_bands[*band]
+                        .fragments
+                        .iter()
+                        .position(|fragment| {
+                            target.as_ref().is_some_and(|target| fragment.cards.contains(target))
+                        })
+                        .map(|fragment| band_shapes[*band][fragment].0);
+                    if let Some(into) = into {
+                        let line: Vec<Pos2> =
+                            wire.points.iter().map(|at| camera.to_screen(*at)).collect();
+                        bands::entry(
+                            &board_painter,
+                            &line,
+                            into,
+                            &cards
+                                .iter()
+                                .map(|card| camera.rect(card.rect()))
+                                .collect::<Vec<_>>(),
+                            branch_bands[*band].branch,
+                            camera.zoom,
+                            dimming && !lit.contains(&wire.id),
+                        );
+                        drawn.push((wire.id.clone(), wire.points.clone()));
+                        continue;
+                    }
                 }
                 paint::routed_wire(
                     &board_painter,
