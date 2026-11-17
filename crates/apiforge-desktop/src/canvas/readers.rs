@@ -24,7 +24,7 @@ use super::{
     layout::{self, Card},
     paint,
     routing::{BoardWire, Start},
-    shape::on_spine,
+    shape::{self, on_spine},
 };
 use crate::theme;
 use apiforge_core::{
@@ -173,6 +173,7 @@ pub fn far(cards: &[Card], from: &Card, to: &Card) -> bool {
 pub fn chipped(graph: &Graph, cards: &[Card], wires: &[BoardWire]) -> HashSet<String> {
     let readers = readers_by_port(graph);
     let rows = rows(cards);
+    let groups = shape::groups(cards);
     // The data wires of each output port, as the board draws them.
     let mut ports: HashMap<(usize, &str), Vec<&BoardWire>> = HashMap::new();
     for wire in wires.iter().filter(|wire| !wire.control) {
@@ -202,10 +203,23 @@ pub fn chipped(graph: &Graph, cards: &[Card], wires: &[BoardWire]) -> HashSet<St
                         .is_some_and(|target| !beside(&rows, source.rect(), target.rect()))
                 })
             };
-            count >= MIN_READERS || (saved && far())
+            // A card hung under its source reads it through a chip: no
+            // line runs inside the group (LAY-31).
+            let hung = || {
+                port_wires
+                    .iter()
+                    .any(|wire| shape::hung_under(cards, &groups, *card, wire.target))
+            };
+            count >= MIN_READERS || (saved && far()) || hung()
         })
         .flat_map(|(_, port_wires)| port_wires.into_iter().map(|wire| wire.id.clone()))
         .collect()
+}
+
+/// How a count names its readers: `1 reader`, `3 readers` (LAY-31: one
+/// card hung under its source reads it through a chip).
+fn noun(readers: usize) -> &'static str {
+    if readers == 1 { "reader" } else { "readers" }
 }
 
 /// The fields a reference sits in inside an input: the keys of the objects
@@ -351,7 +365,7 @@ pub fn plan(
                 card: *card,
                 port: port.clone(),
                 readers: number,
-                label: format!("{name} → {number} readers"),
+                label: format!("{name} → {number} {}", noun(number)),
                 wires: vec![wire.id.clone()],
                 anchor: at,
             });
@@ -693,7 +707,7 @@ pub fn lay_counts(
         let texts = fitting(
             painter,
             &[
-                format!("→ {} readers", count.readers),
+                format!("→ {} {}", count.readers, noun(count.readers)),
                 format!("→ {}", count.readers),
                 "→".to_owned(),
             ],

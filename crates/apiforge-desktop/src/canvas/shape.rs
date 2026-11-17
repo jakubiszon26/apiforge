@@ -119,6 +119,36 @@ pub fn plan(graph: &Graph, later: Option<&Graph>) -> Option<Plan> {
     Some(Plan { spine, satellites })
 }
 
+/// The group of each card (LAY-31), as [`apiforge_layout::groups`] tells it
+/// from where the cards lie: a step and the cards hung under it, at most the
+/// stack gap apart, as the router sees them.
+pub fn groups(cards: &[Card]) -> Vec<usize> {
+    let rects: Vec<apiforge_layout::Rect> = cards
+        .iter()
+        .map(|card| {
+            let rect = card.rect();
+            apiforge_layout::Rect::new(
+                apiforge_layout::Point::new(rect.min.x, rect.min.y),
+                apiforge_layout::Point::new(rect.max.x, rect.max.y),
+            )
+        })
+        .collect();
+    apiforge_layout::groups(&rects)
+}
+
+/// Whether the card `reader` hangs under the card `source` (LAY-31): in its
+/// group, below it, and not a spine step. `groups` are [`groups`] of `cards`.
+pub fn hung_under(cards: &[Card], groups: &[usize], source: usize, reader: usize) -> bool {
+    let (Some(from), Some(to)) = (cards.get(source), cards.get(reader)) else {
+        return false;
+    };
+    source != reader
+        && groups.get(source).is_some()
+        && groups.get(source) == groups.get(reader)
+        && !on_spine(to.kind)
+        && to.rect().top() >= from.rect().bottom()
+}
+
 /// The continuation marks of a board: each spine step at the end of a row
 /// with the spine step the engine reaches next, which starts the row below.
 /// A pair is a row break when the next step stands left of the first and
