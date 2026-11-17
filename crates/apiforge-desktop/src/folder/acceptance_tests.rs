@@ -14925,4 +14925,84 @@ mod lay16 {
         release(&mut harness, body);
         crate::testing::capture(&mut harness, "lay16-tray-bound", Some(region));
     }
+
+    // MOCK (LAY-38): the chips of `shop-30` in each variant.
+    fn chips(harness: &FolderHarness) -> Vec<(String, Rect)> {
+        canvas(harness)
+            .debug_tags()
+            .iter()
+            .map(|tag| (tag.shown.clone(), tag.rect))
+            .collect()
+    }
+
+    fn report(harness: &FolderHarness, name: &str) {
+        let chips = chips(harness);
+        let mut touching = 0;
+        let mut nearest = f32::MAX;
+        for (index, (_, a)) in chips.iter().enumerate() {
+            for (_, b) in &chips[index + 1..] {
+                if a.intersects(*b) {
+                    touching += 1;
+                }
+                let dx = (a.left() - b.right()).max(b.left() - a.right()).max(0.0);
+                let dy = (a.top() - b.bottom()).max(b.top() - a.bottom()).max(0.0);
+                nearest = nearest.min(dx.hypot(dy));
+            }
+        }
+        let widest = chips.iter().map(|(_, r)| r.width()).fold(0.0, f32::max);
+        let full = chips.iter().filter(|(shown, _)| shown.chars().count() > 4).count();
+        eprintln!(
+            "LAY38 {name}: chips {} touching {touching} nearest {nearest:.1} widest {widest:.1} long-text {full}",
+            chips.len()
+        );
+    }
+
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_lay38_chips() {
+        for (variant, letter) in [(0u8, "main"), (1, "a"), (2, "b"), (3, "c")] {
+            crate::canvas::LAY38_MOCK.store(variant, std::sync::atomic::Ordering::Relaxed);
+            for (size, suffix) in [(WIDE, "1600"), (crate::testing::MINIMUM, "960")] {
+                let (_project, mut harness) = open(&shop_30(), size);
+                harness.get_by_label("Tidy up").click();
+                settle(&mut harness);
+                harness.get_by_label("Fit the view").click();
+                settle(&mut harness);
+                report(&harness, &format!("{letter}-fit-{suffix}"));
+                crate::testing::capture(&mut harness, &format!("lay38-{letter}-fit-{suffix}"), None);
+                for (density, zooms) in [("compact", [1.0, 0.6]), ("full", [1.0, 0.6])] {
+                    if density == "full" {
+                        switch_density(&mut harness);
+                        settle(&mut harness);
+                        harness.get_by_label("Tidy up").click();
+                        settle(&mut harness);
+                    }
+                    for zoom in zooms {
+                        show(&mut harness, "cart_view", zoom);
+                        let percent = (zoom * 100.0) as u32;
+                        report(&harness, &format!("{letter}-{density}-{percent}-{suffix}"));
+                        if zoom == 1.0 {
+                            crate::testing::capture(
+                                &mut harness,
+                                &format!("lay38-{letter}-{density}-100-{suffix}"),
+                                None,
+                            );
+                            if suffix == "1600" {
+                                let card = screen_of(&harness, "cart_view");
+                                let region = Rect::from_min_size(
+                                    card.left_top() - vec2(300.0, 20.0),
+                                    vec2(460.0, card.height().min(330.0) + 40.0),
+                                );
+                                crate::testing::capture(
+                                    &mut harness,
+                                    &format!("lay38-{letter}-{density}-closeup"),
+                                    Some(region),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

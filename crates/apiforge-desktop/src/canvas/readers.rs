@@ -56,6 +56,15 @@ pub const MIN_READERS: usize = 3;
 /// Tidy up leaves it there clear of the lines (LAY-37).
 pub(super) const GAP: f32 = 96.0;
 
+/// MOCK (LAY-38): which variant the chips are drawn in. 0 = main today,
+/// 1 = A (arrow towards the card, input filled), 2 = B (the input chip is a
+/// pointer), 3 = C (arrow towards the card, input tinted).
+pub static MOCK: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+fn mock() -> u8 {
+    MOCK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// The chip's text before the camera's zoom, and its smallest on screen.
 const TEXT: f32 = 11.0;
 
@@ -607,11 +616,19 @@ pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera, clear: &Clear<'
         let anchor = camera.to_screen(tag.anchor);
         let texts = fitting(
             painter,
-            &[
-                format!("← {}", tag.text),
-                format!("← {}", tag.short),
-                "←".to_owned(),
-            ],
+            &match mock() {
+                0 => [
+                    format!("← {}", tag.text),
+                    format!("← {}", tag.short),
+                    "←".to_owned(),
+                ],
+                2 => [tag.text.clone(), tag.short.clone(), String::new()],
+                _ => [
+                    format!("{} →", tag.text),
+                    format!("{} →", tag.short),
+                    "→".to_owned(),
+                ],
+            },
             &font_id,
             room,
         );
@@ -823,6 +840,60 @@ pub fn paint(painter: &Painter, laid: &Laid, lit: bool) {
         Stroke::new(1.0, border),
         StrokeKind::Inside,
     );
+    painter.galley(laid.rect.min + vec2(4.0, 1.5), laid.galley.clone(), ink);
+}
+
+/// MOCK (LAY-38): an input chip in the variant chosen.
+pub fn paint_tag(painter: &Painter, laid: &Laid, lit: bool) {
+    const INPUT_FILL: eframe::egui::Color32 = eframe::egui::Color32::from_rgb(222, 228, 237);
+    const TINT: eframe::egui::Color32 = eframe::egui::Color32::from_rgb(70, 106, 145);
+    const TINT_SOFT: eframe::egui::Color32 = eframe::egui::Color32::from_rgb(233, 240, 248);
+    let variant = mock();
+    if variant == 0 {
+        return paint(painter, laid, lit);
+    }
+    let (border, ink, fill) = match (lit, variant) {
+        (true, _) => (theme::ACCENT, theme::TEXT, theme::ACCENT_SOFT),
+        (false, 1) => (theme::CONTROL_WIRE, theme::TEXT, INPUT_FILL),
+        (false, 2) => (theme::CONTROL_WIRE, theme::MUTED, theme::WHITE),
+        (false, _) => (TINT, TINT, TINT_SOFT),
+    };
+    let line = Stroke::new(1.2, if variant == 3 && !lit { theme::CONTROL_WIRE } else { border });
+    painter.line_segment(laid.stub, line);
+    if let Some(bend) = laid.bend {
+        painter.line_segment([laid.stub[1], bend], line);
+        painter.line_segment([bend, laid.socket], line);
+    }
+    if variant == 2 {
+        // A pointer: round at the far end, a point at the card's side.
+        let rect = laid.rect.shrink(0.5);
+        let radius = rect.height() / 2.0;
+        let centre = pos2(rect.left() + radius, rect.center().y);
+        let mut all: Vec<Pos2> = (0..=12)
+            .map(|step| {
+                let angle =
+                    std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * step as f32 / 12.0;
+                pos2(centre.x + radius * angle.cos(), centre.y - radius * angle.sin())
+            })
+            .collect();
+        let tip = radius * 0.8;
+        all.push(pos2(rect.right(), rect.bottom()));
+        all.push(pos2(rect.right() + tip, rect.center().y));
+        all.push(pos2(rect.right(), rect.top()));
+        painter.add(eframe::egui::Shape::convex_polygon(
+            all,
+            fill,
+            Stroke::new(1.0, border),
+        ));
+    } else {
+        painter.rect(
+            laid.rect,
+            laid.rect.height() / 2.0,
+            fill,
+            Stroke::new(1.0, border),
+            StrokeKind::Inside,
+        );
+    }
     painter.galley(laid.rect.min + vec2(4.0, 1.5), laid.galley.clone(), ink);
 }
 

@@ -10,6 +10,8 @@ mod layout;
 mod menu;
 mod paint;
 mod readers;
+#[cfg(test)]
+pub(crate) use readers::MOCK as LAY38_MOCK;
 mod resting;
 mod routing;
 pub mod shape;
@@ -1967,7 +1969,7 @@ impl Canvas {
             .remember(&traced, drawn.iter().chain(&drawn_revealed));
         for (tag, laid) in shown_tags.iter().zip(&laid_tags) {
             let lit = tag.wires.iter().all(|wire| revealed.contains(wire));
-            readers::paint(&board_painter, laid, lit);
+            readers::paint_tag(&board_painter, laid, lit);
         }
         for (count, laid) in shown_counts.iter().zip(&laid_counts) {
             let lit = count.wires.iter().any(|wire| revealed.contains(wire));
