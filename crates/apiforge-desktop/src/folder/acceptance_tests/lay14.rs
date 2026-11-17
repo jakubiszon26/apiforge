@@ -608,6 +608,132 @@ fn lay14_criterion_4_tracing_moves_nothing_and_fits() {
     }
 }
 
+/// Review of #420, 1: dragging a card that is not selected selects it and
+/// ends what a click kept, as a click on it does; Delete then removes only
+/// what is selected.
+#[test]
+fn lay14_review_dragging_a_card_ends_the_kept_line() {
+    let (_project, mut harness, id) = opened(WIDE);
+    let drawn = line(&harness, &id, "valid_cart", "checkout");
+    let at = point_on(&harness, &id, &drawn.id);
+    click(&mut harness, at);
+    assert_eq!(
+        board(&harness, &id).debug_selected_wires(),
+        std::slice::from_ref(&drawn.id),
+        "the line is kept"
+    );
+    let order = id_of(&harness, &id, "order");
+    let card = board(&harness, &id)
+        .debug_card_rect(&order)
+        .expect("order is drawn");
+    let from = card.center_top() + vec2(0.0, 12.0);
+    super::lay16::drag(&mut harness, from, from + vec2(0.0, 60.0));
+    settle(&mut harness);
+    harness.step();
+    assert_eq!(
+        folder(&harness)
+            .selections
+            .get(&id)
+            .cloned()
+            .unwrap_or_default(),
+        vec![order],
+        "the drag selects order"
+    );
+    assert!(
+        board(&harness, &id).debug_selected_wires().is_empty(),
+        "the kept line ends"
+    );
+    assert!(
+        board(&harness, &id).debug_statements().is_empty(),
+        "its statement goes: {:?}",
+        board(&harness, &id).debug_statements()
+    );
+}
+
+/// Review of #420, 2: a kept wire that leaves the board some other way than
+/// Delete (an edit of the binding) is no longer kept, and Undo, which brings
+/// the wire back, does not keep it again.
+#[test]
+fn lay14_review_a_kept_wire_that_goes_is_no_longer_kept() {
+    let (_project, mut harness, id) = opened(WIDE);
+    let drawn = line(&harness, &id, "valid_cart", "checkout");
+    let at = point_on(&harness, &id, &drawn.id);
+    click(&mut harness, at);
+    assert_eq!(
+        board(&harness, &id).debug_selected_wires(),
+        std::slice::from_ref(&drawn.id)
+    );
+    let checkout = id_of(&harness, &id, "checkout");
+    app(&mut harness).active_board_command(crate::canvas::Command::Bind {
+        node: checkout,
+        input: "body".into(),
+        path: vec!["cartId".into()],
+        binding: apiforge_core::format::Binding::literal(serde_json::json!("c-1")),
+    });
+    settle(&mut harness);
+    harness.step();
+    assert!(
+        board(&harness, &id)
+            .debug_wires()
+            .iter()
+            .all(|wire| wire.id != drawn.id),
+        "the edit removed the line"
+    );
+    assert!(
+        board(&harness, &id).debug_selected_wires().is_empty(),
+        "a wire that is gone is not kept"
+    );
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    settle(&mut harness);
+    harness.step();
+    harness.step();
+    assert!(
+        board(&harness, &id)
+            .debug_wires()
+            .iter()
+            .any(|wire| wire.id == drawn.id),
+        "Undo brings the line back"
+    );
+    assert_quiet(&harness, &id, "after Undo");
+}
+
+/// Review of #420, 3: moving the pointer from a chip onto its wire, where
+/// the chip drew it, keeps the wire drawn, ringed and stated: a statement
+/// never stands for a wire that is not drawn.
+#[test]
+fn lay14_review_pointing_at_a_chips_wire_keeps_it_drawn() {
+    let (_project, mut harness, id) = opened(WIDE);
+    let chip = board(&harness, &id)
+        .debug_tags()
+        .iter()
+        .find(|tag| tag.tag.statement == CHIP)
+        .cloned()
+        .expect("checkout's body carries the chip of expected_total");
+    hover(&mut harness, chip.rect.center());
+    let wire_id = chip.tag.wires[0].clone();
+    assert!(
+        revealed(&harness, &id).contains(&wire_id),
+        "the chip draws its wire"
+    );
+    let at = point_on(&harness, &id, &wire_id);
+
+    hover(&mut harness, at);
+    assert_eq!(
+        board(&harness, &id).debug_statement().as_deref(),
+        Some(CHIP),
+        "the wire pointed at states itself"
+    );
+    assert!(
+        revealed(&harness, &id).contains(&wire_id),
+        "the wire stated is drawn"
+    );
+    let lit = wire(&harness, &id, &wire_id);
+    assert!(lit.lit && !lit.dimmed, "at full strength");
+    assert_ends_ringed(&harness, &id, &wire_id, "the chip's wire pointed at");
+    away(&mut harness);
+    assert_quiet(&harness, &id, "the pointer gone");
+}
+
 /// A capture that keeps the pointer where it is: what is pointed at is what
 /// the view shows.
 fn save(harness: &mut FolderHarness, name: &str) {
