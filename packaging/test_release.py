@@ -897,7 +897,7 @@ class OutputCapture(unittest.TestCase):
     def test_the_native_validation_reads_the_valid_line(self):
         validate = step(self.rust, "Validate workspace using the native release binary")
         self.assertIn("shell: bash", validate)
-        self.assertIn('output="$(./${{ matrix.binary_path }} --check fixtures/workspace.json)"', validate)
+        self.assertIn('output="$(./${{ env.BINARY_PATH }} --check fixtures/workspace.json)"', validate)
         self.assertIn('[[ ! "$output" =~ ^Valid\\ v[0-9]+\\ document:\\ [0-9]+\\ project\\(s\\)$ ]]', validate)
         self.assertIn("exit 1", validate)
 

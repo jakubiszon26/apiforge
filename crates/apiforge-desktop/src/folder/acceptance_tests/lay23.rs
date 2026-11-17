@@ -1,6 +1,6 @@
 //! LAY-23 (#333), stage 1: a value read by three or more steps draws a quiet
-//! chip `← name` beside each reader's input instead of a long wire; a reader
-//! beside its source keeps its wire; the source counts its readers; the wire
+//! chip `← name` beside each reader's input instead of a long wire, at every
+//! reader, the one beside it too (LAY-32); the source counts its readers; the wire
 //! comes back while the chip or the input is pointed at and while the reader
 //! or the source is selected. A *Wires* setting in the board's view menu
 //! (*All wires*, *Chips for shared values*), *Chips* the default. Rendering
@@ -22,7 +22,7 @@ const CHIPS: &str = "Chips for shared values";
 /// The board file `quality` reads (LAY-06 criterion 10).
 const BOARDS: &str = "../apiforge-layout/examples/support/boards.txt";
 
-fn fixture(name: &str) -> String {
+pub(super) fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/scenarios/lay")
         .join(format!("{name}.afs"));
@@ -31,7 +31,7 @@ fn fixture(name: &str) -> String {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Checks {
+pub(super) enum Checks {
     /// Folded into their subjects, the default (LAY-11).
     Collapsed,
     Expanded,
@@ -40,7 +40,7 @@ enum Checks {
 /// The reference scenario `name` opened at `size` without positions, as a
 /// new install shows it (chips on), its checks as `checks` says, tidied up
 /// once more with nothing selected.
-fn tidied(
+pub(super) fn tidied(
     name: &str,
     size: egui::Vec2,
     checks: Checks,
@@ -49,7 +49,7 @@ fn tidied(
 }
 
 /// As [`tidied`], with the scenario's text given.
-fn tidied_text(
+pub(super) fn tidied_text(
     text: &str,
     size: egui::Vec2,
     checks: Checks,
@@ -71,12 +71,12 @@ fn tidied_text(
     (project, harness, id)
 }
 
-fn graph(harness: &FolderHarness, id: &str) -> Graph {
+pub(super) fn graph(harness: &FolderHarness, id: &str) -> Graph {
     let snapshot = folder(harness).snapshot(id).unwrap();
     graph_of(snapshot.model.as_ref().unwrap(), false).clone()
 }
 
-fn id_of(harness: &FolderHarness, id: &str, handle: &str) -> String {
+pub(super) fn id_of(harness: &FolderHarness, id: &str, handle: &str) -> String {
     graph(harness, id)
         .nodes
         .iter()
@@ -86,7 +86,7 @@ fn id_of(harness: &FolderHarness, id: &str, handle: &str) -> String {
         .clone()
 }
 
-fn handle_of(graph: &Graph, id: &str) -> String {
+pub(super) fn handle_of(graph: &Graph, id: &str) -> String {
     graph
         .nodes
         .iter()
@@ -94,7 +94,7 @@ fn handle_of(graph: &Graph, id: &str) -> String {
         .map_or_else(|| id.to_owned(), |node| node.handle.clone())
 }
 
-fn board<'a>(harness: &'a FolderHarness, id: &str) -> &'a crate::canvas::Canvas {
+pub(super) fn board<'a>(harness: &'a FolderHarness, id: &str) -> &'a crate::canvas::Canvas {
     folder(harness)
         .canvases
         .get(id)
@@ -109,14 +109,14 @@ fn board_mut<'a>(harness: &'a mut FolderHarness, id: &str) -> &'a mut crate::can
 }
 
 /// The camera centred on `handle` at `zoom`, as a person scrolls there.
-fn show(harness: &mut FolderHarness, id: &str, handle: &str, zoom: f32) {
+pub(super) fn show(harness: &mut FolderHarness, id: &str, handle: &str, zoom: f32) {
     let node = id_of(harness, id, handle);
     board_mut(harness, id).debug_show(&node, zoom);
     settle(harness);
     harness.step();
 }
 
-fn select(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
+pub(super) fn select(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
     let ids = handles
         .iter()
         .map(|handle| id_of(harness, id, handle))
@@ -136,7 +136,7 @@ fn switch_wires(harness: &mut FolderHarness, label: &str) {
 }
 
 /// The chips the last frame drew, as `(reader, source text)` by handle.
-fn chips(harness: &FolderHarness, id: &str) -> BTreeSet<(String, String)> {
+pub(super) fn chips(harness: &FolderHarness, id: &str) -> BTreeSet<(String, String)> {
     let graph = graph(harness, id);
     board(harness, id)
         .debug_tags()
@@ -147,7 +147,7 @@ fn chips(harness: &FolderHarness, id: &str) -> BTreeSet<(String, String)> {
 
 /// The wires the last frame drew at rest, as `(source, target)` by handle;
 /// a wire drawn because it is pointed at or selected is not one of them.
-fn wires(harness: &FolderHarness, id: &str) -> BTreeSet<(String, String)> {
+pub(super) fn wires(harness: &FolderHarness, id: &str) -> BTreeSet<(String, String)> {
     let graph = graph(harness, id);
     board(harness, id)
         .debug_wires()
@@ -164,7 +164,7 @@ fn wires(harness: &FolderHarness, id: &str) -> BTreeSet<(String, String)> {
 
 /// The data wires brought back; the rails into the next step a selected
 /// card brings back too (LAY-24) are not chips'.
-fn revealed(harness: &FolderHarness, id: &str) -> BTreeSet<String> {
+pub(super) fn revealed(harness: &FolderHarness, id: &str) -> BTreeSet<String> {
     board(harness, id)
         .debug_wires()
         .iter()
@@ -229,11 +229,11 @@ fn reader_with_chips(harness: &FolderHarness, id: &str) -> String {
         .expect("the board draws chips")
 }
 
-/// Criterion 1: on `fan-out` no wire is drawn from `cartId` or `itemId` to
-/// a reader that is not beside them; each such input carries a chip that
-/// names its source, two chips where an address reads both; `quantity`,
-/// beside them, keeps both wires; a port read by fewer than three steps
-/// keeps all of its wires.
+/// Criterion 1: on `fan-out` no wire is drawn from `cartId` or `itemId`;
+/// each input that reads them carries a chip that names its source, two
+/// chips where an address reads both, `quantity` beside them included
+/// (LAY-32: a value shown as a chip is read only through chips); a port read
+/// by fewer than three steps keeps all of its wires.
 #[test]
 fn lay23_criterion_1_a_fanned_out_port_draws_chips() {
     let (_project, harness, id) = tidied("fan-out", WIDE, Checks::Collapsed);
@@ -248,14 +248,11 @@ fn lay23_criterion_1_a_fanned_out_port_draws_chips() {
     for value in ["cartId", "itemId"] {
         let readers = readers_in_document(&graph, value);
         assert!(readers.len() >= 3, "{value} is read by {readers:?}");
+        assert!(
+            !drawn.iter().any(|(source, _)| source == value),
+            "no wire leaves {value}: {drawn:?}"
+        );
         for reader in &readers {
-            if reader == "quantity" {
-                assert!(
-                    drawn.contains(&(value.to_owned(), reader.clone())),
-                    "quantity, beside {value}, keeps its wire: {drawn:?}"
-                );
-                continue;
-            }
             if board(&harness, &id)
                 .debug_world(&id_of(&harness, &id, reader))
                 .is_none()
@@ -273,8 +270,8 @@ fn lay23_criterion_1_a_fanned_out_port_draws_chips() {
             );
         }
     }
-    // An address that reads both carries two chips.
-    for reader in ["note", "stock"] {
+    // An address that reads both carries two chips, the neighbour's too.
+    for reader in ["quantity", "note", "stock"] {
         assert!(chips.contains(&(reader.to_owned(), "cartId".to_owned())));
         assert!(chips.contains(&(reader.to_owned(), "itemId".to_owned())));
     }
@@ -705,7 +702,7 @@ fn coincident(wires: &[&[Pos2]]) -> usize {
 }
 
 /// Lines drawn, crossings (the router's bridges) and coincident pairs.
-fn measures(harness: &FolderHarness, id: &str) -> (usize, usize, usize) {
+pub(super) fn measures(harness: &FolderHarness, id: &str) -> (usize, usize, usize) {
     let wires: Vec<_> = board(harness, id)
         .debug_wires()
         .iter()
@@ -885,13 +882,14 @@ fn lay23_criterion_9_editing_follows_the_rule() {
     harness.step();
     assert!(!reads(&harness), "removing the binding removes the chip");
 
-    // `quantity` keeps its wires beside cartId; dragged far away it keeps
-    // them until it is dropped.
-    show(&mut harness, &id, "quantity", 0.6);
-    let near = ("cartId".to_owned(), "quantity".to_owned());
+    // `product` keeps its wire beside `first`, a variable it alone reads;
+    // dragged far away it keeps it until it is dropped (LAY-32: then the
+    // variable has a far reader and is read through chips).
+    show(&mut harness, &id, "product", 0.6);
+    let near = ("first".to_owned(), "product".to_owned());
     assert!(wires(&harness, &id).contains(&near));
     let card = board(&harness, &id)
-        .debug_card_rect(&id_of(&harness, &id, "quantity"))
+        .debug_card_rect(&id_of(&harness, &id, "product"))
         .unwrap();
     let from = card.center_top() + egui::vec2(0.0, 12.0);
     let to = from + egui::vec2(0.0, 420.0);
@@ -902,7 +900,7 @@ fn lay23_criterion_9_editing_follows_the_rule() {
         "while it is dragged the wire stays a wire"
     );
     assert!(
-        !chips(&harness, &id).contains(&("quantity".to_owned(), "cartId".to_owned())),
+        !chips(&harness, &id).contains(&("product".to_owned(), "first".to_owned())),
         "and no chip appears"
     );
     super::lay16::release(&mut harness, to);
@@ -910,9 +908,9 @@ fn lay23_criterion_9_editing_follows_the_rule() {
     harness.step();
     assert!(
         !wires(&harness, &id).contains(&near),
-        "dropped away from cartId, the wire is a chip"
+        "dropped away from first, the wire is a chip"
     );
-    assert!(chips(&harness, &id).contains(&("quantity".to_owned(), "cartId".to_owned())));
+    assert!(chips(&harness, &id).contains(&("product".to_owned(), "first".to_owned())));
 }
 
 /// Criterion 4, review of #337: a wire brought back and then clicked is

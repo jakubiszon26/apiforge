@@ -4,7 +4,7 @@
 //! visible rows are drawn.
 
 use super::*;
-use apiforge_storage::project::{TreeEntry, TreeEntryKind, TreeScan, tree_order};
+use apiforge_storage::project::{MANIFEST_PATH, TreeEntry, TreeEntryKind, TreeScan, tree_order};
 use std::collections::{BTreeSet, HashSet};
 
 const ROW_HEIGHT: f32 = 24.0;
@@ -57,7 +57,16 @@ impl Row {
     pub fn is_root(&self) -> bool {
         matches!(self.kind, RowKind::Root { .. })
     }
+    /// The project file, which API Forge keeps itself: shown, but not opened,
+    /// renamed, moved or deleted from the explorer (UX-23, decision 14).
+    pub fn is_manifest(&self) -> bool {
+        self.kind == RowKind::File && self.path == MANIFEST_PATH
+    }
 }
+
+/// What a click on the project file says instead of opening it (UX-23).
+pub const MANIFEST_EXPLANATION: &str = "apiforge.project.json is the project file, which API \
+     Forge keeps itself. Change the project through Project › Project settings…";
 
 /// A row being dragged onto a folder.
 #[derive(Clone, Debug)]
@@ -232,6 +241,8 @@ pub(super) enum Action {
     NewFolder(String),
     Import(String),
     Register(String),
+    /// Say what the project file is, in place of opening it (UX-23).
+    ExplainManifest,
 }
 
 impl FolderApp {
@@ -297,8 +308,12 @@ impl FolderApp {
     }
 
     /// What activating a row does: a registered document opens as a document,
-    /// any other file as text, and a folder folds.
+    /// any other file as text, and a folder folds. The project file is not
+    /// opened; it is explained.
     fn activate(row: &Row) -> Action {
+        if row.is_manifest() {
+            return Action::ExplainManifest;
+        }
         match &row.kind {
             RowKind::Root { .. } | RowKind::Directory => Action::Toggle(row.path.clone()),
             RowKind::Document { id, .. } => Action::Open(id.clone()),
@@ -540,7 +555,7 @@ impl FolderApp {
             .session
             .as_ref()
             .is_some_and(|session| !session.is_read_only());
-        if writable && row.portable && !row.is_root() {
+        if writable && row.portable && !row.is_root() && !row.is_manifest() {
             if pressed(Key::F2) && !row.missing {
                 actions.push(Action::Rename(row.path.clone()));
             }
@@ -638,6 +653,7 @@ impl FolderApp {
                 }
             }
             Action::Delete(path) => self.request_delete(vec![path]),
+            Action::ExplainManifest => self.notify(MANIFEST_EXPLANATION, false),
             Action::NewDocument(kind) => {
                 self.prompt = Some(Prompt::NewDocument {
                     kind,
@@ -954,6 +970,7 @@ fn explorer_row(
         (_, true) => format!("{} — missing from the folder", row.path),
         (RowKind::Source, _) => format!("{} — not registered in this project", row.path),
         (RowKind::Link, _) => format!("{} — a link; not followed", row.path),
+        _ if row.is_manifest() => format!("{} — the project file, kept by API Forge", row.path),
         _ => row.path.clone(),
     });
     let painter = ui.painter_at(rect);
@@ -1045,7 +1062,13 @@ fn explorer_row(
             actions.push(FolderApp::activate(row));
         }
     }
-    if writable && row.portable && !row.missing && !row.is_root() && response.drag_started() {
+    if writable
+        && row.portable
+        && !row.missing
+        && !row.is_root()
+        && !row.is_manifest()
+        && response.drag_started()
+    {
         response.dnd_set_drag_payload(Dragged(row.path.clone()));
     }
     if row.is_folder()
@@ -1066,7 +1089,9 @@ fn explorer_row(
             RowKind::Document { id, .. } if ui.button("Open").clicked() => {
                 actions.push(Action::Open(id.clone()));
             }
-            RowKind::Source | RowKind::File if ui.button("Open as text").clicked() => {
+            RowKind::Source | RowKind::File
+                if !row.is_manifest() && ui.button("Open as text").clicked() =>
+            {
                 actions.push(Action::OpenText(row.path.clone()));
             }
             _ => {}
@@ -1081,6 +1106,10 @@ fn explorer_row(
         }
         if ui.button("Reveal in file manager").clicked() {
             actions.push(Action::Reveal(row.path.clone()));
+        }
+        // The project file has nothing more: no file actions (UX-23).
+        if row.is_manifest() {
+            return;
         }
         ui.separator();
         ui.add_enabled_ui(writable, |ui| {

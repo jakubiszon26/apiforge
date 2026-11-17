@@ -474,6 +474,30 @@ fn the_reference_explains_what_the_server_answers() {
     );
 }
 
+/// LANG-10 (#354), criterion 5: every built-in function of the catalogue has
+/// a row in the functions table, `uuid()` among them. `language_reference`
+/// serves this file unchanged (MCP-03, criterion 12).
+#[test]
+fn lang10_criterion_5_every_built_in_function_has_a_row() {
+    let rows: Vec<&str> = REFERENCE
+        .lines()
+        .filter(|line| line.starts_with("| `"))
+        .collect();
+    for operator in apiforge_core::operator::Operator::ALL {
+        let name = serde_json::to_value(operator).expect("a name");
+        let name = name.as_str().expect("a text name");
+        assert!(
+            rows.iter()
+                .any(|row| row.contains(&format!("`{name}`")) || row.contains(&format!("`{name}("))),
+            "the functions table has no row for `{name}`"
+        );
+    }
+    assert!(
+        rows.iter().any(|row| row.starts_with("| `uuid()` |")),
+        "the functions table has a `uuid()` row"
+    );
+}
+
 /// A folder project with a base URL, one environment variable and one secret
 /// name, into which the reference's complete component is created and
 /// published as revision 1.

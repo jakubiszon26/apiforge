@@ -842,7 +842,7 @@ fn expressions(
             .join(", ");
         found.push(
             Completion::new(Kind::Operator, name.clone(), replace.clone())
-                .inserting(format!("{name}()"), name.len() + 1)
+                .inserting(format!("{name}()"), operator_caret(operator, &name))
                 .detail(format!(
                     "{}({signature}) → {}",
                     operator.label(),
@@ -911,7 +911,7 @@ fn members(
                         let name = operator_name(operator)?;
                         Some(
                             Completion::new(Kind::Operator, name.clone(), replace.clone())
-                                .inserting(format!("{name}()"), name.len() + 1)
+                                .inserting(format!("{name}()"), operator_caret(operator, &name))
                                 .detail(operator.label()),
                         )
                     })
@@ -952,6 +952,16 @@ fn members(
             Completion::new(Kind::Path, found.segment, replace.clone()).detail(detail)
         })
         .collect()
+}
+
+/// Where the caret lands in `name()`: inside the parentheses, or after them
+/// for an operator that takes nothing (`uuid()`).
+fn operator_caret(operator: Operator, name: &str) -> usize {
+    if operator.spec().operands.is_empty() {
+        name.len() + 2
+    } else {
+        name.len() + 1
+    }
 }
 
 /// The identifier an operator is written with, as the document names it.
