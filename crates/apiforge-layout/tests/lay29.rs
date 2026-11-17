@@ -190,6 +190,30 @@ fn lay29_criterion_1_cards_closer_than_a_stub_still_give_a_route() {
     assert_eq!(violations(&routes, &wires, &cards), []);
 }
 
+/// Criterion 1, a card over one port only: the wire's two cards face each
+/// other 10 px apart and a third card lies over the start port, ending 2 px
+/// short of the other card. The route leaves that card through its stub
+/// and touches no card past it: a card over one port is no room for the
+/// route, only one over both is (ADR 0006).
+#[test]
+fn lay29_criterion_1_a_card_over_one_port_is_left_through_the_stub_only() {
+    let cards = [
+        card(0.0, 0.0, 100.0, 100.0),
+        card(110.0, 0.0, 100.0, 100.0),
+        card(50.0, 0.0, 58.0, 100.0),
+    ];
+    let wires = [wire((0, Side::Right, 50.0), (1, Side::Left, 80.0))];
+    let routes = route(&cards, &wires, &Routing::default());
+    assert!(routes[0].complete, "{:?}", routes[0].points);
+    assert_eq!(
+        violations(&routes, &wires, &cards),
+        [],
+        "{:?}",
+        routes[0].points
+    );
+    assert_eq!(under_own(&routes, &wires, &cards), []);
+}
+
 /// Criterion 5: the budget of ADR 0006. The reference boards route within
 /// it by a wide margin; the budget's own board is `bench`'s.
 #[test]
