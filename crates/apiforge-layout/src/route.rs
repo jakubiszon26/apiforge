@@ -200,6 +200,7 @@ pub fn route_among(
             })
         })
         .collect();
+    let groups = std::env::var_os("APIFORGE_LAY31").map(|_| stacks(cards));
     let mut scratch = Scratch::default();
     for index in order {
         let wire = wires[index];
@@ -214,6 +215,25 @@ pub fn route_among(
             .filter(|(card, _)| *card != wire.from.block && *card != wire.to.block)
             .map(|(_, card)| *card)
             .collect();
+        // Mock of LAY-31: the other cards of the wire's own group keep it
+        // at a short distance only, so it can run in the group's gaps.
+        let near: Vec<bool> = cards
+            .iter()
+            .enumerate()
+            .filter(|(card, _)| *card != wire.from.block && *card != wire.to.block)
+            .map(|(card, _)| {
+                groups.as_ref().is_some_and(|groups| {
+                    groups[card] == groups[wire.from.block] || groups[card] == groups[wire.to.block]
+                })
+            })
+            .collect();
+        let kept = |index: usize, margin: f32| {
+            if near[index] {
+                margin.min(MATE)
+            } else {
+                margin
+            }
+        };
         // The two cards the wire joins, at their exact size. A route may hug them
         // but not pass under them: a card is painted over its wires, so a segment
         // crossing one is invisible and the port it came from looks unconnected.
@@ -241,10 +261,17 @@ pub fn route_among(
                 Some(_) => (0.0, margin),
                 None => (margin, 0.0),
             };
-            let mut obstacles: Vec<Rect> =
-                foreign.iter().map(|card| card.inflate(margin)).collect();
+            let mut obstacles: Vec<Rect> = foreign
+                .iter()
+                .enumerate()
+                .map(|(index, card)| card.inflate(kept(index, margin)))
+                .collect();
             let mut zones: Vec<Rect> = if zone > 0.0 {
-                foreign.iter().map(|card| card.inflate(zone)).collect()
+                foreign
+                    .iter()
+                    .enumerate()
+                    .map(|(index, card)| card.inflate(kept(index, zone)))
+                    .collect()
             } else {
                 Vec::new()
             };
@@ -254,9 +281,17 @@ pub fn route_among(
             let stub_start = clear_stub(start, wire.from.side, &foreign, &obstacles, settings);
             let stub_end = clear_stub(end, wire.to.side, &foreign, &obstacles, settings);
             if avoid_own {
-                obstacles.extend(own.iter().map(|card| card.inflate(margin)));
+                // Mock of LAY-31: a card of a group lets its own line leave
+                // through the group's gap.
+                let grouped = groups.as_ref().is_some_and(|groups| {
+                    [wire.from.block, wire.to.block].into_iter().any(|block| {
+                        groups.iter().filter(|group| **group == groups[block]).count() > 1
+                    })
+                });
+                let own_margin = |margin: f32| if grouped { margin.min(MATE) } else { margin };
+                obstacles.extend(own.iter().map(|card| card.inflate(own_margin(margin))));
                 if zone > 0.0 {
-                    zones.extend(own.iter().map(|card| card.inflate(zone)));
+                    zones.extend(own.iter().map(|card| card.inflate(own_margin(zone))));
                 }
             }
             // The search covers a window around the two ports. A card outside it
@@ -364,6 +399,39 @@ pub fn route_among(
     }
     bridges(&mut routes, wires, cards);
     routes
+}
+
+/// Mock of LAY-31: how near a line may run to the other cards of its group.
+const MATE: f32 = 10.0;
+
+/// Mock of LAY-31: the group of each card, told by where the cards lie: two
+/// cards one above the other, at most 30 px apart, are in one group.
+pub fn stacks(cards: &[Rect]) -> Vec<usize> {
+    let mut group: Vec<usize> = (0..cards.len()).collect();
+    loop {
+        let mut changed = false;
+        for upper in 0..cards.len() {
+            for lower in 0..cards.len() {
+                let (a, b) = (cards[upper], cards[lower]);
+                let shared = a.max.x.min(b.max.x) - a.min.x.max(b.min.x);
+                let gap = b.min.y - a.max.y;
+                if upper != lower
+                    && shared > 0.5 * a.width().min(b.width())
+                    && (0.0..=30.0).contains(&gap)
+                    && group[upper] != group[lower]
+                {
+                    let (low, high) = (group[upper].min(group[lower]), group[upper].max(group[lower]));
+                    for entry in group.iter_mut().filter(|entry| **entry == high) {
+                        *entry = low;
+                    }
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return group;
+        }
+    }
 }
 
 /// One attempt at a wire: the clearance from cards, how far the search looks,

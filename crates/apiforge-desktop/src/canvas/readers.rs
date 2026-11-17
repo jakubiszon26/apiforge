@@ -200,7 +200,22 @@ pub fn chipped(graph: &Graph, cards: &[Card], wires: &[BoardWire]) -> HashSet<St
                         .is_some_and(|target| !beside(&rows, source.rect(), target.rect()))
                 })
             };
-            count >= MIN_READERS || (saved && far())
+            // Mock of LAY-31, option A: a card hung under its subject reads
+            // it through a chip, so no line loops round it.
+            let hung = || {
+                super::lay31() == Some('a')
+                    && port_wires.iter().any(|wire| {
+                        cards.get(wire.target).is_some_and(|target| {
+                            let (from, to) = (source.rect(), target.rect());
+                            !on_spine(target.kind)
+                                && row_of(&rows.0, from.top()) == row_of(&rows.0, to.top())
+                                && column_of(&rows.1, from.center().x)
+                                    == column_of(&rows.1, to.center().x)
+                                && to.top() >= from.bottom()
+                        })
+                    })
+            };
+            count >= MIN_READERS || (saved && far()) || hung()
         })
         .flat_map(|(_, port_wires)| port_wires.into_iter().map(|wire| wire.id.clone()))
         .collect()

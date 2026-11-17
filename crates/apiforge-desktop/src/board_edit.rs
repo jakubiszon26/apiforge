@@ -247,9 +247,15 @@ impl Board<'_> {
                 .iter()
                 .flat_map(|wire| apiforge_layout::route(&cards, &[*wire], &alone))
                 .collect();
-            if !apiforge_layout::make_room(
+            let grew = apiforge_layout::make_room(
                 &hanging, &placed, &rows, &wanted, &hidden, gap, &mut room,
-            ) {
+            );
+            // Mock of LAY-31: a step and its checks are one group, so the
+            // gap above a hung card never grows.
+            if canvas::lay31().is_some() {
+                room.stacks.clear();
+            }
+            if !grew {
                 break;
             }
         }
@@ -263,12 +269,62 @@ impl Board<'_> {
             let routes =
                 apiforge_layout::route(&cards, &wires, &apiforge_layout::Routing::default());
             let found = apiforge_layout::packed(&routes, &cards, gap);
+            // Mock of LAY-31: inside a group the lines need not keep the
+            // gap, so a breach there widens nothing.
+            let found: Vec<apiforge_layout::Breach> = if canvas::lay31().is_some() {
+                let groups: Vec<apiforge_layout::Rect> = plan
+                    .spine
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(place, block)| {
+                        let members: Vec<usize> = std::iter::once(*block)
+                            .chain(
+                                plan.satellites
+                                    .iter()
+                                    .filter(|(_, under)| *under == place)
+                                    .map(|(block, _)| *block),
+                            )
+                            .collect();
+                        (members.len() > 1).then(|| {
+                            apiforge_layout::Rect::bounding(members.iter().map(|index| {
+                                apiforge_layout::Rect::from_size(placed[*index], blocks[*index].size)
+                            }))
+                        })?
+                    })
+                    .map(|group| group.inflate(gap + 1.0))
+                    .collect();
+                let stacks = apiforge_layout::stacks(&cards);
+                found
+                    .into_iter()
+                    .filter(|breach| !groups.iter().any(|group| group.contains(breach.area.center())))
+                    // Nor does a line beside a card of its own group.
+                    .filter(|breach| {
+                        let (apiforge_layout::Near::Card(card), Some(wire)) =
+                            (breach.near, wires.get(breach.route))
+                        else {
+                            return true;
+                        };
+                        stacks[card] != stacks[wire.from.block]
+                            && stacks[card] != stacks[wire.to.block]
+                    })
+                    .collect()
+            } else {
+                found
+            };
+            if canvas::lay31().is_some() {
+                for breach in &found {
+                    errln!("LAY-31 breach left: {breach:?}");
+                }
+            }
             if found.is_empty()
                 || !apiforge_layout::widen(
                     &hanging, &placed, &rows, &found, &hidden, gap, &mut room,
                 )
             {
                 break;
+            }
+            if canvas::lay31().is_some() {
+                room.stacks.clear();
             }
         }
         let (placed, _) = apiforge_layout::hang_with(&hanging, &room);

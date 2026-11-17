@@ -5025,3 +5025,8 @@ mod tests {
         }
     }
 }
+
+/// Mock of LAY-31: `APIFORGE_LAY31=a` or `=b`; unset is `main`.
+pub fn lay31() -> Option<char> {
+    std::env::var("APIFORGE_LAY31").ok()?.chars().next()
+}
