@@ -2110,6 +2110,7 @@ impl App {
             let scenario = self.editor.scenario();
             let context = report::Context {
                 run: self.run.as_ref(),
+                ends: None,
                 selected_node_id: selected_id,
                 error_policy: self.editor.scenario().error_policy,
                 running: self.is_running(),
@@ -2379,6 +2380,7 @@ impl App {
                 parameters: &parameters,
                 selection: &self.editor.selection,
                 steps: steps.as_deref(),
+                ends: None,
                 progress: canvas::Progress {
                     on,
                     running: running.as_deref(),
