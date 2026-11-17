@@ -14,6 +14,7 @@ mod resting;
 mod routing;
 pub mod shape;
 mod strip;
+mod trace;
 mod variables;
 
 pub use collapse::collapsible;
