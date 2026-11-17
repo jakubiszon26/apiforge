@@ -924,6 +924,16 @@ fn review_lay19() {
             settle(&mut harness);
             harness.get_by_label("Maximise run results").click();
             settle(&mut harness);
+            // The list scrolled to the steps that did not run.
+            let list = harness.get_by_label_contains("begin · ").rect().center();
+            harness.hover_at(list);
+            harness.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -1000.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+            settle(&mut harness);
             harness.step();
             crate::testing::capture(
                 &mut harness,
