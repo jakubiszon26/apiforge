@@ -15,11 +15,15 @@
 //! [`crate::packed`] is how tests check it.
 //!
 //! The guarantee the board relies on: a final route never touches a card other than
-//! its own two. Where a port itself lies inside another card — cards can overlap —
-//! the route may cross that card within its stub and no further. Every step that
-//! could break the guarantee (nudging, smoothing) checks its result and falls back.
+//! its own two, and never passes under those (LAY-29): it meets them at its ports.
+//! Where a port itself lies inside another card — cards can overlap, the wire's
+//! other card included — the route may cross that card within its stub and no
+//! further; where the wire's own cards leave the stub no way out, the route may
+//! leave the cards over its port by its first pieces, and no further. Every step
+//! that could break the guarantee (nudging, smoothing) checks its result and
+//! falls back.
 //! [ADR 0006](../../../docs/decisions/0006-layout-and-wire-routing.md) is the
-//! contract; `violations` is how tests check it.
+//! contract; `violations` and `under_own` are how tests check it.
 
 use crate::geometry::{Point, Port, Rect, Side, compare};
 use crate::order::{Rules, untangle};
@@ -126,9 +130,10 @@ pub struct Route {
     pub points: Vec<Point>,
     pub bridges: Vec<Bridge>,
     /// Whether a route around the cards was found. It is false only when the ports
-    /// sit in a pocket that cards enclose completely; the wire is then drawn as a
-    /// plain corner so that it stays visible and orthogonal, and it may cross a
-    /// card. Such a board needs *tidy up*, not a cleverer router.
+    /// sit in a pocket that cards enclose completely, the wire's own two among
+    /// them (LAY-29); the wire is then drawn as a plain corner so that it stays
+    /// visible and orthogonal, and it may cross a card. Such a board needs
+    /// *tidy up*, not a cleverer router.
     pub complete: bool,
 }
 
@@ -214,26 +219,29 @@ pub fn route_among(
             .filter(|(card, _)| *card != wire.from.block && *card != wire.to.block)
             .map(|(_, card)| *card)
             .collect();
-        // The two cards the wire joins, at their exact size. A route may hug them
-        // but not pass under them: a card is painted over its wires, so a segment
-        // crossing one is invisible and the port it came from looks unconnected.
-        // They carry no clearance, or the port on the boundary would start inside
-        // its own obstacle and leave no room for a stub.
+        // The two cards the wire joins. A route never passes under them
+        // (LAY-29): a card is painted over its wires, so a piece of a line
+        // inside one is not seen and the line seems to come out of an edge
+        // where there is no port. They are in the wire's way on every attempt.
         let own: Vec<Rect> = [wire.from.block, wire.to.block]
             .into_iter()
             .filter_map(|block| cards.get(block).copied())
             .collect();
+        // The card at the other end, for each port: cards overlap, so a port
+        // can lie inside the card its wire goes to.
+        let apart = wire.from.block != wire.to.block;
+        let (beyond_start, beyond_end) = (apart.then_some(*to_card), apart.then_some(*from_card));
         let start = wire.from.point_on(from_card);
         let end = wire.to.point_on(to_card);
-        // Cards overlap, so a port can sit inside another card. The stub then
-        // reaches past whatever buries it: that crossing belongs to the stub, which
-        // is the one exception the guarantee makes, and the route proper starts in
-        // open space.
+        // Cards overlap, so a port can sit inside another card, the wire's
+        // other card included. The stub then reaches past whatever buries it:
+        // that crossing belongs to the stub, which is the one exception the
+        // guarantee makes, and the route proper starts in open space.
         let attempt = |rung: Rung, scratch: &mut Scratch| {
             let Rung {
                 margin,
                 slack,
-                avoid_own,
+                stubs,
             } = rung;
             // While Tidy up measures, a card keeps a line off itself only; the
             // clearance around it is room the line pays for.
@@ -241,23 +249,64 @@ pub fn route_among(
                 Some(_) => (0.0, margin),
                 None => (margin, 0.0),
             };
-            let mut obstacles: Vec<Rect> =
-                foreign.iter().map(|card| card.inflate(margin)).collect();
+            // The last two attempts let the wire run inside the cards that
+            // lie over its ports, where the stubs could not leave them without
+            // passing under a card the wire joins (LAY-29): first only a card
+            // over both ports, then any card over one.
+            let blocking = |card: &&Rect| {
+                let (over_start, over_end) =
+                    (card.contains_strictly(start), card.contains_strictly(end));
+                match stubs {
+                    Stubs::Clear => true,
+                    Stubs::Near => !(over_start && over_end),
+                    Stubs::Through => !(over_start || over_end),
+                }
+            };
+            let mut obstacles: Vec<Rect> = foreign
+                .iter()
+                .filter(blocking)
+                .map(|card| card.inflate(margin))
+                .collect();
             let mut zones: Vec<Rect> = if zone > 0.0 {
-                foreign.iter().map(|card| card.inflate(zone)).collect()
+                foreign
+                    .iter()
+                    .filter(blocking)
+                    .map(|card| card.inflate(zone))
+                    .collect()
             } else {
                 Vec::new()
             };
             // A stub is measured before the wire's own cards join the obstacles: a
             // port sits on its card's edge, so a clearance around that card would
             // leave it nowhere to start.
-            let stub_start = clear_stub(start, wire.from.side, &foreign, &obstacles, settings);
-            let stub_end = clear_stub(end, wire.to.side, &foreign, &obstacles, settings);
-            if avoid_own {
-                obstacles.extend(own.iter().map(|card| card.inflate(margin)));
-                if zone > 0.0 {
-                    zones.extend(own.iter().map(|card| card.inflate(zone)));
-                }
+            let (stub_start, stub_end) = if stubs != Stubs::Clear {
+                (
+                    near_stub(start, wire.from.side, &obstacles, beyond_start, settings),
+                    near_stub(end, wire.to.side, &obstacles, beyond_end, settings),
+                )
+            } else {
+                (
+                    clear_stub(
+                        start,
+                        wire.from.side,
+                        &foreign,
+                        &obstacles,
+                        beyond_start.map(|card| (card, card.inflate(margin))),
+                        settings,
+                    ),
+                    clear_stub(
+                        end,
+                        wire.to.side,
+                        &foreign,
+                        &obstacles,
+                        beyond_end.map(|card| (card, card.inflate(margin))),
+                        settings,
+                    ),
+                )
+            };
+            obstacles.extend(own.iter().map(|card| card.inflate(margin)));
+            if zone > 0.0 {
+                zones.extend(own.iter().map(|card| card.inflate(zone)));
             }
             // The search covers a window around the two ports. A card outside it
             // cannot be met by a route inside it, and a wire between neighbours
@@ -297,44 +346,53 @@ pub fn route_among(
         let whole = Rect::bounding(cards.iter().copied())
             .map(|board| board.width().max(board.height()))
             .unwrap_or(0.0);
-        let rung = |margin: f32, slack: f32, avoid_own: bool| Rung {
+        let rung = |margin: f32, slack: f32, stubs: Stubs| Rung {
             margin,
             slack,
-            avoid_own,
+            stubs,
         };
-        let mut attempted = attempt(rung(settings.margin, LOCAL_SLACK, true), &mut scratch);
+        let mut tried = rung(settings.margin, LOCAL_SLACK, Stubs::Clear);
+        let mut attempted = attempt(tried, &mut scratch);
+        // No attempt lets the wire under a card it joins (LAY-29). Where its
+        // stubs end in the other card, the last two attempts shorten them and
+        // let the wire run inside the cards over its ports; where nothing is
+        // left, the wire has no route and says so.
         for next in [
-            rung(settings.margin, LOCAL_SLACK * 4.0, true),
-            rung(settings.margin, whole, true),
-            rung(0.0, whole, true),
-            // Cards that leave no way round at all. A wire that has to cross one
-            // of its own is still better than none, and its stub says where it
-            // begins.
-            rung(settings.margin, LOCAL_SLACK, false),
-            rung(settings.margin, whole, false),
-            rung(0.0, whole, false),
+            rung(settings.margin, LOCAL_SLACK * 4.0, Stubs::Clear),
+            rung(settings.margin, whole, Stubs::Clear),
+            rung(0.0, whole, Stubs::Clear),
+            rung(0.0, whole, Stubs::Near),
+            rung(0.0, whole, Stubs::Through),
         ] {
             if !attempted.2.is_empty() {
                 break;
             }
+            tried = next;
             attempted = attempt(next, &mut scratch);
         }
         let (stub_start, stub_end, path) = attempted;
-        let complete = !path.is_empty();
+        let found = !path.is_empty();
         let mut points = vec![start];
-        if complete {
-            points.extend(path);
-        } else {
-            // Enclosed ports: a plain corner keeps the wire visible and orthogonal.
-            points.push(stub_start);
-            points.push(Point::new(stub_end.x, stub_start.y));
-            points.push(stub_end);
-        }
+        points.extend(path);
         points.push(end);
         // The search walks the grid cell by cell, so collinear runs arrive split
         // into many small segments; nudging them separately would build a
         // staircase. The corners go first, the stub ends stay.
-        let points = simplify(points);
+        let mut points = simplify(points);
+        // A route through the cards over a port may leave them and come
+        // back; it must leave them for good, as the guarantee says.
+        let complete =
+            found && (tried.stubs != Stubs::Through || touched(&points, &wire, cards).is_empty());
+        if !complete {
+            // Enclosed ports: a plain corner keeps the wire visible and orthogonal.
+            points = simplify(vec![
+                start,
+                stub_start,
+                Point::new(stub_end.x, stub_start.y),
+                stub_end,
+                end,
+            ]);
+        }
         if complete {
             routed.push(Trace::of(&points, settings.stub));
         }
@@ -366,13 +424,27 @@ pub fn route_among(
     routes
 }
 
-/// One attempt at a wire: the clearance from cards, how far the search looks,
-/// and whether the wire's own cards are in its way.
+/// One attempt at a wire: the clearance from cards, how far the search
+/// looks, and how its stubs leave the cards over its ports.
 #[derive(Clone, Copy)]
 struct Rung {
     margin: f32,
     slack: f32,
-    avoid_own: bool,
+    stubs: Stubs,
+}
+
+/// How an attempt's stubs leave a port and which cards over the ports are
+/// in the way (LAY-29).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stubs {
+    /// [`clear_stub`]: every card is in the way.
+    Clear,
+    /// [`near_stub`]: the stub stops short of the wire's other card, and a
+    /// card over both ports is no obstacle.
+    Near,
+    /// [`near_stub`], and no card over either port is an obstacle: the route
+    /// leaves them however it can.
+    Through,
 }
 
 /// Where the stub of a port ends, kept free for that port's wires.
@@ -459,16 +531,24 @@ impl Trace {
 /// the one exception the guarantee makes. A port merely *beside* a card has no room
 /// for a full stub, so the stub shrinks to the free distance, possibly to nothing,
 /// and the search leaves along the card instead of through it.
+///
+/// `beyond` is the card at the wire's other end and its obstacle: a port
+/// inside that card leaves it through its stub too (LAY-29). A port merely
+/// beside it keeps its stub; the search then deals with the card.
 fn clear_stub(
     point: Point,
     side: Side,
     cards: &[Rect],
     obstacles: &[Rect],
+    beyond: Option<(Rect, Rect)>,
     settings: &Routing,
 ) -> Point {
     // A port within the clearance of a card is not inside it. Only a card that
     // really contains the port earns the long stub.
-    let buried = cards.iter().any(|card| card.contains_strictly(point));
+    let beyond = beyond
+        .filter(|(card, _)| card.contains_strictly(point))
+        .map(|(_, obstacle)| obstacle);
+    let buried = beyond.is_some() || cards.iter().any(|card| card.contains_strictly(point));
     if !buried {
         let free = obstacles
             .iter()
@@ -482,6 +562,7 @@ fn clear_stub(
         let end = step(point, side, distance);
         let Some(beyond) = obstacles
             .iter()
+            .chain(&beyond)
             .filter(|obstacle| obstacle.contains(end))
             .map(|obstacle| far_side(point, side, obstacle) + 1.0)
             .fold(None, |most: Option<f32>, far| {
@@ -495,6 +576,53 @@ fn clear_stub(
         }
         distance = beyond;
     }
+    step(point, side, distance)
+}
+
+/// The stub of the last attempt (LAY-29). Two cards a wire joins can face
+/// each other closer than a stub, or a pile can bury a port between them:
+/// the stub [`clear_stub`] gives then ends in the wire's other card, where
+/// no route may start. This one leaves the cards over the port, as
+/// [`clear_stub`] does, and then stops short of the obstacles left, and
+/// halfway to the other card when that card is nearer, so the route starts
+/// between the two. Where the cards over the port reach into the other
+/// card, the stub ends in it and the attempt finds no route. A port inside
+/// the other card leaves it as in [`clear_stub`].
+fn near_stub(
+    point: Point,
+    side: Side,
+    obstacles: &[Rect],
+    other: Option<Rect>,
+    settings: &Routing,
+) -> Point {
+    if let Some(card) = other.filter(|card| card.contains_strictly(point)) {
+        return clear_stub(point, side, &[], obstacles, Some((card, card)), settings);
+    }
+    // The far side of the cards over the port: four rounds leave a pile.
+    let mut out = 0.0f32;
+    for _ in 0..4 {
+        let end = step(point, side, out);
+        let far = obstacles
+            .iter()
+            .filter(|obstacle| obstacle.contains_strictly(end))
+            .map(|obstacle| far_side(point, side, obstacle))
+            .fold(out, f32::max);
+        if far <= out {
+            break;
+        }
+        out = far;
+    }
+    let from = step(point, side, out);
+    let free = obstacles
+        .iter()
+        .filter_map(|obstacle| entry_distance(from, side, obstacle))
+        .fold(settings.stub, f32::min)
+        .max(0.0);
+    let distance = match other.and_then(|card| entry_distance(point, side, &card)) {
+        Some(other) if other <= out => out,
+        Some(other) if other < out + free => (out + other) / 2.0,
+        _ => out + free,
+    };
     step(point, side, distance)
 }
 
@@ -1204,7 +1332,9 @@ fn bridges(routes: &mut [Route], wires: &[Wire], cards: &[Rect]) {
 /// Cards a route touches although it should not, as `(wire, card)` pairs.
 ///
 /// A route may touch only its own two cards, and a port that lies inside a third
-/// card may be left only through the route's first or last segment — the stub. Tests
+/// card may be left only through the route's first or last segment — the stub —
+/// or, where the wire's own cards leave the stub no way out, through the first
+/// or last pieces that begin inside the cards over the port (LAY-29). Tests
 /// and debug assertions use this; it is the written form of the ADR's guarantee.
 pub fn violations(routes: &[Route], wires: &[Wire], cards: &[Rect]) -> Vec<(usize, usize)> {
     let mut found = Vec::new();
@@ -1217,38 +1347,112 @@ pub fn violations(routes: &[Route], wires: &[Wire], cards: &[Rect]) -> Vec<(usiz
             // board itself is the problem and *tidy up* is the answer.
             continue;
         }
-        let segments: Vec<(Point, Point)> = route.segments().collect();
-        let Some(first) = segments.first() else {
+        found.extend(
+            touched(&route.points, wire, cards)
+                .into_iter()
+                .map(|card| (index, card)),
+        );
+    }
+    found
+}
+
+/// The cards other than its own two that the route `points` of `wire`
+/// touches past the pieces that leave its ports ([`violations`]).
+fn touched(points: &[Point], wire: &Wire, cards: &[Rect]) -> Vec<usize> {
+    let segments: Vec<(Point, Point)> = points.windows(2).map(|pair| (pair[0], pair[1])).collect();
+    if segments.is_empty() {
+        return Vec::new();
+    }
+    // Whether a card other than the port's own lies over a point; the card at
+    // the wire's other end counts (LAY-29).
+    let under = |point: Point, own: usize| {
+        cards
+            .iter()
+            .enumerate()
+            .any(|(card, rectangle)| card != own && rectangle.contains_strictly(point))
+    };
+    // A port inside other cards is left by the route's first pieces (its
+    // last, for the port it enters), however much they cross, while each
+    // begins inside a card: usually only the stub, and where the wire's own
+    // cards leave the stub no way out, the pieces of the route that leave
+    // the cards over the port (LAY-29). Past them the route is in the open.
+    let leaving = segments
+        .iter()
+        .take_while(|(from, _)| under(*from, wire.from.block))
+        .count();
+    let entering = segments
+        .iter()
+        .rev()
+        .take_while(|(_, to)| under(*to, wire.to.block))
+        .count();
+    let mut found = Vec::new();
+    for (card, rectangle) in cards.iter().enumerate() {
+        if card == wire.from.block || card == wire.to.block {
             continue;
-        };
-        let foreign = |point: Point| {
-            cards.iter().enumerate().any(|(card, rectangle)| {
-                card != wire.from.block
-                    && card != wire.to.block
-                    && rectangle.contains_strictly(point)
-            })
-        };
-        // A port inside another card is left through its stub, which is the route's
-        // first or last segment, however much it has to cross to get out.
-        let buried_start = foreign(first.0);
-        let buried_end = foreign(segments[segments.len() - 1].1);
-        for (card, rectangle) in cards.iter().enumerate() {
-            if card == wire.from.block || card == wire.to.block {
-                continue;
+        }
+        let crossed = segments.iter().enumerate().any(|(position, (from, to))| {
+            if position < leaving || position + entering >= segments.len() {
+                return false;
             }
-            for (position, (from, to)) in segments.iter().enumerate() {
-                if (position == 0 && buried_start) || (position + 1 == segments.len() && buried_end)
-                {
-                    continue;
+            let piece = Rect::new(
+                Point::new(from.x.min(to.x), from.y.min(to.y)),
+                Point::new(from.x.max(to.x), from.y.max(to.y)),
+            );
+            rectangle.overlaps(&piece)
+        });
+        if crossed {
+            found.push(card);
+        }
+    }
+    found
+}
+
+/// Wires that run under a card they join, as `(wire, card)` pairs (LAY-29).
+///
+/// A card is painted over its wires, so a piece of a line inside the card it
+/// leaves or enters is not seen: the line then seems to come out of an edge
+/// where there is no port. A line may lie on the edge of its card, where its
+/// port is; it is under the card when a piece of it lies inside. A wire
+/// with no route to judge (`complete` false) is left out, as in
+/// [`violations`].
+pub fn under_own(routes: &[Route], wires: &[Wire], cards: &[Rect]) -> Vec<(usize, usize)> {
+    let mut found = Vec::new();
+    for (index, (route, wire)) in routes.iter().zip(wires).enumerate() {
+        if !route.complete {
+            continue;
+        }
+        let mut own = vec![wire.from.block];
+        if wire.to.block != wire.from.block {
+            own.push(wire.to.block);
+        }
+        for card in own {
+            let Some(rectangle) = cards.get(card) else {
+                continue;
+            };
+            // A port inside the wire's other card is left through its stub,
+            // the first or the last piece, as one inside a foreign card is.
+            let last = route.points.len().saturating_sub(2);
+            let start_buried = card == wire.to.block
+                && route
+                    .points
+                    .first()
+                    .is_some_and(|point| rectangle.contains_strictly(*point));
+            let end_buried = card == wire.from.block
+                && route
+                    .points
+                    .last()
+                    .is_some_and(|point| rectangle.contains_strictly(*point));
+            let inside = route.segments().enumerate().any(|(piece, (from, to))| {
+                if (piece == 0 && start_buried) || (piece == last && end_buried) {
+                    return false;
                 }
-                let touched = Rect::new(
-                    Point::new(from.x.min(to.x), from.y.min(to.y)),
-                    Point::new(from.x.max(to.x), from.y.max(to.y)),
-                );
-                if rectangle.overlaps(&touched) {
-                    found.push((index, card));
-                    break;
-                }
+                from.x.min(to.x) < rectangle.max.x - 0.01
+                    && from.x.max(to.x) > rectangle.min.x + 0.01
+                    && from.y.min(to.y) < rectangle.max.y - 0.01
+                    && from.y.max(to.y) > rectangle.min.y + 0.01
+            });
+            if inside {
+                found.push((index, card));
             }
         }
     }
