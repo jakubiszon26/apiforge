@@ -1697,6 +1697,12 @@ impl Canvas {
                 .iter()
                 .position(|laid| laid.rect.contains(pointer))
         });
+        // Pointing at a count lists the fields of its port read (LAY-18).
+        let pointed_count = hover.and_then(|pointer| {
+            laid_counts
+                .iter()
+                .position(|laid| laid.rect.contains(pointer))
+        });
         // An input row names every value feeding it, a drawn line its own;
         // a click keeps a line or a chip (LAY-14).
         let pointed_input =
@@ -1732,10 +1738,18 @@ impl Canvas {
         );
         lit.extend(traced.lit().cloned());
         let dimming = focus.is_some() || traced.dims();
-        let statement: Option<(String, Rect)> = match (pointed_tag, &pointed_input) {
-            (Some(index), _) => Some((shown_tags[index].statement.clone(), laid_tags[index].rect)),
-            (None, Some((_, _, row))) => traced.pointed_statement().map(|text| (text, *row)),
-            (None, None) => pointed_wire
+        let list = |index: usize| {
+            let text =
+                readers::field_list(input.graph, input.project, input.steps, shown_counts[index]);
+            (text, laid_counts[index].rect)
+        };
+        let statement: Option<(String, Rect)> = match (pointed_tag, pointed_count, &pointed_input) {
+            (Some(index), _, _) => {
+                Some((shown_tags[index].statement.clone(), laid_tags[index].rect))
+            }
+            (None, Some(index), _) => Some(list(index)),
+            (None, None, Some((_, _, row))) => traced.pointed_statement().map(|text| (text, *row)),
+            (None, None, None) => pointed_wire
                 .as_ref()
                 .and_then(|(_, at)| Some((traced.pointed_statement()?, trace::at_pointer(*at)))),
         };
@@ -1948,8 +1962,9 @@ impl Canvas {
             let lit = tag.wires.iter().all(|wire| revealed.contains(wire));
             readers::paint(&board_painter, laid, lit);
         }
-        for (count, laid) in shown_counts.iter().zip(&laid_counts) {
-            let lit = count.wires.iter().any(|wire| revealed.contains(wire));
+        for (index, (count, laid)) in shown_counts.iter().zip(&laid_counts).enumerate() {
+            let lit = count.wires.iter().any(|wire| revealed.contains(wire))
+                || pointed_count == Some(index);
             readers::paint(&board_painter, laid, lit);
         }
         #[cfg(test)]
@@ -2391,8 +2406,7 @@ impl Canvas {
                         .with(("reader-count", &count.source, &count.port)),
                     Sense::click(),
                 )
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text("Draw every wire of this value");
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
             response.widget_info(move || {
                 egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
             });
@@ -2482,12 +2496,20 @@ impl Canvas {
         {
             self.var_marks = drawn_marks;
         }
+        // The list of the count clicked stays with its wires (LAY-18).
+        let listed = shown_counts
+            .iter()
+            .position(|count| {
+                self.shown_port.as_ref() == Some(&(count.source.clone(), count.port.clone()))
+            })
+            .map(list);
         self.trace.paint(
             &painter,
             overlays.board,
             camera,
             &traced,
             statement.as_ref(),
+            listed.as_ref(),
             &shown_tags,
             &laid_tags,
         );
