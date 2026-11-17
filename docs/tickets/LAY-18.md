@@ -1,10 +1,9 @@
 # LAY-18: A reader count names the fields read — `login.body.token → 10 readers`
 
-- Size: S · Owner review: 10 min · Risk: `visible UI`
-- State: Analysis, re-checked against `main` at 514f06a on 2026-11-17.
-  The owner chose the shape and approved the mock-up the same day
-  (decisions 1, 2 and 4); decision 3 waits for him with its own mock-up
-  (issue #302, `decision-needed`). Was M · 20 min, *Compact shows the data
+- Size: S · Owner review: 15 min · Risk: `visible UI`
+- State: Implementation. Re-checked against `main` at 514f06a on
+  2026-11-17; the owner chose the shape, approved the mock-up and took
+  decision 3 the same day (issue #302). Was M · 20 min, *Compact shows the data
   in use*: LAY-16, LAY-23, LAY-32, LAY-27/31 and LAY-14 delivered most of
   it. Implementation after LAY-37 (#423).
 - Analysis model: Fable · Implementation model: Opus
@@ -62,11 +61,10 @@ Taken by the owner on 2026-11-17 (quiz on the mock-up at 9409004):
    delivered).
 2. **No** grey line *Nothing reads this step*.
 4. **The mock-up is approved** for the above.
+3. **The last run's value: A**, in the list (captures `lay18-value-*`,
+   `shop-30` at Full after a simulation).
 
-Open, recommended option first (captures `lay18-value-*`, `shop-30` at
-Full after a simulation):
-
-3. **The last run's value.** **A** in the list: after a run each line names
+The options of decision 3 as they were put: **A** in the list: after a run each line names
    the field's value, `cart.body.id = "c-1" → 3 readers: …`, at either
    density; nothing is added at rest. A secret stays as the run report has
    it (`login.body.token = "[REDACTED]"`). · **B** beside the count at
@@ -78,9 +76,9 @@ Full after a simulation):
 
 ## Mock-up
 
-Not yet approved. Design-review captures of `review_lay18` on
-`mock/lay-18-data-in-use`, `shop-30` tidied, Compact, checks folded, in
-[docs/qa/2026-11-17/LAY-18](../qa/2026-11-17/LAY-18):
+Approved. Design-review captures of `review_lay18` on
+`mock/lay-18-data-in-use` (9c9f0ac), `shop-30` tidied, Compact, checks
+folded, in `docs/qa/2026-11-17/LAY-18` of that branch:
 
 | View | Main | A | B |
 | --- | --- | --- | --- |
@@ -120,7 +118,7 @@ Compact, checks folded.
 5. The count keeps its accessible name (`login.body → 11 readers`), so the
    tests of LAY-23 and LAY-32 pass unchanged.
 
-6. Only if decision 3 = A: after a run, each line names the field's value
+6. Decision 3 = A: after a run, each line names the field's value
    from the report, cut to 28 characters, before the arrow; without a run,
    or for a field the report has no value for, the line is as in
    criterion 1. Test: `lay18_criterion_6_the_list_names_the_run_value`.
