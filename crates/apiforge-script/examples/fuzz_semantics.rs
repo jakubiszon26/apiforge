@@ -1,10 +1,12 @@
-//! Dependency-free mutational smoke fuzzer for lowering, printing and
-//! reconciliation; not coverage-guided fuzzing. Inputs are generated scenario
+//! Dependency-free mutational smoke fuzzer for lowering, printing, board
+//! edits and reconciliation; not coverage-guided fuzzing. Inputs are generated scenario
 //! DAGs mutated by lines and tokens, so many stay syntactically valid and reach
 //! semantic checks.
 //! Run: cargo run -p apiforge-script --example fuzz_semantics --release -- 60 2718281828
 use apiforge_core::{ImportLimits, format::*, import_document};
-use apiforge_script::{Document, LowerContext, lower, parse, print_scenario, reconcile, semantic};
+use apiforge_script::{
+    Document, LowerContext, edit_folder_document, lower, parse, print_scenario, reconcile, semantic,
+};
 use std::time::{Duration, Instant};
 
 #[path = "../tests/support/generator.rs"]
@@ -91,6 +93,38 @@ fn mutate(state: &mut u64, source: &str) -> String {
         }
     }
     lines.join("\n")
+}
+
+/// A board edit of `source`, which says `previous`, to `document` (LAY-34):
+/// an edit that changes nothing writes the text as it is, and what an edit
+/// writes reads back as `document`.
+fn verify_edit(source: &str, previous: &Document, document: &Document, project: &Project) {
+    let folder = lower(&parse(source), &LowerContext::folder(project));
+    if !folder.has_errors()
+        && folder
+            .document
+            .as_ref()
+            .is_some_and(|lowered| semantic(lowered, project) == semantic(previous, project))
+    {
+        assert_eq!(
+            edit_folder_document(project, source, previous, previous).as_deref(),
+            Ok(source),
+            "an edit without a change"
+        );
+    }
+    if let Ok(text) = edit_folder_document(project, source, previous, document) {
+        let again = lower(&parse(&text), &LowerContext::folder(project));
+        assert!(
+            !again.has_errors(),
+            "{:?}\n{source}\n---\n{text}",
+            again.diagnostics
+        );
+        assert_eq!(
+            semantic(&again.document.unwrap(), project),
+            semantic(document, project),
+            "{source}\n---\n{text}"
+        );
+    }
 }
 
 /// Returns whether the input lowered without errors.
@@ -180,11 +214,20 @@ fn main() {
     let mut state = seed;
     let deadline = Instant::now() + Duration::from_secs(seconds);
     let (mut cases, mut valid) = (0_u64, 0_u64);
+    // The last valid input, which the next one is written into as a board edit.
+    let mut last: Option<(String, Document)> = None;
     while Instant::now() < deadline {
         let source = generate(random(&mut state) as u64);
         let mutated = mutate(&mut state, &source);
         if verify(&mutated, &project, &current) {
             valid += 1;
+            let document = lower(&parse(&mutated), &LowerContext::new(&project))
+                .document
+                .expect("a valid input lowers");
+            if let Some((text, previous)) = &last {
+                verify_edit(text, previous, &document, &project);
+            }
+            last = Some((mutated, document));
         }
         cases += 1;
     }
