@@ -6,7 +6,12 @@
 //! inputs and HTTP request snapshot.
 
 use crate::icons::Icon;
-use crate::{dnd::Payload, labels, theme, widgets};
+use crate::{
+    dnd::Payload,
+    labels,
+    not_run::{self, NotRun},
+    theme, widgets,
+};
 use apiforge_core::{
     format::{Binding, Graph, Node, OptionalJson, Project},
     graph::{component_definition, condition_predicates, predicate},
@@ -17,7 +22,7 @@ use apiforge_core::{
 };
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 const RESERVED_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
 
@@ -221,6 +226,38 @@ pub struct StepRow<'a> {
     /// The node ids of the component calls that hold the step, outermost
     /// first; empty at the top level.
     pub calls: Vec<&'a str>,
+    /// The results of the step's own graph, which its cause names (LAY-19).
+    pub siblings: &'a [StepResult],
+}
+
+impl StepRow<'_> {
+    /// Why the step did not run; `None` for a step that ran.
+    fn not_run(&self) -> Option<NotRun<'_>> {
+        NotRun::of(self.step, self.siblings)
+    }
+
+    /// The step's first word: its cause's kind for a step that did not run,
+    /// *Not met* for a false *Data condition*, otherwise its status
+    /// (LAY-19).
+    fn word(&self) -> &'static str {
+        match self.not_run() {
+            Some(not_run) => not_run.word(),
+            None if not_run::unmet(self.step) => "Not met",
+            None => self.step.status.label(),
+        }
+    }
+
+    /// What the row says of the step: what its card says, the steps it kept
+    /// from running after a step that ran (LAY-19).
+    fn words(&self) -> String {
+        if let Some(not_run) = self.not_run() {
+            return not_run.words();
+        }
+        match not_run::count_of(self.siblings, &self.step.node_id) {
+            0 => self.word().to_owned(),
+            count => format!("{} · {}", self.word(), not_run::count_text(count)),
+        }
+    }
 }
 
 /// Flattens top-level steps and any nested component steps in execution order.
@@ -246,6 +283,7 @@ fn flatten_into<'a>(
             root_id: root.to_owned(),
             depth,
             calls: calls.to_vec(),
+            siblings: steps,
         });
         if let Some(children) = &step.children {
             let child_prefix = format!("{key}/");
@@ -982,11 +1020,17 @@ impl ReportPanel {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                widgets::pill(ui, step.status.label(), status_color(step.status));
+                widgets::pill(ui, selected.word(), status_color(step.status));
             });
         });
 
-        if let Some(message) = &step.message {
+        // A step that did not run says why from its cause, never from the
+        // engine's message (LAY-19).
+        let message = match selected.not_run() {
+            Some(not_run) => Some(Cow::Owned(not_run.sentence())),
+            None => step.message.as_deref().map(Cow::Borrowed),
+        };
+        if let Some(message) = message {
             let color = status_color(step.status);
             egui::Frame::new()
                 .fill(color.gamma_multiply(0.08))
@@ -995,7 +1039,11 @@ impl ReportPanel {
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new(message).size(12.0).color(theme::TEXT));
+                    ui.label(
+                        RichText::new(message.as_ref())
+                            .size(12.0)
+                            .color(theme::TEXT),
+                    );
                 });
         }
 
@@ -1441,32 +1489,30 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
             {
                 actions.push(Action::ExportReport);
             }
-            let passed = run
-                .steps
-                .iter()
-                .filter(|step| step.status == StepStatus::Passed)
-                .count();
-            let failed = run
-                .steps
-                .iter()
-                .filter(|step| matches!(step.status, StepStatus::Failed | StepStatus::Error))
-                .count();
-            if failed > 0 {
-                ui.label(
-                    RichText::new(format!("{failed} failed"))
-                        .size(12.0)
-                        .strong()
-                        .color(theme::DANGER),
-                );
+            // Every step in one group, the steps that did not run by their
+            // cause (LAY-19); right to left, so the last group first.
+            for (group, count) in not_run::summary(&run.steps).into_iter().rev() {
+                group_label(ui, group, count);
             }
-            ui.label(
-                RichText::new(format!("{passed} passed"))
-                    .size(12.0)
-                    .strong()
-                    .color(theme::SUCCESS),
-            );
         });
     });
+}
+
+/// One group of the summary, `11 stopped`.
+fn group_label(ui: &mut Ui, group: not_run::Group, count: usize) {
+    use not_run::Group;
+    let color = match group {
+        Group::Passed => theme::SUCCESS,
+        Group::Failed => theme::DANGER,
+        Group::NotMet | Group::Blocked | Group::Cancelled => theme::WARNING,
+        Group::Stopped | Group::Skipped => theme::MUTED,
+    };
+    ui.label(
+        RichText::new(format!("{count} {}", group.label()))
+            .size(12.0)
+            .strong()
+            .color(color),
+    );
 }
 
 fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
@@ -1550,11 +1596,14 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     name.wrap.max_rows = 1;
     let galley = painter.layout_job(name);
     painter.galley(egui::pos2(text_left, rect.top() + 5.0), galley, name_color);
+    let words = row.words();
     let sub = if row.depth > 0 {
-        format!("Inside component · {}", row.step.status.label())
+        format!("Inside component · {words}")
     } else {
-        row.step.status.label().to_owned()
+        words.clone()
     };
+    // A step that did not run took no time (LAY-19).
+    let ran = row.step.cause.is_none();
     painter.text(
         egui::pos2(text_left, rect.top() + 29.0),
         egui::Align2::LEFT_CENTER,
@@ -1562,19 +1611,24 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
         egui::FontId::proportional(11.0),
         theme::MUTED,
     );
-    painter.text(
-        egui::pos2(rect.right() - 8.0, rect.center().y),
-        egui::Align2::RIGHT_CENTER,
-        format!("{} ms", row.step.duration_ms),
-        egui::FontId::monospace(10.5),
-        theme::MUTED,
-    );
-    let a11y_label = format!(
-        "{} · {} · {} ms",
-        row.step.display_name(),
-        row.step.status.label(),
-        row.step.duration_ms
-    );
+    if ran {
+        painter.text(
+            egui::pos2(rect.right() - 8.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{} ms", row.step.duration_ms),
+            egui::FontId::monospace(10.5),
+            theme::MUTED,
+        );
+    }
+    let a11y_label = if ran {
+        format!(
+            "{} · {words} · {} ms",
+            row.step.display_name(),
+            row.step.duration_ms
+        )
+    } else {
+        format!("{} · {words}", row.step.display_name())
+    };
     response.widget_info(move || {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
     });
