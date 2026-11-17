@@ -7736,11 +7736,19 @@ mod ux01 {
 
     /// The window after one simulation of a scenario whose source starts
     /// with a comment that belongs to no statement, its Run results
-    /// maximised on *Add to cart*; with the source the run used.
+    /// maximised on *Add to cart*; with the source the run used. The
+    /// scenario is written on one line, so a check cannot be written into
+    /// the text and its edit prints the whole file, which drops the comment:
+    /// only then is the prompt asked (LAY-34, owner, 2026-11-17).
     fn after_a_run_with_a_loose_comment()
     -> (tempfile::TempDir, FolderHarness, String, RunResult, String) {
         let (project, mut harness, scenario) = window(MINIMUM);
-        let text = format!("// loose comment\n\n{}", source_of(&harness, &scenario));
+        let source = source_of(&harness, &scenario);
+        assert!(!source.contains("//"), "no comment ends the one line early");
+        let text = format!(
+            "// loose comment\n\n{}\n",
+            source.trim_end().replace('\n', " ")
+        );
         let session = app(&mut harness).session.as_mut().unwrap();
         session.edit_source(&scenario, &text, CODE).unwrap();
         session.settle(&scenario).unwrap();
