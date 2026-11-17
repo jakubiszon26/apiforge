@@ -22,7 +22,7 @@ pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
 pub use readers::WireMode;
-pub use resting::{Drawn, Lines, resting};
+pub use resting::{Drawn, LANE, Lane, Lines, resting};
 pub use routing::WireStyle;
 pub use strip::Pill as InputView;
 
@@ -260,6 +260,9 @@ pub struct Input<'a> {
     pub parameters: &'a [String],
     pub selection: &'a [String],
     pub steps: Option<&'a [StepResult]>,
+    /// The run's cause ends, resolved once per run (LAY-19); `None`
+    /// resolves them from `steps`.
+    pub ends: Option<&'a apiforge_core::run::CauseEnds>,
     /// Where a run that is on has got to (LAY-07).
     pub progress: Progress<'a>,
     pub can_paste: bool,
@@ -1429,6 +1432,24 @@ impl Canvas {
             &folded.keys().map(String::as_str).collect(),
             &numbers,
         );
+        // The steps a failure kept from running, on the card that holds it:
+        // a folded check's on its subject (LAY-19).
+        let resolved;
+        let ends = match (input.steps, input.ends) {
+            (Some(_), Some(ends)) => Some(ends),
+            (Some(steps), None) => {
+                resolved = apiforge_core::run::CauseEnds::of(steps);
+                Some(&resolved)
+            }
+            (None, _) => None,
+        };
+        let costs = ends
+            .map(|ends| {
+                crate::not_run::costs(ends, |id| {
+                    folded.get(id).map(|(subject, _)| subject.as_str())
+                })
+            })
+            .unwrap_or_default();
         #[cfg(test)]
         {
             self.hidden = folded.keys().cloned().collect();
@@ -1637,12 +1658,53 @@ impl Canvas {
                     && cards[count.card].output_tray().is_some())
             })
             .collect();
-        let laid_tags = readers::lay_tags(&painter, &shown_tags, camera);
         let mark_screens: Vec<Rect> = marks.iter().map(|mark| camera.rect(mark.rect)).collect();
-        let laid_counts: Vec<readers::Laid> = shown_counts
+        // The chips and the counts keep clear of the cards, their badges, the
+        // marks and the lines drawn at rest (LAY-37). Those lines are routed here, before
+        // they are drawn below with the same request, which the router keeps;
+        // while a card is dragged they are not waited for.
+        let dragging = matches!(self.drag, Some(Drag::Nodes { .. }));
+        let rest_lines: Vec<Vec<Pos2>> =
+            if !dragging && !(shown_tags.is_empty() && shown_counts.is_empty()) {
+                let at_rest: Vec<routing::BoardWire> = board_wires
+                    .iter()
+                    .filter(|wire| {
+                        !tagged.contains(wire.id.as_str())
+                            && !after_marks.iter().any(|mark| mark.wires.contains(&wire.id))
+                    })
+                    .cloned()
+                    .collect();
+                self.router
+                    .routes(&routing::Request {
+                        cards: &cards,
+                        chips: &chips,
+                        wires: &at_rest,
+                        moving: &HashSet::new(),
+                        style: self.wire_style,
+                        bridges: self.bridges,
+                        among: &[],
+                    })
+                    .iter()
+                    .filter(|wire| wire.routed)
+                    .map(|wire| wire.points.iter().map(|at| camera.to_screen(*at)).collect())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        let keep: Vec<Rect> = cards
             .iter()
-            .map(|count| readers::lay_count(&painter, count, camera, &mark_screens))
+            .flat_map(|card| {
+                let rect = camera.rect(card.rect());
+                [rect, after::corner(rect, camera.zoom)]
+            })
+            .chain(mark_screens.iter().copied())
             .collect();
+        let clear = readers::Clear {
+            boxes: &keep,
+            lines: &rest_lines,
+        };
+        let laid_tags = readers::lay_tags(&painter, &shown_tags, camera, &clear);
+        let laid_counts = readers::lay_counts(&painter, &shown_counts, camera, &clear, &laid_tags);
         // A step's badge keeps clear of the chips and counts (LAY-07).
         let chip_boxes: Vec<Rect> = laid_tags
             .iter()
@@ -2104,6 +2166,12 @@ impl Canvas {
                     .previous
                     .and_then(|steps| steps.iter().find(|step| step.node_id == card.id)),
                 clear_of: &chip_boxes,
+                // A Value or an IF card keeps its line (LAY-19, 3 A).
+                ends: ends.filter(|_| !matches!(card.kind, NodeKind::Value | NodeKind::If)),
+                cost: costs
+                    .get(card.id.as_str())
+                    .copied()
+                    .filter(|_| !matches!(card.kind, NodeKind::Value | NodeKind::If)),
             };
             let reveal = Reveal::of(
                 card,
@@ -4911,6 +4979,7 @@ mod tests {
                                 parameters: &[],
                                 selection: &selection,
                                 steps: None,
+                                ends: None,
                                 progress: Progress::default(),
                                 can_paste: false,
                                 context: "test",
@@ -4967,6 +5036,7 @@ mod tests {
                                 parameters: &[],
                                 selection: &[],
                                 steps: None,
+                                ends: None,
                                 progress: Progress::default(),
                                 can_paste: false,
                                 context: "test",
@@ -5047,6 +5117,7 @@ mod tests {
                             parameters: &[],
                             selection: &[],
                             steps: None,
+                            ends: None,
                             progress: Progress::default(),
                             can_paste: false,
                             context: "test",

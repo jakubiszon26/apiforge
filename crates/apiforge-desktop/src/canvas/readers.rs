@@ -11,10 +11,12 @@
 //! input is pointed at and while its reader or its source is selected.
 //!
 //! It is a rendering rule only. Nothing here is saved, no card's box
-//! changes, Tidy up and the router's other wires do not depend on it: the
-//! wires that are chips are simply not given to the router, and a wire
-//! brought back is routed apart, so the wires already drawn keep their
-//! routes. The rule is decided on the cards where they rest, so a card
+//! changes, the router's other wires do not depend on it: the wires that
+//! are chips are simply not given to the router, and a wire brought back is
+//! routed apart, so the wires already drawn keep their routes. Tidy up
+//! leaves the chips and the counts room in the gaps between columns, and
+//! they are laid clear of each other, of the cards and of the lines drawn
+//! (LAY-37). The rule is decided on the cards where they rest, so a card
 //! being dragged turns no wire into a chip or back until it is dropped.
 
 use super::{
@@ -29,7 +31,7 @@ use apiforge_core::{
     format::{Binding, Graph, Project},
     graph::{self, WireKind, wires as document_wires},
 };
-use eframe::egui::{FontId, Galley, Painter, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
+use eframe::egui::{FontId, Galley, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, pos2, vec2};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::Arc,
@@ -50,9 +52,9 @@ pub enum WireMode {
 /// A port read by at least this many steps draws chips (decision 3).
 pub const MIN_READERS: usize = 3;
 
-/// The free space Tidy up leaves between two columns (shape D), where a
-/// chip and a count stand.
-const GAP: f32 = 96.0;
+/// The room a chip or a count takes in the gap beside its card, at most;
+/// Tidy up leaves it there clear of the lines (LAY-37).
+pub(super) const GAP: f32 = 96.0;
 
 /// The chip's text before the camera's zoom, and its smallest on screen.
 const TEXT: f32 = 11.0;
@@ -413,107 +415,152 @@ fn stub_length(zoom: f32) -> f32 {
     (10.0 * zoom).max(4.0)
 }
 
-/// The first of `texts` that fits `room` on screen, else the last.
-fn fitting(painter: &Painter, texts: &[String], font: &FontId, room: f32) -> (String, Arc<Galley>) {
-    let mut last = None;
-    for text in texts {
-        let galley = painter.layout_no_wrap(text.clone(), font.clone(), theme::MUTED);
-        if galley.size().x + 8.0 <= room {
-            return (text.clone(), galley);
-        }
-        last = Some((text.clone(), galley));
-    }
-    last.expect("a text to lay out")
+/// The room on screen a chip or a count keeps from another chip or count,
+/// from a card and from a line (LAY-37).
+const CLEAR: f32 = 4.0;
+
+/// How far a chip or a count may stand from its socket to keep that room,
+/// in its own heights, and the step it is moved by.
+const REACH: f32 = 4.0;
+const NUDGE: f32 = 1.0;
+
+/// What the chips and the counts keep clear of, on screen (LAY-37).
+pub struct Clear<'a> {
+    /// The cards and the continuation marks.
+    pub boxes: &'a [Rect],
+    /// The lines drawn at rest.
+    pub lines: &'a [Vec<Pos2>],
 }
 
-/// The chips of `tags` left of their sockets, in the gap between two
-/// columns; their text keeps a legible size at any zoom and shortens to the
-/// source step (a variable's badge number), then to the arrow, where the gap has no room for it. The
-/// chips of one card stand one under the other: a chip that would cover the
-/// one above it moves down and its stub bends to its socket.
-pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera) -> Vec<Laid> {
-    let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
-    let font_id = FontId::proportional(font);
-    let stub = stub_length(camera.zoom);
-    let room = GAP * camera.zoom - stub - 2.0;
-    let mut laid: Vec<Laid> = Vec::with_capacity(tags.len());
-    let mut below: Option<(usize, f32)> = None;
-    for tag in tags {
-        let anchor = camera.to_screen(tag.anchor);
-        let (shown, galley) = fitting(
-            painter,
-            &[
-                format!("← {}", tag.text),
-                format!("← {}", tag.short),
-                "←".to_owned(),
-            ],
-            &font_id,
-            room,
-        );
-        let size = galley.size() + vec2(8.0, 3.0);
-        let free = match below {
-            Some((card, bottom)) if card == tag.card => bottom + 2.0,
-            _ => f32::MIN,
-        };
-        let centre = anchor.y.max(free + size.y / 2.0);
-        let rect = Rect::from_min_size(pos2(anchor.x - stub - size.x, centre - size.y / 2.0), size);
-        below = Some((tag.card, rect.bottom()));
-        let (stub, bend) = if (centre - anchor.y).abs() < 0.5 {
-            ([pos2(rect.right(), anchor.y), anchor], None)
+/// Whether the segment `a`–`b` passes through `rect`.
+fn crosses(rect: Rect, a: Pos2, b: Pos2) -> bool {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    for (p, q) in [
+        (-dx, a.x - rect.left()),
+        (dx, rect.right() - a.x),
+        (-dy, a.y - rect.top()),
+        (dy, rect.bottom() - a.y),
+    ] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return false;
+            }
+        } else if p < 0.0 {
+            low = low.max(q / p);
         } else {
-            let x = rect.right() + stub / 2.0;
-            (
-                [pos2(rect.right(), centre), pos2(x, centre)],
-                Some(pos2(x, anchor.y)),
-            )
-        };
-        laid.push(Laid {
-            galley,
-            shown,
-            rect,
-            font,
-            stub,
-            bend,
-            socket: anchor,
-        });
+            high = high.min(q / p);
+        }
     }
-    laid
+    low <= high
 }
 
-/// The count at a source's port, right of it in the gap. Where it would
-/// cover something in `avoid` (a continuation mark, on screen) it stands
-/// under it and its stub bends up to the port.
-pub fn lay_count(painter: &Painter, count: &Count, camera: Camera, avoid: &[Rect]) -> Laid {
-    let anchor = camera.to_screen(count.anchor);
-    let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
-    let font_id = FontId::proportional(font);
-    let stub = stub_length(camera.zoom);
-    let room = GAP * camera.zoom - stub - 2.0;
-    let (shown, galley) = fitting(
-        painter,
-        &[
-            format!("→ {} readers", count.readers),
-            format!("→ {}", count.readers),
-            "→".to_owned(),
-        ],
-        &font_id,
-        room,
-    );
-    let size = galley.size() + vec2(8.0, 3.0);
-    let mut rect = Rect::from_min_size(pos2(anchor.x + stub, anchor.y - size.y / 2.0), size);
-    for _ in 0..avoid.len() {
-        let Some(over) = avoid.iter().find(|other| other.intersects(rect)) else {
-            break;
-        };
-        rect = rect.translate(vec2(0.0, over.bottom() + 2.0 - rect.top()));
+/// The obstacles in `band`: boxes, and the segments of lines. Only what
+/// is in it is known, so a place whose room reaches out of it is not free.
+struct Near {
+    band: Rect,
+    boxes: Vec<Rect>,
+    segments: Vec<[Pos2; 2]>,
+}
+
+impl Near {
+    fn of(band: Rect, clear: &Clear<'_>, laid: &[Rect]) -> Self {
+        Self {
+            band,
+            boxes: clear
+                .boxes
+                .iter()
+                .chain(laid)
+                .filter(|other| other.intersects(band))
+                .copied()
+                .collect(),
+            segments: clear
+                .lines
+                .iter()
+                .flat_map(|line| line.windows(2).map(|pair| [pair[0], pair[1]]))
+                .filter(|[a, b]| Rect::from_two_pos(*a, *b).intersects(band))
+                .collect(),
+        }
     }
-    let (stub, bend) = if (rect.center().y - anchor.y).abs() < 0.5 {
-        ([anchor, pos2(rect.left(), anchor.y)], None)
+
+    fn free(&self, rect: Rect) -> bool {
+        let around = rect.expand(CLEAR - 0.5);
+        self.band.contains_rect(around)
+            && !self.boxes.iter().any(|other| other.intersects(around))
+            && !self.segments.iter().any(|[a, b]| crosses(around, *a, *b))
+    }
+}
+
+/// Where a box of `size` keeps its room from what is `near`: the place
+/// nearest its socket's height `want`, not above `lowest`, at one of the
+/// `edges` it may stand at, the first edge preferred at a height; `None`
+/// when there is none within [`REACH`]. `at` gives the box for an edge and
+/// the height of its centre.
+fn spot(
+    at: impl Fn(f32, f32) -> Rect,
+    edges: &[f32],
+    want: f32,
+    lowest: f32,
+    near: &Near,
+) -> Option<Rect> {
+    let start = want.max(lowest);
+    let first = *edges.first()?;
+    let reach = REACH * at(first, start).height();
+    let steps = (reach / NUDGE).ceil() as usize;
+    let at = &at;
+    (0..=steps)
+        .flat_map(|step| {
+            let by = step as f32 * NUDGE;
+            [start + by, start - by]
+                .into_iter()
+                .take(if step == 0 { 1 } else { 2 })
+        })
+        .filter(|centre| *centre >= lowest)
+        .flat_map(|centre| edges.iter().map(move |edge| at(*edge, centre)))
+        .find(|rect| near.free(*rect))
+}
+
+/// Each of `texts` that fits `room` on screen, in order; the last always.
+fn fitting(
+    painter: &Painter,
+    texts: &[String],
+    font: &FontId,
+    room: f32,
+) -> Vec<(String, Arc<Galley>)> {
+    let last = texts.len().saturating_sub(1);
+    texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            let galley = painter.layout_no_wrap(text.clone(), font.clone(), theme::MUTED);
+            (index, text, galley)
+        })
+        .filter(|(index, _, galley)| *index == last || galley.size().x + 8.0 <= room)
+        .map(|(_, text, galley)| (text.clone(), galley))
+        .collect()
+}
+
+/// A chip or a count laid in `rect`, with its stub to `socket`: straight
+/// where it is level with it, else bent down or up at `elbow` across.
+fn stubbed(
+    (shown, galley): (String, Arc<Galley>),
+    rect: Rect,
+    socket: Pos2,
+    elbow: f32,
+    font: f32,
+) -> Laid {
+    let centre = rect.center().y;
+    let edge = if elbow < socket.x {
+        rect.right()
     } else {
-        let x = anchor.x + stub / 2.0;
+        rect.left()
+    };
+    let (stub, bend) = if (centre - socket.y).abs() < 0.5 {
+        ([pos2(edge, socket.y), socket], None)
+    } else {
         (
-            [pos2(rect.left(), rect.center().y), pos2(x, rect.center().y)],
-            Some(pos2(x, anchor.y)),
+            [pos2(edge, centre), pos2(elbow, centre)],
+            Some(pos2(elbow, socket.y)),
         )
     };
     Laid {
@@ -523,8 +570,175 @@ pub fn lay_count(painter: &Painter, count: &Count, camera: Camera, avoid: &[Rect
         font,
         stub,
         bend,
-        socket: anchor,
+        socket,
     }
+}
+
+/// The order chips or counts are laid in: by column, then down the board.
+fn down_columns(anchors: impl Iterator<Item = Pos2>) -> Vec<usize> {
+    let anchors: Vec<Pos2> = anchors.collect();
+    let mut order: Vec<usize> = (0..anchors.len()).collect();
+    order.sort_by(|a, b| {
+        let (a, b) = (anchors[*a], anchors[*b]);
+        a.x.round()
+            .total_cmp(&b.x.round())
+            .then(a.y.total_cmp(&b.y))
+    });
+    order
+}
+
+/// The chips of `tags` left of their sockets, in the gap between two
+/// columns; their text keeps a legible size at any zoom and shortens to the
+/// source step (a variable's badge number), then to the arrow, where the gap
+/// has no room for it. The chips of one column stand one under the other,
+/// [`CLEAR`] apart, and keep that room from the cards and the lines in
+/// `clear` (LAY-37): a chip that would come nearer moves up or down, its
+/// stub bent to its socket, else it shortens.
+pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera, clear: &Clear<'_>) -> Vec<Laid> {
+    let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
+    let font_id = FontId::proportional(font);
+    let stub = stub_length(camera.zoom);
+    let room = GAP * camera.zoom - stub - 2.0;
+    let mut laid: Vec<Option<Laid>> = vec![None; tags.len()];
+    let mut placed: Vec<Rect> = Vec::with_capacity(tags.len());
+    let mut below: Option<(f32, f32)> = None;
+    for index in down_columns(tags.iter().map(|tag| camera.to_screen(tag.anchor))) {
+        let tag = &tags[index];
+        let anchor = camera.to_screen(tag.anchor);
+        let texts = fitting(
+            painter,
+            &[
+                format!("← {}", tag.text),
+                format!("← {}", tag.short),
+                "←".to_owned(),
+            ],
+            &font_id,
+            room,
+        );
+        // Under the chip above it in its column.
+        let lowest = match below {
+            Some((x, bottom)) if (x - anchor.x).abs() < 1.0 => bottom + CLEAR,
+            _ => f32::MIN,
+        };
+        // Every place the search below may try, with its room: beyond a
+        // few lines down a widened gap, and its reach up or down.
+        let tall = texts[0].1.size().y + 3.0;
+        let reach = tall * (REACH + 1.0) + CLEAR;
+        let start = anchor.y.max(lowest + tall / 2.0);
+        let band = Rect::from_min_max(
+            pos2(
+                anchor.x - stub - 4.0 * (room + CLEAR),
+                start.min(anchor.y) - reach,
+            ),
+            pos2(anchor.x, start + reach),
+        );
+        let near = Near::of(band, clear, &placed);
+        // Where lines run down the gap past the socket, the chip may stand
+        // left of any of them, its stub across them: level with its socket
+        // first, then nearest it.
+        let mut rights: Vec<f32> = near
+            .segments
+            .iter()
+            .filter(|[a, b]| (a.x - b.x).abs() < 0.5 && a.x < anchor.x - stub + CLEAR)
+            .filter(|[a, b]| a.y.min(b.y) < anchor.y + tall && a.y.max(b.y) > anchor.y - tall)
+            .map(|[a, _]| a.x - CLEAR)
+            .collect();
+        rights.sort_by(|a, b| b.total_cmp(a));
+        rights.insert(0, anchor.x - stub);
+        let at = |size: Vec2| {
+            move |right: f32, centre: f32| {
+                Rect::from_min_size(pos2(right - size.x, centre - size.y / 2.0), size)
+            }
+        };
+        let chosen = texts.iter().find_map(|(shown, galley)| {
+            let size = galley.size() + vec2(8.0, 3.0);
+            let rect = spot(at(size), &rights, anchor.y, lowest + size.y / 2.0, &near)?;
+            Some(((shown.clone(), galley.clone()), rect))
+        });
+        // Nowhere clear within reach: under the chip above, as before.
+        let (text, rect) = chosen.unwrap_or_else(|| {
+            let (shown, galley) = texts[0].clone();
+            let size = galley.size() + vec2(8.0, 3.0);
+            let centre = anchor.y.max(lowest + size.y / 2.0);
+            ((shown, galley), at(size)(anchor.x - stub, centre))
+        });
+        placed.push(rect);
+        below = Some((anchor.x, rect.bottom()));
+        laid[index] = Some(stubbed(text, rect, anchor, rect.right() + stub / 2.0, font));
+    }
+    laid.into_iter().flatten().collect()
+}
+
+/// The counts at the sources' ports, right of them in the gap, laid as the
+/// chips are: [`CLEAR`] from the cards, the marks and the lines in `clear`,
+/// from the chips in `tags` and from each other (LAY-37). A count that would
+/// come nearer moves up or down, its stub bent to its port, else it
+/// shortens.
+pub fn lay_counts(
+    painter: &Painter,
+    counts: &[&Count],
+    camera: Camera,
+    clear: &Clear<'_>,
+    tags: &[Laid],
+) -> Vec<Laid> {
+    let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
+    let font_id = FontId::proportional(font);
+    let stub = stub_length(camera.zoom);
+    let room = GAP * camera.zoom - stub - 2.0;
+    let mut laid: Vec<Option<Laid>> = vec![None; counts.len()];
+    let mut placed: Vec<Rect> = tags.iter().map(|tag| tag.rect).collect();
+    for index in down_columns(counts.iter().map(|count| camera.to_screen(count.anchor))) {
+        let count = counts[index];
+        let anchor = camera.to_screen(count.anchor);
+        let texts = fitting(
+            painter,
+            &[
+                format!("→ {} readers", count.readers),
+                format!("→ {}", count.readers),
+                "→".to_owned(),
+            ],
+            &font_id,
+            room,
+        );
+        // Every place the search below may try, with its room.
+        let tall = texts[0].1.size().y + 3.0;
+        let reach = tall * (REACH + 1.0) + CLEAR;
+        let band = Rect::from_min_max(
+            pos2(anchor.x, anchor.y - reach),
+            pos2(anchor.x + stub + 4.0 * (room + CLEAR), anchor.y + reach),
+        );
+        let near = Near::of(band, clear, &placed);
+        // Where lines run down the gap past the port, the count may stand
+        // right of any of them, its stub across them: level with its port
+        // first, then nearest it.
+        let mut lefts: Vec<f32> = near
+            .segments
+            .iter()
+            .filter(|[a, b]| (a.x - b.x).abs() < 0.5 && a.x > anchor.x + stub - CLEAR)
+            .filter(|[a, b]| a.y.min(b.y) < anchor.y + tall && a.y.max(b.y) > anchor.y - tall)
+            .map(|[a, _]| a.x + CLEAR)
+            .collect();
+        lefts.sort_by(f32::total_cmp);
+        lefts.insert(0, anchor.x + stub);
+        let at = |size: Vec2| {
+            move |left: f32, centre: f32| {
+                Rect::from_min_size(pos2(left, centre - size.y / 2.0), size)
+            }
+        };
+        let chosen = texts.iter().find_map(|(shown, galley)| {
+            let size = galley.size() + vec2(8.0, 3.0);
+            let rect = spot(at(size), &lefts, anchor.y, f32::MIN, &near)?;
+            Some(((shown.clone(), galley.clone()), rect))
+        });
+        let (text, rect) = chosen.unwrap_or_else(|| {
+            let (shown, galley) = texts[0].clone();
+            let size = galley.size() + vec2(8.0, 3.0);
+            ((shown, galley), at(size)(anchor.x + stub, anchor.y))
+        });
+        placed.push(rect);
+        laid[index] = Some(stubbed(text, rect, anchor, rect.left() - stub / 2.0, font));
+    }
+    laid.into_iter().flatten().collect()
 }
 
 /// The mark `+ var` under a count (LAY-25): the port has values worth a
@@ -542,7 +756,8 @@ pub fn lay_mark(painter: &Painter, count: &Laid, camera: Camera, avoid: &[Rect])
         &["+ var".to_owned(), "+".to_owned()],
         &font_id,
         room,
-    );
+    )
+    .swap_remove(0);
     let size = galley.size() + vec2(8.0, 3.0);
     if size.x > room {
         return None;
@@ -637,4 +852,218 @@ pub fn paint_statement(painter: &Painter, near: Rect, text: &str, within: Rect) 
     );
     painter.galley(rect.min + vec2(6.0, 3.0), galley, theme::TEXT);
     rect
+}
+
+#[cfg(test)]
+mod tests {
+    //! LAY-37 review findings: a chip or a count placed anywhere its search
+    //! reaches keeps [`CLEAR`] from everything in `clear`, also beyond the
+    //! band it was first looked for in; only the fallback place, where no
+    //! clear place was found, may come nearer.
+    use super::*;
+    use eframe::egui::{Context, LayerId, RawInput, Vec2};
+
+    const SOCKET: Pos2 = pos2(1000.0, 500.0);
+
+    fn camera() -> Camera {
+        Camera {
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+        }
+    }
+
+    fn with_painter<T>(run: impl FnOnce(&Painter) -> T) -> T {
+        let context = Context::default();
+        let mut out = None;
+        let mut run = Some(run);
+        let mut output = context.run_ui(RawInput::default(), |ui| {
+            if let Some(run) = run.take() {
+                out = Some(run(&ui.ctx().layer_painter(LayerId::background())));
+            }
+        });
+        output.textures_delta.clear();
+        out.expect("a frame")
+    }
+
+    fn tag(anchor: Pos2) -> Tag {
+        Tag {
+            reader: "reader".into(),
+            card: 0,
+            source: "cart".into(),
+            port: "body".into(),
+            input: "query".into(),
+            path: Vec::new(),
+            text: "cart.id".into(),
+            short: "cart".into(),
+            statement: "cart.id → reader.query".into(),
+            wires: vec!["w".into()],
+            anchor,
+            slot: 0,
+        }
+    }
+
+    fn count(anchor: Pos2) -> Count {
+        Count {
+            source: "source".into(),
+            card: 0,
+            port: "body".into(),
+            readers: 3,
+            label: "source.body → 3 readers".into(),
+            wires: vec!["w".into()],
+            anchor,
+        }
+    }
+
+    /// The distance between a box and a segment, 0 where they meet.
+    fn apart(rect: Rect, [a, b]: [Pos2; 2]) -> f32 {
+        if crosses(rect, a, b) {
+            return 0.0;
+        }
+        (0..=100)
+            .map(|step| a.lerp(b, step as f32 / 100.0))
+            .map(|at| rect.distance_to_pos(at))
+            .fold(f32::INFINITY, f32::min)
+    }
+
+    /// Panics where `laid` comes nearer than [`CLEAR`] to something in
+    /// `clear` without standing at `fallback`, the place it takes when no
+    /// clear place is found.
+    fn assert_clear(laid: &Laid, clear: &Clear<'_>, fallback: Rect, context: &str) {
+        let at_fallback = (laid.rect.center() - fallback.center()).length() < 0.5;
+        if at_fallback {
+            return;
+        }
+        let near = CLEAR - 0.5 - 0.01;
+        for other in clear.boxes {
+            let gap = laid.rect.distance_to_pos(other.clamp(laid.rect.center()));
+            let gap = gap.min(apart(*other, [laid.rect.left_top(), laid.rect.right_top()]));
+            let gap = gap.min(apart(
+                *other,
+                [laid.rect.left_bottom(), laid.rect.right_bottom()],
+            ));
+            assert!(
+                gap >= near,
+                "{context}: {:?} is {gap} px from the box {other:?}",
+                laid.rect
+            );
+        }
+        for line in clear.lines {
+            for pair in line.windows(2) {
+                let gap = apart(laid.rect, [pair[0], pair[1]]);
+                assert!(
+                    gap >= near,
+                    "{context}: {:?} is {gap} px from the line {pair:?}",
+                    laid.rect
+                );
+            }
+        }
+    }
+
+    /// Vertical lines down the gap past `SOCKET`, each just where the chip
+    /// stood beside the one before, until the chip would stand beyond the
+    /// band it was looked for in; then a line just past that place.
+    fn walls(width: f32, side: f32) -> Vec<Vec<Pos2>> {
+        let stub = stub_length(1.0);
+        let room = GAP - stub - 2.0;
+        let band = stub + 2.0 * (room + CLEAR);
+        let line = |x: f32| vec![pos2(x, SOCKET.y - 300.0), pos2(x, SOCKET.y + 300.0)];
+        let mut lines = Vec::new();
+        // The near edge of the chip as it stands, its far edge from the
+        // socket.
+        let mut edge = stub;
+        while edge + width < band {
+            let x = edge + width / 2.0;
+            lines.push(line(SOCKET.x + side * x));
+            edge = x + CLEAR;
+        }
+        // Beyond the band: just past the far edge of the last place.
+        lines.push(line(SOCKET.x + side * (edge + width + 1.0)));
+        lines
+    }
+
+    /// Finding 1: a chip set left of lines that hug its card, beyond the
+    /// band, keeps clear of a line there.
+    #[test]
+    fn a_chip_beyond_the_band_keeps_clear_of_a_line_there() {
+        with_painter(|painter| {
+            let tags = [tag(SOCKET)];
+            let alone = lay_tags(
+                painter,
+                &tags,
+                camera(),
+                &Clear {
+                    boxes: &[],
+                    lines: &[],
+                },
+            );
+            let fallback = alone[0].rect;
+            let lines = walls(fallback.width(), -1.0);
+            let clear = Clear {
+                boxes: &[],
+                lines: &lines,
+            };
+            let laid = lay_tags(painter, &tags, camera(), &clear);
+            assert_clear(&laid[0], &clear, fallback, "a chip");
+        });
+    }
+
+    /// Finding 1, for a count set right of lines that leave its port.
+    #[test]
+    fn a_count_beyond_the_band_keeps_clear_of_a_line_there() {
+        with_painter(|painter| {
+            let source = count(SOCKET);
+            let counts = [&source];
+            let none = Clear {
+                boxes: &[],
+                lines: &[],
+            };
+            let alone = lay_counts(painter, &counts, camera(), &none, &[]);
+            let fallback = alone[0].rect;
+            let lines = walls(fallback.width(), 1.0);
+            let clear = Clear {
+                boxes: &[],
+                lines: &lines,
+            };
+            let laid = lay_counts(painter, &counts, camera(), &clear, &[]);
+            assert_clear(&laid[0], &clear, fallback, "a count");
+        });
+    }
+
+    /// Finding 2: a chip pushed down by the chip above it to the end of its
+    /// reach keeps clear of a card just below there.
+    #[test]
+    fn a_chip_at_the_end_of_its_reach_keeps_clear_of_what_is_below() {
+        with_painter(|painter| {
+            let tags = [tag(SOCKET), tag(SOCKET + vec2(0.0, 1.0))];
+            let none = Clear {
+                boxes: &[],
+                lines: &[],
+            };
+            let stacked = lay_tags(painter, &tags, camera(), &none);
+            let (above, fallback) = (stacked[0].rect, stacked[1].rect);
+            let height = fallback.height();
+            // Where the second chip may stand: from under the first to its
+            // reach below that.
+            let start = fallback.center().y;
+            let last = start + (REACH * height / NUDGE).ceil() * NUDGE;
+            let lane = (SOCKET.x - GAP, SOCKET.x - stub_length(1.0) + 1.0);
+            // A card over every place but the last, clear of the first chip,
+            // and one 2 px under the last.
+            let blocked = Rect::from_min_max(
+                pos2(lane.0, above.bottom() + CLEAR),
+                pos2(lane.1, last - height / 2.0 - CLEAR),
+            );
+            let below = Rect::from_min_max(
+                pos2(lane.0, last + height / 2.0 + 2.0),
+                pos2(lane.1, last + height / 2.0 + 40.0),
+            );
+            let boxes = [blocked, below];
+            let clear = Clear {
+                boxes: &boxes,
+                lines: &[],
+            };
+            let laid = lay_tags(painter, &tags, camera(), &clear);
+            assert_clear(&laid[1], &clear, fallback, "the second chip");
+        });
+    }
 }

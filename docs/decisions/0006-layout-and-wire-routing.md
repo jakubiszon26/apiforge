@@ -190,7 +190,12 @@ spacing of shape D.
    lines; then the board is routed as drawn and every place a line still
    runs within the gap widens the gap it lies in by 20 px, until none is
    left. The gap between two columns is the same in every row. A scenario
-   opened from code is laid out the same way.
+   opened from code is laid out the same way. Where chips and counts
+   (LAY-23) stand in a gap, the gap also grows until each has a stretch of
+   96 px between the lines that pass it, a line's gap from the chips or
+   counts facing it across the gap; a chip or count stands there, beyond
+   the lines with its stub across them where they hug its card, and keeps
+   4 px from every chip, card and line (LAY-37).
 5. **Without Tidy up** nothing moves: lines keep the gap by longer routes,
    and give it up only where cards and the lines already drawn leave no
    route within the search window.

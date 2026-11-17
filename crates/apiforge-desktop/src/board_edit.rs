@@ -57,6 +57,121 @@ pub struct Paste {
 const ASKING_ROUNDS: usize = 4;
 const ROOM_ROUNDS: usize = 24;
 
+/// What each gap between two columns lacks for the chips and the counts
+/// that stand in it (LAY-37), by the left column's place in a row, in the 20
+/// px steps the gaps grow by (LAY-03).
+///
+/// A chip stands left of its socket and a count right of its port, each in
+/// up to [`canvas::LANE`]; where lines run down the gap past it, it may
+/// stand beyond them, its stub across them. So each needs a stretch of the
+/// gap that wide between the lines that pass it, short of a line's gap from
+/// the lane of a count or a chip facing it across the gap.
+fn lane_room(
+    hanging: &apiforge_layout::Hanging<'_>,
+    plan: &canvas::shape::Plan,
+    placed: &[apiforge_layout::Point],
+    lanes: &[canvas::Lane],
+    routes: &[apiforge_layout::Route],
+    index: impl Fn(&str) -> Option<usize>,
+) -> Vec<(usize, f32)> {
+    let step = apiforge_layout::GAP;
+    let per = hanging.rows.columns();
+    // A stub, the room kept from a line, and half a chip's height, at 100 %.
+    let (stub, clear, half) = (10.0, 4.0, 10.0);
+    let wide = canvas::LANE - stub - 2.0;
+    // The row and the column of each card's stack.
+    let place = |node: usize| {
+        let spine = plan
+            .spine
+            .iter()
+            .position(|step| *step == node)
+            .or_else(|| {
+                plan.satellites
+                    .iter()
+                    .find(|(satellite, _)| *satellite == node)
+                    .map(|(_, spine)| *spine)
+            })?;
+        Some((spine / per, spine % per))
+    };
+    let sides = |input: bool| -> HashSet<(usize, usize)> {
+        lanes
+            .iter()
+            .filter(|lane| lane.input == input)
+            .filter_map(|lane| place(index(&lane.node)?))
+            .collect()
+    };
+    let (tagged, counted) = (sides(true), sides(false));
+    // The left and right edges of the spine step at a row and column.
+    let spine = |row: usize, column: usize| {
+        let step = *plan
+            .spine
+            .get(row * per + column)
+            .filter(|_| column < per)?;
+        Some((
+            placed[step].x,
+            placed[step].x + hanging.blocks[step].size.width,
+        ))
+    };
+    let segments: Vec<(apiforge_layout::Point, apiforge_layout::Point)> = routes
+        .iter()
+        .filter(|route| route.complete)
+        .flat_map(apiforge_layout::Route::segments)
+        .filter(|(from, to)| (from.x - to.x).abs() < 0.01 && (from.y - to.y).abs() > 0.01)
+        .collect();
+    let mut short: HashMap<usize, f32> = HashMap::new();
+    for lane in lanes {
+        let Some(node) = index(&lane.node) else {
+            continue;
+        };
+        let Some((row, column)) = place(node) else {
+            continue;
+        };
+        let size = hanging.blocks[node].size;
+        // The gap, and the stretch of it the chip or count may take.
+        let (gap, from, to) = if lane.input {
+            let Some((_, left)) = column.checked_sub(1).and_then(|before| spine(row, before))
+            else {
+                continue;
+            };
+            let facing = counted.contains(&(row, column - 1));
+            let from = left + if facing { canvas::LANE + step } else { clear };
+            (column - 1, from, placed[node].x - stub + clear)
+        } else {
+            let Some((right, _)) = spine(row, column + 1) else {
+                continue;
+            };
+            let facing = tagged.contains(&(row, column + 1));
+            let to = right - if facing { canvas::LANE + step } else { clear };
+            (column, placed[node].x + size.width + stub - clear, to)
+        };
+        // The lines that run past it, and the widest stretch between them.
+        let (top, bottom) = (lane.anchor.y - half, lane.anchor.y + half);
+        let mut lines: Vec<f32> = segments
+            .iter()
+            .filter(|(at, _)| at.x > from - clear && at.x < to + clear)
+            .filter(|(at, other)| at.y.min(other.y) < bottom && at.y.max(other.y) > top)
+            .map(|(at, _)| at.x)
+            .collect();
+        lines.sort_by(f32::total_cmp);
+        let ends = std::iter::once(from - clear)
+            .chain(lines)
+            .chain(std::iter::once(to + clear));
+        let widest = ends
+            .clone()
+            .zip(ends.skip(1))
+            .map(|(low, high)| high - low - 2.0 * clear)
+            .fold(f32::MIN, f32::max);
+        if wide - widest > 0.5 {
+            let more = short.entry(gap).or_default();
+            *more = more.max(wide - widest);
+        }
+    }
+    short
+        .into_iter()
+        .map(|(gap, more)| (gap, (more / step).ceil() * step))
+        .collect()
+}
+
 /// The space kept between pasted cards and the cards they clear.
 const PASTE_GAP: f32 = 40.0;
 
@@ -242,7 +357,7 @@ impl Board<'_> {
         let alone = apiforge_layout::Routing::sizing();
         for _ in 0..ASKING_ROUNDS {
             let (placed, rows) = apiforge_layout::hang_with(&hanging, &room);
-            let (cards, wires) = drawn(&placed);
+            let ((cards, wires), _) = drawn(&placed);
             let wanted: Vec<apiforge_layout::Route> = wires
                 .iter()
                 .flat_map(|wire| apiforge_layout::route(&cards, &[*wire], &alone))
@@ -255,19 +370,31 @@ impl Board<'_> {
         }
         // Then what is left: the board is routed as it will be drawn, and
         // each place where a line still runs within the gap widens the gap
-        // it lies in. Gaps only grow, so this ends; the limit is for a board
-        // whose lines no room separates.
+        // it lies in, as does each place where a chip or a count has no room
+        // beside its card clear of the lines (LAY-37). Gaps only grow, so
+        // this ends; the limit is for a board whose lines no room separates.
         for _ in 0..ROOM_ROUNDS {
             let (placed, rows) = apiforge_layout::hang_with(&hanging, &room);
-            let (cards, wires) = drawn(&placed);
+            let ((cards, wires), lanes) = drawn(&placed);
             let routes =
                 apiforge_layout::route(&cards, &wires, &apiforge_layout::Routing::default());
             let found = apiforge_layout::packed(&routes, &cards, gap);
-            if found.is_empty()
-                || !apiforge_layout::widen(
+            let lines = !found.is_empty()
+                && apiforge_layout::widen(
                     &hanging, &placed, &rows, &found, &hidden, gap, &mut room,
-                )
-            {
+                );
+            let chips = lane_room(&hanging, &plan, &placed, &lanes, &routes, |id| {
+                self.graph.nodes.iter().position(|node| node.id == id)
+            })
+            .into_iter()
+            .fold(false, |grew, (column, more)| {
+                if room.columns.len() <= column {
+                    room.columns.resize(column + 1, 0.0);
+                }
+                room.columns[column] += more;
+                grew || more > 0.0
+            });
+            if !(lines || chips) {
                 break;
             }
         }
