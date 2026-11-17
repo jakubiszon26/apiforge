@@ -223,7 +223,7 @@ fn fields(binding: Option<&Binding>, path: &[String]) -> Vec<String> {
 
 /// What a chip says, its shorter form, and the reference written whole.
 /// `number` is the source's place in the engine's order, its badge.
-fn texts(
+pub fn texts(
     graph: &Graph,
     project: &Project,
     wire: &BoardWire,
@@ -628,4 +628,36 @@ pub fn paint_statement(painter: &Painter, near: Rect, text: &str) {
         StrokeKind::Inside,
     );
     painter.galley(rect.min + vec2(6.0, 3.0), galley, theme::TEXT);
+}
+
+/// MOCK (LAY-14): the statement on a pill at a wire's midpoint (round 3).
+pub fn paint_pill(painter: &Painter, at: Pos2, text: &str) {
+    let galley = painter.layout_no_wrap(
+        text.to_owned(),
+        FontId::proportional(theme::FONT_META),
+        theme::TEXT,
+    );
+    let size = galley.size() + vec2(14.0, 6.0);
+    let rect = Rect::from_center_size(at, size);
+    painter.rect(
+        rect,
+        size.y / 2.0,
+        theme::WHITE,
+        Stroke::new(1.2, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    painter.galley(rect.min + vec2(7.0, 3.0), galley, theme::TEXT);
+}
+
+/// MOCK (LAY-14): where the pointer is, since a capture has none.
+pub fn paint_pointer(painter: &Painter, at: Pos2) {
+    use eframe::egui::{Color32, Shape};
+    let tail = [at + vec2(4.5, 10.0), at + vec2(8.5, 18.5)];
+    painter.line_segment(tail, Stroke::new(4.6, Color32::WHITE));
+    painter.add(Shape::convex_polygon(
+        vec![at, at + vec2(0.0, 15.5), at + vec2(11.0, 11.0)],
+        Color32::BLACK,
+        Stroke::new(1.4, Color32::WHITE),
+    ));
+    painter.line_segment(tail, Stroke::new(2.4, Color32::BLACK));
 }

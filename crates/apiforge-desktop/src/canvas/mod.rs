@@ -552,6 +552,9 @@ pub struct Canvas {
     offer_rect: Option<Rect>,
     #[cfg(test)]
     statement: Option<String>,
+    /// MOCK (LAY-14): the trace the mock-up draws.
+    #[allow(dead_code)]
+    pub(crate) mock: Option<MockTrace>,
     /// The continuation marks the last frame drew (LAY-06).
     #[cfg(test)]
     marks: Vec<shape::Mark>,
@@ -711,6 +714,7 @@ impl Default for Canvas {
             offer_rect: None,
             #[cfg(test)]
             statement: None,
+            mock: None,
             #[cfg(test)]
             marks: Vec::new(),
             #[cfg(test)]
@@ -721,6 +725,29 @@ impl Default for Canvas {
             ringed_ports: Vec::new(),
         }
     }
+}
+
+/// MOCK (LAY-14): a trace as the proposal would draw it. Throwaway.
+#[allow(dead_code)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MockTrace {
+    /// The wires traced, by id.
+    pub wires: Vec<String>,
+    /// The rest of the board dims, as for a selected step.
+    pub dim: bool,
+    /// The statement stands on a pill at each wire's midpoint, not in a box.
+    pub pill: bool,
+    /// Where the pointer is: this far along the first wire, or on the row
+    /// of this input of this card, or on the chip of the first wire.
+    pub along: Option<f32>,
+    /// Or exactly here on screen.
+    pub at: Option<Pos2>,
+    pub row: Option<(String, String)>,
+    pub chip: bool,
+    /// The pointer is drawn (pointing); a pinned trace has none.
+    pub pointer: bool,
+    /// The box stands this far from where it would (kept in the window).
+    pub nudge: Vec2,
 }
 
 impl Canvas {
@@ -1592,6 +1619,15 @@ impl Canvas {
                 .map(|wire| wire.id.clone())
                 .collect()
         });
+        let mock = self.mock.clone();
+        let lit: HashSet<String> = {
+            let mut lit = lit;
+            if let Some(mock) = &mock {
+                lit.extend(mock.wires.iter().cloned());
+            }
+            lit
+        };
+        let dimming = focus.is_some() || mock.as_ref().is_some_and(|mock| mock.dim);
         // The chips of the wires decided above, at the cards as they are drawn
         // now; a wire with no chip stays a wire (LAY-23).
         let (tags, counts) = match rest_plan {
@@ -1675,6 +1711,9 @@ impl Canvas {
                         .wires
                         .iter()
                         .any(|wire| self.selected_wires.contains(wire))
+                    || mock
+                        .as_ref()
+                        .is_some_and(|mock| tag.wires.iter().any(|wire| mock.wires.contains(wire)))
                     || pointed_tag.is_some_and(|index| shown_tags[index] == **tag)
                     || pointed_input.as_ref().is_some_and(|(reader, name, _)| {
                         &tag.reader == reader && &tag.input == name
@@ -1774,7 +1813,7 @@ impl Canvas {
                     selected_wires.contains(&wire.id)
                         || related_wires.contains(&wire.id)
                         || lit.contains(&wire.id),
-                    focus.is_some() && !lit.contains(&wire.id),
+                    dimming && !lit.contains(&wire.id),
                 );
                 if let Some(text) = wire_labels.get(&wire.id) {
                     paint::wire_label(&board_painter, wire, camera, text);
@@ -1807,7 +1846,7 @@ impl Canvas {
                     wire,
                     camera,
                     true,
-                    focus.is_some() && !lit.contains(&wire.id),
+                    dimming && !lit.contains(&wire.id),
                 );
                 drawn_revealed.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
@@ -1862,6 +1901,88 @@ impl Canvas {
                 if let (Some(color), Some(at)) = (focus.rings.get(other), at) {
                     port_rings.push((other.clone(), camera.to_screen(*at), *color));
                 }
+            }
+        }
+        // MOCK (LAY-14): both ends of a traced wire are ringed, and its
+        // statement is made the way a chip's is.
+        let mut mock_pills: Vec<(Pos2, String)> = Vec::new();
+        let mut mock_box: Option<(Rect, String, Option<Pos2>)> = None;
+        let mut mock_ends: HashSet<String> = HashSet::new();
+        if let Some(mock) = &mock {
+            let mut lines: Vec<String> = Vec::new();
+            let mut pointer_at: Option<Pos2> = mock.at;
+            for id in &mock.wires {
+                let Some((_, points)) = drawn.iter().chain(&drawn_revealed).find(|(w, _)| w == id)
+                else {
+                    continue;
+                };
+                let Some(wire) = board_wires
+                    .iter()
+                    .chain(&revealed_wires)
+                    .find(|wire| &wire.id == id)
+                else {
+                    continue;
+                };
+                let routing::Start::Output { card, .. } = &wire.start else {
+                    continue;
+                };
+                let (source, target) = (&cards[*card], &cards[wire.target]);
+                mock_ends.insert(source.id.clone());
+                mock_ends.insert(target.id.clone());
+                if let (Some(first), Some(last)) = (points.first(), points.last()) {
+                    port_rings.push((source.id.clone(), camera.to_screen(*first), theme::ACCENT));
+                    port_rings.push((target.id.clone(), camera.to_screen(*last), theme::ACCENT));
+                }
+                let (_, _, statement) = readers::texts(
+                    input.graph,
+                    input.project,
+                    wire,
+                    &target.id,
+                    &source.id,
+                    None,
+                );
+                let screen: Vec<Pos2> = points.iter().map(|at| camera.to_screen(*at)).collect();
+                mock_pills.push((along(&screen, 0.5), statement.clone()));
+                if pointer_at.is_none() {
+                    if let Some(t) = mock.along {
+                        pointer_at = Some(along(&screen, t));
+                    }
+                }
+                lines.push(statement);
+            }
+            let near = if let Some((card, name)) = &mock.row {
+                cards.iter().find(|c| &c.id == card).and_then(|card| {
+                    let index = card.inputs.iter().position(|row| &row.name == name)?;
+                    let row = camera.rect(card.input_row(index));
+                    pointer_at = Some(row.left_center() + vec2(row.width() * 0.45, 2.0));
+                    Some(row)
+                })
+            } else if mock.chip {
+                shown_tags
+                    .iter()
+                    .zip(&laid_tags)
+                    .find(|(tag, _)| tag.wires.iter().any(|w| mock.wires.contains(w)))
+                    .map(|(_, laid)| {
+                        pointer_at = Some(laid.rect.center() + vec2(2.0, 2.0));
+                        laid.rect
+                    })
+            } else {
+                pointer_at.map(|at| Rect::from_center_size(at, vec2(0.0, 12.0)))
+            };
+            if !mock.pill {
+                if let Some(near) = near {
+                    mock_box = Some((near.translate(mock.nudge), lines.join("\n"), None));
+                }
+            }
+            if mock.pointer {
+                if let Some(slot) = &mut mock_box {
+                    slot.2 = pointer_at;
+                } else {
+                    mock_box = Some((Rect::NOTHING, String::new(), pointer_at));
+                }
+            }
+            if !mock.pill {
+                mock_pills.clear();
             }
         }
         for (tag, laid) in shown_tags.iter().zip(&laid_tags) {
@@ -1925,7 +2046,7 @@ impl Canvas {
                     revealed: revealed.contains(&wire.id),
                     label_box: label_boxes.get(&wire.id).copied(),
                     lit: lit.contains(&wire.id),
-                    dimmed: focus.is_some() && !lit.contains(&wire.id),
+                    dimmed: dimming && !lit.contains(&wire.id),
                 })
                 .collect();
         }
@@ -2107,9 +2228,11 @@ impl Canvas {
                     .as_ref()
                     .and_then(|focus| focus.rings.get(&card.id).copied())
                     .or_else(|| related_blocks.contains(&card.id).then_some(paint::RELATED)),
-                dimmed: focus.as_ref().is_some_and(|focus| {
+                dimmed: (focus.as_ref().is_some_and(|focus| {
                     focus.selected != card.id && !focus.rings.contains_key(&card.id)
-                }) && !failed
+                }) || (mock.as_ref().is_some_and(|mock| mock.dim)
+                    && !mock_ends.contains(&card.id)))
+                    && !failed
                     && !run.running,
             };
             let drawn_card = if card.compact.is_some() {
@@ -2388,6 +2511,17 @@ impl Canvas {
         }
         if let Some((text, near)) = &statement {
             readers::paint_statement(&painter, *near, text);
+        }
+        for (at, text) in &mock_pills {
+            readers::paint_pill(&board_painter, *at, text);
+        }
+        if let Some((near, text, pointer)) = &mock_box {
+            if !text.is_empty() {
+                readers::paint_statement(&painter, *near, text);
+            }
+            if let Some(at) = pointer {
+                readers::paint_pointer(&painter, *at);
+            }
         }
 
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
@@ -4527,6 +4661,20 @@ fn wire_ports(wire: &apiforge_core::graph::Wire) -> (String, String) {
 }
 
 /// The wire under the pointer, within a few pixels of the route that was drawn.
+/// MOCK (LAY-14): the point `t` of the way along a line.
+fn along(points: &[Pos2], t: f32) -> Pos2 {
+    let total: f32 = points.windows(2).map(|p| p[0].distance(p[1])).sum();
+    let mut left = total * t;
+    for pair in points.windows(2) {
+        let length = pair[0].distance(pair[1]);
+        if left <= length && length > 0.0 {
+            return pair[0] + (pair[1] - pair[0]) * (left / length);
+        }
+        left -= length;
+    }
+    points.last().copied().unwrap_or_default()
+}
+
 fn hit_wire(drawn: &[(String, Vec<Pos2>)], camera: Camera, pointer: Pos2) -> Option<String> {
     drawn
         .iter()
