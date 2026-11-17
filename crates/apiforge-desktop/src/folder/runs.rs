@@ -2,7 +2,7 @@
 use super::*;
 use apiforge_core::{
     journal::JournalRun,
-    run::{Phase, RunMode, RunResult, RunStatus},
+    run::{CauseEnds, Phase, RunMode, RunResult, RunStatus},
 };
 use apiforge_project::PreparedRun;
 use apiforge_runner::{RunHandle, RunRequest, RunTarget, RunnerService};
@@ -39,6 +39,9 @@ pub(super) struct JournalReview {
 struct Report {
     prepared: PreparedRun,
     result: RunResult,
+    /// The cause ends of `result`'s steps, resolved when the result changes
+    /// rather than every frame (LAY-19).
+    ends: Arc<CauseEnds>,
     /// The run before, while it described the document as it is: the board
     /// shows its results, muted, for the steps this run has not reached
     /// (LAY-07).
@@ -55,6 +58,7 @@ impl Report {
     fn new(prepared: PreparedRun, result: RunResult, previous: Option<RunResult>) -> Self {
         Self {
             prepared,
+            ends: Arc::new(CauseEnds::of(&result.steps)),
             result,
             previous,
             checks: Vec::new(),
@@ -127,7 +131,10 @@ fn publish(
     keep: bool,
 ) {
     match reports.get_mut(prepared.document_id()) {
-        Some(report) if report.result.id == result.id => report.result = result,
+        Some(report) if report.result.id == result.id => {
+            report.ends = Arc::new(CauseEnds::of(&result.steps));
+            report.result = result;
+        }
         _ => {
             let previous = reports
                 .remove(prepared.document_id())
@@ -221,6 +228,7 @@ impl FolderApp {
         if let Some(report) = self.runs.reports.get_mut(id) {
             report.result.steps.retain(|step| keep(step));
             report.result.status = apiforge_core::run::RunStatus::Running;
+            report.ends = Arc::new(CauseEnds::of(&report.result.steps));
         }
     }
 
@@ -230,7 +238,17 @@ impl FolderApp {
     pub(super) fn debug_edit_run(&mut self, id: &str, edit: impl FnOnce(&mut RunResult)) {
         if let Some(report) = self.runs.reports.get_mut(id) {
             edit(&mut report.result);
+            report.ends = Arc::new(CauseEnds::of(&report.result.steps));
         }
+    }
+
+    /// The cause ends of the document's last run, shared with the report
+    /// (LAY-19).
+    pub(super) fn run_ends(&self, id: &str) -> Option<Arc<CauseEnds>> {
+        self.runs
+            .reports
+            .get(id)
+            .map(|report| Arc::clone(&report.ends))
     }
 
     /// The document's report while it is fresh or only checks were added
@@ -606,6 +624,7 @@ impl FolderApp {
         };
         let freshness = self.freshness(report);
         let result = report.result.clone();
+        let ends = Arc::clone(&report.ends);
         let checked: Vec<_> = report.checks[..freshness.checks()]
             .iter()
             .map(|check| check.field.clone())
@@ -639,6 +658,7 @@ impl FolderApp {
             ui,
             &crate::report::Context {
                 run: Some(&result),
+                ends: Some(&ends),
                 selected_node_id: selected,
                 error_policy: policy,
                 running: self.runs.handle.is_some(),

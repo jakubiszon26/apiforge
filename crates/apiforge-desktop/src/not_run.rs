@@ -4,11 +4,12 @@
 //! from the engine's message: a step after a stop reads `Stopped ·
 //! checkout_total failed` although the engine names the step before it.
 //! The card that holds the failure counts the steps it kept from running,
-//! as many as the rows of Run results whose cause ends there.
+//! as many as the rows of Run results whose cause ends there. The ends are
+//! resolved once per run (`CauseEnds`); here they are only read.
 
 use apiforge_core::{
     model::NodeKind,
-    run::{CauseEnd, NotRunCause, StepResult, StepStatus},
+    run::{CauseEnd, CauseEnds, EndStep, NotRunCause, StepResult, StepStatus},
 };
 use std::collections::HashMap;
 
@@ -16,6 +17,11 @@ use std::collections::HashMap;
 /// run, and it reads *Not met* (4 A).
 pub fn unmet(step: &StepResult) -> bool {
     step.kind == NodeKind::Condition && step.status == StepStatus::Blocked && step.cause.is_none()
+}
+
+/// The end of a chain is a false *Data condition*.
+fn unmet_end(end: &EndStep) -> bool {
+    end.kind == NodeKind::Condition && end.status == StepStatus::Blocked
 }
 
 /// `11 steps not run`.
@@ -40,39 +46,24 @@ pub struct Cost {
     pub unmet: bool,
 }
 
-/// By card, the steps of `steps` kept from running by the step at the end
-/// of their cause; a folded check's on the card it is folded into, which
-/// `holder` names.
+/// By card, the steps kept from running by the step at the end of their
+/// cause; a folded check's on the card it is folded into, which `holder`
+/// names.
 pub fn costs<'a>(
-    steps: &'a [StepResult],
+    ends: &'a CauseEnds,
     holder: impl Fn(&str) -> Option<&'a str>,
 ) -> HashMap<&'a str, Cost> {
     let mut costs: HashMap<&str, Cost> = HashMap::new();
-    for step in steps {
-        let Some(end) = step.cause_end(steps).and_then(|end| end.step) else {
-            continue;
-        };
+    for end in ends.ends().filter_map(|end| end.step.as_ref()) {
         let card = holder(&end.node_id).unwrap_or(&end.node_id);
         let cost = costs.entry(card).or_insert(Cost {
             count: 0,
             unmet: true,
         });
         cost.count += 1;
-        cost.unmet &= unmet(end);
+        cost.unmet &= unmet_end(end);
     }
     costs
-}
-
-/// How many of `steps` the step `id` kept from running.
-pub fn count_of(steps: &[StepResult], id: &str) -> usize {
-    steps
-        .iter()
-        .filter(|step| {
-            step.cause_end(steps)
-                .and_then(|end| end.step)
-                .is_some_and(|end| end.node_id == id)
-        })
-        .count()
 }
 
 /// A group of Run results' summary; every step is in one.
@@ -110,9 +101,9 @@ impl Group {
         }
     }
 
-    /// The group of `step` among `steps`, the results of its graph.
-    pub fn of(step: &StepResult, steps: &[StepResult]) -> Self {
-        if let Some(not_run) = NotRun::of(step, steps) {
+    /// The group of `step`, with the ends of its graph.
+    pub fn of(step: &StepResult, ends: &CauseEnds) -> Self {
+        if let Some(not_run) = NotRun::of(step, ends) {
             return not_run.group();
         }
         match step.status {
@@ -128,16 +119,17 @@ impl Group {
 
 /// Run results' summary: how many steps each group holds, in a fixed
 /// order, empty groups left out.
-pub fn summary(steps: &[StepResult]) -> Vec<(Group, usize)> {
+pub fn summary(steps: &[StepResult], ends: &CauseEnds) -> Vec<(Group, usize)> {
+    let mut counts = [0; Group::ALL.len()];
+    for step in steps {
+        let group = Group::of(step, ends);
+        if let Some(at) = Group::ALL.iter().position(|each| *each == group) {
+            counts[at] += 1;
+        }
+    }
     Group::ALL
         .into_iter()
-        .map(|group| {
-            let count = steps
-                .iter()
-                .filter(|step| Group::of(step, steps) == group)
-                .count();
-            (group, count)
-        })
+        .zip(counts)
         .filter(|(_, count)| *count > 0)
         .collect()
 }
@@ -145,12 +137,12 @@ pub fn summary(steps: &[StepResult]) -> Vec<(Group, usize)> {
 /// Why a step did not run: the last link of its cause and the step at its
 /// end.
 #[derive(Clone, Copy, Debug)]
-pub struct NotRun<'a>(CauseEnd<'a>);
+pub struct NotRun<'a>(&'a CauseEnd);
 
 impl<'a> NotRun<'a> {
     /// `None` for a step that ran.
-    pub fn of(step: &'a StepResult, steps: &'a [StepResult]) -> Option<Self> {
-        step.cause_end(steps).map(Self)
+    pub fn of(step: &StepResult, ends: &'a CauseEnds) -> Option<Self> {
+        ends.end(&step.node_id).map(Self)
     }
 
     /// The first word: the kind of the last link.
@@ -174,11 +166,11 @@ impl<'a> NotRun<'a> {
 
     /// `checkout_total failed`, `valid_cart unmet`.
     fn end(&self) -> Option<String> {
-        self.0.step.map(|end| {
+        self.0.step.as_ref().map(|end| {
             format!(
                 "{} {}",
-                end.display_name(),
-                if unmet(end) { "unmet" } else { "failed" }
+                end.name,
+                if unmet_end(end) { "unmet" } else { "failed" }
             )
         })
     }
@@ -193,7 +185,8 @@ impl<'a> NotRun<'a> {
             NotRunCause::CleanupInputMissing { .. } => self
                 .0
                 .step
-                .map(|end| format!("no value from {}", end.display_name())),
+                .as_ref()
+                .map(|end| format!("no value from {}", end.name)),
             _ => self.end(),
         };
         match rest {
@@ -204,10 +197,10 @@ impl<'a> NotRun<'a> {
 
     /// The sentence of the step's details.
     pub fn sentence(&self) -> String {
-        let end = self.0.step;
-        let name = end.map(StepResult::display_name);
-        let condition = end.is_some_and(unmet);
-        match (self.0.last, name) {
+        let end = self.0.step.as_ref();
+        let name = end.map(|end| end.name.as_str());
+        let condition = end.is_some_and(unmet_end);
+        match (&self.0.last, name) {
             (NotRunCause::Stopped { .. }, Some(name)) if condition => format!(
                 "Did not run: the condition {name} is not met and the error policy Stop ended the run."
             ),
@@ -327,17 +320,18 @@ mod tests {
                 Some(NotRunCause::OutsidePath),
             ),
         ];
+        let ends = CauseEnds::of(&steps);
         let words = |handle: &str| {
             let step = steps.iter().find(|step| step.handle == handle).unwrap();
-            NotRun::of(step, &steps).map(|not_run| not_run.words())
+            NotRun::of(step, &ends).map(|not_run| not_run.words())
         };
         assert_eq!(words("total"), None);
         assert_eq!(words("pay").as_deref(), Some("Stopped · total failed"));
         assert_eq!(words("behind").as_deref(), Some("Blocked · valid unmet"));
         assert_eq!(words("else").as_deref(), Some("Skipped · outside path"));
-        assert_eq!(count_of(&steps, "id-total"), 3);
-        assert_eq!(count_of(&steps, "id-valid"), 2);
-        let costs = costs(&steps, |_| None);
+        assert_eq!(ends.kept("id-total"), 3);
+        assert_eq!(ends.kept("id-valid"), 2);
+        let costs = costs(&ends, |_| None);
         assert_eq!(
             costs.get("id-valid"),
             Some(&Cost {
@@ -346,7 +340,7 @@ mod tests {
             })
         );
         assert_eq!(
-            summary(&steps),
+            summary(&steps, &ends),
             [
                 (Group::Failed, 1),
                 (Group::NotMet, 1),

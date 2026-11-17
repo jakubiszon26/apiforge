@@ -260,6 +260,9 @@ pub struct Input<'a> {
     pub parameters: &'a [String],
     pub selection: &'a [String],
     pub steps: Option<&'a [StepResult]>,
+    /// The run's cause ends, resolved once per run (LAY-19); `None`
+    /// resolves them from `steps`.
+    pub ends: Option<&'a apiforge_core::run::CauseEnds>,
     /// Where a run that is on has got to (LAY-07).
     pub progress: Progress<'a>,
     pub can_paste: bool,
@@ -1431,10 +1434,18 @@ impl Canvas {
         );
         // The steps a failure kept from running, on the card that holds it:
         // a folded check's on its subject (LAY-19).
-        let costs = input
-            .steps
-            .map(|steps| {
-                crate::not_run::costs(steps, |id| {
+        let resolved;
+        let ends = match (input.steps, input.ends) {
+            (Some(_), Some(ends)) => Some(ends),
+            (Some(steps), None) => {
+                resolved = apiforge_core::run::CauseEnds::of(steps);
+                Some(&resolved)
+            }
+            (None, _) => None,
+        };
+        let costs = ends
+            .map(|ends| {
+                crate::not_run::costs(ends, |id| {
                     folded.get(id).map(|(subject, _)| subject.as_str())
                 })
             })
@@ -2115,9 +2126,7 @@ impl Canvas {
                     .and_then(|steps| steps.iter().find(|step| step.node_id == card.id)),
                 clear_of: &chip_boxes,
                 // A Value or an IF card keeps its line (LAY-19, 3 A).
-                steps: input
-                    .steps
-                    .filter(|_| !matches!(card.kind, NodeKind::Value | NodeKind::If)),
+                ends: ends.filter(|_| !matches!(card.kind, NodeKind::Value | NodeKind::If)),
                 cost: costs
                     .get(card.id.as_str())
                     .copied()
@@ -4929,6 +4938,7 @@ mod tests {
                                 parameters: &[],
                                 selection: &selection,
                                 steps: None,
+                                ends: None,
                                 progress: Progress::default(),
                                 can_paste: false,
                                 context: "test",
@@ -4985,6 +4995,7 @@ mod tests {
                                 parameters: &[],
                                 selection: &[],
                                 steps: None,
+                                ends: None,
                                 progress: Progress::default(),
                                 can_paste: false,
                                 context: "test",
@@ -5065,6 +5076,7 @@ mod tests {
                             parameters: &[],
                             selection: &[],
                             steps: None,
+                            ends: None,
                             progress: Progress::default(),
                             can_paste: false,
                             context: "test",

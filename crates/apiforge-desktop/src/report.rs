@@ -18,7 +18,7 @@ use apiforge_core::{
     js::{json_stringify, type_name},
     model::{ErrorPolicy, Match, NodeKind, Predicate},
     path::JsonPath,
-    run::{Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
+    run::{CauseEnds, Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
@@ -57,6 +57,9 @@ pub struct CheckedField {
 /// Everything the report panel needs to draw one frame.
 pub struct Context<'a> {
     pub run: Option<&'a RunResult>,
+    /// The run's cause ends, resolved once per run (LAY-19); `None`
+    /// resolves them from the run.
+    pub ends: Option<&'a CauseEnds>,
     pub selected_node_id: Option<&'a str>,
     pub error_policy: ErrorPolicy,
     pub running: bool,
@@ -226,21 +229,27 @@ pub struct StepRow<'a> {
     /// The node ids of the component calls that hold the step, outermost
     /// first; empty at the top level.
     pub calls: Vec<&'a str>,
-    /// The results of the step's own graph, which its cause names (LAY-19).
-    pub siblings: &'a [StepResult],
 }
 
 impl StepRow<'_> {
+    /// The cause ends of the step's own graph: the run's, or those of the
+    /// component calls that hold it (LAY-19).
+    fn level<'e>(&self, ends: &'e CauseEnds) -> Option<&'e CauseEnds> {
+        self.calls
+            .iter()
+            .try_fold(ends, |ends, call| ends.within(call))
+    }
+
     /// Why the step did not run; `None` for a step that ran.
-    fn not_run(&self) -> Option<NotRun<'_>> {
-        NotRun::of(self.step, self.siblings)
+    fn not_run<'e>(&self, ends: &'e CauseEnds) -> Option<NotRun<'e>> {
+        NotRun::of(self.step, self.level(ends)?)
     }
 
     /// The step's first word: its cause's kind for a step that did not run,
     /// *Not met* for a false *Data condition*, otherwise its status
     /// (LAY-19).
-    fn word(&self) -> &'static str {
-        match self.not_run() {
+    fn word(&self, ends: &CauseEnds) -> &'static str {
+        match self.not_run(ends) {
             Some(not_run) => not_run.word(),
             None if not_run::unmet(self.step) => "Not met",
             None => self.step.status.label(),
@@ -249,13 +258,16 @@ impl StepRow<'_> {
 
     /// What the row says of the step: what its card says, the steps it kept
     /// from running after a step that ran (LAY-19).
-    fn words(&self) -> String {
-        if let Some(not_run) = self.not_run() {
+    fn words(&self, ends: &CauseEnds) -> String {
+        if let Some(not_run) = self.not_run(ends) {
             return not_run.words();
         }
-        match not_run::count_of(self.siblings, &self.step.node_id) {
-            0 => self.word().to_owned(),
-            count => format!("{} · {}", self.word(), not_run::count_text(count)),
+        match self
+            .level(ends)
+            .map_or(0, |level| level.kept(&self.step.node_id))
+        {
+            0 => self.word(ends).to_owned(),
+            count => format!("{} · {}", self.word(ends), not_run::count_text(count)),
         }
     }
 }
@@ -283,7 +295,6 @@ fn flatten_into<'a>(
             root_id: root.to_owned(),
             depth,
             calls: calls.to_vec(),
-            siblings: steps,
         });
         if let Some(children) = &step.children {
             let child_prefix = format!("{key}/");
@@ -871,7 +882,15 @@ impl ReportPanel {
         context: &Context<'_>,
         actions: &mut Vec<Action>,
     ) {
-        header_row(ui, run, context.files_busy, actions);
+        let resolved;
+        let ends = match context.ends {
+            Some(ends) => ends,
+            None => {
+                resolved = CauseEnds::of(&run.steps);
+                &resolved
+            }
+        };
+        header_row(ui, run, ends, context.files_busy, actions);
         if run.diagnostic {
             ui.label(
                 RichText::new(
@@ -917,7 +936,7 @@ impl ReportPanel {
                 egui::vec2(300.0, height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    self.step_list(ui, &rows, selected.as_ref(), actions);
+                    self.step_list(ui, &rows, selected.as_ref(), ends, actions);
                 },
             );
             ui.separator();
@@ -937,6 +956,7 @@ impl ReportPanel {
                                 ui,
                                 &run.id,
                                 selected.as_ref(),
+                                ends,
                                 requirement,
                                 !context.document_locked,
                                 context.component,
@@ -953,6 +973,7 @@ impl ReportPanel {
         ui: &mut Ui,
         rows: &[StepRow<'_>],
         selected: Option<&StepRow<'_>>,
+        ends: &CauseEnds,
         actions: &mut Vec<Action>,
     ) {
         egui::ScrollArea::vertical()
@@ -973,7 +994,7 @@ impl ReportPanel {
                         ui.add_space(2.0);
                     }
                     let is_active = selected.is_some_and(|active| active.key == row.key);
-                    if step_row_button(ui, row, is_active).clicked() {
+                    if step_row_button(ui, row, is_active, ends).clicked() {
                         self.selected_key = Some(row.key.clone());
                         actions.push(Action::SelectNode(row.root_id.clone()));
                     }
@@ -987,6 +1008,7 @@ impl ReportPanel {
         ui: &mut Ui,
         run_id: &str,
         selected: Option<&StepRow<'_>>,
+        ends: &CauseEnds,
         requirement: Option<Requirement>,
         editable: bool,
         component: bool,
@@ -1020,13 +1042,13 @@ impl ReportPanel {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                widgets::pill(ui, selected.word(), status_color(step.status));
+                widgets::pill(ui, selected.word(ends), status_color(step.status));
             });
         });
 
         // A step that did not run says why from its cause, never from the
         // engine's message (LAY-19).
-        let message = match selected.not_run() {
+        let message = match selected.not_run(ends) {
             Some(not_run) => Some(Cow::Owned(not_run.sentence())),
             None => step.message.as_deref().map(Cow::Borrowed),
         };
@@ -1461,7 +1483,13 @@ pub(crate) fn mode_pill(mode: RunMode) -> (&'static str, Color32) {
     }
 }
 
-fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<Action>) {
+fn header_row(
+    ui: &mut Ui,
+    run: &RunResult,
+    ends: &CauseEnds,
+    files_busy: bool,
+    actions: &mut Vec<Action>,
+) {
     ui.horizontal(|ui| {
         let (text, colour) = mode_pill(run.mode);
         widgets::pill(ui, text, colour);
@@ -1491,7 +1519,7 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
             }
             // Every step in one group, the steps that did not run by their
             // cause (LAY-19); right to left, so the last group first.
-            for (group, count) in not_run::summary(&run.steps).into_iter().rev() {
+            for (group, count) in not_run::summary(&run.steps, ends).into_iter().rev() {
                 group_label(ui, group, count);
             }
         });
@@ -1561,7 +1589,12 @@ fn compact_json(value: &Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| json_stringify(value))
 }
 
-fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Response {
+fn step_row_button(
+    ui: &mut Ui,
+    row: &StepRow<'_>,
+    active: bool,
+    ends: &CauseEnds,
+) -> egui::Response {
     let indent = row.depth as f32 * 14.0;
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 42.0), Sense::click());
@@ -1596,7 +1629,7 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     name.wrap.max_rows = 1;
     let galley = painter.layout_job(name);
     painter.galley(egui::pos2(text_left, rect.top() + 5.0), galley, name_color);
-    let words = row.words();
+    let words = row.words(ends);
     let sub = if row.depth > 0 {
         format!("Inside component · {words}")
     } else {
@@ -1873,6 +1906,7 @@ mod tests {
         };
         let context = Context {
             run: None,
+            ends: None,
             selected_node_id: None,
             error_policy: ErrorPolicy::Continue,
             running: false,
@@ -1985,6 +2019,7 @@ mod tests {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let empty = Context {
                     run: None,
+                    ends: None,
                     selected_node_id: None,
                     error_policy: ErrorPolicy::Continue,
                     running: false,
@@ -2003,6 +2038,7 @@ mod tests {
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 let populated = Context {
                     run: Some(&run),
+                    ends: None,
                     selected_node_id: Some("comp-1"),
                     error_policy: ErrorPolicy::Stop,
                     running: false,
@@ -2060,6 +2096,7 @@ mod tests {
                 let mut out = ctx.run_ui(input, |ui| {
                     let context = Context {
                         run: Some(&run),
+                        ends: None,
                         selected_node_id: Some("comp-1"),
                         error_policy: ErrorPolicy::Continue,
                         running: false,
@@ -2111,6 +2148,7 @@ mod tests {
         };
         let report_context = Context {
             run: None,
+            ends: None,
             selected_node_id: None,
             error_policy: ErrorPolicy::Continue,
             running: false,
@@ -2172,6 +2210,7 @@ mod tests {
             };
             let report_context = Context {
                 run: None,
+                ends: None,
                 selected_node_id: None,
                 error_policy: ErrorPolicy::Continue,
                 running: false,
@@ -2236,6 +2275,7 @@ mod tests {
             };
             let report_context = Context {
                 run: None,
+                ends: None,
                 selected_node_id: None,
                 error_policy: ErrorPolicy::Continue,
                 running: false,

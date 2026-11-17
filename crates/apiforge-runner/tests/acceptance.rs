@@ -16,7 +16,9 @@ use apiforge_core::{
     format::{Node, Project, Scenario},
     graph::{WireKind, wires},
     model::{Branch, NodeKind},
-    run::{CauseEnd, NotRunCause, RunMode, RunResult, RunStatus, StepResult, StepStatus},
+    run::{
+        CauseEnd, CauseEnds, NotRunCause, RunMode, RunResult, RunStatus, StepResult, StepStatus,
+    },
 };
 use apiforge_runner::{HttpTransport, RunOptions, RunRequest, SeededRandom, run_scenario};
 use apiforge_script::{Document, LowerContext, format, lower, parse};
@@ -567,13 +569,13 @@ async fn not_run_causes_are_an_enum_with_one_variant_per_branch() {
 }
 
 /// The step a not-run step's cause chain ends at, or the cause that ends it
-/// without a step; the rule is `StepResult::cause_end` (LAY-19).
-fn chain_end<'a>(run: &'a RunResult, step: &'a StepResult) -> Result<&'a str, NotRunCause> {
-    match step.cause_end(&run.steps) {
-        None => Ok(&step.handle),
+/// without a step; the rule is `CauseEnds` (LAY-19).
+fn chain_end<'a>(run: &'a RunResult, step: &'a StepResult) -> Result<String, NotRunCause> {
+    match CauseEnds::of(&run.steps).end(&step.node_id) {
+        None => Ok(step.handle.clone()),
         Some(CauseEnd {
             step: Some(end), ..
-        }) => Ok(&end.handle),
+        }) => Ok(end.handle.clone()),
         Some(CauseEnd { last, step: None }) => Err(last.clone()),
     }
 }
@@ -597,7 +599,7 @@ async fn causes_on_shop_30() {
     for step in not_run {
         assert_eq!(
             chain_end(&run, step),
-            Ok("checkout_total"),
+            Ok("checkout_total".to_owned()),
             "`{}`: {:?}",
             step.handle,
             step.cause
@@ -631,7 +633,7 @@ async fn causes_on_shop_30() {
     );
     assert_eq!(
         chain_end(&run, by_handle(&run, "logout")),
-        Ok("refund_amount")
+        Ok("refund_amount".to_owned())
     );
 }
 

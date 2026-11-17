@@ -15,7 +15,7 @@ use crate::{
 use apiforge_core::{
     format::Graph,
     model::{Branch, NodeKind},
-    run::{StepResult, StepStatus},
+    run::{CauseEnds, StepResult, StepStatus},
 };
 use eframe::egui::{
     self, Align2, Color32, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2,
@@ -517,10 +517,10 @@ pub struct CardRun<'a> {
     /// The chips and counts on screen (LAY-23), which the badge keeps
     /// clear of.
     pub clear_of: &'a [Rect],
-    /// The results of the card's graph, from which the card says why its
-    /// step did not run (LAY-19); `None` on a Value or an IF card, which
-    /// keeps its line (3 A).
-    pub steps: Option<&'a [StepResult]>,
+    /// The run's cause ends, from which the card says why its step did not
+    /// run (LAY-19); `None` on a Value or an IF card, which keeps its line
+    /// (3 A).
+    pub ends: Option<&'a CauseEnds>,
     /// The steps the card's step, or a check folded into it, kept from
     /// running (LAY-19).
     pub cost: Option<Cost>,
@@ -533,8 +533,8 @@ impl CardRun<'_> {
         if let Some(step) = self.step {
             // A step that did not run names its cause, without a duration;
             // a false *Data condition* reads *Not met* (LAY-19).
-            if let Some(steps) = self.steps {
-                if let Some(not_run) = NotRun::of(step, steps) {
+            if let Some(ends) = self.ends {
+                if let Some(not_run) = NotRun::of(step, ends) {
                     return (not_run.words(), status_color(step.status));
                 }
                 if not_run::unmet(step) {
