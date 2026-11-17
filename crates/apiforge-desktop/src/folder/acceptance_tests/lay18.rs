@@ -22,7 +22,10 @@ const CART_TOTAL: &str = "cart.body.total → 2 checks: cart_total, receipt_tota
 
 fn opened(size: Vec2) -> (tempfile::TempDir, FolderHarness, String) {
     let (project, mut harness, id) = tidied("shop-30", size, Checks::Collapsed);
-    assert!(board(&harness, &id).debug_compact(), "Compact is the default");
+    assert!(
+        board(&harness, &id).debug_compact(),
+        "Compact is the default"
+    );
     show(&mut harness, &id, "login", 0.6);
     (project, harness, id)
 }
@@ -100,7 +103,9 @@ fn lines(harness: &FolderHarness, id: &str, prefix: &str) -> Vec<String> {
 fn assert_no_list(harness: &FolderHarness, id: &str, context: &str) {
     let boxes = board(harness, id).debug_statements();
     assert!(
-        boxes.iter().all(|(text, _)| !text.contains(" → 10 readers")),
+        boxes
+            .iter()
+            .all(|(text, _)| !text.contains(" → 10 readers")),
         "{context}: no list: {boxes:?}"
     );
 }
@@ -138,9 +143,7 @@ fn lay18_criterion_1_a_count_lists_its_fields() {
     );
     // Criterion 5: the count's accessible name.
     assert!(
-        harness
-            .query_by_label("login.body → 11 readers")
-            .is_some(),
+        harness.query_by_label("login.body → 11 readers").is_some(),
         "the count keeps its name"
     );
 
@@ -337,7 +340,12 @@ fn lay18_criterion_4_the_list_moves_nothing_and_fits() {
 
 /// The value of `field` of `handle`'s port `port` in the run's report, as
 /// the list writes it: JSON, cut to 28 characters.
-fn reported(report: &apiforge_core::run::RunResult, handle: &str, port: &str, field: &str) -> String {
+fn reported(
+    report: &apiforge_core::run::RunResult,
+    handle: &str,
+    port: &str,
+    field: &str,
+) -> String {
     let step = report
         .steps
         .iter()
@@ -382,7 +390,10 @@ fn lay18_criterion_6_the_list_names_the_run_value() {
     hover(&mut harness, rect.center());
     assert_eq!(
         lines(&harness, &id, "login.body."),
-        vec![with_value(LOGIN_TOKEN, &token), with_value(LOGIN_USER, &user)]
+        vec![
+            with_value(LOGIN_TOKEN, &token),
+            with_value(LOGIN_USER, &user)
+        ]
     );
     away(&mut harness);
 
@@ -398,7 +409,10 @@ fn lay18_criterion_6_the_list_names_the_run_value() {
     assert_eq!(id_value, "\"c-1\"");
     assert_eq!(
         lines(&harness, &id, "cart.body."),
-        vec![with_value(CART_ID, &id_value), with_value(CART_TOTAL, &total)]
+        vec![
+            with_value(CART_ID, &id_value),
+            with_value(CART_TOTAL, &total)
+        ]
     );
     away(&mut harness);
 
@@ -435,4 +449,45 @@ fn lay18_criterion_6_the_list_names_the_run_value() {
         lines(&harness, &id, "login.body."),
         vec![with_value(LOGIN_TOKEN, &token), LOGIN_USER.to_owned()]
     );
+}
+
+/// A capture that keeps the pointer where it is: what is pointed at is what
+/// the view shows.
+fn save(harness: &mut FolderHarness, name: &str) {
+    harness.step();
+    let image = harness
+        .render()
+        .unwrap_or_else(|error| panic!("cannot render {name}: {error}"));
+    let directory = crate::testing::capture_dir();
+    fs::create_dir_all(&directory).unwrap();
+    image.save(directory.join(format!("{name}.png"))).unwrap();
+}
+
+/// The views of the QA section: `login`'s count pointed at and clicked, at
+/// 1600 × 1000 and 960 × 540, and pointed at after a run.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay18() {
+    for (size, suffix) in [(WIDE, "1600"), (MINIMUM, "960")] {
+        let (_project, mut harness, id) = opened(size);
+        let (_, rect) = count(&harness, &id, "login", "body");
+        hover(&mut harness, rect.center());
+        save(&mut harness, &format!("lay18-login-point-{suffix}"));
+        click(&mut harness, rect.center());
+        away(&mut harness);
+        save(&mut harness, &format!("lay18-login-click-{suffix}"));
+        escape(&mut harness);
+
+        choose(&mut harness, "Run simulation");
+        finish_run(&mut harness);
+        choose(&mut harness, "Diagram");
+        settle(&mut harness);
+        for (step, zoom) in [("login", 0.6), ("cart", 1.0)] {
+            show(&mut harness, &id, step, zoom);
+            let (_, rect) = count(&harness, &id, step, "body");
+            hover(&mut harness, rect.center());
+            save(&mut harness, &format!("lay18-{step}-run-point-{suffix}"));
+            away(&mut harness);
+        }
+    }
 }
