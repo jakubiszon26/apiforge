@@ -315,11 +315,12 @@ fn invalid_code_locks_only_its_own_diagram_and_shows_the_last_valid_one() {
 }
 
 #[test]
-fn a_graphical_edit_reprints_the_source_and_retires_its_text_history() {
+fn a_graphical_edit_rewrites_its_statement_and_retires_its_text_history() {
     let directory = shop();
     let (context, mut app) = open(directory.path());
     let scenario = document(&app, SCENARIO);
-    // A blank first line is valid but not how the printer writes it.
+    // A blank first line is valid but not how the printer writes it; the
+    // edit rewrites only the statement it changes (LAY-34).
     context.memory_mut(|memory| memory.request_focus(editor_id(&scenario)));
     frame(&mut app, &context, vec![]);
     frame(&mut app, &context, vec![key(Key::Enter, Modifiers::NONE)]);
@@ -333,7 +334,7 @@ fn a_graphical_edit_reprints_the_source_and_retires_its_text_history() {
     frame(&mut app, &context, vec![]);
     let reprinted = text(&app, &scenario);
     assert!(reprinted.contains("Renamed product"), "{reprinted}");
-    assert!(reprinted.starts_with("scenario"), "canonical print");
+    assert!(reprinted.starts_with('\n'), "the blank line stays: {reprinted}");
     assert_eq!(first_node(&app, &scenario).id, node.id);
 
     // Undoing in the text cannot type back the source the graph replaced.
