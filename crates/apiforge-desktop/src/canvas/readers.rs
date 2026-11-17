@@ -348,7 +348,7 @@ fn fields_read(graph: &Graph, project: &Project, source: &str, port: &str) -> Ve
             }),
         }
     }
-    fields.sort_by(|a, b| b.readers.len().cmp(&a.readers.len()));
+    fields.sort_by_key(|field| std::cmp::Reverse(field.readers.len()));
     fields
 }
 
