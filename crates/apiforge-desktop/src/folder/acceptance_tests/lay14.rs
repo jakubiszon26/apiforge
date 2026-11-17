@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 
 /// The line `valid_cart → checkout`: `valid_cart.value.id` has two readers,
 /// so it is drawn, not a chip.
-const LINE: &str = "valid_cart.value.id → checkout.body.cartId";
+pub(super) const LINE: &str = "valid_cart.value.id → checkout.body.cartId";
 /// The chip at `checkout`'s body: `expected_total` is read far and often.
 const CHIP: &str = "expected_total → checkout.body.total";
 
@@ -28,7 +28,7 @@ fn opened(size: Vec2) -> (tempfile::TempDir, FolderHarness, String) {
 }
 
 /// The line from `source` into `target` as the last frame drew it at rest.
-fn line(harness: &FolderHarness, id: &str, source: &str, target: &str) -> DrawnWire {
+pub(super) fn line(harness: &FolderHarness, id: &str, source: &str, target: &str) -> DrawnWire {
     let graph = graph(harness, id);
     board(harness, id)
         .debug_wires()
@@ -103,7 +103,7 @@ fn obstacles(harness: &FolderHarness, id: &str) -> Vec<Rect> {
 
 /// A point on screen on the wire `wire`, inside the board, clear of every
 /// card, chip and count, and at least 14 px from every other wire drawn.
-fn point_on(harness: &FolderHarness, id: &str, wire: &str) -> Pos2 {
+pub(super) fn point_on(harness: &FolderHarness, id: &str, wire: &str) -> Pos2 {
     let routes = routes(harness, id);
     let inside = board(harness, id).debug_board().shrink(24.0);
     let obstacles = obstacles(harness, id);
@@ -128,7 +128,7 @@ fn point_on(harness: &FolderHarness, id: &str, wire: &str) -> Pos2 {
 }
 
 /// A point of the empty board: no card, chip, count or wire near it.
-fn empty_point(harness: &FolderHarness, id: &str) -> Pos2 {
+pub(super) fn empty_point(harness: &FolderHarness, id: &str) -> Pos2 {
     let routes = routes(harness, id);
     let inside = board(harness, id).debug_board().shrink(40.0);
     let obstacles = obstacles(harness, id);
