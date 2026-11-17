@@ -10,6 +10,7 @@ use crate::{
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -134,6 +135,147 @@ impl NotRunCause {
     }
 }
 
+/// The step that ran at the end of a cause chain: the one that failed, or
+/// a false *Data condition*.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EndStep {
+    pub node_id: String,
+    pub handle: String,
+    /// The label, or the handle of a node without one.
+    pub name: String,
+    pub kind: NodeKind,
+    pub status: StepStatus,
+}
+
+/// Where the cause of a step that did not run ends (LAY-19): the last link
+/// of its chain and the step that ran at its end. A chain that ends without
+/// a step (outside the path, cancelled) has none, and so has one that names
+/// a step missing from the results or that loops.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CauseEnd {
+    pub last: NotRunCause,
+    pub step: Option<EndStep>,
+}
+
+/// The cause ends of a run's steps, resolved once (LAY-19): each link names
+/// a step of the same graph, which has a cause of its own when it did not
+/// run either. A component call's steps are resolved among themselves.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CauseEnds {
+    /// By the node id of a step that did not run.
+    ends: HashMap<String, CauseEnd>,
+    /// By the node id of the step at an end, how many steps it kept from
+    /// running.
+    kept: HashMap<String, usize>,
+    /// By the node id of a component call, its steps' ends.
+    children: HashMap<String, CauseEnds>,
+}
+
+impl CauseEnds {
+    /// Resolves every chain of `steps` in one pass: each step is visited
+    /// once and a chain's end is shared by every step on it.
+    pub fn of(steps: &[StepResult]) -> Self {
+        #[derive(Clone, Copy)]
+        enum Memo {
+            Todo,
+            /// On the chain being followed: reaching it again is a loop.
+            Busy,
+            Ran,
+            /// The step whose cause is the last link, and the step at the
+            /// end.
+            Ends(usize, Option<usize>),
+        }
+        let mut index: HashMap<&str, usize> = HashMap::with_capacity(steps.len());
+        for (at, step) in steps.iter().enumerate() {
+            index.entry(step.node_id.as_str()).or_insert(at);
+        }
+        let mut memo = vec![Memo::Todo; steps.len()];
+        let mut path = Vec::new();
+        for start in 0..steps.len() {
+            if !matches!(memo[start], Memo::Todo) {
+                continue;
+            }
+            path.clear();
+            let mut at = start;
+            let found = loop {
+                match memo[at] {
+                    Memo::Ends(last, end) => break Memo::Ends(last, end),
+                    Memo::Busy => break Memo::Ends(*path.last().unwrap_or(&at), None),
+                    Memo::Ran => break Memo::Ran,
+                    Memo::Todo => {}
+                }
+                let Some(cause) = &steps[at].cause else {
+                    break Memo::Ran;
+                };
+                memo[at] = Memo::Busy;
+                path.push(at);
+                let Some(&next) = cause.step().and_then(|id| index.get(id)) else {
+                    break Memo::Ends(at, None);
+                };
+                if steps[next].cause.is_none() {
+                    break Memo::Ends(at, Some(next));
+                }
+                at = next;
+            };
+            if path.is_empty() {
+                memo[start] = found;
+            }
+            for &on in &path {
+                memo[on] = found;
+            }
+        }
+
+        let mut ends = Self::default();
+        for (step, memo) in steps.iter().zip(&memo) {
+            if let Memo::Ends(last, end) = *memo
+                && let Some(last) = &steps[last].cause
+            {
+                let end = end.map(|end| &steps[end]);
+                if let Some(end) = end {
+                    *ends.kept.entry(end.node_id.clone()).or_default() += 1;
+                }
+                ends.ends.entry(step.node_id.clone()).or_insert(CauseEnd {
+                    last: last.clone(),
+                    step: end.map(|end| EndStep {
+                        node_id: end.node_id.clone(),
+                        handle: end.handle.clone(),
+                        name: end.display_name().to_owned(),
+                        kind: end.kind,
+                        status: end.status,
+                    }),
+                });
+            }
+            if let Some(children) = &step.children {
+                ends.children
+                    .entry(step.node_id.clone())
+                    .or_insert_with(|| Self::of(children));
+            }
+        }
+        ends
+    }
+
+    /// Where the cause of the step `node_id` ends; `None` for a step that
+    /// ran.
+    pub fn end(&self, node_id: &str) -> Option<&CauseEnd> {
+        self.ends.get(node_id)
+    }
+
+    /// Every end, one per step that did not run.
+    pub fn ends(&self) -> impl Iterator<Item = &CauseEnd> {
+        self.ends.values()
+    }
+
+    /// How many steps the step `node_id` kept from running.
+    pub fn kept(&self, node_id: &str) -> usize {
+        self.kept.get(node_id).copied().unwrap_or(0)
+    }
+
+    /// The ends inside the component call `node_id`.
+    pub fn within(&self, node_id: &str) -> Option<&CauseEnds> {
+        self.children.get(node_id)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StepResult {
@@ -232,5 +374,110 @@ pub struct RunResult {
 impl RunResult {
     pub fn step(&self, node_id: &str) -> Option<&StepResult> {
         self.steps.iter().find(|step| step.node_id == node_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(handle: &str, status: StepStatus, cause: Option<NotRunCause>) -> StepResult {
+        StepResult {
+            node_id: format!("id-{handle}"),
+            handle: handle.to_owned(),
+            label: None,
+            kind: NodeKind::Request,
+            status,
+            phase: Phase::Main,
+            inputs: IndexMap::new(),
+            outputs: IndexMap::new(),
+            duration_ms: 0,
+            message: None,
+            expected: OptionalJson::Missing,
+            actual: OptionalJson::Missing,
+            request: None,
+            children: None,
+            cause,
+        }
+    }
+
+    fn blocked_by(handle: &str) -> Option<NotRunCause> {
+        Some(NotRunCause::BlockedBy {
+            step: format!("id-{handle}"),
+        })
+    }
+
+    /// A chain of hundreds of steps, each blocked by the one before and the
+    /// first stopped by the failure, resolves to the failure, in either
+    /// order of the results.
+    #[test]
+    fn a_long_chain_resolves_to_its_end() {
+        const LENGTH: usize = 600;
+        let mut steps = vec![
+            step("failed", StepStatus::Failed, None),
+            step(
+                "s0",
+                StepStatus::Skipped,
+                Some(NotRunCause::Stopped {
+                    by: "id-failed".into(),
+                }),
+            ),
+        ];
+        for at in 1..LENGTH {
+            steps.push(step(
+                &format!("s{at}"),
+                StepStatus::Skipped,
+                blocked_by(&format!("s{}", at - 1)),
+            ));
+        }
+        for order in [false, true] {
+            if order {
+                steps.reverse();
+            }
+            let ends = CauseEnds::of(&steps);
+            assert_eq!(ends.kept("id-failed"), LENGTH);
+            assert_eq!(ends.end("id-failed"), None);
+            for at in 0..LENGTH {
+                let end = ends
+                    .end(&format!("id-s{at}"))
+                    .expect("a step that did not run");
+                assert!(matches!(end.last, NotRunCause::Stopped { .. }), "s{at}");
+                assert_eq!(
+                    end.step.as_ref().map(|end| end.handle.as_str()),
+                    Some("failed")
+                );
+            }
+        }
+    }
+
+    /// A loop, a missing step and a cause without a step end without a
+    /// step; a component call's steps resolve among themselves.
+    #[test]
+    fn a_chain_without_an_end_step() {
+        let mut call = step("call", StepStatus::Failed, None);
+        call.children = Some(vec![
+            step("inner", StepStatus::Error, None),
+            step("reader", StepStatus::Blocked, blocked_by("inner")),
+        ]);
+        let steps = vec![
+            step("a", StepStatus::Skipped, blocked_by("b")),
+            step("b", StepStatus::Skipped, blocked_by("a")),
+            step("lost", StepStatus::Skipped, blocked_by("nowhere")),
+            step("other", StepStatus::Skipped, Some(NotRunCause::OutsidePath)),
+            step("behind", StepStatus::Skipped, blocked_by("other")),
+            call,
+        ];
+        let ends = CauseEnds::of(&steps);
+        for handle in ["a", "b", "lost", "behind"] {
+            let end = ends.end(&format!("id-{handle}")).expect(handle);
+            assert_eq!(end.step, None, "{handle}");
+        }
+        assert_eq!(
+            ends.end("id-behind").map(|end| &end.last),
+            Some(&NotRunCause::OutsidePath)
+        );
+        let inner = ends.within("id-call").expect("the call's steps");
+        assert_eq!(inner.kept("id-inner"), 1);
+        assert_eq!(ends.kept("id-inner"), 0);
     }
 }

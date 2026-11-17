@@ -116,6 +116,8 @@ impl FolderApp {
         }
         let project = self.context_project();
         let run = self.fresh_run(document_id);
+        // Resolved with the report, once per run (LAY-19).
+        let ends = self.run_ends(document_id);
         let phase = if cleanup {
             apiforge_core::run::Phase::Cleanup
         } else {
@@ -221,6 +223,7 @@ impl FolderApp {
                     parameters: &parameters,
                     selection: &selection,
                     steps: steps.as_deref(),
+                    ends: ends.as_deref(),
                     progress: canvas::Progress {
                         on,
                         running: running.as_deref(),

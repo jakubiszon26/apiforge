@@ -308,9 +308,11 @@ fn assert_numbers_below_45(harness: &FolderHarness, context: &str) -> Seen {
             continue;
         };
         let failed = marked.contains(&id);
+        // The count of the steps a failure kept from running, under the
+        // pill (LAY-19), is not the checks' numbers.
         let results: Vec<&DrawnText> = texts
             .iter()
-            .filter(|text| text.kind == TextKind::Result)
+            .filter(|text| text.kind == TextKind::Result && !text.text.ends_with(" not run"))
             .collect();
         let Some(name) = texts.iter().find(|text| text.kind == TextKind::Name) else {
             assert!(
