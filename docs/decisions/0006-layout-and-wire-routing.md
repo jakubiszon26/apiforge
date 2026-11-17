@@ -265,7 +265,8 @@ they join, past such a stub: none on the 24 reference boards and on
 generated tidied boards, before and after, and none on the generated
 piles of cards, where 71 of 256 wires had one and 3 now have no route.
 The reference boards route as before. **Cost:** none measurable; the
-budget's board routes in BENCH.
+budget's board routes in 135 ms (133 ms with the router of `main` in
+the same run, budget 150 ms).
 
 ## As implemented
 
