@@ -797,8 +797,9 @@ impl ProjectSession {
         self.apply_analysis(analysis)
     }
 
-    /// A graphical edit. Semantic changes reprint canonical source and mark it
-    /// dirty; a pure layout change leaves the source untouched.
+    /// A graphical edit. A semantic change rewrites the source of what it
+    /// changes and nothing else (LAY-34) and marks it dirty; a pure layout
+    /// change leaves the source untouched.
     pub fn apply_model_edit(
         &mut self,
         document_id: &str,
@@ -879,12 +880,24 @@ impl ProjectSession {
         let previous = document.model.as_ref().ok_or(Error::ModelLocked)?;
         let semantic = apiforge_script::semantic(previous, &self.context)
             != apiforge_script::semantic(&model, &self.context);
-        if semantic {
-            self.require_comment_decision(index)?;
-        }
         let (model, text) = if semantic {
-            let text = apiforge_script::print_folder_document(&self.context, &model)
-                .map_err(|_| Error::Unprintable)?;
+            // The edit changes the text of what it changes and nothing else
+            // (LAY-34). Only printing the whole file drops comments that
+            // belong to no statement, so only then is the person asked first
+            // (owner, 2026-11-17).
+            let text = match apiforge_script::edit_in_place(
+                &self.context,
+                document.text(),
+                previous,
+                &model,
+            ) {
+                Some(text) => text,
+                None => {
+                    self.require_comment_decision(index)?;
+                    apiforge_script::print_folder_document(&self.context, &model)
+                        .map_err(|_| Error::Unprintable)?
+                }
+            };
             // Keep the model the printed text reads back, with the edited
             // model's identities and positions: a board edit may store blocks
             // or inputs in an order the source cannot state, and the
