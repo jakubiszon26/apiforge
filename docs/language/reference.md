@@ -482,7 +482,8 @@ scenario "Branches" {
   step of the branch that was taken, here `items` when `then` is taken, or
   right after the condition when that branch holds no step, as `else` here.
   When that last step failed with an error or was blocked, the statement
-  does not run, as after any such step.
+  does not run, as after any such step. A statement inside the braces of
+  `created`, at any depth, cannot write `@after(created)`.
 - `@after(created.then)` orders a statement outside the braces after the
   condition, on the `then` branch; `.else` on the other. It waits for the
   condition only, not for the statements inside the branch. A statement whose

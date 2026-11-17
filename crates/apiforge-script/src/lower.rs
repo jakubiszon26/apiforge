@@ -82,6 +82,7 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         omitted: tree.omitted_diagnostics,
         nodes: HashMap::new(),
         scopes: HashMap::new(),
+        enclosing: vec![],
         parameters: HashSet::new(),
         arguments: None,
         allow_unresolved_environment: context.allow_unresolved_environment,
@@ -180,6 +181,8 @@ struct Lower<'a> {
     omitted: usize,
     nodes: HashMap<String, Node>,
     scopes: HashMap<String, bool>, // true for cleanup
+    /// The `if`s whose braces hold the statement being lowered, outermost first.
+    enclosing: Vec<String>,
     parameters: HashSet<String>,
     arguments: Option<HashSet<String>>,
     allow_unresolved_environment: bool,
@@ -626,7 +629,18 @@ impl Lower<'_> {
                                 }
                             };
                             if let Some(source) = name.and_then(|name| self.nodes.get(name)) {
-                                if self.scopes.get(&source.handle) != Some(&cleanup)
+                                if branch.is_none()
+                                    && source.kind == NodeKind::If
+                                    && self.enclosing.contains(&source.handle)
+                                {
+                                    self.push_error(Diagnostic::error(
+                                        argument.range.clone(),
+                                        format!(
+                                            "`{}` stands inside the braces of `{}` and cannot run after the whole if; order it after a statement of its braces",
+                                            statement.handle, source.handle
+                                        ),
+                                    ));
+                                } else if self.scopes.get(&source.handle) != Some(&cleanup)
                                     || (branch.is_some() && source.kind != NodeKind::If)
                                 {
                                     self.error(
@@ -699,6 +713,7 @@ impl Lower<'_> {
                 then, otherwise, ..
             } = &statement.form
             {
+                self.enclosing.push(statement.handle.clone());
                 self.walk(
                     then,
                     cleanup,
@@ -713,6 +728,7 @@ impl Lower<'_> {
                     Some((&statement.handle, Branch::False)),
                     graph,
                 );
+                self.enclosing.pop();
             }
         }
     }
