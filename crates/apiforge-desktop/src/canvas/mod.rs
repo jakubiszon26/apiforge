@@ -22,7 +22,7 @@ pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
 pub use readers::WireMode;
-pub use resting::{Drawn, Lines, resting};
+pub use resting::{Drawn, LANE, Lane, Lines, resting};
 pub use routing::WireStyle;
 pub use strip::Pill as InputView;
 
@@ -1637,12 +1637,53 @@ impl Canvas {
                     && cards[count.card].output_tray().is_some())
             })
             .collect();
-        let laid_tags = readers::lay_tags(&painter, &shown_tags, camera);
         let mark_screens: Vec<Rect> = marks.iter().map(|mark| camera.rect(mark.rect)).collect();
-        let laid_counts: Vec<readers::Laid> = shown_counts
+        // The chips and the counts keep clear of the cards, their badges, the
+        // marks and the lines drawn at rest (LAY-37). Those lines are routed here, before
+        // they are drawn below with the same request, which the router keeps;
+        // while a card is dragged they are not waited for.
+        let dragging = matches!(self.drag, Some(Drag::Nodes { .. }));
+        let rest_lines: Vec<Vec<Pos2>> =
+            if !dragging && !(shown_tags.is_empty() && shown_counts.is_empty()) {
+                let at_rest: Vec<routing::BoardWire> = board_wires
+                    .iter()
+                    .filter(|wire| {
+                        !tagged.contains(wire.id.as_str())
+                            && !after_marks.iter().any(|mark| mark.wires.contains(&wire.id))
+                    })
+                    .cloned()
+                    .collect();
+                self.router
+                    .routes(&routing::Request {
+                        cards: &cards,
+                        chips: &chips,
+                        wires: &at_rest,
+                        moving: &HashSet::new(),
+                        style: self.wire_style,
+                        bridges: self.bridges,
+                        among: &[],
+                    })
+                    .iter()
+                    .filter(|wire| wire.routed)
+                    .map(|wire| wire.points.iter().map(|at| camera.to_screen(*at)).collect())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+        let keep: Vec<Rect> = cards
             .iter()
-            .map(|count| readers::lay_count(&painter, count, camera, &mark_screens))
+            .flat_map(|card| {
+                let rect = camera.rect(card.rect());
+                [rect, after::corner(rect, camera.zoom)]
+            })
+            .chain(mark_screens.iter().copied())
             .collect();
+        let clear = readers::Clear {
+            boxes: &keep,
+            lines: &rest_lines,
+        };
+        let laid_tags = readers::lay_tags(&painter, &shown_tags, camera, &clear);
+        let laid_counts = readers::lay_counts(&painter, &shown_counts, camera, &clear, &laid_tags);
         // A step's badge keeps clear of the chips and counts (LAY-07).
         let chip_boxes: Vec<Rect> = laid_tags
             .iter()

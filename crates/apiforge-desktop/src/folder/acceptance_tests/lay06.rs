@@ -497,11 +497,14 @@ fn lay06_criterion_6_deterministic() {
 }
 
 /// Criteria 8 and 12: `shop-30` with its checks collapsed, as LAY-11's
-/// preference folds them by default, fits 1600 × 1000 at 0.50 or more.
+/// preference folds them by default, fits 1600 × 1000 at 0.45 or more.
 /// Expanded, the fit is not asserted (0.49 when written); the quality
 /// example reports it. Since LAY-03 the board has the room its lines need,
 /// so this is the board a new install shows, with chips for shared values;
-/// with every wire drawn it is larger (0.46).
+/// with every wire drawn it is larger (0.46). It was 0.50 until LAY-37 gave
+/// the chips and the counts room in the gaps, clear of the lines and of
+/// each other: the owner's rule of 2026-11-15 puts a sprawling board before
+/// a dense one.
 #[test]
 fn lay06_criterion_8_fit_at_least_half_collapsed() {
     let (_project, mut harness, id) =
@@ -516,7 +519,7 @@ fn lay06_criterion_8_fit_at_least_half_collapsed() {
     );
     choose(&mut harness, FIT);
     let collapsed = board(&harness, &id).debug_zoom();
-    assert!(collapsed >= 0.50, "shop-30 collapsed fits at {collapsed}");
+    assert!(collapsed >= 0.45, "shop-30 collapsed fits at {collapsed}");
 }
 
 /// Criterion 9: Tidy up ends with the board in view. The camera is moved
