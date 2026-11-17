@@ -507,6 +507,9 @@ pub struct Canvas {
     /// The steps whose checks hang under them while the board is collapsed:
     /// *Expand checks here*, for this session only (LAY-11).
     expanded_here: HashSet<String>,
+    /// Mock of LAY-30: the steps whose checks are folded on a board that
+    /// shows them.
+    pub(crate) collapsed_here: HashSet<String>,
     /// The cards of the last frame, in board coordinates.
     #[cfg(test)]
     cards: Vec<Card>,
@@ -674,6 +677,7 @@ impl Default for Canvas {
             density_switch: true,
             collapsed: false,
             expanded_here: HashSet::new(),
+            collapsed_here: HashSet::new(),
             drag: None,
             menu: None,
             offer: None,
@@ -1147,13 +1151,28 @@ impl Canvas {
         chips: &mut [Chip],
     ) -> HashMap<String, (String, String)> {
         let mut folded = HashMap::new();
-        if !self.collapsed {
+        if !self.collapsed && self.collapsed_here.is_empty() {
             return folded;
         }
         let present: HashSet<String> = cards.iter().map(|card| card.id.clone()).collect();
         let mut hung: Vec<(String, String)> = Vec::new();
         for candidate in collapsible(graph, later) {
             if !present.contains(&candidate.check) {
+                continue;
+            }
+            // Mock of LAY-30: *Collapse checks here* on a board that shows
+            // its checks.
+            if !self.collapsed {
+                if self.collapsed_here.contains(&candidate.anchor)
+                    && present.contains(&candidate.anchor)
+                {
+                    let name = cards
+                        .iter()
+                        .find(|card| card.id == candidate.check)
+                        .map(|card| card.name.clone())
+                        .unwrap_or_default();
+                    folded.insert(candidate.check, (candidate.anchor, name));
+                }
                 continue;
             }
             let host = std::iter::once(&candidate.anchor)
@@ -2152,6 +2171,38 @@ impl Canvas {
                     aggregate,
                 )
             };
+            // Mock of LAY-30, option A: the step's own switch at the end of
+            // its checks line.
+            if lay30() == Some('a')
+                && let (Some(_), Some(area)) = (aggregate, card.aggregate_area(camera.zoom))
+            {
+                let area = camera.rect(area);
+                let side = (area.height() - 4.0 * camera.zoom).min(16.0 * camera.zoom);
+                let button = Rect::from_center_size(
+                    egui::pos2(area.right() - 8.0 * camera.zoom - side * 0.5, area.center().y),
+                    vec2(side, side),
+                );
+                let here_folded = if self.collapsed {
+                    !self.expanded_here.contains(&card.id)
+                } else {
+                    self.collapsed_here.contains(&card.id)
+                };
+                if area.intersects(overlays.board) {
+                    board_painter.rect(
+                        button.expand(2.0 * camera.zoom),
+                        3.0 * camera.zoom,
+                        theme::FIELD,
+                        Stroke::new(0.75, theme::BORDER),
+                        egui::StrokeKind::Inside,
+                    );
+                    if here_folded {
+                        Icon::ChevronRight
+                    } else {
+                        Icon::ChevronDown
+                    }
+                    .paint(&board_painter, button, theme::TEXT);
+                }
+            }
             if let Some(badge) = &drawn_card.badge {
                 badges.push((card.id.clone(), badge.rect));
             }
@@ -3796,6 +3847,31 @@ impl Canvas {
                             {
                                 commands.push(Command::TidyUp(input.selection.to_vec()));
                             }
+                            // Mock of LAY-30: the switch of the checks on the bar.
+                            if self.density_switch && let Some(variant) = lay30() {
+                                let shown = !self.collapsed;
+                                let button = if variant == 'a' {
+                                    widgets::action(
+                                        if shown { Icon::Eye } else { Icon::EyeOff },
+                                        "Checks",
+                                    )
+                                    .compact()
+                                    .quiet()
+                                } else {
+                                    widgets::icon_button(Icon::Check, "Checks").compact()
+                                };
+                                if ui
+                                    .add(button.toggle(shown))
+                                    .on_hover_text(if shown {
+                                        "Checks are shown as cards under their steps. Click to fold them into each step's footer"
+                                    } else {
+                                        "Checks are folded into each step's footer. Click to show them as cards"
+                                    })
+                                    .clicked()
+                                {
+                                    commands.push(Command::SetChecksCollapsed(shown));
+                                }
+                            }
                             widgets::action_menu(
                                 ui,
                                 // How the board draws, beside each other: wires, and
@@ -3865,7 +3941,7 @@ impl Canvas {
                                         }
                                         // Beside the density: what the board
                                         // draws of its checks (LAY-11).
-                                        if ui
+                                        if lay30().is_none() && ui
                                             .add(
                                                 widgets::action(
                                                     if self.collapsed {
@@ -5024,4 +5100,9 @@ mod tests {
             output.textures_delta.clear();
         }
     }
+}
+
+/// Mock of LAY-30: `APIFORGE_LAY30=a` or `=b`; unset is `main`.
+pub fn lay30() -> Option<char> {
+    std::env::var("APIFORGE_LAY30").ok()?.chars().next()
 }
