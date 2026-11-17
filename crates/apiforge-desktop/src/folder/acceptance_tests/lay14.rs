@@ -607,3 +607,51 @@ fn lay14_criterion_4_tracing_moves_nothing_and_fits() {
         }
     }
 }
+
+/// A capture that keeps the pointer where it is: what is pointed at is what
+/// the view shows.
+fn save(harness: &mut FolderHarness, name: &str) {
+    harness.step();
+    let image = harness
+        .render()
+        .unwrap_or_else(|error| panic!("cannot render {name}: {error}"));
+    let directory = crate::testing::capture_dir();
+    fs::create_dir_all(&directory).unwrap();
+    image.save(directory.join(format!("{name}.png"))).unwrap();
+}
+
+/// The views of the QA section: a line pointed at, a line kept, the row of
+/// `checkout`'s body pointed at and the chip `expected_total` kept, at
+/// 1600 × 1000 and 960 × 540.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay14() {
+    for (size, suffix) in [(WIDE, "1600"), (MINIMUM, "960")] {
+        let (_project, mut harness, id) = opened(size);
+        let drawn = line(&harness, &id, "valid_cart", "checkout");
+        let at = point_on(&harness, &id, &drawn.id);
+        hover(&mut harness, at);
+        save(&mut harness, &format!("lay14-wire-point-after-{suffix}"));
+        click(&mut harness, at);
+        save(&mut harness, &format!("lay14-wire-pin-after-{suffix}"));
+        escape(&mut harness);
+
+        let checkout = id_of(&harness, &id, "checkout");
+        let row = board(&harness, &id)
+            .debug_input_row(&checkout, "body")
+            .expect("checkout shows its body");
+        hover(&mut harness, row.center());
+        save(&mut harness, &format!("lay14-row-point-after-{suffix}"));
+        away(&mut harness);
+
+        let chip = board(&harness, &id)
+            .debug_tags()
+            .iter()
+            .find(|tag| tag.tag.statement == CHIP)
+            .cloned()
+            .expect("checkout's body carries the chip of expected_total");
+        click(&mut harness, chip.rect.center());
+        save(&mut harness, &format!("lay14-chip-click-after-{suffix}"));
+        escape(&mut harness);
+    }
+}
