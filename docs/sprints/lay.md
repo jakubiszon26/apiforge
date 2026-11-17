@@ -14,6 +14,8 @@
   `mock/lay-00-round-3` and `mock/lay-00-round-4` (captures under
   `docs/qa/2026-11-0{3,4}/LAY-00/` on those branches, posted to #37 and
   #241).
+- Day-to-day state — open pull requests, the merge order, the next steps —
+  is in the [handoff](../handoff.md).
 - Inputs: the owner's brief of 2026-11-03 ([section 0](#0-the-owners-brief-2026-11-03));
   [LAY-00](../tickets/LAY-00.md) and LAY-01..06 (#32–#37) with their
   comments; #167, #168, #170 (4), #144, #145, #161 (1), #149; the UX-1 plan
