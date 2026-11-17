@@ -1,10 +1,9 @@
 # LAY-14: Wire and input tracing — which field feeds which input
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: Analysis, re-checked against `main` at dd44c05 on 2026-11-17; the
-  mock-up and three decisions wait for the owner (issue #298,
-  `decision-needed`). Was S–M · 20 min: LAY-23, LAY-25, LAY-32 and LAY-10
-  delivered part of it.
+- State: Approved 2026-11-17 with decisions 1 A, 2 A, 3 A (issue #298);
+  implemented on `feat/lay-14-wire-tracing`. Was S–M · 20 min: LAY-23,
+  LAY-25, LAY-32 and LAY-10 delivered part of it.
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -47,7 +46,8 @@ reads.
 Taken: Q9 = A (2026-11-05), focus is a selection behaviour and tracing is
 its second level.
 
-Open, recommended option first (the mock-up shows each):
+Taken 2026-11-17, on the mock-up below: 1 **A**, 2 **A**, 3 **A**, and
+the mock-up approved with this scope. The options as they were put:
 
 1. **Where the statement stands.** **A** the box at the thing pointed at, as
    chips have today: one form for lines and chips, always beside the
@@ -138,3 +138,7 @@ pointer on a row.
   wire; `paint_statement` gains the clamp to the board.
 - The mock branch carries the drawing as `MockTrace` (marked `MOCK`); it is
   not the implementation and is not merged.
+- As built: the tracing lives in `canvas/trace.rs` (what is pointed at, the
+  statements, the rings, the kept boxes and where they stand);
+  `canvas/mod.rs` only calls it. A line is pointed at against the routes the
+  last frame drew, as the arrows at the badges are.
