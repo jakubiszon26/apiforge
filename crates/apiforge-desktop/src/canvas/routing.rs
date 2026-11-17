@@ -104,11 +104,6 @@ pub struct Request<'a> {
     /// board gives the lines at rest here when it routes the wires it
     /// brings back.
     pub among: &'a [Vec<Pos2>],
-    /// Wires the board does not draw now and may bring back: those a chip
-    /// stands for. The mouths of their sockets are kept free of the lines
-    /// of this request, so a wire brought back has its 20 px there
-    /// (LAY-29).
-    pub reserved: &'a [BoardWire],
 }
 
 impl Request<'_> {
@@ -138,7 +133,6 @@ struct Key {
     style: WireStyle,
     bridges: bool,
     among: Vec<Vec<[i32; 2]>>,
-    reserved: Vec<String>,
 }
 
 /// Rounded coordinates: a sub-pixel difference cannot change a route.
@@ -192,11 +186,6 @@ impl Router {
                         .collect()
                 })
                 .collect(),
-            reserved: request
-                .reserved
-                .iter()
-                .map(|wire| wire.id.clone())
-                .collect(),
         };
         if request.moving.is_empty() {
             if self.key.as_ref() == Some(&key) {
@@ -242,12 +231,8 @@ struct Prepared {
 
 /// Translates the board's cards, chips and wires into rectangles and ports.
 fn prepare(request: &Request<'_>) -> Vec<Prepared> {
-    prepare_wires(request, request.wires)
-}
-
-/// [`prepare`] for `wires`, which may be those the request only reserves.
-fn prepare_wires(request: &Request<'_>, wires: &[BoardWire]) -> Vec<Prepared> {
-    wires
+    request
+        .wires
         .iter()
         .filter_map(|wire| {
             let target = request.cards.get(wire.target)?;
@@ -311,16 +296,6 @@ fn port_at(block: usize, anchor: Pos2, card: Rect) -> layout::Port {
     layout::Port::new(block, side, offset)
 }
 
-/// The sockets of the wires the request reserves: in *Chips for shared
-/// values* a wire a chip stands for has no line at rest, and the line
-/// brought back needs the mouths of its two sockets free (LAY-29).
-fn reserved_sockets(request: &Request<'_>) -> Vec<layout::Port> {
-    prepare_wires(request, request.reserved)
-        .iter()
-        .flat_map(|wire| [wire.wire.from, wire.wire.to])
-        .collect()
-}
-
 /// Cards first, then chips: one index space for ports and obstacles.
 fn rectangles(request: &Request<'_>) -> Vec<layout::Rect> {
     request
@@ -351,13 +326,7 @@ fn route_all(request: &Request<'_>, prepared: &[Prepared], key: &Key) -> Vec<Rou
             ..layout::Route::default()
         })
         .collect();
-    let routes = layout::route_reserving(
-        &cards,
-        &wires,
-        &layout::Routing::default(),
-        &fixed,
-        &reserved_sockets(request),
-    );
+    let routes = layout::route_among(&cards, &wires, &layout::Routing::default(), &fixed);
     let _ = key;
     prepared
         .iter()
@@ -520,7 +489,6 @@ mod tests {
                         style: WireStyle::Orthogonal,
                         bridges: true,
                         among: &[],
-                        reserved: &[],
                     };
                     let first: Vec<(Vec<Pos2>, bool)> = router
                         .routes(&request)

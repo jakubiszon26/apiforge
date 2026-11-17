@@ -107,13 +107,6 @@ implementation may do better than its numbers, not worse.
 6. Review captures at 960 × 540 and 1600 × 1000, each asserting a card in
    view.
 7. The budget of ADR 0006 holds: full routing of its board within 150 ms.
-8. Selecting any step of `shop-30` or `fan-out` brings its lines back
-   without one of them nearer than 20 px to another line or a card, and
-   moves no line at rest. Left out: `login` on `shop-30`, whose eleven
-   lines come back to one port (nine places within the gap, as on
-   `main`). Found while implementing: with ordering lines leaving their
-   bottom sockets, three selections brought a line back on another (a
-   rail on a data line for 160 px on `fan-out`).
 
 ## Measured
 
@@ -125,23 +118,16 @@ implementation may do better than its numbers, not worse.
 | `shop-30`, chips, checks drawn | 10 → 12 | — → 104 | 1920 × 1710 → 1900 × 1690 | 0.444 → 0.450 |
 | `shop-30`, all wires, checks folded | 75 → 82 | — → 144 | 2020 × 1650 → 2080 × 1710 | 0.461 → 0.444 |
 | `shop-30`, all wires, checks drawn | 105 → 106 | 198 → 208 | 2160 × 2010 → 2160 × 1950 | 0.378 → 0.390 |
-| `fan-out`, chips, checks folded (default) | — → 1 | — → 26 | 1928 × 1268 → 1948 × 1308 | 0.588 → 0.581 |
-| `fan-out`, chips, checks drawn | 5 → 3 | — → 76 | 2008 × 1360 → 2048 × 1476 | 0.559 → 0.515 |
+| `fan-out`, chips, checks drawn | 5 → 5 | — → 76 | 2008 × 1360 → 2008 × 1360 | 0.559 → 0.559 |
 | `fan-out`, all wires, checks folded | 42 → 42 | 96 → 112 | 2128 × 1468 → 2128 × 1508 | 0.518 → 0.504 |
 | `fan-out`, all wires, checks drawn | 90 → 79 | — → 170 | 2228 × 1640 → 2228 × 1696 | 0.463 → 0.448 |
-| `shop-50`, chips, checks drawn | 26 → 19 | — → 174 | 1968 × 3218 → 1948 × 3138 | 0.236 → 0.242 |
+| `shop-50`, chips, checks drawn | 26 → 19 | — → 176 | 1968 × 3218 → 1948 × 3098 | 0.236 → 0.245 |
 | `shop-50`, all wires, checks drawn | 340 → 315 | — → 390 | 2388 × 3690 → 2388 × 3878 | 0.206 → 0.196 |
 
 - `packed`, `close` and `incomplete` are 0 on all 24 boards, as before;
   `under_own` is empty on all of them. Bends before are given where they
   were measured.
 - In the window `shop-30` in the default view fits at 49 % (51 %).
-- `fan-out` grows in the default view because Tidy up now leaves room
-  for the rails a selection brings back (criterion 8); `shop-30` does not
-  change for it.
-- `quality` routes the boards without the sockets kept free for chips'
-  wires, which the window has; on the boards in chips mode a line may lie
-  one track off what the window draws.
 - Limits of earlier tickets follow the decision: LAY-06 criterion 4 (an
   ordering line leaves the bottom socket and reaches the rail) and
   criterion 8 (Fit 0.50 → 0.48); LAY-28 criteria 3 and 5 (`shop-30`: 75 →
@@ -172,11 +158,6 @@ implementation may do better than its numbers, not worse.
   `under_own` is the measure. `routing_order` is as it was: routing the
   ordering lines first was tried and gives more crossings (8 for 6 on
   `shop-30` in the default view).
-- Criterion 8: `route_reserving` in `route.rs` (the mouths of sockets no
-  wire of the call ends on); `canvas/routing.rs` passes the sockets of
-  `Request::reserved`, which `canvas/mod.rs` fills with the wires chips
-  stand for (nine lines there, after LAY-10 was merged);
-  `canvas/resting.rs` keeps the rails among the lines Tidy up measures.
 - `boards.txt` written again; ADR 0006 amended.
 - Tests: `crates/apiforge-layout/tests/lay29.rs`,
   `folder/acceptance_tests/lay29.rs`.

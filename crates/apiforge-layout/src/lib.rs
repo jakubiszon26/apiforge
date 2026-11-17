@@ -19,7 +19,7 @@ pub use layered::{
 };
 pub use packed::{Breach, GAP, Near, packed};
 pub use route::{
-    Bridge, Route, Routing, Wire, intersection as crossing, route, route_among, route_reserving,
-    under_own, violations,
+    Bridge, Route, Routing, Wire, intersection as crossing, route, route_among, under_own,
+    violations,
 };
 pub use smooth::{DEFAULT_RADIUS, Piece, smooth, violations as smooth_violations};

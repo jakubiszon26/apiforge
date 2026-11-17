@@ -183,21 +183,6 @@ pub fn route_among(
     settings: &Routing,
     fixed: &[Route],
 ) -> Vec<Route> {
-    route_reserving(cards, wires, settings, fixed, &[])
-}
-
-/// [`route_among`], keeping the mouths of `sockets` free as well: ports no
-/// wire of this call ends on, whose wires the board draws later. A line may
-/// cross in front of one but does not run into it or turn there, so the
-/// wire brought back into it has its 20 px (LAY-29: an ordering line now
-/// passes the inputs of the next card on its way to the rail).
-pub fn route_reserving(
-    cards: &[Rect],
-    wires: &[Wire],
-    settings: &Routing,
-    fixed: &[Route],
-    sockets: &[Port],
-) -> Vec<Route> {
     let mut routes = vec![Route::default(); wires.len()];
     let order = routing_order(cards, wires);
 
@@ -208,31 +193,13 @@ pub fn route_reserving(
         .collect();
     let mouths: Vec<Mouth> = wires
         .iter()
-        .flat_map(|wire| [(wire.from, false), (wire.to, false)])
-        .chain(
-            sockets
-                .iter()
-                .filter(|socket| {
-                    // A socket a wire of this routing ends on is that
-                    // wire's port, not a free one.
-                    !wires
-                        .iter()
-                        .flat_map(|wire| [wire.from, wire.to])
-                        .any(|port| {
-                            port.block == socket.block
-                                && port.side == socket.side
-                                && (port.offset - socket.offset).abs() < 0.5
-                        })
-                })
-                .map(|port| (*port, true)),
-        )
-        .filter_map(|(port, free)| {
+        .flat_map(|wire| [wire.from, wire.to])
+        .filter_map(|port| {
             let card = cards.get(port.block)?;
             Some(Mouth {
                 at: step(port.point_on(card), port.side, settings.stub),
                 horizontal: port.side.is_horizontal(),
                 block: port.block,
-                free,
             })
         })
         .collect();
@@ -420,9 +387,6 @@ pub(crate) struct Mouth {
     pub(crate) horizontal: bool,
     /// The card the port is on.
     pub(crate) block: usize,
-    /// A socket no wire of this routing ends on, kept for a wire the board
-    /// draws later ([`route_reserving`]).
-    pub(crate) free: bool,
 }
 
 /// A line already on the board, as the wires routed after it see it.
@@ -845,37 +809,22 @@ fn search(problem: &Problem<'_>, scratch: &mut Scratch) -> Vec<Point> {
     // The mouth of every other port: a line may cross in front of it but not
     // run into it or turn there, or the port's own wire has no way out. A
     // wire's own two port lines stay open to it, past the mouths of the
-    // ports beside its own. Past a socket kept free for a later wire only
-    // the line of the wire's port on that socket's card stays open (LAY-29:
-    // an ordering line leaves along the bottom of its card and would turn
-    // in the mouth of an input of the next).
+    // ports beside its own.
     for mouth in mouths.iter().filter(|_| reach > 0.0) {
         if same(mouth.at, start) || same(mouth.at, end) {
             continue;
         }
+        let neighbour = mouth.block == blocks.0 || mouth.block == blocks.1;
         let (across, along, line, at, own) = if mouth.horizontal {
             (&ys, &xs, mouth.at.y, mouth.at.x, [start.y, end.y])
         } else {
             (&xs, &ys, mouth.at.x, mouth.at.y, [start.x, end.x])
         };
-        let (first, second) = (mouth.block == blocks.0, mouth.block == blocks.1);
-        let beside = if mouth.free {
-            [first, second]
-        } else {
-            [first || second; 2]
-        };
         for line in inside(across, line - reach, line + reach) {
-            if own
-                .iter()
-                .zip(beside)
-                .any(|(own, beside)| beside && (across[line] - own).abs() < 0.5)
-            {
+            if neighbour && own.iter().any(|own| (across[line] - own).abs() < 0.5) {
                 continue;
             }
-            // In front of a free socket two lanes stay clear, not one:
-            // its wire comes back among lines that had the first pick.
-            let clear = if mouth.free { reach * 2.0 } else { reach };
-            for edge in covering(along, at - clear, at + clear) {
+            for edge in covering(along, at - reach, at + reach) {
                 if mouth.horizontal {
                     tight_h[line * (width - 1) + edge] = true;
                 } else {
