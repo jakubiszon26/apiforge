@@ -695,6 +695,24 @@ mod tests {
         text
     }
 
+    /// `SOURCE` after `change`, then that text edited back to the document
+    /// `SOURCE` says, as a second board edit (or *Undo*) writes it.
+    fn edit_and_back(change: impl FnOnce(&mut Scenario)) -> (String, String) {
+        let project = apiforge_core::demos::shop_project();
+        let original = lower(&parse(SOURCE), &LowerContext::folder(&project))
+            .document
+            .unwrap();
+        let changed = edit(change);
+        let tree = parse(&changed);
+        let previous = lower(&tree, &LowerContext::folder(&project))
+            .document
+            .unwrap();
+        let back = edited(&project, &tree, &previous, &original).expect("written into the text");
+        verify(&project, &original, true, &back)
+            .unwrap_or_else(|errors| panic!("{back}\n{errors:?}"));
+        (changed, back)
+    }
+
     fn id(scenario: &Scenario, handle: &str) -> String {
         scenario
             .graph
@@ -844,5 +862,49 @@ mod tests {
                 "  description \"Changed.\"\n  on_error continue\n  param count = 1\n  param limit = 5\n"
             )
         );
+    }
+    /// A note that only `@note` can carry exactly is written once, in the
+    /// attribute, not also as comments (review of #426).
+    #[test]
+    fn a_note_written_by_its_attribute_is_not_also_written_as_comments() {
+        let text = edit(|scenario| node(scenario, "list").note = Some(" padded".into()));
+        assert_eq!(text.matches("padded").count(), 1, "{text}");
+        assert!(text.contains("@note(\" padded\")"), "{text}");
+        assert!(!text.contains("Reads the list"), "{text}");
+    }
+
+    /// An `else` the edit opened is closed again when its last statement is
+    /// deleted, so deleting the new step gives the text back (review of #426).
+    #[test]
+    fn an_else_opened_for_a_step_closes_when_the_step_is_deleted() {
+        let (opened, back) = edit_and_back(|scenario| {
+            let found = id(scenario, "found");
+            scenario.graph = add_node(
+                &scenario.graph,
+                Block::Request,
+                AT,
+                None,
+                Some(OutputRef {
+                    node_id: &found,
+                    port: FALSE_PORT,
+                }),
+            )
+            .unwrap()
+            .graph;
+        });
+        assert!(opened.contains("} else {"));
+        assert_eq!(back, SOURCE);
+    }
+
+    /// The same for a cleanup the edit wrote.
+    #[test]
+    fn a_cleanup_written_for_a_step_goes_when_the_step_is_deleted() {
+        let (opened, back) = edit_and_back(|scenario| {
+            scenario.cleanup = add_node(&scenario.cleanup, Block::Request, AT, None, None)
+                .unwrap()
+                .graph;
+        });
+        assert!(opened.contains("cleanup {"));
+        assert_eq!(back, SOURCE);
     }
 }
