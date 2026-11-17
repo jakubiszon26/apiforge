@@ -223,7 +223,7 @@ fn fields(binding: Option<&Binding>, path: &[String]) -> Vec<String> {
 
 /// What a chip says, its shorter form, and the reference written whole.
 /// `number` is the source's place in the engine's order, its badge.
-fn texts(
+pub(super) fn texts(
     graph: &Graph,
     project: &Project,
     wire: &BoardWire,
@@ -611,15 +611,23 @@ pub fn paint(painter: &Painter, laid: &Laid, lit: bool) {
     painter.galley(laid.rect.min + vec2(4.0, 1.5), laid.galley.clone(), ink);
 }
 
-/// The statement of a pointed chip, in a box above it.
-pub fn paint_statement(painter: &Painter, near: Rect, text: &str) {
+/// The statement of what is pointed at or kept, in a box above `near`, or
+/// under it where there is no room above, kept whole inside `within`
+/// (LAY-14). Returns the box.
+pub fn paint_statement(painter: &Painter, near: Rect, text: &str, within: Rect) -> Rect {
     let galley = painter.layout_no_wrap(
         text.to_owned(),
         FontId::proportional(theme::FONT_META),
         theme::TEXT,
     );
     let size = galley.size() + vec2(12.0, 6.0);
-    let rect = Rect::from_min_size(pos2(near.left(), near.top() - size.y - 4.0), size);
+    let mut at = pos2(near.left(), near.top() - size.y - 4.0);
+    if at.y < within.top() {
+        at.y = near.bottom() + 4.0;
+    }
+    at.x = at.x.min(within.right() - size.x).max(within.left());
+    at.y = at.y.min(within.bottom() - size.y).max(within.top());
+    let rect = Rect::from_min_size(at, size);
     painter.rect(
         rect,
         4.0,
@@ -628,4 +636,5 @@ pub fn paint_statement(painter: &Painter, near: Rect, text: &str) {
         StrokeKind::Inside,
     );
     painter.galley(rect.min + vec2(6.0, 3.0), galley, theme::TEXT);
+    rect
 }

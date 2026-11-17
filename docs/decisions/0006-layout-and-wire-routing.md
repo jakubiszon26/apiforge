@@ -4,7 +4,8 @@
   *As implemented*
 - Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn),
   2026-11-12 (LAY-06, shape D and the rail), 2026-11-15 (LAY-03, the gap
-  between lines) and 2026-11-16 (LAY-28, the order of lines in a corridor)
+  between lines) and 2026-11-16 (LAY-28, the order of lines in a corridor;
+  LAY-29, no line under its own card)
 - Scope: new crate `apiforge-layout`, the desktop board
 - Plan: [scenario code and canvas](../roadmap.md)
 
@@ -239,6 +240,48 @@ the reference boards it takes 15 to 30 % of the crossings off where every
 wire or every check is drawn. **Cost:** the budget's board routes in
 132 ms (122 ms before, budget 150 ms), `shop-50` with every wire and check
 in 35 ms (31 ms).
+
+### No line under its own card (LAY-29)
+
+Amended by LAY-29 (2026-11-16, the owner's note on #382; narrowed by the
+owner on 2026-11-17 to the part that does not depend on the language). A
+card is painted over its lines, so a piece of a line inside a card it
+joins is not seen, and the line seems to come out of the card from
+nowhere. Where an ordering wire leaves its card (rule 4 of shape D) is
+unchanged.
+
+1. **A wire's own two cards are in its way on every attempt** of the
+   search, at the clearance of the attempt. The last attempts, which let a
+   wire under a card it joins where nothing else was found, are gone.
+2. **A port inside the wire's other card** — cards lie on each other — is
+   left through its stub, long enough to leave that card, exactly as a
+   port inside a foreign card is. The guarantee's one exception covers
+   both, and `violations` judges both the same.
+3. **A last attempt where a stub ends in the other card.** Two cards a
+   wire joins can face each other closer than a stub, or a third card can
+   bury both ports between them; the stub then ends inside the wire's
+   other card and no route can start. Two last attempts, with no
+   clearance, let each stub leave the cards over its port, then stop it
+   short of the cards left and halfway to the other card when that card
+   is nearer. The first keeps a card over one port in the way past the
+   stub; the second, where the pile over a port reaches the other card
+   and no stub leaves it, lets the route leave the cards over its ports
+   however it can. The exception widens with it: a port inside other
+   cards is left by the route's first pieces (its last, for the port it
+   enters) while each begins inside a card, and past them the route is
+   in the open; the stub is the usual case. `violations` judges that, and
+   a route of the second attempt that comes back into those cards is
+   given up. Only a wire with no way at all has no route, is marked
+   incomplete and drawn as the plain corner of an enclosed port.
+
+`apiforge_layout::under_own` lists the wires with a piece inside a card
+they join, past such a stub: none on the 24 reference boards and on
+generated tidied boards, before and after, and none on the generated
+piles of cards, where 71 of 256 wires had one; every wire there has a
+route. No wire of a tidied board reaches the last attempt.
+The reference boards route as before. **Cost:** none measurable; the
+budget's board routes in 133 ms (133 ms with the router of `main`,
+budget 150 ms).
 
 ## As implemented
 
