@@ -455,8 +455,10 @@ fn crosses(rect: Rect, a: Pos2, b: Pos2) -> bool {
     low <= high
 }
 
-/// The obstacles near `band`: boxes, and the segments of lines.
+/// The obstacles in `band`: boxes, and the segments of lines. Only what
+/// is in it is known, so a place whose room reaches out of it is not free.
 struct Near {
+    band: Rect,
     boxes: Vec<Rect>,
     segments: Vec<[Pos2; 2]>,
 }
@@ -464,6 +466,7 @@ struct Near {
 impl Near {
     fn of(band: Rect, clear: &Clear<'_>, laid: &[Rect]) -> Self {
         Self {
+            band,
             boxes: clear
                 .boxes
                 .iter()
@@ -482,7 +485,8 @@ impl Near {
 
     fn free(&self, rect: Rect) -> bool {
         let around = rect.expand(CLEAR - 0.5);
-        !self.boxes.iter().any(|other| other.intersects(around))
+        self.band.contains_rect(around)
+            && !self.boxes.iter().any(|other| other.intersects(around))
             && !self.segments.iter().any(|[a, b]| crosses(around, *a, *b))
     }
 }
@@ -616,14 +620,17 @@ pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera, clear: &Clear<'
             Some((x, bottom)) if (x - anchor.x).abs() < 1.0 => bottom + CLEAR,
             _ => f32::MIN,
         };
+        // Every place the search below may try, with its room: beyond a
+        // few lines down a widened gap, and its reach up or down.
         let tall = texts[0].1.size().y + 3.0;
-        let reach = tall * (REACH + 1.0);
+        let reach = tall * (REACH + 1.0) + CLEAR;
+        let start = anchor.y.max(lowest + tall / 2.0);
         let band = Rect::from_min_max(
             pos2(
-                anchor.x - stub - 2.0 * (room + CLEAR),
-                (anchor.y - reach).max(lowest - tall),
+                anchor.x - stub - 4.0 * (room + CLEAR),
+                start.min(anchor.y) - reach,
             ),
-            pos2(anchor.x, anchor.y.max(lowest) + reach),
+            pos2(anchor.x, start + reach),
         );
         let near = Near::of(band, clear, &placed);
         // Where lines run down the gap past the socket, the chip may stand
@@ -693,11 +700,12 @@ pub fn lay_counts(
             &font_id,
             room,
         );
+        // Every place the search below may try, with its room.
         let tall = texts[0].1.size().y + 3.0;
-        let reach = tall * (REACH + 1.0);
+        let reach = tall * (REACH + 1.0) + CLEAR;
         let band = Rect::from_min_max(
             pos2(anchor.x, anchor.y - reach),
-            pos2(anchor.x + stub + 2.0 * (room + CLEAR), anchor.y + reach),
+            pos2(anchor.x + stub + 4.0 * (room + CLEAR), anchor.y + reach),
         );
         let near = Near::of(band, clear, &placed);
         // Where lines run down the gap past the port, the count may stand
