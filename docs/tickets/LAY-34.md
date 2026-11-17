@@ -4,7 +4,9 @@
   into an `.afs`)
 - State: decided by the owner — option A on 2026-11-16 (#396); a statement
   added from the board is written directly after the step it follows,
-  inside the same braces, on 2026-11-17 (#396, #382) · issue #396
+  inside the same braces, on 2026-11-17 (#396, #382); the comment question
+  only before a whole-file print, and the branch wire to a step added from
+  *Next* accepted, on 2026-11-17 (#396) · issue #396
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
@@ -56,6 +58,10 @@ not change.
 - Text that cannot be edited this way (a statement sharing a line with
   another where something is inserted), or an edit that would not read back
   as the edited document, is printed whole, as before.
+
+Comments that belong to no statement are dropped only by printing the
+whole file, so the window asks about them only then (owner, 2026-11-17,
+#396); a board edit written into the text keeps them and does not ask.
 
 A step added from a step's *Next* also follows the branches that step
 follows (`apiforge-core`, `add_node`), so it stands in the same braces.
