@@ -10,6 +10,12 @@
 - State: **approved by the owner on 2026-11-16**, with the four consequences
   of [To confirm](#to-confirm-at-approval): RUN-03 and LANG-14 start at once,
   beside the LAY sprint; LANG-13 and LANG-12 follow LAY-12 (#296).
+- **Amended on 2026-11-16 by [LANG-00](LANG-00.md#owner-decisions-2026-11-16):**
+  a chain is written by the order of its lines, and `@after` leaves the
+  language. That replaces decisions 2 and 8 and consequence 1 below, rules
+  1–4 (now [the rules of language 2](LANG-00.md#the-rules-of-language-2))
+  and the acceptance criteria of LANG-13 and LANG-12; LANG-12 is not
+  needed. Decisions 1 and 3–7, rules 5 and 6, RUN-03 and LANG-14 stand.
 
 ## Goal
 
