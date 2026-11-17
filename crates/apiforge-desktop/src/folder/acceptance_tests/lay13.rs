@@ -21,6 +21,9 @@ fn review_lay13_mock() {
             ("shop-50", fixture("shop-50"), "paid", Checks::Expanded),
             ("checkout", checkout(), "created", Checks::Expanded),
         ] {
+            if std::env::var("APIFORGE_LAY13_ONLY").is_ok_and(|only| only != name) {
+                continue;
+            }
             let (_project, mut harness, id) = tidied_text(&text, size, checks);
             choose(&mut harness, "Run simulation");
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);

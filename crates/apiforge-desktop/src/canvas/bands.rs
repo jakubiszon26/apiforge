@@ -229,7 +229,7 @@ fn tint() -> (Color32, Color32) {
 pub fn screen(
     band: &Band,
     camera: Camera,
-    chips: &[Rect],
+    chips: &[(Rect, String)],
 ) -> Vec<(Rect, Vec<(f32, f32, f32)>, f32)> {
     band.fragments
         .iter()
@@ -250,7 +250,11 @@ pub fn screen(
             let margin = 6.0 * camera.zoom;
             let lowest = columns.iter().map(|column| column.2).fold(top, f32::max);
             if let Some(first) = columns.first_mut() {
-                for chip in chips {
+                for chip in chips
+                    .iter()
+                    .filter(|(_, owner)| fragment.cards.contains(owner))
+                    .map(|(chip, _)| chip)
+                {
                     if chip.right() <= first.0 + PAD * camera.zoom + 2.0
                         && chip.right() > first.0 - reach
                         && chip.top() > top
@@ -261,7 +265,11 @@ pub fn screen(
                 }
             }
             if let Some(last) = columns.last_mut() {
-                for chip in chips {
+                for chip in chips
+                    .iter()
+                    .filter(|(_, owner)| fragment.cards.contains(owner))
+                    .map(|(chip, _)| chip)
+                {
                     if chip.left() >= last.1 - PAD * camera.zoom - 2.0
                         && chip.left() < last.1 + reach
                         && chip.top() > top

@@ -1866,9 +1866,20 @@ impl Canvas {
         let selected_wires: HashSet<String> = self.selected_wires.iter().cloned().collect();
         // A continuation mark is drawn under the wires: a wire that passes
         // it stays whole, and the mark is no obstacle to route around.
+        let chip_owners: Vec<(Rect, String)> = laid_tags
+            .iter()
+            .zip(&shown_tags)
+            .map(|(laid, tag)| (laid.rect, tag.reader.clone()))
+            .chain(
+                laid_counts
+                    .iter()
+                    .zip(&shown_counts)
+                    .map(|(laid, count)| (laid.rect, count.source.clone())),
+            )
+            .collect();
         let band_shapes: Vec<Vec<(Rect, Vec<(f32, f32, f32)>, f32)>> = branch_bands
             .iter()
-            .map(|band| bands::screen(band, camera, &chip_boxes))
+            .map(|band| bands::screen(band, camera, &chip_owners))
             .collect();
         for (band, shapes) in branch_bands.iter().zip(&band_shapes) {
             bands::paint(&board_painter, band, shapes, camera, input.steps);
