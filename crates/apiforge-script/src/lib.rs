@@ -1,5 +1,6 @@
 //! ApiForge Script syntax, diagnostics and canonical source formatting.
 pub mod ast;
+mod branches;
 pub mod complete;
 mod far;
 mod format;

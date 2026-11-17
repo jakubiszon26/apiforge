@@ -595,8 +595,8 @@ fn document_validation_errors_point_at_their_statement() {
             "b = start",
         ),
         (
-            "scenario \"Located\" {\n  x = if true {\n  }\n  @after(x)\n  y = 2\n}",
-            "@after(x)\n  y = 2",
+            "scenario \"Located\" {\n  a = 1\n  @after(a)\n  b = start\n}",
+            "@after(a)\n  b = start",
         ),
     ] {
         let result = lower(&parse(source), &LowerContext::new(project));
