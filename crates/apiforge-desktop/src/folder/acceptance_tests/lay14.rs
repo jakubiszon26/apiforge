@@ -238,11 +238,13 @@ fn wire<'a>(harness: &'a FolderHarness, id: &str, wire: &str) -> &'a DrawnWire {
         .unwrap_or_else(|| panic!("the wire {wire} is drawn"))
 }
 
-/// The cards on screen in the last frame, by id.
+/// The cards the last frame drew on the board, by id: the ones in view.
 fn cards_on_screen(harness: &FolderHarness, id: &str) -> Vec<String> {
-    board(harness, id)
+    let canvas = board(harness, id);
+    canvas
         .debug_cards()
         .iter()
+        .filter(|(card, _)| canvas.debug_is_drawn(card))
         .map(|(card, _)| card.clone())
         .collect()
 }
