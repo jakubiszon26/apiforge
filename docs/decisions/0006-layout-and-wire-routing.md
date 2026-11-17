@@ -252,21 +252,30 @@ unchanged.
 
 1. **A wire's own two cards are in its way on every attempt** of the
    search, at the clearance of the attempt. The last attempts, which let a
-   wire under a card it joins where nothing else was found, are gone: such
-   a wire has no route, is marked incomplete and drawn as the plain corner
-   of an enclosed port.
+   wire under a card it joins where nothing else was found, are gone.
 2. **A port inside the wire's other card** — cards lie on each other — is
    left through its stub, long enough to leave that card, exactly as a
    port inside a foreign card is. The guarantee's one exception covers
    both, and `violations` judges both the same.
+3. **A last attempt where a stub ends in the other card.** Two cards a
+   wire joins can face each other closer than a stub, or a third card can
+   bury both ports between them; the stub then ends inside the wire's
+   other card and no route can start. The last attempt, with no
+   clearance, stops each stub short of the cards left and halfway to the
+   other card when that card is nearer, and lets the wire run inside a
+   card that lies over one of its ports. A card over both ports may then
+   hold the whole route, a widening of the exception that `violations`
+   knows. Only a wire with no way at all has no route, is marked
+   incomplete and drawn as the plain corner of an enclosed port.
 
 `apiforge_layout::under_own` lists the wires with a piece inside a card
 they join, past such a stub: none on the 24 reference boards and on
 generated tidied boards, before and after, and none on the generated
-piles of cards, where 71 of 256 wires had one and 3 now have no route.
+piles of cards, where 71 of 256 wires had one; every wire there has a
+route. No wire of a tidied board reaches the last attempt.
 The reference boards route as before. **Cost:** none measurable; the
-budget's board routes in 135 ms (133 ms with the router of `main` in
-the same run, budget 150 ms).
+budget's board routes in 133 ms (133 ms with the router of `main`,
+budget 150 ms).
 
 ## As implemented
 

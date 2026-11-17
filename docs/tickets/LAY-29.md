@@ -35,8 +35,11 @@ The analysis found two causes (both on #382):
 
 - Changed: where cards lie on each other, a line no longer passes under a
   card it joins. A port the other card lies over is left by a longer stub;
-  a line with no way round at all is drawn as the plain lighter corner of
-  an enclosed port (3 of 256 wires on generated piles).
+  two cards closer than a stub get a short stub between them and the line
+  goes round (the owner's review of the first captures: `begin` into
+  `login` must have a real route). Only a line with no way at all would be
+  drawn as the plain lighter corner of an enclosed port; none on the
+  generated piles.
 - Unchanged: a tidied board. No line ran under its own card there, and
   every reference board routes as before.
 - Removed or hidden, migrated, default behaviour, file format: nothing.
@@ -45,15 +48,18 @@ The analysis found two causes (both on #382):
 
 1. Router: a wire's own cards are in its way on every attempt. A port that
    lies inside the wire's other card is left through its stub, as one
-   inside a foreign card is (ADR 0006); on the generated piles no route
-   passes under a card it joins (71 of 256 wires before).
+   inside a foreign card is (ADR 0006); a port facing the other card
+   closer than a stub still gets a route. On the generated piles no route
+   passes under a card it joins (71 of 256 wires before) and every wire
+   has a route.
 2. On all 24 reference boards no piece of a line lies inside a card it
    joins (`under_own` is empty), every wire has a route, the gap of LAY-03
    holds (`packed` 0) and no line touches another card (`violations`
    empty). The limits of LAY-06 and LAY-28 are unchanged.
 3. The window: on `shop-30` and `fan-out`, tidied and with cards piled on
-   each other, no line is under a card it joins; tidied, every line has a
-   route and the gap holds; piled, at most one line in ten has none.
+   each other, no line is under a card it joins and every line has a
+   route (`begin` into `login` on `shop-30` included); tidied, the gap
+   holds.
 4. Review captures at 960 × 540 and 1600 × 1000 of a piled board, before
    and after, each asserting a card in view.
 5. The budget of ADR 0006 holds: full routing of its board within 150 ms.
@@ -61,17 +67,18 @@ The analysis found two causes (both on #382):
 ## Measured
 
 - Generated piles of cards (`generated_boards`): 71 of 256 wires ran under
-  a card they join; none now, and 3 have no route.
+  a card they join; none now, and every wire has a route (3 had none
+  before the last attempt was added).
 - The 24 reference boards: `under_own` empty before and after;
   `boards.txt` is unchanged, so crossings, bends and Fit are those of
   `main`.
 - In the window, `shop-30` with every wire and every third step piled on
   the others: 5 of 42 lines ran under a card they join (`begin` into
-  `login`, `order` into `receipt` and `refund`); none now. The line from
-  `begin` into `login`, which starts under `login` with no way round, has
-  no route and is drawn as the plain corner of an enclosed port.
-- The budget's board routes in 135 ms (133 ms with the router of `main` in
-  the same run, budget 150 ms).
+  `login`, `order` into `receipt` and `refund`); none now, and every line
+  has a route. The line from `begin` into `login` starts 12 px under
+  `login`: its stub stops between the two cards and it goes round.
+- The budget's board routes in 133 ms (133 ms with the router of `main`,
+  budget 150 ms).
 - Captures, before and after, `shop-30` piled with every wire:
   [Fit, 1600 × 1000](../qa/2026-11-17/LAY-29/before-piled-1600.png) →
   [after](../qa/2026-11-17/LAY-29/after-piled-1600.png);
@@ -93,7 +100,9 @@ The analysis found two causes (both on #382):
 - `apiforge-layout/src/route.rs`: the attempts that let a wire under its
   own cards are gone; `clear_stub` leaves the wire's other card when it
   lies over the port; `violations` counts that stub as the exception;
-  `under_own` is the measure. `canvas/` is unchanged.
+  a last attempt (`near_stub`) stops the stubs between cards closer than a
+  stub and lets the wire run inside a card over its port; `under_own` is
+  the measure. `canvas/` is unchanged.
 - ADR 0006 amended.
 - Tests: `crates/apiforge-layout/tests/lay29.rs`,
   `crates/apiforge-layout/tests/generated_boards.rs`
