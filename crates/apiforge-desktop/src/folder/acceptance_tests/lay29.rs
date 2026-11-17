@@ -121,9 +121,10 @@ fn drawn(harness: &FolderHarness, id: &str) -> (Vec<Route>, Vec<Block>) {
 
 /// Criterion 3: the window draws no line under a card it joins. On
 /// `shop-30` and `fan-out` with cards piled on each other, in both *Wires*
-/// modes, no line has a piece inside a card it joins, and few have no
-/// route; tidied, the same boards have none under their cards, every line
-/// has a route and the gap of LAY-03 holds.
+/// modes, no line has a piece inside a card it joins and every line has a
+/// route (`begin` into `login` on `shop-30`, which starts 12 px under
+/// `login`, had none at first); tidied, the same boards have none under
+/// their cards, every line has a route and the gap of LAY-03 holds.
 #[test]
 fn lay29_criterion_3_the_window_draws_no_line_under_its_own_card() {
     for (name, mode) in [
@@ -141,12 +142,8 @@ fn lay29_criterion_3_the_window_draws_no_line_under_its_own_card() {
 
         pile(&mut harness, &id);
         let (under, incomplete) = under_own_in_the_window(&harness, &id);
-        let wires = board(&harness, &id).debug_geometry().1.len();
         assert_eq!(under, [], "{label}, piled: lines under a card they join");
-        assert!(
-            incomplete * 10 <= wires,
-            "{label}, piled: {incomplete} of {wires} lines have no route"
-        );
+        assert_eq!(incomplete, 0, "{label}, piled: every line has a route");
     }
 }
 
@@ -155,7 +152,7 @@ fn lay29_criterion_3_the_window_draws_no_line_under_its_own_card() {
 /// Fit and at 100 % on `receipt` in the large window, where the lines from
 /// `order` into `receipt` and `refund` ran under both cards before, and at
 /// 100 % on `login` in the smallest one, where the ordering line from
-/// `begin` ran under `login` and now has no way round.
+/// `begin` ran under `login` and now goes round it.
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_lay29() {

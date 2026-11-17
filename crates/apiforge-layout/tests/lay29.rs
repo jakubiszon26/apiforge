@@ -161,6 +161,35 @@ fn lay29_criterion_1_between_cards_that_touch_the_wire_is_not_under_them() {
     }
 }
 
+/// Criterion 1, cards closer than a stub: the ports of a wire face the
+/// other card 12 px and 9 px away, as `begin` and `login` lie when cards
+/// are piled. Each stub stops between the two cards and the wire goes
+/// round; it has a route, and no piece of it lies inside either card.
+#[test]
+fn lay29_criterion_1_cards_closer_than_a_stub_still_give_a_route() {
+    // A port on the top of the lower card, under the upper one, wired to
+    // the top of the upper card.
+    let cards = [
+        card(300.0, 200.0, 280.0, 110.0),
+        card(380.0, 0.0, 280.0, 188.0),
+    ];
+    let wires = [wire((0, Side::Top, 140.0), (1, Side::Top, 140.0))];
+    let routes = route(&cards, &wires, &Routing::default());
+    assert!(routes[0].complete, "{:?}", routes[0].points);
+    assert_eq!(under_own(&routes, &wires, &cards), []);
+    assert_eq!(violations(&routes, &wires, &cards), []);
+    // Two ports facing each other across 9 px.
+    let cards = [
+        card(400.0, 180.0, 210.0, 130.0),
+        card(619.0, 190.0, 330.0, 170.0),
+    ];
+    let wires = [wire((0, Side::Right, 70.0), (1, Side::Left, 54.0))];
+    let routes = route(&cards, &wires, &Routing::default());
+    assert!(routes[0].complete, "{:?}", routes[0].points);
+    assert_eq!(under_own(&routes, &wires, &cards), []);
+    assert_eq!(violations(&routes, &wires, &cards), []);
+}
+
 /// Criterion 5: the budget of ADR 0006. The reference boards route within
 /// it by a wide margin; the budget's own board is `bench`'s.
 #[test]

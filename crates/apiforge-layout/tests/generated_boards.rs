@@ -467,13 +467,15 @@ fn tidying_a_selection_keeps_off_the_cards_outside_it() {
     }
 }
 
-/// LAY-29 criterion 1: on piles of cards no complete route passes under a
-/// card it joins, past the stub out of a port the other card lies over. A
-/// wire with no way round has no route, and those are few.
+/// LAY-29 criterion 1: on piles of cards no route passes under a card it
+/// joins, past the stub out of a port the other card lies over, and every
+/// wire has a route: one whose port lies under the other card leaves it by
+/// its stub and goes round (3 of 256 had none when the fallbacks under a
+/// wire's own cards were first removed).
 #[test]
 fn lay29_criterion_1_no_route_passes_under_its_own_card_on_piled_boards() {
     let routing = Routing::default();
-    let (mut wires_routed, mut incomplete) = (0, 0);
+    let (mut wires_routed, mut incomplete) = (0, Vec::new());
     for seed in 1..=40u64 {
         let count = 4 + (seed as usize * 5) % 10;
         let mut board = board(seed, count, true);
@@ -490,8 +492,14 @@ fn lay29_criterion_1_no_route_passes_under_its_own_card_on_piled_boards() {
             "seed {seed}: a route passes under a card it joins"
         );
         wires_routed += wires.len();
-        incomplete += routes.iter().filter(|route| !route.complete).count();
+        incomplete.extend(
+            routes
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| !line.complete)
+                .map(|(index, _)| (seed, index)),
+        );
     }
-    println!("LAY29 piles: {incomplete} of {wires_routed} wires have no route");
     assert_eq!(wires_routed, 256);
+    assert_eq!(incomplete, [], "(seed, wire) with no route on the piles");
 }
