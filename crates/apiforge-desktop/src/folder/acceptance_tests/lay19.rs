@@ -362,7 +362,7 @@ fn lay19_criterion_1_the_count_equals_the_caused_rows() {
     let source = replaced(
         &condition_unmet(),
         "  cleanup {\n",
-        "  extra = GET \"/extra\" {\n  }\n  extra_ok = assert extra.status == 200\n  cleanup {\n",
+        "  @after(begin)\n  extra = GET \"/extra\" {\n  }\n  extra_ok = assert extra.status == 200\n  cleanup {\n",
     );
     let (_project, mut harness) = ran(&source, WIDE);
     let result = run(&harness);
@@ -578,7 +578,7 @@ fn width(harness: &FolderHarness, text: &str, font: FontId) -> f32 {
 /// The count and the cause of every card in view sit on the result line,
 /// inside the card's box; the count is whole and a cause shows at least its
 /// first word.
-fn assert_fits(harness: &FolderHarness, context: &str) {
+fn assert_fits(harness: &FolderHarness, context: &str) -> usize {
     let result = run(harness);
     let mut counted = 0;
     for (handle, card, texts) in cards_in_view(harness) {
@@ -622,7 +622,7 @@ fn assert_fits(harness: &FolderHarness, context: &str) {
             );
         }
     }
-    assert!(counted > 0, "{context}: a count in view");
+    counted
 }
 
 /// Criterion 5: at Compact and at Full the count and the cause are on the
@@ -641,6 +641,11 @@ fn lay19_criterion_5_fits_the_box() {
     for size in [WIDE, crate::testing::MINIMUM] {
         for (name, source) in [("short", failing()), ("long", long.clone())] {
             let (_project, mut harness) = ran(&source, size);
+            if size != WIDE {
+                // Run results collapsed: the board holds a whole card.
+                harness.get_by_label("Run results").click();
+                settle(&mut harness);
+            }
             for density in ["compact", "full"] {
                 if density == "full" {
                     switch_density(&mut harness);
@@ -649,17 +654,36 @@ fn lay19_criterion_5_fits_the_box() {
                 for zoom in [0.6, 1.0] {
                     for centre in ["checkout", "order", "refund"] {
                         show(&mut harness, centre, zoom);
-                        assert_fits(
-                            &harness,
-                            &format!("{size:?} {name} {density} {zoom} at {centre}"),
+                        let context = format!("{size:?} {name} {density} {zoom} at {centre}");
+                        let counted = assert_fits(&harness, &context);
+                        // The failed card counts wherever it is wholly in
+                        // view; a full card at 100 % is taller than the
+                        // small window's board.
+                        let whole = cards_in_view(&harness)
+                            .iter()
+                            .any(|(handle, _, _)| handle == "checkout");
+                        assert_eq!(
+                            counted,
+                            usize::from(whole),
+                            "{context}: the failed card's count"
                         );
+                        if centre == "checkout" && (size == WIDE || zoom < 1.0) {
+                            assert!(whole, "{context}: checkout wholly in view");
+                        }
                     }
                 }
             }
         }
 
-        // At Overview: Fit, with Run results collapsed at the small size.
-        let (_project, mut harness) = ran(&failing(), size);
+        // At Overview: the board tidied, then Fit, with Run results
+        // collapsed at the small size.
+        let (_project, mut harness) = open(&failing(), size);
+        let tidy = document(&harness);
+        app(&mut harness).selections.insert(tidy, Vec::new());
+        settle(&mut harness);
+        choose(&mut harness, "Tidy up");
+        settle(&mut harness);
+        simulate(&mut harness);
         if size != WIDE {
             harness.get_by_label("Run results").click();
             settle(&mut harness);
@@ -696,17 +720,16 @@ fn lay19_criterion_5_fits_the_box() {
     }
 }
 
-/// Every word a card in view or Run results write about the run: the
-/// result texts of the cards around `centres`, the rows, the summary and
-/// the details of `order`.
-fn everything(harness: &mut FolderHarness, centres: &[&str]) -> Vec<String> {
+/// Every word the cards `cards` and Run results write about the run: the
+/// cards' result texts, the rows, the summary and the details of `order`.
+fn everything(harness: &mut FolderHarness, cards: &[&str]) -> Vec<String> {
     let mut words = Vec::new();
-    for centre in centres {
-        show(harness, centre, 0.6);
-        for (handle, _, texts) in cards_in_view(harness) {
-            for text in texts {
-                words.push(format!("{centre}: {handle}: {}", text.text));
-            }
+    let open = document(harness);
+    app(harness).selections.insert(open, Vec::new());
+    settle(harness);
+    for handle in cards {
+        for text in results_at(harness, handle, 0.6) {
+            words.push(format!("{handle}: {}", text.text));
         }
     }
     let result = run(harness);
@@ -732,7 +755,9 @@ fn everything(harness: &mut FolderHarness, centres: &[&str]) -> Vec<String> {
 #[test]
 fn lay19_criterion_6_no_message_is_read() {
     let (_project, mut harness) = ran(&failing(), WIDE);
-    let centres = ["checkout", "order", "refund", "logout"];
+    let centres = [
+        "checkout", "address", "order", "payment", "receipt", "refund", "logout",
+    ];
     let before = everything(&mut harness, &centres);
     assert!(
         !before
