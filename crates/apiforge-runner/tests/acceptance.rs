@@ -16,7 +16,7 @@ use apiforge_core::{
     format::{Node, Project, Scenario},
     graph::{WireKind, wires},
     model::{Branch, NodeKind},
-    run::{NotRunCause, RunMode, RunResult, RunStatus, StepResult, StepStatus},
+    run::{CauseEnd, NotRunCause, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
 use apiforge_runner::{HttpTransport, RunOptions, RunRequest, SeededRandom, run_scenario};
 use apiforge_script::{Document, LowerContext, format, lower, parse};
@@ -567,23 +567,15 @@ async fn not_run_causes_are_an_enum_with_one_variant_per_branch() {
 }
 
 /// The step a not-run step's cause chain ends at, or the cause that ends it
-/// without a step.
+/// without a step; the rule is `StepResult::cause_end` (LAY-19).
 fn chain_end<'a>(run: &'a RunResult, step: &'a StepResult) -> Result<&'a str, NotRunCause> {
-    let mut current = step;
-    for _ in 0..=run.steps.len() {
-        let Some(cause) = &current.cause else {
-            return Ok(&current.handle);
-        };
-        let Some(next) = cause.step() else {
-            return Err(cause.clone());
-        };
-        current = run
-            .steps
-            .iter()
-            .find(|step| step.node_id == next)
-            .unwrap_or_else(|| panic!("the cause of `{}` names `{next}`", current.handle));
+    match step.cause_end(&run.steps) {
+        None => Ok(&step.handle),
+        Some(CauseEnd {
+            step: Some(end), ..
+        }) => Ok(&end.handle),
+        Some(CauseEnd { last, step: None }) => Err(last.clone()),
     }
-    panic!("the cause chain of `{}` loops", step.handle);
 }
 
 /// Criterion 3: after the failed simulation of `shop-30`, every not-run step's

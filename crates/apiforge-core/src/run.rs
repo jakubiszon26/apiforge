@@ -134,6 +134,29 @@ impl NotRunCause {
     }
 }
 
+/// Where the cause of a step that did not run ends (LAY-19): the last link
+/// of its chain and the step that ran at its end, the one that failed or a
+/// false *Data condition*. A chain that ends without a step (outside the
+/// path, cancelled) has none, and so has one that names a step missing from
+/// the results or that loops.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CauseEnd<'a> {
+    pub last: &'a NotRunCause,
+    pub step: Option<&'a StepResult>,
+}
+
+/// For each step at the end of a cause chain, by node id, how many of
+/// `steps` it kept from running.
+pub fn not_run_by_end(steps: &[StepResult]) -> IndexMap<&str, usize> {
+    let mut counts = IndexMap::new();
+    for step in steps {
+        if let Some(end) = step.cause_end(steps).and_then(|end| end.step) {
+            *counts.entry(end.node_id.as_str()).or_default() += 1;
+        }
+    }
+    counts
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StepResult {
@@ -168,6 +191,31 @@ impl StepResult {
     /// The label, or the handle of a node without one.
     pub fn display_name(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.handle)
+    }
+
+    /// Where this step's cause ends among `steps`, the results of the same
+    /// graph: each link names a step, which has a cause of its own when it
+    /// did not run either. `None` for a step that ran.
+    pub fn cause_end<'a>(&'a self, steps: &'a [StepResult]) -> Option<CauseEnd<'a>> {
+        let mut last = self.cause.as_ref()?;
+        for _ in 0..=steps.len() {
+            let Some(next) = last.step() else {
+                return Some(CauseEnd { last, step: None });
+            };
+            let Some(target) = steps.iter().find(|step| step.node_id == next) else {
+                break;
+            };
+            match &target.cause {
+                Some(further) => last = further,
+                None => {
+                    return Some(CauseEnd {
+                        last,
+                        step: Some(target),
+                    });
+                }
+            }
+        }
+        Some(CauseEnd { last, step: None })
     }
 
     /// A passed step of `node` without inputs or outputs yet.
