@@ -51,7 +51,9 @@ fn default_slot(node: &Node) -> Option<(String, Vec<String>)> {
 /// Adds a new block of `kind`, optionally connected from an existing output.
 ///
 /// - From a control pseudo-port the block gets an ordering edge (taking the IF
-///   branch of `__true`/`__false`).
+///   branch of `__true`/`__false`). From a step's `__order` it is written after
+///   that step and the checks and values that follow it, so it runs directly
+///   after it; every other new block is written last.
 /// - From a data output the block's default input is bound to it: `actual` for
 ///   checks, `value` for values, `body` for requests and the action input of a
 ///   component. A block without such an input gets an ordering edge instead.
@@ -105,9 +107,14 @@ pub fn add_node(
     }
 
     let mut next = graph.clone();
+    // Where the new block is written: last, unless it follows a step's *Next*.
+    let mut at = next.nodes.len();
     match source {
         Some(source) => match control_branch(source.port) {
             Some(branch) => {
+                if branch.is_none() {
+                    at = after_step(graph, source.node_id);
+                }
                 let edge = order_edge(&next, source.node_id, &node.id, branch);
                 next.edges.push(edge);
             }
@@ -145,11 +152,30 @@ pub fn add_node(
         }
     }
     let node_id = node.id.clone();
-    next.nodes.push(node);
+    next.nodes.insert(at, node);
     Ok(AddedNode {
         graph: next,
         node_id,
     })
+}
+
+/// The index after `source` and the checks and values written after it,
+/// before the next step: where a step that follows `source` is written, so
+/// that it runs directly after it (DIAG-07). Among ready blocks the engine
+/// takes the one written first.
+fn after_step(graph: &Graph, source: &str) -> usize {
+    let Some(index) = graph.nodes.iter().position(|node| node.id == source) else {
+        return graph.nodes.len();
+    };
+    graph.nodes[index + 1..]
+        .iter()
+        .position(|node| {
+            matches!(
+                node.kind,
+                NodeKind::Start | NodeKind::Request | NodeKind::Component | NodeKind::If
+            )
+        })
+        .map_or(graph.nodes.len(), |offset| index + 1 + offset)
 }
 
 /// A comparison of one output field with an expected value, placed next to `source`.
@@ -574,6 +600,58 @@ mod tests {
             ),
             Err(EditError::NodeNotFound)
         ));
+    }
+
+    /// DIAG-07: a step added from a step's *Next* is written after that step
+    /// and the checks and values that follow it, before the next step; from
+    /// an IF branch, with no source or from data it is appended.
+    #[test]
+    fn a_step_from_next_is_written_after_its_source_and_its_checks() {
+        let kinds = [
+            NodeKind::Start,
+            NodeKind::Request,
+            NodeKind::Assert,
+            NodeKind::Value,
+            NodeKind::Condition,
+            NodeKind::Request,
+            NodeKind::If,
+            NodeKind::Assert,
+        ];
+        let graph = Graph {
+            nodes: kinds.into_iter().map(node).collect(),
+            edges: vec![],
+            proxies: Vec::new(),
+        };
+        let ids: Vec<String> = graph.nodes.iter().map(|node| node.id.clone()).collect();
+        let order = |source: &str, port: &str| {
+            let added = add_node(
+                &graph,
+                Block::Request,
+                AT,
+                None,
+                Some(OutputRef {
+                    node_id: source,
+                    port,
+                }),
+            )
+            .unwrap();
+            let at = added
+                .graph
+                .nodes
+                .iter()
+                .position(|node| node.id == added.node_id)
+                .unwrap();
+            let mut rest = added.graph.nodes.clone();
+            rest.remove(at);
+            assert_eq!(rest, graph.nodes, "nothing else moves");
+            at
+        };
+        assert_eq!(order(&ids[0], ORDER_PORT), 1, "after Start");
+        assert_eq!(order(&ids[1], ORDER_PORT), 5, "after the checks and values");
+        assert_eq!(order(&ids[5], ORDER_PORT), 6, "before an IF");
+        assert_eq!(order(&ids[7], ORDER_PORT), 8, "after the last block");
+        assert_eq!(order(&ids[6], FALSE_PORT), 8, "a branch appends");
+        assert_eq!(order(&ids[1], "body"), 8, "data appends");
     }
 
     #[test]
