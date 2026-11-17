@@ -5069,3 +5069,52 @@ fn mcp23_criterion_6_a_recorded_result_replays_as_recorded() {
     assert_eq!(unreplayed(&second), unreplayed(&first));
     assert!(journal(root).is_none(), "a finished run leaves no journal");
 }
+
+// ----- RUN-04 (#418): a stopped run says "stopped" on every step -----
+
+/// Criterion 7: after a check of `a` fails under *Stop*, `b`, `c` and `d`
+/// read "Stopped after an error." and name the check by its handle. The
+/// chain replaces the demo scenario's text, at its registered path.
+#[test]
+fn run04_criterion_7_an_agent_reads_stopped_on_every_step_not_reached() {
+    let directory = checkout();
+    let root = directory.path();
+    fs::write(
+        root.join(SCENARIO),
+        r#"scenario "A chain stopped by a check" {
+  begin = start
+  @after(begin)
+  a = GET "/a" {
+    sample 200 { ok: true }
+  }
+  broken = assert a.body.ok == false
+  @after(a)
+  b = GET "/b" {
+    sample 200 {}
+  }
+  @after(b)
+  c = GET "/c" {
+    sample 200 {}
+  }
+  @after(c)
+  d = GET "/d" {
+    sample 200 {}
+  }
+}
+"#,
+    )
+    .unwrap();
+    let report = simulate(root, &arguments(SCENARIO)).unwrap();
+    assert_eq!(report.status, Verdict::Failed);
+    let steps = report.steps.as_deref().unwrap();
+    for handle in ["b", "c", "d"] {
+        let step = step_json(steps, handle);
+        assert_eq!(step["status"], "skipped", "{handle}: {step}");
+        assert_eq!(step["message"], "Stopped after an error.", "{handle}");
+        assert_eq!(
+            step["cause"],
+            json!({ "kind": "stopped", "by": "broken" }),
+            "{handle}"
+        );
+    }
+}
