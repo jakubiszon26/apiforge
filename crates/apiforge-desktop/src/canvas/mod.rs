@@ -14,6 +14,7 @@ mod resting;
 mod routing;
 pub mod shape;
 mod strip;
+mod trace;
 mod variables;
 
 pub use collapse::collapsible;
@@ -479,6 +480,8 @@ pub struct Canvas {
     /// The menu of a port's `+ var` (LAY-25).
     port_menu: Option<variables::PortMenu>,
     selected_wires: Vec<String>,
+    /// What tracing keeps between frames (LAY-14).
+    trace: trace::Memory,
     inline: Option<InlineEdit>,
     error: Option<String>,
     router: routing::Router,
@@ -679,6 +682,7 @@ impl Default for Canvas {
             offer: None,
             port_menu: None,
             selected_wires: Vec::new(),
+            trace: trace::Memory::default(),
             inline: None,
             error: None,
             #[cfg(test)]
@@ -1582,10 +1586,18 @@ impl Canvas {
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &folded);
+        // A kept wire the board no longer has, after an edit, an Undo or a
+        // fold, is no longer kept: it does not come back kept (LAY-14).
+        let kept = self.selected_wires.len();
+        self.selected_wires
+            .retain(|id| board_wires.iter().any(|wire| &wire.id == id));
+        if self.selected_wires.len() != kept {
+            ui.ctx().request_repaint();
+        }
         // One selected step rings what it is related to and dims the rest
         // (LAY-10); its wires are lit, every other wire is dimmed.
         let focus = Focus::of(input.graph, input.selection, &board_wires, &cards);
-        let lit: HashSet<String> = focus.as_ref().map_or_else(HashSet::new, |focus| {
+        let mut lit: HashSet<String> = focus.as_ref().map_or_else(HashSet::new, |focus| {
             board_wires
                 .iter()
                 .filter(|wire| focus.lit(wire, &cards, &chips))
@@ -1685,26 +1697,47 @@ impl Canvas {
                 .iter()
                 .position(|laid| laid.rect.contains(pointer))
         });
-        let pointed_input = hover.and_then(|pointer| {
-            tags.iter().find_map(|tag| {
-                let card = &cards[tag.card];
-                let index = card.inputs.iter().position(|row| row.name == tag.input)?;
-                let row = card.input_row(index);
-                (row != Rect::NOTHING && camera.rect(row).contains(pointer))
-                    .then(|| (tag.reader.clone(), tag.input.clone(), camera.rect(row)))
+        // An input row names every value feeding it, a drawn line its own;
+        // a click keeps a line or a chip (LAY-14).
+        let pointed_input =
+            hover.and_then(|pointer| trace::pointed_row(&cards, &board_wires, camera, pointer));
+        let pointed_wire = hover
+            .filter(|pointer| {
+                pointed_tag.is_none()
+                    && pointed_input.is_none()
+                    && self.drag.is_none()
+                    && ui.ctx().layer_id_at(*pointer) == Some(ui.layer_id())
             })
-        });
+            .and_then(|pointer| {
+                let over = cards
+                    .iter()
+                    .map(|card| camera.rect(card.rect()))
+                    .chain(chips.iter().map(|chip| camera.rect(chip.rect())))
+                    .chain(chip_boxes.iter().copied());
+                Some((self.trace.pointed(camera, pointer, over)?, pointer))
+            });
+        let traced = trace::Trace::of(
+            &trace::Board {
+                graph: input.graph,
+                project: input.project,
+                cards: &cards,
+                chips: &chips,
+                wires: &board_wires,
+            },
+            pointed_wire.as_ref().map(|(wire, _)| wire.as_str()),
+            pointed_input
+                .as_ref()
+                .map(|(reader, name, _)| (reader.as_str(), name.as_str())),
+            &self.selected_wires,
+        );
+        lit.extend(traced.lit().cloned());
+        let dimming = focus.is_some() || traced.dims();
         let statement: Option<(String, Rect)> = match (pointed_tag, &pointed_input) {
             (Some(index), _) => Some((shown_tags[index].statement.clone(), laid_tags[index].rect)),
-            (None, Some((reader, name, row))) => Some((
-                tags.iter()
-                    .filter(|tag| &tag.reader == reader && &tag.input == name)
-                    .map(|tag| tag.statement.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-                *row,
-            )),
-            (None, None) => None,
+            (None, Some((_, _, row))) => traced.pointed_statement().map(|text| (text, *row)),
+            (None, None) => pointed_wire
+                .as_ref()
+                .and_then(|(_, at)| Some((traced.pointed_statement()?, trace::at_pointer(*at)))),
         };
         let mut revealed: HashSet<String> = tags
             .iter()
@@ -1717,6 +1750,9 @@ impl Canvas {
                         .iter()
                         .any(|wire| self.selected_wires.contains(wire))
                     || pointed_tag.is_some_and(|index| shown_tags[index] == **tag)
+                    || pointed_wire
+                        .as_ref()
+                        .is_some_and(|(wire, _)| tag.wires.contains(wire))
                     || pointed_input.as_ref().is_some_and(|(reader, name, _)| {
                         &tag.reader == reader && &tag.input == name
                     })
@@ -1815,7 +1851,7 @@ impl Canvas {
                     selected_wires.contains(&wire.id)
                         || related_wires.contains(&wire.id)
                         || lit.contains(&wire.id),
-                    focus.is_some() && !lit.contains(&wire.id),
+                    dimming && !lit.contains(&wire.id),
                 );
                 if let Some(text) = wire_labels.get(&wire.id) {
                     paint::wire_label(&board_painter, wire, camera, text);
@@ -1848,7 +1884,7 @@ impl Canvas {
                     wire,
                     camera,
                     true,
-                    focus.is_some() && !lit.contains(&wire.id),
+                    dimming && !lit.contains(&wire.id),
                 );
                 drawn_revealed.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
@@ -1888,7 +1924,7 @@ impl Canvas {
                 else {
                     continue;
                 };
-                if !lit.contains(id) {
+                if !focus.lit(wire, &cards, &chips) {
                     continue;
                 }
                 let target = &cards[wire.target].id;
@@ -1905,6 +1941,9 @@ impl Canvas {
                 }
             }
         }
+        port_rings.extend(traced.rings(drawn.iter().chain(&drawn_revealed), camera));
+        self.trace
+            .remember(&traced, drawn.iter().chain(&drawn_revealed));
         for (tag, laid) in shown_tags.iter().zip(&laid_tags) {
             let lit = tag.wires.iter().all(|wire| revealed.contains(wire));
             readers::paint(&board_painter, laid, lit);
@@ -1966,7 +2005,7 @@ impl Canvas {
                     revealed: revealed.contains(&wire.id),
                     label_box: label_boxes.get(&wire.id).copied(),
                     lit: lit.contains(&wire.id),
-                    dimmed: focus.is_some() && !lit.contains(&wire.id),
+                    dimmed: dimming && !lit.contains(&wire.id),
                 })
                 .collect();
         }
@@ -2070,6 +2109,9 @@ impl Canvas {
                 let ids = if selection.contains(card.id.as_str()) {
                     input.selection.to_vec()
                 } else {
+                    // As a click on it does, a new selection ends a kept
+                    // wire (LAY-14).
+                    self.selected_wires.clear();
                     commands.push(Command::Select(vec![card.id.clone()]));
                     vec![card.id.clone()]
                 };
@@ -2148,9 +2190,10 @@ impl Canvas {
                     .as_ref()
                     .and_then(|focus| focus.rings.get(&card.id).copied())
                     .or_else(|| related_blocks.contains(&card.id).then_some(paint::RELATED)),
-                dimmed: focus.as_ref().is_some_and(|focus| {
+                dimmed: (focus.as_ref().is_some_and(|focus| {
                     focus.selected != card.id && !focus.rings.contains_key(&card.id)
-                }) && !failed
+                }) || traced.dims_card(&card.id))
+                    && !failed
                     && !run.running,
             };
             let drawn_card = if card.compact.is_some() {
@@ -2281,6 +2324,9 @@ impl Canvas {
                 let ids = if selection.contains(chip.id()) {
                     input.selection.to_vec()
                 } else {
+                    // As a click on it does, a new selection ends a kept
+                    // wire (LAY-14).
+                    self.selected_wires.clear();
                     commands.push(Command::Select(vec![chip.id().to_owned()]));
                     vec![chip.id().to_owned()]
                 };
@@ -2305,23 +2351,32 @@ impl Canvas {
         }
 
         // The chips and counts, found by their names: pointing at a chip
-        // draws its wire, a click on a count draws every wire of its port.
+        // draws its wire and a click keeps it (LAY-14), a click on a count
+        // draws every wire of its port.
         for (tag, laid) in shown_tags.iter().zip(&laid_tags) {
             if !laid.rect.intersects(overlays.board) {
                 continue;
             }
             let name = tag.statement.clone();
-            board_ui
+            let response = board_ui
                 .interact(
                     laid.rect.intersect(overlays.board),
                     board_ui
                         .id()
                         .with(("reader-chip", &tag.reader, &tag.statement)),
-                    Sense::hover(),
+                    Sense::click(),
                 )
-                .widget_info(move || {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &name)
-                });
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            response.widget_info(move || {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+            });
+            if response.clicked() {
+                clicked_card = true;
+                self.menu = None;
+                self.trace
+                    .keep_chip(&mut self.selected_wires, &tag.wires, modifiers.command);
+                commands.push(Command::Select(vec![]));
+            }
         }
         for (count, laid) in shown_counts.iter().zip(&laid_counts) {
             if !laid.rect.intersects(overlays.board) {
@@ -2427,9 +2482,15 @@ impl Canvas {
         {
             self.var_marks = drawn_marks;
         }
-        if let Some((text, near)) = &statement {
-            readers::paint_statement(&painter, *near, text);
-        }
+        self.trace.paint(
+            &painter,
+            overlays.board,
+            camera,
+            &traced,
+            statement.as_ref(),
+            &shown_tags,
+            &laid_tags,
+        );
 
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(
@@ -2450,6 +2511,10 @@ impl Canvas {
             let hit = pointer.and_then(|pointer| hit_wire(&drawn, camera, pointer));
             match hit {
                 Some(wire) => {
+                    if let Some(at) = pointer {
+                        let at = trace::Anchor::Board(camera.to_world(at));
+                        self.trace.anchor(vec![wire.clone()], at, modifiers.command);
+                    }
                     if modifiers.command {
                         toggle(&mut self.selected_wires, &wire);
                     } else {
