@@ -189,7 +189,7 @@ fn review_lay29() {
         }
         let (under, incomplete) = under_own_in_the_window(&harness, &id);
         let canvas = board(&harness, &id);
-        println!(
+        outln!(
             "LAY29 {label}: lines {} under their own card {} without a route {incomplete} zoom {:.3}",
             canvas.debug_geometry().1.len(),
             under.len(),
