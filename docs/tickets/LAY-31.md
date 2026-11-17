@@ -135,7 +135,9 @@ badges, bands, halos, trays and chips, and says nothing the chip does not.
 6. `shop-30`, checks drawn, default view, 1600 × 1000: Fit is not below
    46 % and the crossings are not above 6 (today's figures); the pull
    request prints lines, crossings, coincident pairs and Fit before and
-   after for the five scenarios, checks drawn and folded.
+   after for the five scenarios, checks drawn and folded. *Re-checked on
+   `main` d480c4b, after LAY-37 (#423) widened the gaps for chips:* Fit is
+   43.8 % there and the crossings 6; the bar stays at 46 %.
 7. `quality` prints for every board the number of hung cards, the mean and
    the worst gap above one, and the lines of other cards inside a group:
    the measure of LAY-01 that would have caught this.
@@ -181,5 +183,37 @@ badges, bands, halos, trays and chips, and says nothing the chip does not.
   extended by the cards hung under a dragged spine step.
 - `collapse::HANG_GAP` and `Rows::stack_gap` are the same 24 px and become
   one constant.
+
+## As implemented
+
+Built on `main` after LAY-29 (#405), LAY-37 (#423), LAY-14 (#420) and
+LAY-19 (#422). Where the ground moved since the analysis:
+
+- **The group is told by geometry everywhere** (`apiforge_layout::groups`):
+  on a tidied board it is the stack of `shape::plan`, and the router, Tidy
+  up, the board and `quality` see the same groups without the plan being
+  passed down. `route_grouped` takes them; `route` and `route_among` route
+  with every card alone, as before.
+- **A wire's own card in a group keeps the short clearance too** (10 px),
+  not only the group's other cards: an ordering line that leaves a hung
+  card (`@after(coupon_ok)`) starts in the group's 24 px gap, where a
+  20 px clearance from its own card left it no way out and sent Tidy up to
+  the round limit.
+- **`Room::stacks` is gone** and `make_room` no longer takes the folded
+  checks: nothing grows above a hung card.
+- **`packed_outside_groups`** is the measure of criterion 4; LAY-03's,
+  LAY-28's and LAY-29's tests that held every line 20 px apart use it.
+- **LAY-37's lanes** (`board_edit::lane_room`): a chip and a count face each
+  other across a gap only where they are level. Since a card hung under its
+  step now has a chip, every stack has chips low down and counts up at the
+  step; counted as facing, they widened every gap by a lane and Fit of
+  `shop-30` fell to 44.8 %. With the rule, 47.0 %.
+- **Dragging** (`canvas/mod.rs`, `with_hung`): the cards hung under a
+  dragged spine step are found where the document places them, folded
+  checks included, so a step drags its folded checks too.
+- **With checks folded** a folded check keeps its place, which no line is
+  kept out of (LAY-11): with every wire drawn, `quality` counts a line of
+  other cards through such a place once on `shop-30` (full cards), once on
+  `shop-50` (compact) and three times on `shop-50` (full); none with chips.
 - ADR 0006 is amended: the group, and the exception to the 20 px rule
   inside it.

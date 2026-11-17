@@ -134,7 +134,10 @@ with and without an ordering chain, then the same for the reference scenarios of
 density, with their checks collapsed and expanded, at the compact density once more
 with chips for shared values (LAY-23) and arrows for the rails into the next step
 (LAY-24), with their board size, fit zoom at 1600 × 1000 and 960 × 540, card and
-chip collisions and 20 px clearance violations. Two runs print the same; the
+chip collisions and 20 px clearance violations, and the cards hung under a
+step, the mean and the worst gap above them and the lines of other cards inside
+a step's group (LAY-31; inside a group a line of the group need not keep the
+20 px, which `packed` does not count). Two runs print the same; the
 example's header defines each column.
 `--dump` prints one generated board's rectangles and routes; `--unordered`
 prints the tables without the order of lines in a corridor (LAY-28), for
