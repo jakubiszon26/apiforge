@@ -90,9 +90,10 @@ impl NodeKind {
     }
 
     /// Data statements: a value, a check, a condition, an export. Among the
-    /// nodes ready at the same time they run before the steps (a start, a
-    /// request, a component call, an `if`), so a step's checks and values are
-    /// computed before the next step starts (RUN-03).
+    /// nodes ready at the same time they run before the steps (a request, a
+    /// component call, an `if`), so a step's checks and values are computed
+    /// before the next step starts (RUN-03). A ready *Start* runs before them:
+    /// it is the first thing a run does (RUN-04).
     pub fn is_data(self) -> bool {
         matches!(
             self,
@@ -553,8 +554,9 @@ pub fn dependency_index(graph: &Graph) -> HashMap<&str, IndexSet<&str>> {
 /// The steps in the order the engine reaches them, without executing anything.
 ///
 /// The runner's loop takes, among the nodes whose dependencies have finished,
-/// the first data statement of the document ([`NodeKind::is_data`]), or else
-/// the first step; and every node finishes whatever its result: a skipped
+/// a *Start*, or else the first data statement of the document
+/// ([`NodeKind::is_data`]), or else the first step; and every node finishes
+/// whatever its result: a skipped
 /// branch or a stopped run still takes its turn. So the order is static.
 /// Dependencies outside `graph` do not hold a step back, as a Cleanup step
 /// reading the main graph. Steps of a cycle, which the engine refuses, keep
@@ -579,24 +581,30 @@ pub fn sequence(graph: &Graph) -> Vec<&str> {
 }
 
 /// The position in `pending` of the node to run next among those `ready`
-/// accepts: the first data statement, or else the first step (RUN-03). The
-/// runner and [`sequence`] both choose with it.
+/// accepts: a *Start*, or else the first data statement, or else the first
+/// step (RUN-03). *Start* is the first thing a run does, so a value that reads
+/// no step runs after it (RUN-04). The runner and [`sequence`] both choose
+/// with it.
 pub fn next_ready<N: std::borrow::Borrow<Node>>(
     pending: &[N],
     mut ready: impl FnMut(&Node) -> bool,
 ) -> Option<usize> {
-    let mut first_step = None;
+    let (mut first_data, mut first_step) = (None, None);
     for (index, node) in pending.iter().enumerate() {
         let node = node.borrow();
         if !ready(node) {
             continue;
         }
-        if node.kind.is_data() {
+        if node.kind == NodeKind::Start {
             return Some(index);
         }
-        first_step.get_or_insert(index);
+        if node.kind.is_data() {
+            first_data.get_or_insert(index);
+        } else {
+            first_step.get_or_insert(index);
+        }
     }
-    first_step
+    first_data.or(first_step)
 }
 
 /// A step a check verifies: a request or a component call it reads directly.
@@ -1185,6 +1193,35 @@ mod tests {
             proxies: Vec::new(),
         };
         assert_eq!(sequence(&graph), ["free", "source", "reader", "ordered"]);
+    }
+
+    /// A ready *Start* goes before a value that reads no step, wherever the
+    /// document writes it; without a *Start*, the value goes first.
+    #[test]
+    fn sequence_takes_a_ready_start_first() {
+        let mut first = node("first", NodeKind::Request);
+        first
+            .inputs
+            .insert(URL_INPUT.into(), Binding::reference("limit", "value", ""));
+        let graph = Graph {
+            nodes: vec![
+                node("limit", NodeKind::Value),
+                node("begin", NodeKind::Start),
+                first,
+            ],
+            edges: vec![edge("begin", "first")],
+            proxies: Vec::new(),
+        };
+        assert_eq!(sequence(&graph), ["begin", "limit", "first"]);
+        let graph = Graph {
+            nodes: vec![
+                node("free", NodeKind::Request),
+                node("limit", NodeKind::Value),
+            ],
+            edges: Vec::new(),
+            proxies: Vec::new(),
+        };
+        assert_eq!(sequence(&graph), ["limit", "free"]);
     }
 
     /// Steps of a cycle cannot run; they keep their document order at the end,

@@ -527,6 +527,45 @@ async fn run03_criterion_5_sequence_agrees_with_the_engine() {
     }
 }
 
+// RUN-04 (#418) ---------------------------------------------------------------
+
+/// A value written before *Start* that reads no step, read by a later request.
+const VALUE_BEFORE_START: &str = r#"scenario "A value before Start" {
+  bad = "1" + 1
+  begin = start
+  @after(begin)
+  first = GET "/a" {
+    sample 200 {}
+  }
+  @after(first)
+  second = GET "/b" {
+    query { limit: bad }
+    sample 200 {}
+  }
+}
+"#;
+
+/// Criterion 6: the board's order is the run's; *Start* comes first, before
+/// the value that reads no step, as written and turned around.
+#[tokio::test]
+async fn run04_criterion_6_sequence_puts_start_first_and_agrees_with_the_engine() {
+    let (project, mut scenario) = lowered_scenario(VALUE_BEFORE_START);
+    for turn in ["as written", "reversed"] {
+        assert_eq!(
+            handles(&scenario.graph, &sequence(&scenario.graph)),
+            ["begin", "bad", "first", "second"],
+            "{turn}"
+        );
+        let run = simulate(project.clone(), &scenario).await;
+        assert_eq!(
+            sequence(&scenario.graph),
+            executed(&run, Phase::Main),
+            "{turn}"
+        );
+        reversed(&mut scenario.graph);
+    }
+}
+
 // LANG-10 (#354) --------------------------------------------------------------
 
 /// The built-in `uuid`, by the name a document writes it with.
