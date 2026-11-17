@@ -203,6 +203,7 @@ impl<'a> Parser<'a> {
             action_contract: None,
             statements: vec![],
             cleanup: None,
+            items: vec![],
             range: start..start,
         };
         while !matches!(self.peek(), "}" | "") {
@@ -219,6 +220,39 @@ impl<'a> Parser<'a> {
         Ok(file)
     }
     fn file_item(&mut self, file: &mut File) -> Result<()> {
+        let start = self.range().start;
+        let keyword = self.peek();
+        let counts = (
+            file.parameters.len(),
+            file.inputs.len(),
+            file.statements.len(),
+        );
+        self.file_part(file)?;
+        let item = if file.parameters.len() > counts.0 {
+            file.parameters
+                .last()
+                .map(|(name, _)| Item::Parameter(name.clone()))
+        } else if file.inputs.len() > counts.1 {
+            file.inputs
+                .last()
+                .map(|input| Item::Input(input.name.clone()))
+        } else if file.statements.len() > counts.2 {
+            None
+        } else {
+            match keyword {
+                "description" => Some(Item::Description),
+                "on_error" => Some(Item::OnError),
+                "action" => Some(Item::Action),
+                "cleanup" => Some(Item::Cleanup),
+                _ => None,
+            }
+        };
+        if let Some(item) = item {
+            file.items.push((item, start..self.last_end));
+        }
+        Ok(())
+    }
+    fn file_part(&mut self, file: &mut File) -> Result<()> {
         let scenario = matches!(file.kind, FileKind::Scenario { .. });
         match self.peek() {
             "description" if !self.next_is("=") => {
@@ -424,6 +458,7 @@ impl<'a> Parser<'a> {
             note: None,
             form,
             range: start..self.last_end,
+            extent: start..self.last_end,
         })
     }
     fn form(&mut self) -> Result<Form> {
@@ -1143,8 +1178,10 @@ fn attach_comments(
             let gap = &source[statement.range.end..comment.range.start];
             if gap.trim().is_empty() && !gap.contains('\n') {
                 note.push((trailing, comment));
+                statement.extent.end = comment.range.end;
             }
         }
+        statement.extent.start = end;
         if !note.is_empty() {
             statement.note = Some(
                 note.into_iter()

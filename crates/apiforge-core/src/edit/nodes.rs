@@ -53,7 +53,8 @@ fn default_slot(node: &Node) -> Option<(String, Vec<String>)> {
 /// - From a control pseudo-port the block gets an ordering edge (taking the IF
 ///   branch of `__true`/`__false`). From a step's `__order` it is written after
 ///   that step and the checks and values that follow it, so it runs directly
-///   after it; every other new block is written last.
+///   after it, and it follows the branches that step follows, so it stands in
+///   the same braces; every other new block is written last.
 /// - From a data output the block's default input is bound to it: `actual` for
 ///   checks, `value` for values, `body` for requests and the action input of a
 ///   component. A block without such an input gets an ordering edge instead.
@@ -112,11 +113,19 @@ pub fn add_node(
     match source {
         Some(source) => match control_branch(source.port) {
             Some(branch) => {
-                if branch.is_none() {
-                    at = after_step(graph, source.node_id);
-                }
                 let edge = order_edge(&next, source.node_id, &node.id, branch);
                 next.edges.push(edge);
+                if branch.is_none() {
+                    at = after_step(graph, source.node_id);
+                    // It stands in the braces its step stands in (LAY-34):
+                    // it follows the branches its step follows.
+                    for edge in &graph.edges {
+                        if edge.target == source.node_id && edge.branch.is_some() {
+                            let edge = order_edge(&next, &edge.source, &node.id, edge.branch);
+                            next.edges.push(edge);
+                        }
+                    }
+                }
             }
             None => {
                 let slot = component

@@ -177,7 +177,9 @@ cargo run -p apiforge-script --example fuzz_semantics --release --locked -- 60 2
 
 `fuzz_syntax` checks panic freedom, token coverage, UTF-8 ranges, fixes and
 formatting idempotence. `fuzz_semantics` mutates generated scenario graphs and checks
-that every successful lowering prints, round-trips, prints identically and reconciles.
+that every successful lowering prints, round-trips, prints identically and reconciles,
+and that a board edit (LAY-34) leaves the text alone when nothing changes and writes
+text that reads back as the edited document when it does.
 
 Changes to the interface follow [GUI testing](gui-testing.md): interaction tests
 through named widgets, measurable layout assertions and a design review of the
