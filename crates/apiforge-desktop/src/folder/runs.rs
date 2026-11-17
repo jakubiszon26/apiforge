@@ -224,6 +224,15 @@ impl FolderApp {
         }
     }
 
+    /// Changes the document's last run in place, as another engine or an
+    /// older report would have written it, for tests (LAY-19).
+    #[cfg(test)]
+    pub(super) fn debug_edit_run(&mut self, id: &str, edit: impl FnOnce(&mut RunResult)) {
+        if let Some(report) = self.runs.reports.get_mut(id) {
+            edit(&mut report.result);
+        }
+    }
+
     /// The document's report while it is fresh or only checks were added
     /// from it (UX-01), for the board's and the code's marks.
     pub(super) fn fresh_run(&self, id: &str) -> Option<RunResult> {
