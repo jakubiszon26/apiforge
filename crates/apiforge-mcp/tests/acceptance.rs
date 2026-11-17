@@ -558,12 +558,12 @@ const DEMO_BASE_URL: &str = "http://127.0.0.1:4318/demo/shop";
 
 /// Every top-level step of the demo scenario, the cleanup's last.
 const DEMO_STEPS: [&str; 8] = [
-    "product",
-    "active_promotion",
     "expected_price",
+    "product",
+    "field_inna_nazwa",
+    "active_promotion",
     "add_to_cart",
     "promotional_price",
-    "field_inna_nazwa",
     "delete_cart",
     "cart_was_deleted",
 ];
@@ -935,9 +935,9 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
     assert_eq!(report.step_count, 18);
     assert_eq!(count(steps), 18, "as `apiforge run` prints 18 lines");
     assert_eq!(handles(steps), DEMO_STEPS);
-    assert_eq!(steps[0].label.as_deref(), Some("Product"));
+    assert_eq!(steps[1].label.as_deref(), Some("Product"));
     assert_eq!(
-        handles(steps[0].steps.as_deref().unwrap()),
+        handles(steps[1].steps.as_deref().unwrap()),
         ["fetch_product", "product"],
         "a component's steps nested beneath it"
     );
@@ -4750,6 +4750,17 @@ fn steps_json(steps: &[Step]) -> Vec<(String, Value)> {
         .collect()
 }
 
+/// The step of a JSON step list with this handle; the run order puts the
+/// scenario's values among the steps, so a position says nothing.
+fn by_handle<'a>(steps: &'a Value, handle: &str) -> &'a Value {
+    steps
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["handle"] == handle)
+        .unwrap_or_else(|| panic!("no step {handle} in {steps}"))
+}
+
 /// `sample_product()` with a field `pad` of `pad` characters.
 fn padded_product(pad: usize) -> Value {
     let mut product = sample_product();
@@ -4771,12 +4782,12 @@ fn mcp23_criterion_1_exports_and_component_calls_carry_their_outputs() {
     assert_eq!(report.status, Verdict::Passed);
     let steps = report.steps.as_deref().unwrap();
 
-    let call = serde_json::to_value(&steps[0]).unwrap();
+    let call = steps.iter().find(|step| step.handle == "product").unwrap();
+    let call = serde_json::to_value(call).unwrap();
     assert_eq!(call["handle"], "product");
     assert_eq!(call["outputs"], json!({ "product": sample_product() }));
-    assert_eq!(call["steps"][1]["handle"], "product");
     assert_eq!(
-        call["steps"][1]["outputs"],
+        by_handle(&call["steps"], "product")["outputs"],
         json!({ "value": sample_product() }),
         "the component's export, nested"
     );
@@ -4911,12 +4922,17 @@ fn mcp23_criterion_3_full_is_the_runners_report_without_the_snapshot() {
     for key in ["status", "mode", "diagnostic", "scenarioId"] {
         assert_eq!(report.get(key), runner.get(key), "{key}");
     }
-    let fetch = &report["steps"][0]["children"][0];
-    assert_eq!(fetch["handle"], "fetch_product");
+    let fetch = by_handle(
+        &by_handle(&report["steps"], "product")["children"],
+        "fetch_product",
+    );
     assert_eq!(fetch["request"]["method"], "GET");
     assert_eq!(fetch["outputs"]["status"], 200);
     assert_eq!(fetch["outputs"]["body"], sample_product());
-    assert_eq!(report["steps"][1]["inputs"]["product"], sample_product());
+    assert_eq!(
+        by_handle(&report["steps"], "active_promotion")["inputs"]["product"],
+        sample_product()
+    );
 }
 
 const ECHO: &str = "components/echo.afs";

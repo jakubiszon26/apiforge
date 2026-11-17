@@ -433,6 +433,100 @@ mod diag07 {
     }
 }
 
+// RUN-03 (#389) ---------------------------------------------------------------
+
+/// A check and a value of `cart`, written after the step that follows it.
+const CHECK_AFTER_THE_NEXT_STEP: &str = r#"scenario "Checks before the next step" {
+  begin = start
+  @after(begin)
+  cart = POST "/carts" {
+    sample 201 { id: "c-1", total: 0 }
+  }
+  @after(cart)
+  paid = POST "/payments" {
+    sample 201 { id: "p-1" }
+  }
+  created = assert cart.status == 201
+  total = cart.body.total
+  cleanup {
+    removed = DELETE "/carts/{{cart.body.id}}" {
+      sample 204 {}
+    }
+    @after(removed)
+    again = GET "/carts/{{cart.body.id}}" {
+      sample 404 {}
+    }
+    gone = assert removed.status == 204
+  }
+}
+"#;
+
+fn lowered_scenario(text: &str) -> (Project, Scenario) {
+    let project = shop_project();
+    let lowered = lower(&parse(text), &LowerContext::folder(&project));
+    assert!(!lowered.has_errors(), "{:#?}", lowered.diagnostics);
+    let Some(Document::Scenario(scenario)) = lowered.document else {
+        panic!("not a scenario");
+    };
+    (project, scenario)
+}
+
+fn handles<'a>(graph: &'a Graph, ids: &[&str]) -> Vec<&'a str> {
+    ids.iter().map(|id| handle_of(graph, id)).collect()
+}
+
+/// Criterion 5: the static order behind the badge numbers puts a step's
+/// checks and values before the next step, in the main flow and the cleanup.
+#[test]
+fn run03_criterion_5_sequence_puts_checks_and_values_before_the_next_step() {
+    let (_, scenario) = lowered_scenario(CHECK_AFTER_THE_NEXT_STEP);
+    assert_eq!(
+        handles(&scenario.graph, &sequence(&scenario.graph)),
+        ["begin", "cart", "created", "total", "paid"]
+    );
+    assert_eq!(
+        handles(&scenario.cleanup, &sequence(&scenario.cleanup)),
+        ["removed", "gone", "again"]
+    );
+}
+
+/// Criterion 5: the static order agrees with the engine on that scenario and
+/// on every reference scenario, as written and turned around.
+#[tokio::test]
+async fn run03_criterion_5_sequence_agrees_with_the_engine() {
+    let mut cases = vec![(
+        "checks after the next step".to_owned(),
+        lowered_scenario(CHECK_AFTER_THE_NEXT_STEP),
+    )];
+    for name in [
+        "fan-out",
+        "far-value",
+        "far-value-saved",
+        "order-flow",
+        "shop-30",
+        "shop-50",
+    ] {
+        cases.push((name.to_owned(), fixture(name)));
+    }
+    for (name, (project, mut scenario)) in cases {
+        for turn in ["as written", "reversed"] {
+            let run = simulate(project.clone(), &scenario).await;
+            assert_eq!(
+                sequence(&scenario.graph),
+                executed(&run, Phase::Main),
+                "{name}, main, {turn}"
+            );
+            assert_eq!(
+                sequence(&scenario.cleanup),
+                executed(&run, Phase::Cleanup),
+                "{name}, cleanup, {turn}"
+            );
+            reversed(&mut scenario.graph);
+            reversed(&mut scenario.cleanup);
+        }
+    }
+}
+
 // LANG-10 (#354) --------------------------------------------------------------
 
 /// The built-in `uuid`, by the name a document writes it with.

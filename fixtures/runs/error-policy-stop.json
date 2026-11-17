@@ -281,6 +281,16 @@
         "expected": 80
       },
       {
+        "nodeId": "reads-failed",
+        "handle": "reads_failed",
+        "label": "reads-failed",
+        "kind": "value",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
         "nodeId": "after",
         "handle": "after",
         "kind": "request",
@@ -293,16 +303,6 @@
         "nodeId": "independent",
         "handle": "independent",
         "kind": "request",
-        "status": "skipped",
-        "phase": "main",
-        "inputs": {},
-        "outputs": {}
-      },
-      {
-        "nodeId": "reads-failed",
-        "handle": "reads_failed",
-        "label": "reads-failed",
-        "kind": "value",
         "status": "skipped",
         "phase": "main",
         "inputs": {},
