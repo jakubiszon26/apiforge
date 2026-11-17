@@ -260,14 +260,19 @@ unchanged.
 3. **A last attempt where a stub ends in the other card.** Two cards a
    wire joins can face each other closer than a stub, or a third card can
    bury both ports between them; the stub then ends inside the wire's
-   other card and no route can start. The last attempt, with no
-   clearance, lets each stub leave the cards over its port, then stops it
+   other card and no route can start. Two last attempts, with no
+   clearance, let each stub leave the cards over its port, then stop it
    short of the cards left and halfway to the other card when that card
-   is nearer. A card over one port only stays in the route's way past
-   the stub; a card over both ports is no obstacle and may hold the whole
-   route, a widening of the exception that `violations` knows. Only a
-   wire with no way at all has no route, is marked incomplete and drawn
-   as the plain corner of an enclosed port.
+   is nearer. The first keeps a card over one port in the way past the
+   stub; the second, where the pile over a port reaches the other card
+   and no stub leaves it, lets the route leave the cards over its ports
+   however it can. The exception widens with it: a port inside other
+   cards is left by the route's first pieces (its last, for the port it
+   enters) while each begins inside a card, and past them the route is
+   in the open; the stub is the usual case. `violations` judges that, and
+   a route of the second attempt that comes back into those cards is
+   given up. Only a wire with no way at all has no route, is marked
+   incomplete and drawn as the plain corner of an enclosed port.
 
 `apiforge_layout::under_own` lists the wires with a piece inside a card
 they join, past such a stub: none on the 24 reference boards and on

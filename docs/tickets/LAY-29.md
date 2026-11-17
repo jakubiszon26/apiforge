@@ -100,8 +100,10 @@ The analysis found two causes (both on #382):
 - `apiforge-layout/src/route.rs`: the attempts that let a wire under its
   own cards are gone; `clear_stub` leaves the wire's other card when it
   lies over the port; `violations` counts that stub as the exception;
-  a last attempt (`near_stub`) stops the stubs between cards closer than a
-  stub and lets the wire run inside a card over both its ports; `under_own` is
+  two last attempts (`near_stub`, `Stubs::Near` and `Stubs::Through`)
+  stop the stubs between cards closer than a stub and let the route leave
+  the cards over its ports, and `violations` allows the first pieces that
+  begin inside them (ADR 0006 rule 3); `under_own` is
   the measure. `canvas/` is unchanged.
 - ADR 0006 amended.
 - Tests: `crates/apiforge-layout/tests/lay29.rs`,
