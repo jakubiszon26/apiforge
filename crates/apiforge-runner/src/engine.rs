@@ -580,7 +580,16 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                         step.status = status;
                         // The message and the cause answer the same branch.
                         let (message, cause) = if let Some(cause) = gate.inactive {
-                            (OUTSIDE_PATH, cause)
+                            match &stopped {
+                                // Before a stop a step is inactive only on a
+                                // branch not taken; after it, one that waits
+                                // on a step that did not run waits on the
+                                // failure (RUN-04).
+                                Some(by) if cause != NotRunCause::OutsidePath => {
+                                    (STOPPED, NotRunCause::Stopped { by: by.clone() })
+                                }
+                                _ => (OUTSIDE_PATH, cause),
+                            }
                         } else if status == StepStatus::Cancelled {
                             (CANCELLED, NotRunCause::Cancelled)
                         } else if let Some(cause) = gate.blocked {

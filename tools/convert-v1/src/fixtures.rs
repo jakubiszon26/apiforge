@@ -196,11 +196,11 @@ fn convert_report(report: &mut Value, context: &Context<'_>) -> Result<(), Strin
 }
 
 /// Puts the steps of a converted report in the order the runner takes them
-/// (RUN-03, #389): among the nodes ready at the same time, the values and
-/// checks go before the next request, call or IF. Version one took the first
-/// ready node of the document whatever its kind, so a check could follow a
-/// later request. The steps themselves, and the order of the requests, calls
-/// and IFs, are as recorded.
+/// (RUN-03, #389): among the nodes ready at the same time, a Start goes
+/// first (RUN-04, #418), then the values and checks, then the next request,
+/// call or IF. Version one took the first ready node of the document whatever
+/// its kind, so a check could follow a later request. The steps themselves,
+/// and the order of the requests, calls and IFs, are as recorded.
 fn in_run_order(report: &mut Value, context: &Context<'_>) {
     fn sort(steps: &mut [Value], graph: &Graph, project: &Project) {
         let order = sequence(graph);

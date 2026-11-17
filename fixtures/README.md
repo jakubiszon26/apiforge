@@ -43,6 +43,13 @@ changes the converter; each resulting change of an expected report is explained 
 commit that makes it, and deliberate divergences from the recorded behaviour are listed
 in `run_corpus.rs`.
 
+The step order of a report in `runs/` is not recorded: the converter puts the steps in
+the order `graph::sequence` gives, which is the code under test. `run_corpus.rs` therefore
+proves statuses and values, not order; the order is proved by the RUN-03 and RUN-04 tests
+(`crates/apiforge-runner/tests/run03.rs`, `run04.rs` and
+`run03_criterion_5_sequence_agrees_with_the_engine` in
+`crates/apiforge-core/tests/acceptance.rs`).
+
 ## Semantic corpus
 
 The semantic corpus was recorded with a JavaScript engine, whose number and value

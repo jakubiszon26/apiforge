@@ -17,7 +17,8 @@ use apiforge_core::{
     graph::{WireKind, wires},
     model::{Branch, NodeKind},
     run::{
-        CauseEnd, CauseEnds, NotRunCause, RunMode, RunResult, RunStatus, StepResult, StepStatus,
+        CauseEnd, CauseEnds, NotRunCause, Phase, RunMode, RunResult, RunStatus, StepResult,
+        StepStatus,
     },
 };
 use apiforge_runner::{HttpTransport, RunOptions, RunRequest, SeededRandom, run_scenario};
@@ -381,6 +382,26 @@ fn assert_causes_only_on_steps_that_did_not_run(run: &RunResult) {
             step.message,
             step.cause
         );
+    }
+    assert_outside_only_when_outside(&run.steps);
+}
+
+/// RUN-04, criterion 3: in the main phase, and in a component's steps, a step
+/// reads "Step outside the active execution path." if and only if its cause
+/// is `OutsidePath`.
+fn assert_outside_only_when_outside(steps: &[StepResult]) {
+    for step in steps.iter().filter(|step| step.phase == Phase::Main) {
+        assert_eq!(
+            step.message.as_deref() == Some(NOT_RUN_MESSAGES[0]),
+            step.cause == Some(NotRunCause::OutsidePath),
+            "`{}`: {:?} {:?}",
+            step.handle,
+            step.message,
+            step.cause
+        );
+        if let Some(children) = &step.children {
+            assert_outside_only_when_outside(children);
+        }
     }
 }
 
