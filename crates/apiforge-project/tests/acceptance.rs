@@ -1489,4 +1489,61 @@ mod lay34 {
             "{new:?}"
         );
     }
+
+    /// The owner's decision of 2026-11-17 (#396): the question about
+    /// comments that belong to no statement is asked only when a board edit
+    /// prints the whole file, which drops them. An edit written into the
+    /// text keeps them and does not ask.
+    #[test]
+    fn lay34_a_board_edit_written_into_the_text_keeps_a_loose_comment_without_asking() {
+        let original = format!(
+            "// a loose note\n\n{}",
+            source("fixtures/scenarios/lay/shop-30.afs")
+        );
+        let (_directory, mut session, id) = opened(&original);
+        assert_eq!(
+            session.unattached_comments(&id).unwrap(),
+            ["// a loose note"]
+        );
+        let mut before = model(&session, &id);
+        let cart = id_of(&mut before, "cart");
+        let (added, _, _) = with_request(&before, Some(&cart));
+        session
+            .apply_model_edit(&id, added, Origin(7))
+            .expect("the edit does not ask");
+        let after = text(&session, &id);
+        assert!(after.starts_with("// a loose note\n\n"), "{after}");
+        inserted(&original, &after);
+    }
+
+    /// The same decision, when the edit cannot be written into the text: a
+    /// step added after a statement that shares its line with the closing
+    /// brace prints the whole file, so the question is asked first.
+    #[test]
+    fn lay34_a_board_edit_that_prints_the_whole_file_still_asks_about_a_loose_comment() {
+        let original = "// a loose note\n\nscenario \"Loose\" {\n  begin = start\n  @after(begin)\n  ping = GET \"/ping\" }\n";
+        let (_directory, mut session, id) = opened(original);
+        assert_eq!(
+            session.unattached_comments(&id).unwrap(),
+            ["// a loose note"]
+        );
+        let mut before = model(&session, &id);
+        let ping = id_of(&mut before, "ping");
+        let (added, _, _) = with_request(&before, Some(&ping));
+        assert!(matches!(
+            session.apply_model_edit(&id, added.clone(), Origin(7)),
+            Err(Error::CommentsWouldBeLost { comments: 1 })
+        ));
+        assert_eq!(
+            text(&session, &id),
+            original,
+            "nothing written before the answer"
+        );
+        session.accept_comment_loss(&id).unwrap();
+        session.apply_model_edit(&id, added, Origin(7)).unwrap();
+        assert!(
+            !text(&session, &id).contains("a loose note"),
+            "the whole file printed"
+        );
+    }
 }

@@ -277,24 +277,22 @@ fn comments_that_belong_to_no_statement_need_a_decision_before_a_reprint() {
         ["// a loose note"]
     );
 
-    // A graphical edit and a publication both refuse until a decision is made,
-    // and the original text stays exactly as it is.
-    let model = session.document(&id).unwrap().model().cloned().unwrap();
-    let Document::Component(mut component) = model else {
-        panic!("component")
-    };
-    component.description = "changed".into();
-    assert!(matches!(
-        session.apply_model_edit(&id, Document::Component(component.clone()), Origin(1)),
-        Err(Error::CommentsWouldBeLost { comments: 1 })
-    ));
+    // A publication refuses until a decision is made, and the original text
+    // stays exactly as it is.
     assert!(matches!(
         session.publish(&id, Origin(1)),
         Err(Error::CommentsWouldBeLost { comments: 1 })
     ));
     assert_eq!(session.document(&id).unwrap().text(), with_comment);
 
-    session.accept_comment_loss(&id).unwrap();
+    // A graphical edit written into the text keeps the comment and does not
+    // ask (owner, 2026-11-17, LAY-34); only one that prints the whole file
+    // asks.
+    let model = session.document(&id).unwrap().model().cloned().unwrap();
+    let Document::Component(mut component) = model else {
+        panic!("component")
+    };
+    component.description = "changed".into();
     session
         .apply_model_edit(&id, Document::Component(component), Origin(1))
         .unwrap();
