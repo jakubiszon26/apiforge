@@ -22,9 +22,10 @@ parser wins and the page has a defect.
   the block; the form says what it does (a request, a check, a value, …).
 - **Line order means nothing.** A statement runs after the statements whose
   values it uses and after those named in its `@after(…)` attribute. Write
-  statements in a readable order; the formatter keeps the order you wrote,
-  and the window, printing from the board, puts each statement after those it
-  uses.
+  statements in a readable order; the formatter keeps the order you wrote.
+  An edit on the board rewrites only the statements it changes and leaves
+  the rest of the file as you wrote it; a statement added from the board is
+  written directly after the step it follows, inside the same braces.
 - Whitespace and line breaks are insignificant outside strings. There is one
   canonical layout (two-space indentation, one statement per line, one
   attribute per line), and the formatter (`apiforge fmt`) writes it. The
@@ -487,8 +488,8 @@ scenario "Branches" {
 - `@after(created.then)` orders a statement outside the braces after the
   condition, on the `then` branch; `.else` on the other. It waits for the
   condition only, not for the statements inside the branch. A statement whose
-  only ordering is one branch is printed inside that branch's braces by the
-  window.
+  only ordering is one branch is printed inside that branch's braces by
+  `apiforge print`; a board edit leaves it where you wrote it.
 - `if` has the outputs `created.passed` and `created.value`, like `assert`.
 
 ## Cleanup

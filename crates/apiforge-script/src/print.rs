@@ -37,7 +37,18 @@ fn print_with(
     document: &Document,
     folder: bool,
 ) -> Result<String, Vec<Diagnostic>> {
-    let valid = if folder {
+    if !printable(project, document, folder) {
+        return Err(vec![Diagnostic::error(
+            0..0,
+            "Cannot print an invalid document",
+        )]);
+    }
+    let source = print_file(&Printer::new(project, document).file(document));
+    verify(project, document, folder, &source)?;
+    Ok(source)
+}
+pub(crate) fn printable(project: &Project, document: &Document, folder: bool) -> bool {
+    if folder {
         validate_document_model(document, &LowerContext::folder(project)).is_ok()
     } else {
         let mut validation = project.clone();
@@ -51,86 +62,23 @@ fn print_with(
             }
         }
         apiforge_core::validate_project(&validation).is_ok()
-    };
-    if !valid {
-        return Err(vec![Diagnostic::error(
-            0..0,
-            "Cannot print an invalid document",
-        )]);
     }
-    let (kind, description, parameters, inputs, action, main, cleanup) = match document {
-        Document::Scenario(s) => (
-            FileKind::Scenario {
-                name: s.name.clone(),
-            },
-            s.description.clone(),
-            s.parameters
-                .iter()
-                .map(|(k, v)| (k.clone(), literal(v)))
-                .collect(),
-            vec![],
-            None,
-            &s.graph,
-            Some(&s.cleanup),
-        ),
-        Document::Component(c) => (
-            FileKind::Component {
-                handle: c.handle.clone(),
-                name: c.name.clone(),
-            },
-            c.description.clone(),
-            vec![],
-            c.inputs.iter().map(input).collect(),
-            c.action.as_ref(),
-            &c.graph,
-            None,
-        ),
-    };
-    let all_nodes: HashMap<_, _> = main
-        .nodes
-        .iter()
-        .chain(cleanup.into_iter().flat_map(|g| &g.nodes))
-        .map(|n| (n.id.as_str(), n))
-        .collect();
-    let printer = Printer {
-        project,
-        nodes: all_nodes,
-    };
-    let file = File {
-        kind,
-        description: (!description.is_empty()).then_some(description),
-        on_error: match document {
-            Document::Scenario(s) => Some(
-                if s.error_policy == ErrorPolicy::Stop {
-                    "stop"
-                } else {
-                    "continue"
-                }
-                .into(),
-            ),
-            _ => None,
-        },
-        parameters,
-        inputs,
-        action: action.map(|a| a.input.clone()),
-        action_type: action.map(|a| a.value_type.to_string()),
-        action_contract: action.and_then(|a| a.contract_id.clone()),
-        statements: printer.statements(main, None),
-        cleanup: cleanup
-            .filter(|g| !g.nodes.is_empty() || !g.edges.is_empty())
-            .map(|g| printer.statements(g, None)),
-        range: 0..0,
-    };
-    let source = print_file(&file);
+}
+/// Printing is a checked projection: never return plausible text that
+/// silently drops a field or cannot be lowered back to the same semantics.
+pub(crate) fn verify(
+    project: &Project,
+    document: &Document,
+    folder: bool,
+    source: &str,
+) -> Result<(), Vec<Diagnostic>> {
     if source.len() > crate::MAX_SOURCE_BYTES {
         return Err(vec![Diagnostic::error(
             0..0,
             "Printed source would exceed the 1 MiB limit",
         )]);
     }
-    // Printing is a checked projection: never return plausible text that silently
-    // drops a field or cannot be lowered back to the same semantics.
-    let tree = parse(&source);
+    let tree = parse(source);
     let context = if folder {
         LowerContext::folder(project)
     } else {
@@ -155,7 +103,65 @@ fn print_with(
             "Document cannot be represented without semantic loss",
         )]);
     }
-    Ok(source)
+    Ok(())
+}
+/// The document's parts before its statements, as the window writes them.
+pub(crate) fn head(document: &Document) -> File {
+    let (kind, description, parameters, inputs, action) = match document {
+        Document::Scenario(s) => (
+            FileKind::Scenario {
+                name: s.name.clone(),
+            },
+            s.description.clone(),
+            s.parameters
+                .iter()
+                .map(|(k, v)| (k.clone(), literal(v)))
+                .collect(),
+            vec![],
+            None,
+        ),
+        Document::Component(c) => (
+            FileKind::Component {
+                handle: c.handle.clone(),
+                name: c.name.clone(),
+            },
+            c.description.clone(),
+            vec![],
+            c.inputs.iter().map(input).collect(),
+            c.action.as_ref(),
+        ),
+    };
+    File {
+        kind,
+        description: (!description.is_empty()).then_some(description),
+        on_error: match document {
+            Document::Scenario(s) => Some(
+                if s.error_policy == ErrorPolicy::Stop {
+                    "stop"
+                } else {
+                    "continue"
+                }
+                .into(),
+            ),
+            _ => None,
+        },
+        parameters,
+        inputs,
+        action: action.map(|a| a.input.clone()),
+        action_type: action.map(|a| a.value_type.to_string()),
+        action_contract: action.and_then(|a| a.contract_id.clone()),
+        statements: vec![],
+        cleanup: None,
+        items: vec![],
+        range: 0..0,
+    }
+}
+/// The main flow and, for a scenario, the cleanup.
+pub(crate) fn graphs(document: &Document) -> (&Graph, Option<&Graph>) {
+    match document {
+        Document::Scenario(s) => (&s.graph, Some(&s.cleanup)),
+        Document::Component(c) => (&c.graph, None),
+    }
 }
 fn expr(kind: ExprKind) -> Expr {
     Expr { kind, range: 0..0 }
@@ -212,11 +218,37 @@ fn input(port: &Port) -> Input {
         range: 0..0,
     }
 }
-struct Printer<'a> {
+pub(crate) struct Printer<'a> {
     project: &'a Project,
     nodes: HashMap<&'a str, &'a Node>,
+    /// Nodes written elsewhere in the text, left out of the braces of an `if`.
+    pub(crate) skip: HashSet<&'a str>,
 }
-impl Printer<'_> {
+impl<'a> Printer<'a> {
+    pub(crate) fn new(project: &'a Project, document: &'a Document) -> Self {
+        let (main, cleanup) = graphs(document);
+        Self {
+            project,
+            nodes: main
+                .nodes
+                .iter()
+                .chain(cleanup.into_iter().flat_map(|g| &g.nodes))
+                .map(|n| (n.id.as_str(), n))
+                .collect(),
+            skip: HashSet::new(),
+        }
+    }
+    /// The document as the window writes it.
+    pub(crate) fn file(&self, document: &Document) -> File {
+        let (main, cleanup) = graphs(document);
+        File {
+            statements: self.statements(main, None),
+            cleanup: cleanup
+                .filter(|g| !g.nodes.is_empty() || !g.edges.is_empty())
+                .map(|g| self.statements(g, None)),
+            ..head(document)
+        }
+    }
     fn binding(&self, binding: &Binding) -> Expr {
         expr(match binding {
             Binding::Literal { value } => return literal(value),
@@ -358,7 +390,7 @@ impl Printer<'_> {
         let members: Vec<&Node> = graph
             .nodes
             .iter()
-            .filter(|n| branches.parent(&n.id) == parent)
+            .filter(|n| branches.parent(&n.id) == parent && !self.skip.contains(n.id.as_str()))
             .collect();
         let position: HashMap<&str, usize> = members
             .iter()
@@ -397,11 +429,19 @@ impl Printer<'_> {
                 .or_else(|| remaining.next())
                 .expect("a member remains");
             done[next] = true;
-            ordered.push(self.statement(members[next], graph, branches));
+            ordered.push(self.statement(members[next], graph, branches, parent));
         }
         ordered
     }
-    fn statement(&self, node: &Node, graph: &Graph, branches: &Branches<'_>) -> Statement {
+    /// The statement of `node` written in `braces`, whose own edge the
+    /// braces write; the end of an `if` is written as the `if`.
+    pub(crate) fn statement(
+        &self,
+        node: &Node,
+        graph: &Graph,
+        branches: &Branches<'_>,
+        braces: Option<(&str, Branch)>,
+    ) -> Statement {
         let mut attributes = vec![];
         if let Some(label) = &node.label {
             attributes.push(attribute("label", vec![literal(&json!(label))]));
@@ -416,9 +456,7 @@ impl Printer<'_> {
                 attributes.push(attribute("note", vec![literal(&json!(note))]));
             }
         }
-        // The braces a statement stands in write their own edge; the end of
-        // an `if` is written as the `if`.
-        let braces = branches.parent(&node.id).map(|(x, b)| (x, Some(b)));
+        let braces = braces.map(|(x, b)| (x, Some(b)));
         let sources = graph
             .edges
             .iter()
@@ -632,6 +670,7 @@ impl Printer<'_> {
             note: node.note.clone(),
             form,
             range: 0..0,
+            extent: 0..0,
         }
     }
 }
