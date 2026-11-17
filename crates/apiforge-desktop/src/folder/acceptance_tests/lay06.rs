@@ -583,7 +583,8 @@ fn board_file() -> String {
     let mut text = String::from(
         "# The reference scenarios of fixtures/scenarios/lay/ as the desktop tidies them\n\
          # (LAY-06): each card and chip at the size the board draws it, each wire as the\n\
-         # ports the router is given, and the continuation marks. The quality example\n\
+         # ports the router is given, and the continuation marks. A card hung under a\n\
+         # step names the card above it in its stack (`under`, LAY-31). The quality example\n\
          # routes and measures these. Written by the desktop's acceptance test\n\
          # lay06_criterion_10_quality_on_real_card_sizes with APIFORGE_WRITE_BOARDS=1;\n\
          # do not edit by hand.\n",
@@ -610,11 +611,29 @@ fn board_file() -> String {
         let graph = main_graph(&harness, &id);
         let canvas = board(&harness, &id);
         let (rectangles, wires) = canvas.debug_geometry();
-        let names: Vec<String> = canvas
+        let ids: Vec<String> = canvas
             .debug_cards()
             .iter()
-            .map(|(card, _)| handle_of(&graph, card))
+            .map(|(card, _)| card.clone())
             .collect();
+        let names: Vec<String> = ids.iter().map(|card| handle_of(&graph, card)).collect();
+        // The card above each card hung under a step: the nearest one above
+        // it in its column (LAY-31).
+        let under = |index: usize| -> Option<usize> {
+            let card = graph.nodes.iter().find(|node| node.id == ids[index])?;
+            if on_spine(card.kind) {
+                return None;
+            }
+            let rect = &rectangles[index];
+            (0..ids.len())
+                .filter(|other| {
+                    let above = &rectangles[*other];
+                    *other != index
+                        && (above.min.x - rect.min.x).abs() < 0.5
+                        && above.max.y <= rect.min.y + 0.5
+                })
+                .max_by(|a, b| rectangles[*a].max.y.total_cmp(&rectangles[*b].max.y))
+        };
         let checks = match checks {
             Checks::Collapsed => "collapsed",
             Checks::Expanded => "expanded",
@@ -629,8 +648,13 @@ fn board_file() -> String {
         ));
         for (index, rect) in rectangles.iter().enumerate() {
             let kind = if index < names.len() { "card" } else { "chip" };
+            let above = if index < names.len() {
+                under(index).map_or_else(String::new, |above| format!(" under {above}"))
+            } else {
+                String::new()
+            };
             text.push_str(&format!(
-                "{kind} {} {} {} {} {}\n",
+                "{kind} {} {} {} {} {}{above}\n",
                 rect.min.x,
                 rect.min.y,
                 rect.width(),

@@ -15,7 +15,8 @@
 mod support;
 
 use apiforge_layout::{
-    Block, Edge, Graph, Point, Port, Rect, Routing, Side, Size, Wire, place, route, smooth, tidy,
+    Block, Edge, Graph, Point, Port, Rect, Routing, Side, Size, Wire, groups, place, route,
+    route_grouped, smooth, tidy,
 };
 use std::time::{Duration, Instant};
 use support::Random;
@@ -171,10 +172,17 @@ fn main() {
             }),
             Duration::from_millis(20),
         );
+        // As the board routes it, with the groups of its cards (LAY-31).
         report(
             "full routing",
             measure(5, || {
-                std::hint::black_box(route(&cards, &wires, &routing));
+                std::hint::black_box(route_grouped(
+                    &cards,
+                    &groups(&cards),
+                    &wires,
+                    &routing,
+                    &[],
+                ));
             }),
             // 30 ms until LAY-03: the grid has a track every 20 px since, and
             // on this board, laid out in layers 48 px apart, most wires have
@@ -195,7 +203,13 @@ fn main() {
             &format!("reroute while dragging ({} wires)", moving.len()),
             measure(20, || {
                 shifted[dragged] = cards[dragged].inflate(1.0);
-                std::hint::black_box(route(&shifted, &moving, &routing));
+                std::hint::black_box(route_grouped(
+                    &shifted,
+                    &groups(&shifted),
+                    &moving,
+                    &routing,
+                    &[],
+                ));
             }),
             Duration::from_millis(8),
         );
@@ -241,7 +255,13 @@ fn main() {
     {
         let (cards, wires) = reference("shop-50 compact expanded 56 all");
         let measured = measure(5, || {
-            std::hint::black_box(route(&cards, &wires, &routing));
+            std::hint::black_box(route_grouped(
+                &cards,
+                &groups(&cards),
+                &wires,
+                &routing,
+                &[],
+            ));
         });
         println!(
             "shop-50, every wire and check: {} cards, {} wires, full routing {:.1} ms (no budget)",
