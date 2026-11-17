@@ -21,6 +21,8 @@ pub use collapse::collapsible;
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
+#[allow(unused_imports)]
+pub(crate) use readers::Mock18;
 pub use readers::WireMode;
 pub use resting::{Drawn, Lines, resting};
 pub use routing::WireStyle;
@@ -493,6 +495,8 @@ pub struct Canvas {
     /// The port whose count was clicked: every wire of it is drawn until Esc
     /// or a click on the board (LAY-23).
     shown_port: Option<(String, String)>,
+    /// MOCK (LAY-18).
+    pub(crate) mock18: readers::Mock18,
     /// The hover areas of the last frame's arrows at the badges, on screen,
     /// by the step they point into (LAY-24).
     arrow_hits: Vec<(String, Rect)>,
@@ -670,6 +674,7 @@ impl Default for Canvas {
             revealed_router: routing::Router::default(),
             wire_mode: WireMode::All,
             shown_port: None,
+            mock18: readers::Mock18::Off,
             arrow_hits: Vec::new(),
             wire_style: WireStyle::default(),
             bridges: true,
@@ -1909,6 +1914,17 @@ impl Canvas {
         }
         for (count, laid) in shown_counts.iter().zip(&laid_counts) {
             let lit = count.wires.iter().any(|wire| revealed.contains(wire));
+            if self.mock18 == readers::Mock18::PerField {
+                for field in
+                    readers::lay_fields(&painter, input.graph, input.project, count, camera)
+                {
+                    readers::paint(&board_painter, &field, lit);
+                }
+                continue;
+            }
+            let lit = lit
+                || (self.mock18 == readers::Mock18::List
+                    && hover.is_some_and(|pointer| laid.rect.contains(pointer)));
             readers::paint(&board_painter, laid, lit);
         }
         #[cfg(test)]
@@ -2350,8 +2366,12 @@ impl Canvas {
                         .with(("reader-count", &count.source, &count.port)),
                     Sense::click(),
                 )
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text("Draw every wire of this value");
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let response = if self.mock18 == readers::Mock18::Off {
+                response.on_hover_text("Draw every wire of this value")
+            } else {
+                response
+            };
             response.widget_info(move || {
                 egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
             });
@@ -2450,6 +2470,19 @@ impl Canvas {
             &shown_tags,
             &laid_tags,
         );
+
+        if self.mock18 == readers::Mock18::List {
+            for (count, laid) in shown_counts.iter().zip(&laid_counts) {
+                let pointed = hover.is_some_and(|pointer| laid.rect.contains(pointer));
+                let kept =
+                    self.shown_port.as_ref() == Some(&(count.source.clone(), count.port.clone()));
+                if pointed || kept {
+                    let text =
+                        readers::field_list(input.graph, input.project, &count.source, &count.port);
+                    readers::paint_statement(&painter, laid.rect, &text, overlays.board);
+                }
+            }
+        }
 
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(

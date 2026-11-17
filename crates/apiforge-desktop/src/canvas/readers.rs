@@ -638,3 +638,154 @@ pub fn paint_statement(painter: &Painter, near: Rect, text: &str, within: Rect) 
     painter.galley(rect.min + vec2(6.0, 3.0), galley, theme::TEXT);
     rect
 }
+
+/// MOCK (LAY-18): what the board shows at a reader count. Throwaway.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum Mock18 {
+    /// Main as it is.
+    #[default]
+    Off,
+    /// Option A: pointing at a count lists the fields read and who reads
+    /// each; a click keeps the list with the wires.
+    List,
+    /// Option B: one count per field in the gap.
+    PerField,
+}
+
+/// MOCK (LAY-18): the fields of `port` the document reads, as the code
+/// writes them, each with its readers in the document's order and whether
+/// the reader is a check.
+pub fn fields_read(
+    graph: &Graph,
+    project: &Project,
+    source: &str,
+    port: &str,
+) -> Vec<(String, Vec<(String, bool)>)> {
+    let Some(source_node) = graph.nodes.iter().find(|node| node.id == source) else {
+        return Vec::new();
+    };
+    let shown_port =
+        if source_node.is_variable() || graph::output_ports(source_node, project).len() == 1 {
+            ""
+        } else {
+            port
+        };
+    let mut fields: Vec<(String, Vec<(String, bool)>)> = Vec::new();
+    for wire in document_wires(graph) {
+        if wire.kind != WireKind::Data
+            || wire.source != source
+            || wire.source_port.as_deref() != Some(port)
+        {
+            continue;
+        }
+        let Some(reader) = graph.nodes.iter().find(|node| node.id == wire.target) else {
+            continue;
+        };
+        let leaf = wire
+            .target_input
+            .as_ref()
+            .and_then(|input| reader.inputs.get(input))
+            .and_then(|binding| binding.at(&wire.operand_path));
+        let field = match leaf {
+            Some(Binding::Reference { path, .. }) => path.clone(),
+            _ => String::new(),
+        };
+        let name = [source_node.handle.as_str(), shown_port, field.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(".");
+        let entry = (reader.handle.clone(), reader.kind.is_check());
+        match fields.iter_mut().find(|(field, _)| *field == name) {
+            Some((_, readers)) => {
+                if !readers.contains(&entry) {
+                    readers.push(entry);
+                }
+            }
+            None => fields.push((name, vec![entry])),
+        }
+    }
+    fields.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+    fields
+}
+
+/// MOCK (LAY-18, option A): the list a count shows, one line per field.
+pub fn field_list(graph: &Graph, project: &Project, source: &str, port: &str) -> String {
+    const NAMED: usize = 6;
+    fields_read(graph, project, source, port)
+        .into_iter()
+        .map(|(field, readers)| {
+            let checks = readers.iter().all(|(_, check)| *check);
+            let unit = match (checks, readers.len()) {
+                (true, 1) => "check",
+                (true, _) => "checks",
+                (false, 1) => "reader",
+                (false, _) => "readers",
+            };
+            let mut names: Vec<String> = readers
+                .iter()
+                .take(NAMED)
+                .map(|(name, _)| name.clone())
+                .collect();
+            if readers.len() > NAMED {
+                names.push(format!("+{} more", readers.len() - NAMED));
+            }
+            format!("{field} → {} {unit}: {}", readers.len(), names.join(", "))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// MOCK (LAY-18, option B): one count per field, stacked down the gap from
+/// the port.
+pub fn lay_fields(
+    painter: &Painter,
+    graph: &Graph,
+    project: &Project,
+    count: &Count,
+    camera: Camera,
+) -> Vec<Laid> {
+    let anchor = camera.to_screen(count.anchor);
+    let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
+    let font_id = FontId::proportional(font);
+    let stub = stub_length(camera.zoom);
+    let room = GAP * camera.zoom - stub - 2.0;
+    let mut laid = Vec::new();
+    let mut top = f32::MIN;
+    for (field, readers) in fields_read(graph, project, &count.source, &count.port) {
+        let last = field.rsplit('.').next().unwrap_or(&field).to_owned();
+        let (shown, galley) = fitting(
+            painter,
+            &[
+                format!("{last} → {}", readers.len()),
+                format!("→ {}", readers.len()),
+            ],
+            &font_id,
+            room,
+        );
+        let size = galley.size() + vec2(8.0, 3.0);
+        let centre = anchor.y.max(top + size.y / 2.0);
+        let rect = Rect::from_min_size(pos2(anchor.x + stub, centre - size.y / 2.0), size);
+        top = rect.bottom() + 2.0;
+        let (stub_line, bend) = if (centre - anchor.y).abs() < 0.5 {
+            ([anchor, pos2(rect.left(), anchor.y)], None)
+        } else {
+            let x = anchor.x + stub / 2.0;
+            (
+                [pos2(rect.left(), centre), pos2(x, centre)],
+                Some(pos2(x, anchor.y)),
+            )
+        };
+        laid.push(Laid {
+            galley,
+            shown,
+            rect,
+            font,
+            stub: stub_line,
+            bend,
+            socket: anchor,
+        });
+    }
+    laid
+}
