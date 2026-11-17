@@ -316,6 +316,36 @@
     "hasError": false,
     "steps": [
       {
+        "nodeId": "session",
+        "handle": "session",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": "[REDACTED]"
+        },
+        "outputs": {
+          "value": "[REDACTED]"
+        }
+      },
+      {
+        "nodeId": "compare",
+        "handle": "compare",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "[REDACTED]",
+          "expected": "[REDACTED]"
+        },
+        "outputs": {
+          "value": "[REDACTED]",
+          "passed": true
+        },
+        "actual": "[REDACTED]",
+        "expected": "[REDACTED]"
+      },
+      {
         "nodeId": "post",
         "handle": "post",
         "kind": "request",
@@ -354,6 +384,24 @@
         }
       },
       {
+        "nodeId": "reads-token",
+        "handle": "reads_token",
+        "label": "reads-token",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "[REDACTED]",
+          "expected": "[REDACTED]"
+        },
+        "outputs": {
+          "value": "[REDACTED]",
+          "passed": true
+        },
+        "actual": "[REDACTED]",
+        "expected": "[REDACTED]"
+      },
+      {
         "nodeId": "echo",
         "handle": "echo",
         "kind": "request",
@@ -385,36 +433,6 @@
         "outputs": {}
       },
       {
-        "nodeId": "session",
-        "handle": "session",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": "[REDACTED]"
-        },
-        "outputs": {
-          "value": "[REDACTED]"
-        }
-      },
-      {
-        "nodeId": "compare",
-        "handle": "compare",
-        "kind": "assert",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "actual": "[REDACTED]",
-          "expected": "[REDACTED]"
-        },
-        "outputs": {
-          "value": "[REDACTED]",
-          "passed": true
-        },
-        "actual": "[REDACTED]",
-        "expected": "[REDACTED]"
-      },
-      {
         "nodeId": "hardcoded",
         "handle": "hardcoded",
         "kind": "request",
@@ -434,24 +452,6 @@
           "url": "https://api.example.test/?api-key=[REDACTED]&x=1",
           "headers": {}
         }
-      },
-      {
-        "nodeId": "reads-token",
-        "handle": "reads_token",
-        "label": "reads-token",
-        "kind": "assert",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "actual": "[REDACTED]",
-          "expected": "[REDACTED]"
-        },
-        "outputs": {
-          "value": "[REDACTED]",
-          "passed": true
-        },
-        "actual": "[REDACTED]",
-        "expected": "[REDACTED]"
       }
     ]
   }

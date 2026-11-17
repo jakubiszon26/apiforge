@@ -725,7 +725,9 @@ fn review_run_inputs() {
 
 /// A component with one required and one optional input, neither with a
 /// default. `given` takes its `else` path when `note` is absent; `size`
-/// reads `note` and fails without it, as when a caller omits it.
+/// reads `note` and fails without it, as when a caller omits it. `size` runs
+/// after whichever branch ran: a value that is ready runs before the next step
+/// (RUN-03), and its failure would stop the component before `given`.
 pub(super) const NOTES: &str = "components/notes.afs";
 const NOTES_SOURCE: &str = "component Notes \"Notes\" {
   @required(true)
@@ -738,6 +740,7 @@ const NOTES_SOURCE: &str = "component Notes \"Notes\" {
   } else {
     fallback = \"no note\"
   }
+  @after(echoed, fallback)
   size = length(param.note)
 }
 ";

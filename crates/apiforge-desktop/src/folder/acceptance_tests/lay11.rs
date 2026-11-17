@@ -158,7 +158,7 @@ fn lay11_criterion_2_no_tick_before_a_run() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
     show(&mut harness, "cart", 0.6);
     // Each line starts with the numbers of its folded checks (LAY-27).
-    assert_eq!(aggregate(&harness, "cart"), "13–14, 26 · 3 checks");
+    assert_eq!(aggregate(&harness, "cart"), "13–14, 27 · 3 checks");
     assert_eq!(aggregate(&harness, "checkout"), "19–21 · 3 checks");
     assert_eq!(aggregate(&harness, "login"), "3–4 · 2 checks");
     for node in graph(&harness).nodes {
@@ -334,9 +334,9 @@ fn lay11_criterion_6_a_shared_check_is_counted_twice() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
     show(&mut harness, "cart", 0.6);
     assert!(hidden(&harness, "receipt_total"));
-    // 26 is `receipt_total`'s number, in both lines (LAY-27).
-    assert_eq!(aggregate(&harness, "cart"), "13–14, 26 · 3 checks");
-    assert_eq!(aggregate(&harness, "receipt"), "26 · 1 check");
+    // 27 is `receipt_total`'s number, in both lines (LAY-27).
+    assert_eq!(aggregate(&harness, "cart"), "13–14, 27 · 3 checks");
+    assert_eq!(aggregate(&harness, "receipt"), "27 · 1 check");
 
     open_aggregate(&mut harness, "receipt");
     assert_eq!(selected(&harness), vec![id_of(&harness, "receipt")]);

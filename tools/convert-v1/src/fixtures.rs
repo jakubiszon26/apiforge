@@ -3,7 +3,7 @@
 use crate::{convert, v1};
 use apiforge_core::{
     format::{Component, Graph, Node, Project, Scenario},
-    graph::{VALUE_INPUT, component_definition, condition_inputs},
+    graph::{VALUE_INPUT, component_definition, condition_inputs, sequence},
     model::NodeKind,
     template::{self, template_text},
 };
@@ -75,6 +75,7 @@ fn convert_run(bytes: &[u8]) -> Result<String, String> {
     }
     request["project"] = serde_json::to_value(&project).map_err(|error| error.to_string())?;
     convert_report(&mut fixture["expected"], &context)?;
+    in_run_order(&mut fixture["expected"], &context);
     Ok(json_text(&fixture))
 }
 
@@ -192,6 +193,47 @@ fn convert_report(report: &mut Value, context: &Context<'_>) -> Result<(), Strin
         Some(Value::Array(list)) => convert_steps(list, None, context),
         _ => Ok(()),
     }
+}
+
+/// Puts the steps of a converted report in the order the runner takes them
+/// (RUN-03, #389): among the nodes ready at the same time, the values and
+/// checks go before the next request, call or IF. Version one took the first
+/// ready node of the document whatever its kind, so a check could follow a
+/// later request. The steps themselves, and the order of the requests, calls
+/// and IFs, are as recorded.
+fn in_run_order(report: &mut Value, context: &Context<'_>) {
+    fn sort(steps: &mut [Value], graph: &Graph, project: &Project) {
+        let order = sequence(graph);
+        steps.sort_by_key(|step| {
+            order
+                .iter()
+                .position(|id| step["nodeId"] == *id)
+                .unwrap_or(order.len())
+        });
+        for step in steps {
+            let definition = graph
+                .nodes
+                .iter()
+                .find(|node| step["nodeId"] == node.id.as_str())
+                .and_then(|node| component_definition(project, node));
+            if let (Some(definition), Some(Value::Array(children))) =
+                (definition, step.get_mut("children"))
+            {
+                sort(children, &definition.graph, project);
+            }
+        }
+    }
+    let Some(Value::Array(steps)) = report.get_mut("steps") else {
+        return;
+    };
+    // Main steps precede cleanup steps; each phase is put in its graph's order.
+    let cleanup = steps
+        .iter()
+        .position(|step| step["phase"] == "cleanup")
+        .unwrap_or(steps.len());
+    let (main, rest) = steps.split_at_mut(cleanup);
+    sort(main, &context.scenario.graph, context.project);
+    sort(rest, &context.scenario.cleanup, context.project);
 }
 
 /// The steps of a component's Export blocks, which run after the blocks they read.
