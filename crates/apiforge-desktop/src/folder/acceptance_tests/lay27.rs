@@ -842,7 +842,7 @@ fn lay27_criterion_10_an_edit_renumbers_the_lines() {
     let (_project, mut harness) = open(&source, WIDE);
     show(&mut harness, "cart", 0.6);
     assert_eq!(line(&harness, "login"), "3–4 · 2 checks");
-    assert_eq!(line(&harness, "cart"), "13–14, 26 · 3 checks");
+    assert_eq!(line(&harness, "cart"), "13–14, 27 · 3 checks");
 
     let anchor = "  catalogue = GET \"/products\" {";
     assert!(source.contains(anchor), "the fixture's catalogue");
@@ -861,7 +861,7 @@ fn lay27_criterion_10_an_edit_renumbers_the_lines() {
     settle(&mut harness);
     harness.step();
     assert_eq!(line(&harness, "login"), "3–4 · 2 checks", "before it");
-    assert_eq!(line(&harness, "cart"), "14–15, 27 · 3 checks");
+    assert_eq!(line(&harness, "cart"), "14–15, 28 · 3 checks");
     show(&mut harness, "cart", 0.6);
     assert_eq!(
         canvas(&harness)
@@ -877,7 +877,7 @@ fn lay27_criterion_10_an_edit_renumbers_the_lines() {
             order["cart_total"],
             order["receipt_total"]
         ),
-        (14, 15, 27)
+        (14, 15, 28)
     );
 }
 

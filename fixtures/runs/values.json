@@ -902,6 +902,106 @@
     "hasError": false,
     "steps": [
       {
+        "nodeId": "array",
+        "handle": "array",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": [
+            2,
+            10,
+            "b",
+            "a"
+          ]
+        },
+        "outputs": {
+          "value": [
+            2,
+            10,
+            "b",
+            "a"
+          ]
+        }
+      },
+      {
+        "nodeId": "random",
+        "handle": "random",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": 2
+        },
+        "outputs": {
+          "value": 2
+        }
+      },
+      {
+        "nodeId": "random-real",
+        "handle": "random_real",
+        "label": "random-real",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": 0.5881250454112887
+        },
+        "outputs": {
+          "value": 0.5881250454112887
+        }
+      },
+      {
+        "nodeId": "rounded",
+        "handle": "rounded",
+        "kind": "value",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "value": 3
+        },
+        "outputs": {
+          "value": 3
+        }
+      },
+      {
+        "nodeId": "wrong-type",
+        "handle": "wrong_type",
+        "label": "wrong-type",
+        "kind": "value",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "nested-error",
+        "handle": "nested_error",
+        "label": "nested-error",
+        "kind": "value",
+        "status": "error",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "approximately",
+        "handle": "approximately",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": 1.05,
+          "expected": 1
+        },
+        "outputs": {
+          "value": 1.05,
+          "passed": true
+        },
+        "actual": 1.05,
+        "expected": 1
+      },
+      {
         "nodeId": "source",
         "handle": "source",
         "kind": "request",
@@ -976,29 +1076,6 @@
         "outputs": {}
       },
       {
-        "nodeId": "array",
-        "handle": "array",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": [
-            2,
-            10,
-            "b",
-            "a"
-          ]
-        },
-        "outputs": {
-          "value": [
-            2,
-            10,
-            "b",
-            "a"
-          ]
-        }
-      },
-      {
         "nodeId": "object",
         "handle": "object",
         "kind": "value",
@@ -1029,46 +1106,6 @@
         "outputs": {}
       },
       {
-        "nodeId": "random",
-        "handle": "random",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": 2
-        },
-        "outputs": {
-          "value": 2
-        }
-      },
-      {
-        "nodeId": "random-real",
-        "handle": "random_real",
-        "label": "random-real",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": 0.5881250454112887
-        },
-        "outputs": {
-          "value": 0.5881250454112887
-        }
-      },
-      {
-        "nodeId": "rounded",
-        "handle": "rounded",
-        "kind": "value",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "value": 3
-        },
-        "outputs": {
-          "value": 3
-        }
-      },
-      {
         "nodeId": "missing-left",
         "handle": "missing_left",
         "label": "missing-left",
@@ -1081,16 +1118,6 @@
         "outputs": {
           "value": 1
         }
-      },
-      {
-        "nodeId": "wrong-type",
-        "handle": "wrong_type",
-        "label": "wrong-type",
-        "kind": "value",
-        "status": "error",
-        "phase": "main",
-        "inputs": {},
-        "outputs": {}
       },
       {
         "nodeId": "null-operand",
@@ -1116,14 +1143,52 @@
         }
       },
       {
-        "nodeId": "nested-error",
-        "handle": "nested_error",
-        "label": "nested-error",
-        "kind": "value",
-        "status": "error",
+        "nodeId": "not-equals",
+        "handle": "not_equals",
+        "label": "not-equals",
+        "kind": "assert",
+        "status": "failed",
         "phase": "main",
-        "inputs": {},
-        "outputs": {}
+        "inputs": {
+          "actual": [
+            {
+              "price": 0,
+              "flag": false,
+              "optional": null
+            }
+          ],
+          "expected": [
+            {
+              "price": 0,
+              "flag": false,
+              "optional": null
+            }
+          ]
+        },
+        "outputs": {
+          "value": [
+            {
+              "price": 0,
+              "flag": false,
+              "optional": null
+            }
+          ],
+          "passed": false
+        },
+        "actual": [
+          {
+            "price": 0,
+            "flag": false,
+            "optional": null
+          }
+        ],
+        "expected": [
+          {
+            "price": 0,
+            "flag": false,
+            "optional": null
+          }
+        ]
       },
       {
         "nodeId": "get-with-body",
@@ -1298,71 +1363,6 @@
             "X-Typed": "5"
           }
         }
-      },
-      {
-        "nodeId": "approximately",
-        "handle": "approximately",
-        "kind": "assert",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "actual": 1.05,
-          "expected": 1
-        },
-        "outputs": {
-          "value": 1.05,
-          "passed": true
-        },
-        "actual": 1.05,
-        "expected": 1
-      },
-      {
-        "nodeId": "not-equals",
-        "handle": "not_equals",
-        "label": "not-equals",
-        "kind": "assert",
-        "status": "failed",
-        "phase": "main",
-        "inputs": {
-          "actual": [
-            {
-              "price": 0,
-              "flag": false,
-              "optional": null
-            }
-          ],
-          "expected": [
-            {
-              "price": 0,
-              "flag": false,
-              "optional": null
-            }
-          ]
-        },
-        "outputs": {
-          "value": [
-            {
-              "price": 0,
-              "flag": false,
-              "optional": null
-            }
-          ],
-          "passed": false
-        },
-        "actual": [
-          {
-            "price": 0,
-            "flag": false,
-            "optional": null
-          }
-        ],
-        "expected": [
-          {
-            "price": 0,
-            "flag": false,
-            "optional": null
-          }
-        ]
       }
     ]
   }

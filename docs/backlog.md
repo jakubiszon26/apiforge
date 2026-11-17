@@ -5,7 +5,9 @@ one per ticket, titled `<ID>: <goal>` and labelled as the
 [development process](process/README.md#labels) says. Their state — open,
 closed, `decision-needed`, `awaiting-acceptance` — lives there and nowhere
 else. This file names the current sprint, its exit criteria and the issues
-in it, and keeps the record of finished sprints.
+in it, and keeps the record of finished sprints. Where the work stood at
+the end of the last working day, and what comes next, is in the
+[handoff](handoff.md).
 
 At most four pull requests await owner acceptance at a time, within 60
 estimated review minutes ([limits](process/README.md#limits-that-keep-review-possible)).
@@ -404,6 +406,21 @@ Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
 (`format`), a component summary on the parent board, MCP-13, arrowheads
 (#167 (3)), wire-length metrics beyond LAY-01. Mock branches `mock/lay-00-*`
 stay on origin because the issues' images point at their commits.
+
+## Next sprint: LANG (not started)
+
+The language sprint follows LAY: it starts after LAY closes, its acceptance
+(LAY-12, #296) and its retrospective. The owner paused its design and
+implementation on 2026-11-17 until then, except what LAY needs (RUN-03
+#389, DIAG-07 #392, LANG-14 #390). The plan, the order and the decisions
+are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
+
+- To the 0.2.0 release: RUN-01 #126 and LANG-15 #412, then LANG-13 #386
+  and DIAG-06 #391, then LANG-06 #143 with KTLO-37 #211 and LANG-05 #142,
+  then REL-05 #414. LANG-12 #385 is closed as replaced by LANG-13.
+- After it: LANG-16 #413 (part B of LANG-00), then LANG-01 #127 with
+  LANG-09 #353, LANG-08 #352 with LANG-07 #212, LANG-02 #129 with LANG-04
+  #132, LANG-03 #131.
 
 ## Later
 

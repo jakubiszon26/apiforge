@@ -375,6 +375,24 @@
         }
       },
       {
+        "nodeId": "checks-yes",
+        "handle": "checks_yes",
+        "label": "checks-yes",
+        "kind": "assert",
+        "status": "passed",
+        "phase": "main",
+        "inputs": {
+          "actual": "yes",
+          "expected": "yes"
+        },
+        "outputs": {
+          "value": "yes",
+          "passed": true
+        },
+        "actual": "yes",
+        "expected": "yes"
+      },
+      {
         "nodeId": "yes-next",
         "handle": "yes_next",
         "label": "yes-next",
@@ -400,6 +418,25 @@
         "nodeId": "no",
         "handle": "no",
         "kind": "request",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "no-side",
+        "handle": "no_side",
+        "label": "no-side",
+        "kind": "value",
+        "status": "skipped",
+        "phase": "main",
+        "inputs": {},
+        "outputs": {}
+      },
+      {
+        "nodeId": "mixed",
+        "handle": "mixed",
+        "kind": "value",
         "status": "skipped",
         "phase": "main",
         "inputs": {},
@@ -466,43 +503,6 @@
             "side": "yes"
           }
         }
-      },
-      {
-        "nodeId": "checks-yes",
-        "handle": "checks_yes",
-        "label": "checks-yes",
-        "kind": "assert",
-        "status": "passed",
-        "phase": "main",
-        "inputs": {
-          "actual": "yes",
-          "expected": "yes"
-        },
-        "outputs": {
-          "value": "yes",
-          "passed": true
-        },
-        "actual": "yes",
-        "expected": "yes"
-      },
-      {
-        "nodeId": "no-side",
-        "handle": "no_side",
-        "label": "no-side",
-        "kind": "value",
-        "status": "skipped",
-        "phase": "main",
-        "inputs": {},
-        "outputs": {}
-      },
-      {
-        "nodeId": "mixed",
-        "handle": "mixed",
-        "kind": "value",
-        "status": "skipped",
-        "phase": "main",
-        "inputs": {},
-        "outputs": {}
       }
     ]
   }

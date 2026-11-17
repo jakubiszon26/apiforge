@@ -1806,7 +1806,9 @@ fn mcp14_criterion_1_simulated_run_results_match_the_output_schema() {
     assert_eq!(passed["replayed"], false);
     assert_eq!(passed["journal_unreadable"], false);
     assert!(
-        passed["steps"][0]["steps"].is_array(),
+        passed["steps"]
+            .as_array()
+            .is_some_and(|steps| steps.iter().any(|step| step["steps"].is_array())),
         "a component's steps nested: {passed}"
     );
     assert!(
@@ -2913,7 +2915,13 @@ fn mcp23_criterion_5_values_match_the_output_schema_and_are_described() {
     initialize(&mut server);
 
     let passed = assert_run_result(&call(&mut server, 2, "run", json!({ "path": SCENARIO })));
-    assert!(passed["steps"][0]["outputs"].is_object(), "{passed}");
+    let product_step = passed["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["handle"] == "product")
+        .unwrap();
+    assert!(product_step["outputs"].is_object(), "{passed}");
 
     let product = json!({
         "id": 123,

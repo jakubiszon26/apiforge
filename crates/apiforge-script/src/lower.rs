@@ -1,6 +1,6 @@
 //! Syntax to document semantics. Temporary node identities are handles; only
 //! reconciliation allocates persistent identities and positions.
-use crate::ast::*;
+use crate::{ast::*, branches::Branches};
 use apiforge_core::{format::*, graph, model::*, operator::Operator, path::JsonPath};
 use serde_json::{Value, json};
 use std::{
@@ -82,6 +82,7 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         omitted: tree.omitted_diagnostics,
         nodes: HashMap::new(),
         scopes: HashMap::new(),
+        enclosing: vec![],
         parameters: HashSet::new(),
         arguments: None,
         allow_unresolved_environment: context.allow_unresolved_environment,
@@ -180,6 +181,8 @@ struct Lower<'a> {
     omitted: usize,
     nodes: HashMap<String, Node>,
     scopes: HashMap<String, bool>, // true for cleanup
+    /// The `if`s whose braces hold the statement being lowered, outermost first.
+    enclosing: Vec<String>,
     parameters: HashSet<String>,
     arguments: Option<HashSet<String>>,
     allow_unresolved_environment: bool,
@@ -441,6 +444,7 @@ impl Lower<'_> {
         // the document's proxies back, as it does positions.
         let mut result = Graph::default();
         self.walk(statements, cleanup, component, None, &mut result);
+        after_whole_ifs(&mut result);
         result
     }
     fn walk(
@@ -625,7 +629,18 @@ impl Lower<'_> {
                                 }
                             };
                             if let Some(source) = name.and_then(|name| self.nodes.get(name)) {
-                                if self.scopes.get(&source.handle) != Some(&cleanup)
+                                if branch.is_none()
+                                    && source.kind == NodeKind::If
+                                    && self.enclosing.contains(&source.handle)
+                                {
+                                    self.push_error(Diagnostic::error(
+                                        argument.range.clone(),
+                                        format!(
+                                            "`{}` stands inside the braces of `{}` and cannot run after the whole if; order it after a statement of its braces",
+                                            statement.handle, source.handle
+                                        ),
+                                    ));
+                                } else if self.scopes.get(&source.handle) != Some(&cleanup)
                                     || (branch.is_some() && source.kind != NodeKind::If)
                                 {
                                     self.error(
@@ -698,6 +713,7 @@ impl Lower<'_> {
                 then, otherwise, ..
             } = &statement.form
             {
+                self.enclosing.push(statement.handle.clone());
                 self.walk(
                     then,
                     cleanup,
@@ -712,6 +728,7 @@ impl Lower<'_> {
                     Some((&statement.handle, Branch::False)),
                     graph,
                 );
+                self.enclosing.pop();
             }
         }
     }
@@ -1146,6 +1163,48 @@ impl Lower<'_> {
             return None;
         }
         Some(Binding::reference(name, port, field_path(&fields)))
+    }
+}
+/// `@after(x)` on an `if` follows the whole `if`: the edge `walk` wrote from
+/// the `if` without a branch becomes an edge from the end of each branch, in
+/// its place. An `if` in or after a cycle has no end to read; it is followed
+/// through both branches, so validation reports the cycle.
+fn after_whole_ifs(graph: &mut Graph) {
+    let ends: HashMap<String, Vec<(String, Option<Branch>)>> = {
+        let branches = Branches::new(graph);
+        let ifs: HashSet<&str> = graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::If)
+            .map(|node| node.id.as_str())
+            .collect();
+        graph
+            .edges
+            .iter()
+            .filter(|edge| edge.branch.is_none() && ifs.contains(edge.source.as_str()))
+            .map(|edge| {
+                let ends = match branches.ends(&edge.source) {
+                    Some(ends) => ends.iter().map(|&(s, b)| (s.to_owned(), b)).collect(),
+                    None => [Branch::True, Branch::False]
+                        .map(|b| (edge.source.clone(), Some(b)))
+                        .into(),
+                };
+                (edge.source.clone(), ends)
+            })
+            .collect()
+    };
+    if ends.is_empty() {
+        return;
+    }
+    for edge in std::mem::take(&mut graph.edges) {
+        match ends.get(&edge.source).filter(|_| edge.branch.is_none()) {
+            Some(ends) => {
+                for (source, branch) in ends {
+                    add_edge(graph, source, &edge.target, *branch);
+                }
+            }
+            None => add_edge(graph, &edge.source, &edge.target, edge.branch),
+        }
     }
 }
 fn add_edge(graph: &mut Graph, source: &str, target: &str, branch: Option<Branch>) {
