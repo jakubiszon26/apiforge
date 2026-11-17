@@ -56,7 +56,7 @@ fn condition_unmet() -> String {
     )
 }
 
-/// A value that fails before *Start*, the run of #418.
+/// A failing value written before *Start* that reads no step, the run of #418.
 fn value_before_start() -> String {
     replaced(
         &replaced(
@@ -386,8 +386,9 @@ fn lay19_criterion_1_the_count_equals_the_caused_rows() {
 
 /// Criterion 2: each card that did not run and has a result line reads the
 /// kind of the last link of its cause and the step at its end, without a
-/// duration: under *Stop* all eleven read `Stopped · checkout_total failed`
-/// although eight carry `BlockedBy`; under *Continue* a request's readers
+/// duration: under *Stop* all eleven read `Stopped · checkout_total failed`,
+/// and since RUN-04 all eleven carry `Stopped` (eight carried `BlockedBy`
+/// before); under *Continue* a request's readers
 /// read `Blocked · refund failed`; behind a false *Data condition*,
 /// `Blocked · valid_cart unmet`.
 #[test]
@@ -404,7 +405,7 @@ fn lay19_criterion_2_each_card_names_the_end_of_its_cause() {
         .iter()
         .filter(|step| matches!(step.cause, Some(NotRunCause::BlockedBy { .. })))
         .count();
-    assert!(blocked >= 8, "the engine names the step before: {blocked}");
+    assert_eq!(blocked, 0, "the engine names the failure (RUN-04)");
     let mut read = 0;
     for step in &not_run {
         assert_eq!(expected_words(&result, step).as_deref(), Some(STOPPED));
@@ -839,9 +840,10 @@ fn lay19_criterion_7_cancelled_is_its_own_cause() {
     );
 }
 
-/// Criterion 8: a value that fails before *Start* (the run of #418) is the
-/// end of every cause: the cards read `Stopped · bad failed` and Run results
-/// count them as stopped, with the engine as it is today.
+/// Criterion 8: a failing value written before *Start* (the run of #418) is
+/// the end of every cause: the cards read `Stopped · bad failed` and Run
+/// results count them as stopped, whether it runs before *Start* or, since
+/// RUN-04, right after it.
 #[test]
 fn lay19_criterion_8_a_failure_before_start() {
     let (_project, mut harness) = ran(&value_before_start(), WIDE);
