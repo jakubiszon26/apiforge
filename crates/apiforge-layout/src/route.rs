@@ -12,7 +12,9 @@
 //! one port share the straight piece out of that port and leave it one by one.
 //! The grid has a track every gap, so lines that share a corridor stack in it at
 //! that distance, and a line with no room there goes the long way round.
-//! [`crate::packed`] is how tests check it.
+//! [`crate::packed`] is how tests check it. A step and the cards hung under it
+//! are one group (LAY-31, [`route_grouped`]): other lines go round it, and its
+//! own may run nearer its cards than the gap.
 //!
 //! The guarantee the board relies on: a final route never touches a card other than
 //! its own two, and never passes under those (LAY-29): it meets them at its ports.
@@ -26,6 +28,7 @@
 //! contract; `violations` and `under_own` are how tests check it.
 
 use crate::geometry::{Point, Port, Rect, Side, compare};
+use crate::group::Groups;
 use crate::order::{Rules, untangle};
 use crate::packed::GAP;
 use std::collections::BinaryHeap;
@@ -93,6 +96,10 @@ const SQUEEZE: f32 = 0.25;
 /// runs within the gap of another only where the window has no other route.
 /// A price instead of a wall keeps that case in the same search.
 const KEPT: f32 = 200.0;
+
+/// How near a line runs to the cards of its own group (LAY-31): in the
+/// middle of a stack gap it has 2 px to spare on either side.
+const IN_GROUP: f32 = 10.0;
 
 /// How far beyond the two ports the first search looks. A detour around a card or
 /// two fits in this; a wire that needs more gets a wider window.
@@ -185,6 +192,25 @@ pub fn route_among(
     settings: &Routing,
     fixed: &[Route],
 ) -> Vec<Route> {
+    route_grouped(cards, &[], wires, settings, fixed)
+}
+
+/// [`route_among`] on a board whose cards are in groups (LAY-31): `groups`
+/// as [`crate::groups`] gives them for `cards`, a step and the cards hung
+/// under it. A wire of a group — one of its ends is on a card of the group
+/// — keeps a short clearance from the group's cards, its own among them, so
+/// it can run in the group's gaps. For every other wire a group's box, its
+/// cards and the gaps between them, is in the way like a card, on every
+/// attempt. An empty `groups` puts every card alone, which is
+/// [`route_among`].
+pub fn route_grouped(
+    cards: &[Rect],
+    groups: &[usize],
+    wires: &[Wire],
+    settings: &Routing,
+    fixed: &[Route],
+) -> Vec<Route> {
+    let groups = Groups::new(cards, groups);
     let mut routes = vec![Route::default(); wires.len()];
     let order = routing_order(cards, wires);
 
@@ -219,6 +245,27 @@ pub fn route_among(
             .filter(|(card, _)| *card != wire.from.block && *card != wire.to.block)
             .map(|(_, card)| *card)
             .collect();
+        // The wire's groups (LAY-31): the other cards of a group it belongs
+        // to keep it at a short clearance only, and the boxes of the other
+        // groups are in its way. A box over one of its ports is not: cards
+        // can lie on each other, and the port's stub leaves them as it can.
+        let own_groups = [groups.of(wire.from.block), groups.of(wire.to.block)];
+        let mate: Vec<bool> = (0..cards.len())
+            .filter(|card| *card != wire.from.block && *card != wire.to.block)
+            .map(|card| {
+                groups
+                    .of(card)
+                    .is_some_and(|group| own_groups.contains(&Some(group)))
+            })
+            .collect();
+        // A card of the wire's own two that is in a group keeps it at the
+        // short clearance too: the wire leaves or enters it through the
+        // group's gaps.
+        let own_in_group: Vec<bool> = [wire.from.block, wire.to.block]
+            .into_iter()
+            .filter(|block| cards.get(*block).is_some())
+            .map(|block| groups.of(block).is_some())
+            .collect();
         // The two cards the wire joins. A route never passes under them
         // (LAY-29): a card is painted over its wires, so a piece of a line
         // inside one is not seen and the line seems to come out of an edge
@@ -233,6 +280,12 @@ pub fn route_among(
         let (beyond_start, beyond_end) = (apart.then_some(*to_card), apart.then_some(*from_card));
         let start = wire.from.point_on(from_card);
         let end = wire.to.point_on(to_card);
+        let walls: Vec<Rect> = groups
+            .boxes()
+            .filter(|(group, _)| !own_groups.contains(&Some(*group)))
+            .map(|(_, area)| area)
+            .filter(|area| !area.contains_strictly(start) && !area.contains_strictly(end))
+            .collect();
         // Cards overlap, so a port can sit inside another card, the wire's
         // other card included. The stub then reaches past whatever buries it:
         // that crossing belongs to the stub, which is the one exception the
@@ -262,16 +315,27 @@ pub fn route_among(
                     Stubs::Through => !(over_start || over_end),
                 }
             };
+            let near = |mate: bool, clearance: f32| {
+                if mate {
+                    clearance.min(IN_GROUP)
+                } else {
+                    clearance
+                }
+            };
             let mut obstacles: Vec<Rect> = foreign
                 .iter()
-                .filter(blocking)
-                .map(|card| card.inflate(margin))
+                .zip(&mate)
+                .filter(|(card, _)| blocking(card))
+                .map(|(card, mate)| card.inflate(near(*mate, margin)))
+                .chain(walls.iter().map(|area| area.inflate(margin)))
                 .collect();
             let mut zones: Vec<Rect> = if zone > 0.0 {
                 foreign
                     .iter()
-                    .filter(blocking)
-                    .map(|card| card.inflate(zone))
+                    .zip(&mate)
+                    .filter(|(card, _)| blocking(card))
+                    .map(|(card, mate)| card.inflate(near(*mate, zone)))
+                    .chain(walls.iter().map(|area| area.inflate(zone)))
                     .collect()
             } else {
                 Vec::new()
@@ -304,9 +368,17 @@ pub fn route_among(
                     ),
                 )
             };
-            obstacles.extend(own.iter().map(|card| card.inflate(margin)));
+            obstacles.extend(
+                own.iter()
+                    .zip(&own_in_group)
+                    .map(|(card, grouped)| card.inflate(near(*grouped, margin))),
+            );
             if zone > 0.0 {
-                zones.extend(own.iter().map(|card| card.inflate(zone)));
+                zones.extend(
+                    own.iter()
+                        .zip(&own_in_group)
+                        .map(|(card, grouped)| card.inflate(near(*grouped, zone))),
+                );
             }
             // The search covers a window around the two ports. A card outside it
             // cannot be met by a route inside it, and a wire between neighbours
