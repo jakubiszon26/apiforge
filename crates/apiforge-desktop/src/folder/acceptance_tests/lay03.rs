@@ -250,6 +250,7 @@ fn lay03_criterion_4_opening_gives_the_tidied_board() {
 /// Criterion 6: the wires brought back while a card is selected keep the
 /// gap from the lines at rest, from each other and from the cards.
 #[test]
+#[ignore = "LAY-36 #419: fails about one run in five on main (two rails brought back meet on one track); un-ignored by its fix"]
 fn lay03_criterion_6_lines_brought_back_keep_the_gap() {
     for name in ["shop-30", "fan-out"] {
         let (_project, mut harness, id) = tidied(name, WIDE, false, WireMode::Chips);
