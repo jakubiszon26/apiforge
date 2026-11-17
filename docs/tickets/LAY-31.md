@@ -43,15 +43,18 @@ data conditions that hang the same way.
 Rendered by the throwaway branch `mock/lay-31-checks-group`
 (`review_lay31_mock`, `APIFORGE_LAY31=a|b`): `shop-30`, checks drawn,
 tidied, the default view (chips for shared values), in
-[`docs/qa/2026-11-17/LAY-31/`](../qa/2026-11-17/LAY-31/).
+[`docs/qa/2026-11-17/LAY-31/`](https://github.com/jakubiszon26/apiforge/tree/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31)
+of that branch (commit 6a91e43). The captures of the implementation, before
+and after, are in [`docs/qa/2026-11-17/LAY-31/`](../qa/2026-11-17/LAY-31/)
+of this one.
 
 | View | Before (`main`) | A | B |
 | --- | --- | --- | --- |
-| Fit, 1600 × 1000 | [capture](../qa/2026-11-17/LAY-31/mock-main-shop-30-fit-1600.png) | [capture](../qa/2026-11-17/LAY-31/mock-a-shop-30-fit-1600.png) | [capture](../qa/2026-11-17/LAY-31/mock-b-shop-30-fit-1600.png) |
-| Fit, 960 × 540 | [capture](../qa/2026-11-17/LAY-31/mock-main-shop-30-fit-960.png) | [capture](../qa/2026-11-17/LAY-31/mock-a-shop-30-fit-960.png) | [capture](../qa/2026-11-17/LAY-31/mock-b-shop-30-fit-960.png) |
-| `cart` and its checks, 60 % | [capture](../qa/2026-11-17/LAY-31/mock-main-cart-1600.png) | [capture](../qa/2026-11-17/LAY-31/mock-a-cart-1600.png) | [capture](../qa/2026-11-17/LAY-31/mock-b-cart-1600.png) |
-| `checkout` and its checks, 60 % | [capture](../qa/2026-11-17/LAY-31/mock-main-checkout-1600.png) | [capture](../qa/2026-11-17/LAY-31/mock-a-checkout-1600.png) | [capture](../qa/2026-11-17/LAY-31/mock-b-checkout-1600.png) |
-| `login` and its checks, 100 % | [capture](../qa/2026-11-17/LAY-31/mock-main-login-1600.png) | [capture](../qa/2026-11-17/LAY-31/mock-a-login-1600.png) | [capture](../qa/2026-11-17/LAY-31/mock-b-login-1600.png) |
+| Fit, 1600 × 1000 | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-main-shop-30-fit-1600.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-a-shop-30-fit-1600.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-b-shop-30-fit-1600.png) |
+| Fit, 960 × 540 | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-main-shop-30-fit-960.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-a-shop-30-fit-960.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-b-shop-30-fit-960.png) |
+| `cart` and its checks, 60 % | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-main-cart-1600.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-a-cart-1600.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-b-cart-1600.png) |
+| `checkout` and its checks, 60 % | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-main-checkout-1600.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-a-checkout-1600.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-b-checkout-1600.png) |
+| `login` and its checks, 100 % | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-main-login-1600.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-a-login-1600.png) | [capture](https://github.com/jakubiszon26/apiforge/blob/6a91e435347ae96594267655531f9012214ace08/docs/qa/2026-11-17/LAY-31/mock-b-login-1600.png) |
 
 In both A and B the gap above a hung card is 24 px and never grows, and no
 line of another card enters a group. They differ in how a hung card shows
