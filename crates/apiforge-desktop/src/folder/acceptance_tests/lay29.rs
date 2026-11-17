@@ -206,4 +206,3 @@ fn review_lay29() {
         crate::testing::capture(&mut harness, &format!("lay29-{label}"), None);
     }
 }
-
