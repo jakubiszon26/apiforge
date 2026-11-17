@@ -422,8 +422,14 @@ fn lay31_criterion_6_fit_and_crossings_on_shop_30() {
             harness.step();
             let (lines, crossings, pairs) = super::lay23::measures(&harness, &id);
             let fit = board(&harness, &id).debug_zoom();
+            let size = cards(&harness, &id)
+                .values()
+                .fold(Rect::NOTHING, |all, card| all.union(*card))
+                .size();
             errln!(
-                "LAY-31 {name} {checks:?}: {lines} lines, {crossings} crossings, {pairs} coincident pairs, Fit {:.0} %",
+                "LAY-31 {name} {checks:?}: {lines} lines, {crossings} crossings, {pairs} coincident pairs, cards {:.0} x {:.0}, Fit {:.1} %",
+                size.x,
+                size.y,
                 fit * 100.0
             );
             if name == "shop-30" && checks == Checks::Expanded {
@@ -563,5 +569,48 @@ fn lay31_criterion_9_a_saved_board_opens_where_it_was() {
             "{} opens where it was",
             node.handle
         );
+    }
+}
+
+/// Criterion 11: Tidy up of `shop-50`, every check drawn, takes at most the
+/// 150 ms of a full routing (ADR 0006), the frame that shows it included.
+/// Ignored in the ordinary suite: a debug build says nothing about time.
+#[test]
+#[ignore = "LAY-31: timed in release, cargo test --release lay31_criterion_11 -- --ignored"]
+fn lay31_criterion_11_tidy_up_of_shop_50_in_time() {
+    for wires in [WireMode::Chips, WireMode::All] {
+        let (_project, mut harness, _id) = tidied("shop-50", WIDE, Checks::Expanded, wires);
+        let mut fastest = std::time::Duration::MAX;
+        for _ in 0..5 {
+            let started = std::time::Instant::now();
+            choose(&mut harness, TIDY);
+            harness.step();
+            fastest = fastest.min(started.elapsed());
+        }
+        errln!("LAY-31 Tidy up of shop-50, {wires:?}: {fastest:?}");
+        assert!(
+            fastest <= std::time::Duration::from_millis(150),
+            "{wires:?}: {fastest:?}"
+        );
+    }
+}
+
+/// The views of the pull request: `shop-30`, checks drawn, the default
+/// view, at Fit at 1600 × 1000 and 960 × 540, and `cart` with its checks at
+/// 60 %. `APIFORGE_LAY31_STAGE` names them (`after` unless set).
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay31() {
+    let stage = std::env::var("APIFORGE_LAY31_STAGE").unwrap_or_else(|_| "after".to_owned());
+    for (size, suffix) in [(WIDE, "1600"), (crate::testing::MINIMUM, "960")] {
+        let (_project, mut harness, id) =
+            tidied("shop-30", size, Checks::Expanded, WireMode::Chips);
+        choose(&mut harness, FIT);
+        harness.step();
+        crate::testing::capture(&mut harness, &format!("{stage}-shop-30-fit-{suffix}"), None);
+        if suffix == "1600" {
+            show(&mut harness, &id, "cart_created", 0.6);
+            crate::testing::capture(&mut harness, &format!("{stage}-cart-{suffix}"), None);
+        }
     }
 }

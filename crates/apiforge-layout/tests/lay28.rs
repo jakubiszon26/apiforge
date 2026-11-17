@@ -12,8 +12,8 @@
 //! lines of a reference board run within 8 px of each other.
 
 use apiforge_layout::{
-    GAP, Point, Port, Rect, Route, Routing, Side, Size, Wire, crossing, packed, route, route_among,
-    violations,
+    GAP, Point, Port, Rect, Route, Routing, Side, Size, Wire, crossing, groups, packed,
+    packed_outside_groups, route, route_among, route_grouped, violations,
 };
 
 const BOARDS: &str = include_str!("../examples/support/boards.txt");
@@ -264,10 +264,22 @@ fn lay28_criterion_3_the_reference_boards_cross_less() {
     let measured: Vec<(String, usize, usize, usize)> = boards
         .iter()
         .map(|board| {
-            let routes = route(&board.cards, &board.wires, &Routing::default());
-            let before = route(&board.cards, &board.wires, &unordered());
+            let routes = route_grouped(
+                &board.cards,
+                &groups(&board.cards),
+                &board.wires,
+                &Routing::default(),
+                &[],
+            );
+            let before = route_grouped(
+                &board.cards,
+                &groups(&board.cards),
+                &board.wires,
+                &unordered(),
+                &[],
+            );
             assert_eq!(
-                packed(&routes, &board.cards, GAP),
+                packed_outside_groups(&routes, &board.cards, &groups(&board.cards), GAP),
                 [],
                 "{}: the gap holds",
                 board.name
@@ -288,14 +300,18 @@ fn lay28_criterion_3_the_reference_boards_cross_less() {
             .1
     };
     // What `quality` printed before this ticket, with the inputs of #349:
-    // 82, 123, 17, 7, 38 and 130.
+    // 82, 123, 17, 7, 38 and 130. Since LAY-31 a step and the cards hung
+    // under it are one group: with every wire drawn the group's own lines
+    // run inside it, 24 px apart, where they cross each other and the lines
+    // into the cards under them (75, 105 and 90 before), and the boards
+    // with chips have no line inside a group at all.
     for (name, most) in [
-        ("shop-30 compact collapsed 30 all", 75),
-        ("shop-30 compact expanded 30 all", 105),
+        ("shop-30 compact collapsed 30 all", 76),
+        ("shop-30 compact expanded 30 all", 116),
         ("shop-30 compact expanded 30 chips", 10),
         ("fan-out compact expanded 26 chips", 5),
         ("shop-50 compact expanded 56 chips", 26),
-        ("fan-out compact expanded 26 all", 90),
+        ("fan-out compact expanded 26 all", 105),
     ] {
         assert!(of(name) <= most, "{name}: {} crossings", of(name));
     }
@@ -344,7 +360,13 @@ fn lay28_criterion_4_lines_brought_back_leave_the_others_alone() {
 #[test]
 fn issue349_criterion_3_no_two_lines_run_within_8_px() {
     for board in reference() {
-        let routes = route(&board.cards, &board.wires, &Routing::default());
+        let routes = route_grouped(
+            &board.cards,
+            &groups(&board.cards),
+            &board.wires,
+            &Routing::default(),
+            &[],
+        );
         let (close, coincident) = (alongside(&routes, 8.0), alongside(&routes, 0.5));
         assert_eq!(
             close - coincident,

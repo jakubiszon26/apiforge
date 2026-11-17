@@ -9,7 +9,8 @@
 //! 2026-11-17 to the part that does not depend on the language.
 
 use apiforge_layout::{
-    GAP, Point, Port, Rect, Routing, Side, Size, Wire, packed, route, under_own, violations,
+    GAP, Point, Port, Rect, Routing, Side, Size, Wire, groups, packed_outside_groups, route,
+    route_grouped, under_own, violations,
 };
 use std::time::{Duration, Instant};
 
@@ -75,7 +76,13 @@ fn reference() -> Vec<Board> {
 #[test]
 fn lay29_criterion_2_on_the_reference_boards_no_line_is_under_its_card() {
     for board in reference() {
-        let routes = route(&board.cards, &board.wires, &Routing::default());
+        let routes = route_grouped(
+            &board.cards,
+            &groups(&board.cards),
+            &board.wires,
+            &Routing::default(),
+            &[],
+        );
         assert_eq!(
             under_own(&routes, &board.wires, &board.cards),
             [],
@@ -89,7 +96,7 @@ fn lay29_criterion_2_on_the_reference_boards_no_line_is_under_its_card() {
             board.name
         );
         assert_eq!(
-            packed(&routes, &board.cards, GAP),
+            packed_outside_groups(&routes, &board.cards, &groups(&board.cards), GAP),
             [],
             "{}: the gap holds",
             board.name
@@ -251,7 +258,13 @@ fn lay29_criterion_5_the_reference_boards_route_in_time() {
         .find(|board| board.name == "shop-50 compact expanded 56 all")
         .expect("the board");
     let started = Instant::now();
-    let routes = route(&board.cards, &board.wires, &Routing::default());
+    let routes = route_grouped(
+        &board.cards,
+        &groups(&board.cards),
+        &board.wires,
+        &Routing::default(),
+        &[],
+    );
     let taken = started.elapsed();
     assert_eq!(routes.len(), board.wires.len());
     // A debug build is some twenty times slower than the release build the

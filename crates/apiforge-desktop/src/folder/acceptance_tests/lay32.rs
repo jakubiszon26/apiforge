@@ -164,11 +164,17 @@ fn lay32_criterion_3_the_count_is_the_number_of_readers() {
                         .map(|reader| handle_of(&graph, reader))
                         .collect::<Vec<_>>()
                 );
+                // `1 reader` for a card hung under its source (LAY-31).
+                let noun = if readers.len() == 1 {
+                    "reader"
+                } else {
+                    "readers"
+                };
                 assert!(
                     count
                         .count
                         .label
-                        .ends_with(&format!("→ {} readers", readers.len())),
+                        .ends_with(&format!("→ {} {noun}", readers.len())),
                     "{}",
                     count.count.label
                 );
@@ -182,7 +188,9 @@ fn lay32_criterion_3_the_count_is_the_number_of_readers() {
 #[test]
 fn lay32_criterion_4_below_the_threshold_and_brought_back() {
     let (_project, mut harness, id) = tidied("fan-out", WIDE, Checks::Collapsed);
-    for (source, target) in [("catalogue", "first"), ("checkout", "orderNumber")] {
+    // Neither reader hangs under its source, which would read it through a
+    // chip (LAY-31).
+    for (source, target) in [("first", "product"), ("orderNumber", "lookup")] {
         assert!(
             wires(&harness, &id).contains(&(source.to_owned(), target.to_owned())),
             "{source} -> {target} stays a wire"

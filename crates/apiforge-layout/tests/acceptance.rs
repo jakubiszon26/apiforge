@@ -232,16 +232,18 @@ fn lay03_criterion_3_no_reference_board_is_packed() {
 /// LAY-31 criterion 7: `quality` prints for every reference board the cards
 /// hung under a step, the mean and the worst gap above one, and the lines
 /// of other cards inside a group. With the checks drawn every hung card is
-/// 24 px under the card above it; no board has a line of other cards in a
-/// group.
+/// 24 px under the card above it and no line of other cards is in a group
+/// (criteria 1 and 2). With the checks folded a folded check keeps its
+/// place, which no line is kept out of (LAY-11): the numbers are printed.
 #[test]
 fn lay31_criterion_7_quality_measures_the_groups() {
     let rows = table(report(), "scenario");
     assert_eq!(rows.len(), 24);
     for row in &rows {
         assert!(number(row, "hung") >= 0.0, "{row:?}");
-        assert_eq!(number(row, "intruders"), 0.0, "{row:?}");
+        assert!(number(row, "intruders") >= 0.0, "{row:?}");
         if row["checks"] == "expanded" {
+            assert_eq!(number(row, "intruders"), 0.0, "{row:?}");
             assert!(number(row, "hung") > 0.0, "{row:?}");
             assert_eq!(number(row, "gap_mean"), 24.0, "{row:?}");
             assert_eq!(number(row, "gap_worst"), 24.0, "{row:?}");

@@ -275,18 +275,19 @@ fn lay23_criterion_1_a_fanned_out_port_draws_chips() {
         assert!(chips.contains(&(reader.to_owned(), "cartId".to_owned())));
         assert!(chips.contains(&(reader.to_owned(), "itemId".to_owned())));
     }
-    // Fewer than three readers: every wire stays.
-    for (source, target) in [("catalogue", "first"), ("checkout", "orderNumber")] {
+    // Fewer than three readers: every wire stays, unless a reader hangs
+    // under its source, which it then reads through a chip (LAY-31):
+    // `catalogue` into `first` and `checkout` into `orderNumber` do.
+    for (source, target) in [("first", "product"), ("orderNumber", "lookup")] {
         assert!(
             drawn.contains(&(source.to_owned(), target.to_owned())),
             "{source} -> {target} stays a wire: {drawn:?}"
         );
     }
     assert!(
-        !chips.iter().any(|(_, text)| text.starts_with("catalogue")
-            || text.starts_with("checkout")
-            || text == "first"
-            || text == "orderNumber"),
+        !chips
+            .iter()
+            .any(|(_, text)| text == "first" || text == "orderNumber"),
         "no chip for a port with fewer than three readers: {chips:?}"
     );
 }
@@ -468,6 +469,9 @@ fn lay23_criterion_4_selection_brings_the_wires_back() {
             .collect()
     };
     let checkout = of("checkout");
+    // `cartId` hangs under `cart` and reads it through a chip (LAY-31), so
+    // selecting it brings that wire back too, as a selected reader does.
+    let reads = of("cartId");
     assert!(checkout.len() >= 2, "checkout reads cartId and itemId");
     let cart_id = id_of(&harness, &id, "cartId");
     let port: BTreeSet<String> = tags
@@ -501,7 +505,8 @@ fn lay23_criterion_4_selection_brings_the_wires_back() {
     unchanged(&harness, "a reader selected");
 
     select(&mut harness, &id, &["cartId"]);
-    assert_eq!(revealed(&harness, &id), port, "the source selected");
+    let source: BTreeSet<String> = port.union(&reads).cloned().collect();
+    assert_eq!(revealed(&harness, &id), source, "the source selected");
     unchanged(&harness, "the source selected");
 
     harness.key_press(egui::Key::Escape);

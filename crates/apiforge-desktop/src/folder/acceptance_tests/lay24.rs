@@ -781,12 +781,20 @@ fn lay24_criterion_7_the_rail_brought_back_is_an_ordering_wire() {
         .iter()
         .find(|wire| wire.id == into_note)
         .expect("the rail into note is brought back");
-    // The middle of a segment of the rail, clear of the cards and of the
-    // other lines.
+    // A point of a segment of the rail, clear of the cards and of the other
+    // lines: its middle, or else the nearest point to it every twentieth of
+    // the segment (a line brought back may cross the rail at its middle).
     let at = rail
         .points
         .windows(2)
-        .map(|pair| on_screen(canvas, pair[0].lerp(pair[1], 0.5)))
+        .flat_map(|pair| {
+            let mut parts: Vec<f32> = (1..20).map(|step| step as f32 / 20.0).collect();
+            parts.sort_by(|a, b| (a - 0.5).abs().total_cmp(&(b - 0.5).abs()));
+            parts
+                .into_iter()
+                .map(|part| on_screen(canvas, pair[0].lerp(pair[1], part)))
+                .collect::<Vec<_>>()
+        })
         .find(|at| {
             canvas.debug_viewport().shrink(16.0).contains(*at)
                 && cards.iter().all(|card| !card.expand(12.0).contains(*at))
