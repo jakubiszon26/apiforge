@@ -122,10 +122,15 @@ impl<'d> Side<'d> {
     }
 
     /// `node` written in `key`'s braces at depth 0, with its note and the
-    /// statements of its own braces that the printer does not skip.
+    /// statements of its own braces that the printer does not skip. A note
+    /// that `@note` carries is written there only, not also as comments.
     fn written(&self, node: &Node, cleanup: bool, key: Key<'_>) -> Option<Statement> {
         let (graph, branches) = self.graph(cleanup)?;
-        Some(self.printer.statement(node, graph, branches, key.braces()))
+        let mut statement = self.printer.statement(node, graph, branches, key.braces());
+        if statement.attributes.iter().any(|a| a.name == "note") {
+            statement.note = None;
+        }
+        Some(statement)
     }
 
     /// What `node` owns in `key`'s braces: its text without its note and
@@ -158,6 +163,11 @@ struct Block {
     /// Where a statement written first in the braces goes, at a line start.
     open: Option<usize>,
     indent: String,
+    /// The text that goes when the edit leaves the braces empty: an `else`
+    /// or a cleanup that held statements, as a block the edit opened does.
+    close: Option<Range<usize>>,
+    /// Whether the edit writes a new statement in the braces.
+    filled: bool,
 }
 
 /// Braces the old text does not have yet: the `else` of an `if` or the
@@ -301,6 +311,8 @@ impl<'s, 'd> Edit<'s, 'd> {
             let then_block = Block {
                 open: self.line_after(brace.end),
                 indent: self.inner(then, &indent),
+                close: None,
+                filled: false,
             };
             self.blocks
                 .insert(Key::branch(id, Branch::True), then_block);
@@ -310,9 +322,13 @@ impl<'s, 'd> Edit<'s, 'd> {
                     let close = self.symbol(from, "}")?;
                     let keyword = self.symbol(close.end, "else")?;
                     let brace = self.symbol(keyword.end, "{")?;
+                    // From the `}` of `then` to the `}` that ends the `if`.
+                    let end = statement.range.end.checked_sub(1)?;
                     let else_block = Block {
                         open: self.line_after(brace.end),
                         indent: self.inner(otherwise, &indent),
+                        close: (!otherwise.is_empty()).then_some(close.start..end),
+                        filled: false,
                     };
                     self.blocks
                         .insert(Key::branch(id, Branch::False), else_block);
@@ -388,6 +404,8 @@ impl<'s, 'd> Edit<'s, 'd> {
             Block {
                 open: self.line_after(head_end.unwrap_or(brace.end)),
                 indent: first.map_or_else(|| indent.clone(), |at| self.indent_at(at)),
+                close: None,
+                filled: false,
             },
         );
         let cleanup = file
@@ -407,6 +425,8 @@ impl<'s, 'd> Edit<'s, 'd> {
                             || format!("{outer}  "),
                             |s| self.indent_at(s.extent.start),
                         ),
+                        close: (!statements.is_empty()).then(|| self.lines(range.clone())),
+                        filled: false,
                     },
                 );
             }
@@ -461,7 +481,8 @@ impl<'s, 'd> Edit<'s, 'd> {
                 );
             }
             if old.note != new.note {
-                let note = new.note.as_ref().map_or_else(String::new, |note| {
+                let comments = self.new.written(new, cleanup, key)?.note;
+                let note = comments.as_ref().map_or_else(String::new, |note| {
                     note.split('\n')
                         .map(|line| format!("// {line}\n{indent}"))
                         .collect()
@@ -517,7 +538,8 @@ impl<'s, 'd> Edit<'s, 'd> {
                             .push_str(&indented(&text, &missing.indent));
                         continue;
                     }
-                    let block = self.blocks.get(&key)?;
+                    let block = self.blocks.get_mut(&key)?;
+                    block.filled = true;
                     let at = after.get(&key).copied().unwrap_or(block.open)?;
                     let text = indented(&text, &block.indent);
                     self.insert_at(at, text);
@@ -529,6 +551,22 @@ impl<'s, 'd> Edit<'s, 'd> {
     }
 
     fn finish(mut self) -> Option<String> {
+        // Braces the edit empties go with their last statement, as an
+        // `else` or a cleanup the edit opened would, so deleting a new step
+        // gives the text back. What was written inside them goes too.
+        let kept: Vec<Key<'d>> = self.kept.values().map(|&(_, key)| key).collect();
+        let emptied: Vec<Range<usize>> = self
+            .blocks
+            .iter()
+            .filter(|(key, block)| !block.filled && !kept.contains(key))
+            .filter_map(|(_, block)| block.close.clone())
+            .collect();
+        for range in emptied {
+            self.edits.retain(|(edit, _, _)| {
+                edit.is_empty() || edit.start < range.start || edit.end > range.end
+            });
+            self.replace(range, String::new());
+        }
         for missing in std::mem::take(&mut self.missing).into_values() {
             if !missing.statements.is_empty() {
                 self.insert_at(
