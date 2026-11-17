@@ -1425,6 +1425,31 @@ impl Canvas {
             &folded.keys().map(String::as_str).collect(),
             &numbers,
         );
+        // LAY-19 (design review): the words of each not-run card and the
+        // count on the card that holds the failure, a folded check's on its
+        // subject.
+        let lay19_variant = crate::consequence::variant();
+        let lay19 = lay19_variant
+            .zip(input.steps)
+            .map(|(_, steps)| crate::consequence::Consequences::of(steps));
+        let mut lay19_cause: HashMap<String, String> = HashMap::new();
+        let mut lay19_cost: HashMap<String, (usize, bool)> = HashMap::new();
+        if let (Some(found), Some(variant), Some(steps)) = (&lay19, lay19_variant, input.steps) {
+            for (id, not_run) in &found.not_run {
+                lay19_cause.insert(id.clone(), not_run.text(variant));
+            }
+            for (id, count) in &found.cost {
+                let failure = !steps
+                    .iter()
+                    .any(|step| step.node_id == *id && crate::consequence::unmet(step));
+                let holder = folded
+                    .get(id)
+                    .map_or_else(|| id.clone(), |(subject, _)| subject.clone());
+                let entry = lay19_cost.entry(holder).or_insert((0, failure));
+                entry.0 += count;
+                entry.1 |= failure;
+            }
+        }
         #[cfg(test)]
         {
             self.hidden = folded.keys().cloned().collect();
@@ -2062,6 +2087,8 @@ impl Canvas {
                     .previous
                     .and_then(|steps| steps.iter().find(|step| step.node_id == card.id)),
                 clear_of: &chip_boxes,
+                cause: lay19_cause.get(&card.id).map(String::as_str),
+                cost: lay19_cost.get(&card.id).copied(),
             };
             let reveal = Reveal::of(
                 card,

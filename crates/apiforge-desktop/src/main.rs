@@ -38,6 +38,7 @@ mod canvas;
 mod capture;
 mod code;
 mod consent;
+mod consequence;
 mod dialogs;
 mod dnd;
 mod editor;

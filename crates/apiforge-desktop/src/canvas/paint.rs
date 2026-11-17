@@ -512,12 +512,29 @@ pub struct CardRun<'a> {
     /// The chips and counts on screen (LAY-23), which the badge keeps
     /// clear of.
     pub clear_of: &'a [Rect],
+    /// LAY-19: why the step did not run, in the card's words.
+    pub cause: Option<&'a str>,
+    /// LAY-19: the steps this step, or a check folded into it, kept from
+    /// running, and whether that is a failure (red) or a condition (amber).
+    pub cost: Option<(usize, bool)>,
 }
 
 impl CardRun<'_> {
     /// The result line: the step's result, *Running…*, the previous run's
     /// result muted and marked as such, or `idle`.
     fn line(&self, idle: &str) -> (String, Color32) {
+        if let (Some(step), Some(cause)) = (self.step, self.cause) {
+            return (cause.to_owned(), status_color(step.status));
+        }
+        if let Some(step) = self.step
+            && crate::consequence::variant().is_some()
+            && crate::consequence::unmet(step)
+        {
+            return (
+                format!("Not met · {} ms", step.duration_ms),
+                status_color(step.status),
+            );
+        }
         if let Some(step) = self.step {
             return execution(step);
         }
@@ -1325,6 +1342,12 @@ pub fn card(
                     color = theme::DANGER;
                 }
             }
+            if let Some((count, _)) = run.cost {
+                status = format!(
+                    "{status} · {}",
+                    crate::consequence::Consequences::cost_text(count)
+                );
+            }
             drawn.label(
                 &clipped,
                 status_rect,
@@ -1534,8 +1557,50 @@ pub fn compact_card(
             egui::Align::Min,
         );
     }
+    let pill_bottom = pill.as_ref().map(|pill| pill.rect.bottom());
     if let (Some(pill), Some(aggregate)) = (pill, aggregate_at_overview) {
         pill.draw(&clipped, &mut drawn, aggregate);
+    }
+    if !legible && z >= LABELS_FROM {
+        let word = run.cost.map(|(count, failure)| {
+            (
+                format!("{count} not run"),
+                if failure {
+                    theme::DANGER
+                } else {
+                    theme::WARNING
+                },
+                true,
+            )
+        });
+        // A card that did not run keeps its grey band at Overview: the word
+        // has room on some cards only.
+        if let (Some((text, color, strong)), Some(name)) = (word, name) {
+            let font = if strong {
+                FontId::new(min_on_screen(LINE_TEXT, z, LINE_MIN), theme::bold_family())
+            } else {
+                FontId::proportional(min_on_screen(LINE_TEXT, z, LINE_MIN))
+            };
+            let size = clipped
+                .layout_no_wrap(text.clone(), font.clone(), color)
+                .size();
+            let top = pill_bottom.unwrap_or(name.bottom()) + 1.0;
+            let area = Rect::from_min_size(
+                pos2(rect.left() + 10.0, top),
+                vec2(size.x.min(rect.width() - 14.0), size.y),
+            );
+            if area.bottom() <= rect.bottom() - 7.0 && size.x <= rect.width() - 14.0 {
+                drawn.label(
+                    &clipped,
+                    area,
+                    &text,
+                    TextKind::Result,
+                    font,
+                    color,
+                    egui::Align::Min,
+                );
+            }
+        }
     }
 
     let small = min_on_screen(LINE_TEXT, z, LINE_MIN);
@@ -1621,6 +1686,36 @@ pub fn compact_card(
                     Stroke::new(0.75, theme::BORDER),
                 );
                 let (text, color) = run.line("Not run");
+                if let (Some((count, failure)), true) = (run.cost, legible) {
+                    let cost = crate::consequence::Consequences::cost_text(count);
+                    let font = FontId::new(small, theme::bold_family());
+                    let left = clipped
+                        .layout_no_wrap(text.clone(), FontId::proportional(small), color)
+                        .size()
+                        .x;
+                    let width = clipped
+                        .layout_no_wrap(cost.clone(), font.clone(), color)
+                        .size()
+                        .x;
+                    let cost = if left + width + 8.0 > area.width() {
+                        format!("{count} not run")
+                    } else {
+                        cost
+                    };
+                    drawn.label(
+                        &clipped,
+                        area,
+                        &cost,
+                        TextKind::Result,
+                        font,
+                        if failure {
+                            theme::DANGER
+                        } else {
+                            theme::WARNING
+                        },
+                        egui::Align::Max,
+                    );
+                }
                 (
                     Cow::Owned(text),
                     FontId::proportional(small),

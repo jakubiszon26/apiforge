@@ -440,3 +440,111 @@ fn review_lay09_zoom() {
         crate::testing::capture(&mut harness, name, None);
     }
 }
+
+fn lay19_continue(source: &str) -> String {
+    failing(
+        source,
+        "  begin = start\n",
+        "  on_error continue\n  begin = start\n",
+    )
+}
+
+fn lay19_no_sample(source: &str, sample: &str) -> String {
+    failing(source, sample, "")
+}
+
+/// LAY-19's design-review view: `shop-30` after a failed simulation, around
+/// the failure at 60 % and at Fit, at both window sizes. `LAY19` names the
+/// variant: unset renders `main`, `a` and `b` the proposals.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay19() {
+    let variant = std::env::var("LAY19").unwrap_or_else(|_| "before".into());
+    let checkout = "    sample 201 { orderId: \"o-1\", status: \"created\", total: 172.5 }\n";
+    let refund = "    sample 200 { refunded: true, amount: 172.5 }\n";
+    let only = std::env::var("LAY19_ONLY").ok();
+    let cases = [
+        ("stop", failing_30(), "order", true),
+        (
+            "continue-error",
+            lay19_no_sample(&lay19_continue(&shop_30()), refund),
+            "refund",
+            false,
+        ),
+        (
+            "continue-condition",
+            lay19_continue(&blocked_30()),
+            "checkout",
+            false,
+        ),
+        (
+            "value-before-start",
+            failing(
+                &shop_30(),
+                "  begin = start\n",
+                "  begin = start\n  bad = \"1\" + 1\n",
+            )
+            .replace("query { limit: 20 }", "query { limit: bad }"),
+            "login",
+            false,
+        ),
+        (
+            "stop-error",
+            lay19_no_sample(&shop_30(), checkout),
+            "order",
+            false,
+        ),
+    ];
+    for (case, source, centre, both) in cases {
+        if only.as_deref().is_some_and(|only| only != case) {
+            continue;
+        }
+        for (size, suffix) in [(WIDE, "1600x1000"), (crate::testing::MINIMUM, "960x540")] {
+            if size != WIDE && !both {
+                continue;
+            }
+            let project = crate::testing::shop_project();
+            fs::write(project.path().join(SCENARIO), &source).unwrap();
+            fs::remove_file(project.path().join(".apiforge/diagram.json")).unwrap();
+            let mut harness =
+                crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
+            app(&mut harness).review_open(SCENARIO, None);
+            settle(&mut harness);
+            let document = document(&harness);
+            app(&mut harness).selections.insert(document, Vec::new());
+            settle(&mut harness);
+            choose(&mut harness, "Tidy up");
+            settle(&mut harness);
+            harness.step();
+            simulate(&mut harness);
+            let name = format!("lay19-{variant}-{case}-60-{suffix}");
+            show(&mut harness, centre, 0.6);
+            assert_a_card_in_view(&harness, &name);
+            crate::testing::capture(&mut harness, &name, None);
+            if both {
+                let name = format!("lay19-{variant}-{case}-fit-{suffix}");
+                if size != WIDE {
+                    harness.get_by_label("Run results").click();
+                    settle(&mut harness);
+                }
+                harness.get_by_label("Fit the view").click();
+                settle(&mut harness);
+                harness.step();
+                assert_a_card_in_view(&harness, &name);
+                crate::testing::capture(&mut harness, &name, None);
+            }
+            if both && size == WIDE {
+                // Run results with a step that did not run chosen.
+                let order = id_of(&harness, "order");
+                let document = super::lay16::document(&harness);
+                app(&mut harness).selections.insert(document, vec![order]);
+                settle(&mut harness);
+                harness.get_by_label("Maximise run results").click();
+                settle(&mut harness);
+                harness.step();
+                let name = format!("lay19-{variant}-{case}-results-{suffix}");
+                crate::testing::capture(&mut harness, &name, None);
+            }
+        }
+    }
+}

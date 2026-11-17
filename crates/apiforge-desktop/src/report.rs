@@ -935,7 +935,18 @@ impl ReportPanel {
                         ui.add_space(2.0);
                     }
                     let is_active = selected.is_some_and(|active| active.key == row.key);
-                    if step_row_button(ui, row, is_active).clicked() {
+                    let response = step_row_button(ui, row, is_active);
+                    // Design review: the capture shows the chosen step's row.
+                    if is_active
+                        && std::env::var_os("LAY19_SCROLL").is_some()
+                        && !ui.clip_rect().contains_rect(response.rect)
+                    {
+                        response.scroll_to_me_animation(
+                            Some(egui::Align::Center),
+                            egui::style::ScrollAnimation::none(),
+                        );
+                    }
+                    if response.clicked() {
                         self.selected_key = Some(row.key.clone());
                         actions.push(Action::SelectNode(row.root_id.clone()));
                     }
@@ -982,11 +993,37 @@ impl ReportPanel {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                widgets::pill(ui, step.status.label(), status_color(step.status));
+                let lay19 = crate::consequence::SHOWN.with(|shown| {
+                    shown.borrow().as_ref().map(|found| {
+                        found.not_run.get(&step.node_id).map_or_else(
+                            || {
+                                if crate::consequence::unmet(step) {
+                                    "Not met"
+                                } else {
+                                    step.status.label()
+                                }
+                            },
+                            |found| found.class.word(),
+                        )
+                    })
+                });
+                widgets::pill(
+                    ui,
+                    lay19.unwrap_or(step.status.label()),
+                    status_color(step.status),
+                );
             });
         });
 
-        if let Some(message) = &step.message {
+        let lay19 = crate::consequence::SHOWN.with(|shown| {
+            shown.borrow().as_ref().and_then(|found| {
+                found
+                    .not_run
+                    .get(&step.node_id)
+                    .map(|found| found.sentence())
+            })
+        });
+        if let Some(message) = lay19.as_ref().or(step.message.as_ref()) {
             let color = status_color(step.status);
             egui::Frame::new()
                 .fill(color.gamma_multiply(0.08))
@@ -1414,6 +1451,9 @@ pub(crate) fn mode_pill(mode: RunMode) -> (&'static str, Color32) {
 }
 
 fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<Action>) {
+    let lay19 =
+        crate::consequence::variant().map(|_| crate::consequence::Consequences::of(&run.steps));
+    crate::consequence::SHOWN.with(|shown| *shown.borrow_mut() = lay19.clone());
     ui.horizontal(|ui| {
         let (text, colour) = mode_pill(run.mode);
         widgets::pill(ui, text, colour);
@@ -1451,6 +1491,31 @@ fn header_row(ui: &mut Ui, run: &RunResult, files_busy: bool, actions: &mut Vec<
                 .iter()
                 .filter(|step| matches!(step.status, StepStatus::Failed | StepStatus::Error))
                 .count();
+            if let Some(found) = &lay19 {
+                let mut parts = found.summary(&run.steps);
+                let unmet = run
+                    .steps
+                    .iter()
+                    .filter(|step| crate::consequence::unmet(step))
+                    .count();
+                if unmet > 0 {
+                    parts.insert(
+                        0,
+                        (format!("{unmet} not met"), crate::consequence::Class::Unmet),
+                    );
+                }
+                for (text, class) in parts.into_iter().rev() {
+                    ui.label(RichText::new(text).size(12.0).strong().color(
+                        if class == crate::consequence::Class::Skipped
+                            || class == crate::consequence::Class::Stopped
+                        {
+                            theme::MUTED
+                        } else {
+                            theme::WARNING
+                        },
+                    ));
+                }
+            }
             if failed > 0 {
                 ui.label(
                     RichText::new(format!("{failed} failed"))
@@ -1553,7 +1618,29 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     let sub = if row.depth > 0 {
         format!("Inside component · {}", row.step.status.label())
     } else {
-        row.step.status.label().to_owned()
+        crate::consequence::SHOWN.with(|shown| {
+            let shown = shown.borrow();
+            let variant = crate::consequence::variant().unwrap_or('a');
+            match shown.as_ref() {
+                Some(found) => match found.not_run.get(&row.step.node_id) {
+                    Some(not_run) => not_run.text(variant),
+                    None => match found.cost.get(&row.step.node_id) {
+                        Some(count) => format!(
+                            "{} · {}",
+                            if crate::consequence::unmet(row.step) {
+                                "Not met"
+                            } else {
+                                row.step.status.label()
+                            },
+                            crate::consequence::Consequences::cost_text(*count)
+                        ),
+                        None if crate::consequence::unmet(row.step) => "Not met".to_owned(),
+                        None => row.step.status.label().to_owned(),
+                    },
+                },
+                None => row.step.status.label().to_owned(),
+            }
+        })
     };
     painter.text(
         egui::pos2(text_left, rect.top() + 29.0),
@@ -1565,7 +1652,11 @@ fn step_row_button(ui: &mut Ui, row: &StepRow<'_>, active: bool) -> egui::Respon
     painter.text(
         egui::pos2(rect.right() - 8.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
-        format!("{} ms", row.step.duration_ms),
+        if crate::consequence::variant().is_some() && row.step.cause.is_some() {
+            String::new()
+        } else {
+            format!("{} ms", row.step.duration_ms)
+        },
         egui::FontId::monospace(10.5),
         theme::MUTED,
     );
