@@ -255,3 +255,36 @@ fn lang14_criterion_4_branches_keep_their_meaning() {
     );
     assert_eq!(printed(&project, &scenario), WHOLE_IF);
 }
+
+/// `@after(x)` on an `if` that a cycle holds, or that follows one, reports
+/// the cycle, not an edge the text never wrote.
+#[test]
+fn lang14_after_an_if_in_or_after_a_cycle_reports_the_cycle() {
+    let request =
+        |handle: &str| format!("  {handle} = GET \"/{handle}\" {{\n    sample 200 {{}}\n  }}\n");
+    let through_the_if = format!(
+        "scenario \"Cycle\" {{\n  @after(b)\n  x = if true {{\n  }}\n  @after(x)\n{}}}\n",
+        request("b")
+    );
+    let after_a_cycle = format!(
+        "scenario \"Cycle\" {{\n  @after(d)\n{}  @after(c)\n{}  @after(c)\n  x = if true {{\n  }}\n  @after(x)\n{}}}\n",
+        request("c"),
+        request("d"),
+        request("b")
+    );
+    let project = apiforge_core::demos::shop_project();
+    for source in [through_the_if, after_a_cycle] {
+        let lowered = lower(&parse(&source), &LowerContext::folder(&project));
+        let messages: Vec<_> = lowered
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| d.message.as_str())
+            .collect();
+        assert_eq!(
+            messages,
+            ["Graph contains a data/control cycle"],
+            "{source}"
+        );
+    }
+}
