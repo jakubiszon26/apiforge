@@ -5,7 +5,7 @@
 - State: decided by the owner on 2026-11-18 (Q8 = A, #296): a scenario in a
   project never opened on this computer opens in Diagram; a remembered
   choice still wins. Accepted on a capture before merge (#296, Plan A) ·
-  LAY sprint, part of its close
+  issue #436 · LAY sprint, part of its close
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
