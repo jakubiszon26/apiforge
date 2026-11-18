@@ -1,0 +1,54 @@
+{
+  "formatVersion": 1,
+  "id": "rooms",
+  "name": "Room booking",
+  "environment": {
+    "baseUrl": "http://127.0.0.1:4318/demo/rooms",
+    "variables": {},
+    "secretNames": []
+  },
+  "contracts": [],
+  "documents": [
+    {
+      "documentId": "6f1d2c40-1a7e-4c55-9b1e-2a1f0c9d7e01",
+      "kind": "component",
+      "path": "components/sign-in.afs",
+      "entityId": "sign-in",
+      "baseRevision": 1,
+      "recovered": false
+    },
+    {
+      "documentId": "6f1d2c40-1a7e-4c55-9b1e-2a1f0c9d7e02",
+      "kind": "scenario",
+      "path": "scenarios/double-booking.afs",
+      "entityId": "double-booking",
+      "baseRevision": null,
+      "recovered": false
+    },
+    {
+      "documentId": "6f1d2c40-1a7e-4c55-9b1e-2a1f0c9d7e03",
+      "kind": "scenario",
+      "path": "scenarios/double-booking-notice.afs",
+      "entityId": "double-booking-notice",
+      "baseRevision": null,
+      "recovered": false
+    },
+    {
+      "documentId": "6f1d2c40-1a7e-4c55-9b1e-2a1f0c9d7e04",
+      "kind": "scenario",
+      "path": "scenarios/booking-day.afs",
+      "entityId": "booking-day",
+      "baseRevision": null,
+      "recovered": false
+    }
+  ],
+  "revisions": [
+    {
+      "componentId": "sign-in",
+      "handle": "sign_in",
+      "revision": 1,
+      "path": ".apiforge/revisions/sign-in/1.afs",
+      "sourceHash": "41225da199b3d67336688f87b7667d53dbac568686e194eb4262afbd0fa2f911"
+    }
+  ]
+}

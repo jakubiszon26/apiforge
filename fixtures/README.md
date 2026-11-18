@@ -27,6 +27,15 @@ as `crates/apiforge-runner/tests/acceptance.rs` does: it holds what the later
 tickets read from `shop-30`, so a change that breaks a ticket fails there. The
 [quality command](../docs/development.md#verification) prints their board metrics.
 
+`scenarios/lay/rooms/` is a folder project, not a single file: a fictional
+room-booking API with one component (`sign_in`, and its published revision
+under `.apiforge/revisions/`) and three scenarios, `double-booking` (11
+steps), `double-booking-notice` and `booking-day` (29 steps). It is the
+owner's acceptance material for the close of the LAY sprint (#296): two
+bookings that read `rooms.body.items[0].id` and `rooms.body.items[1].id`.
+A test copies the folder to a temporary directory and opens the copy as a
+project; nothing walks it with the single-file references above.
+
 ## Generated fixtures
 
 Project and run fixtures are generated from frozen version-one sources in
