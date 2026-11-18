@@ -5,7 +5,7 @@
   2026-11-18 (#296): Q5 = A, a change of source is staged — nothing is
   written until *Apply*, with a summary above it, worded without `@after`;
   Q6 = A, *Change source* on the relation statement a chip or line click
-  keeps opens the Inspector at that field. Not ready · LAY sprint, part of
+  keeps opens the Inspector at that field. Not ready · issue #439 · LAY sprint, part of
   its close, beside the cards track
 - Analysis model: Fable · Implementation model: —
 
