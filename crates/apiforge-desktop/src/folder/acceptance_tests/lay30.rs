@@ -687,6 +687,19 @@ fn lay30_criterion_8_opening_one_step_displaces_nothing() {
     assert!(hidden(&harness, &id, "held"));
     assert_eq!(board(&harness, &id).debug_cards().to_vec(), cards_before);
     assert_eq!(chips_of_others(&harness, &id, &[]), all_before);
+
+    // The mock-up's defect: `second` opened on `double-booking`, in the
+    // bottom row, leaves `calendar`'s chips beside it as they were.
+    let (_project, mut harness, id) = open(DOUBLE);
+    show(&mut harness, &id, "second", 0.56);
+    let before = chips_of_others(&harness, &id, &["second", "refused"]);
+    click(&mut harness, "Expand checks of second");
+    assert!(!hidden(&harness, &id, "refused"));
+    assert_eq!(
+        chips_of_others(&harness, &id, &["second", "refused"]),
+        before,
+        "double-booking: every other chip and count as before"
+    );
 }
 
 /// Criterion 9: a check folded by its step's switch that fails turns the
