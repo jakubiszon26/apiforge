@@ -819,6 +819,31 @@ impl FolderApp {
         self.inspector.focused_input().map(str::to_owned)
     }
 
+    /// The block the Inspector shows, while its panel is open (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_node(&self) -> Option<String> {
+        let open = self
+            .workbench
+            .active()
+            .and_then(|id| self.selections.get(id))
+            .is_some_and(|selection| selection.len() == 1);
+        open.then(|| self.inspector.debug_node().map(str::to_owned))
+            .flatten()
+    }
+
+    /// The Inspector's scroll offset in the last frame (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_offset(&self) -> f32 {
+        self.inspector.debug_offset()
+    }
+
+    /// The Inspector's sections in the last frame and whether each is open
+    /// (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_sections(&self) -> Vec<(String, bool)> {
+        self.inspector.debug_sections()
+    }
+
     fn activate_tab(&mut self, id: &str) {
         self.activation_generation += 1;
         self.workbench.open(id);

@@ -6,6 +6,7 @@
 
 mod after;
 mod collapse;
+mod edge;
 mod layout;
 mod menu;
 mod paint;
@@ -18,6 +19,10 @@ mod trace;
 mod variables;
 
 pub use collapse::collapsible;
+#[cfg(test)]
+pub(crate) use edge::DrawnEdge;
+#[cfg_attr(not(test), allow(unused_imports))]
+pub use edge::Side;
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
@@ -571,6 +576,9 @@ pub struct Canvas {
     /// The ports the last frame ringed for the selected step (LAY-10).
     #[cfg(test)]
     ringed_ports: Vec<(String, Pos2)>,
+    /// The minimap and the zoom bar of the last frame, on screen.
+    #[cfg(test)]
+    chrome: (Option<Rect>, Rect),
 }
 
 /// A wire as the last frame drew it: its id, its source and target cards,
@@ -726,6 +734,8 @@ impl Default for Canvas {
             drawn: Vec::new(),
             #[cfg(test)]
             ringed_ports: Vec::new(),
+            #[cfg(test)]
+            chrome: (None, Rect::NOTHING),
         }
     }
 }
@@ -887,6 +897,30 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_ringed_ports(&self) -> Vec<(String, Pos2)> {
         self.ringed_ports.clone()
+    }
+
+    /// The header row of the card `id`, on screen in the last frame
+    /// (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_header(&self, id: &str) -> Option<Rect> {
+        let card = self.cards.iter().find(|card| card.id == id)?;
+        Some(
+            self.screen_camera(self.last_viewport)
+                .rect(card.header_rect()),
+        )
+    }
+
+    /// The minimap of the last frame, on screen, where the board has room
+    /// for one.
+    #[cfg(test)]
+    pub(crate) fn debug_minimap(&self) -> Option<Rect> {
+        self.chrome.0
+    }
+
+    /// The zoom bar of the last frame, on screen.
+    #[cfg(test)]
+    pub(crate) fn debug_zoom_bar(&self) -> Rect {
+        self.chrome.1
     }
 
     /// A box on the board, on screen in the last frame.
@@ -1353,6 +1387,10 @@ impl Canvas {
         let viewport = Self::viewport(ui);
         let measures = self.measure_overlays(ui, input);
         let overlays = layout::board_overlays(viewport, &measures);
+        #[cfg(test)]
+        {
+            self.chrome = (overlays.minimap, overlays.zoom_controls);
+        }
         // The toolbar comes before the board in the keyboard order: it ends the
         // header row, which reads before the board below it (KTLO-12).
         self.toolbar(ui, viewport, &overlays, input, &mut commands);

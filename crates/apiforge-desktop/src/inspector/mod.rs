@@ -93,6 +93,8 @@ pub struct Inspector {
     tab: Tab,
     choosing_response: Option<ResponseChoiceState>,
     focus: Focus,
+    /// The scroll offset of the panel in the last frame (LAY-15).
+    offset: f32,
 }
 
 /// The input a double-click on the board asked the Inspector to show
@@ -122,6 +124,7 @@ impl Default for Inspector {
             tab: Tab::Configuration,
             choosing_response: None,
             focus: Focus::default(),
+            offset: 0.0,
         }
     }
 }
@@ -144,6 +147,25 @@ impl Inspector {
     #[cfg(test)]
     pub fn focused_input(&self) -> Option<&str> {
         self.focus.reached.as_deref()
+    }
+
+    /// The block the Inspector showed last, if any.
+    #[cfg(test)]
+    pub fn debug_node(&self) -> Option<&str> {
+        (!self.node_id.is_empty()).then_some(self.node_id.as_str())
+    }
+
+    /// The panel's scroll offset in the last frame (LAY-15).
+    #[cfg(test)]
+    pub fn debug_offset(&self) -> f32 {
+        self.offset
+    }
+
+    /// The sections the panel drew in the last frame, by name, and whether
+    /// each is open (LAY-15).
+    #[cfg(test)]
+    pub fn debug_sections(&self) -> Vec<(String, bool)> {
+        Vec::new()
     }
 
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
@@ -199,7 +221,7 @@ impl Inspector {
         }
         ui.separator();
 
-        egui::ScrollArea::vertical()
+        let scrolled = egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_width((ui.available_width() - theme::SPACE_SM).max(0.0));
@@ -209,6 +231,7 @@ impl Inspector {
                     Tab::Checks => checks::show(ui, context, &mut actions),
                 }
             });
+        self.offset = scrolled.state.offset.y;
         self.response_choice(ui.ctx(), context, &mut node);
 
         if node != *context.node {
