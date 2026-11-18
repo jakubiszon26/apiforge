@@ -3,7 +3,7 @@
 - Size: S · Owner review: 15 min · Risk: `visible UI`
 - State: **mock-up waits for the owner.** Decided in principle on
   2026-11-18 (Q3 = A, #296): one line — method and path, call, or
-  condition — at a fixed small size, the card's size unchanged. Not ready ·
+  condition — at a fixed small size, the card's size unchanged. Not ready · issue #437 ·
   LAY sprint, part of its close, the cards track (after LAY-30)
 - Analysis model: Fable · Implementation model: —
 
