@@ -57,7 +57,14 @@ fn files(root: &Path) -> BTreeMap<String, Vec<u8>> {
             } else {
                 let relative = path.strip_prefix(root).unwrap();
                 let name = relative.to_string_lossy().replace('\\', "/");
-                into.insert(name, fs::read(&path).unwrap());
+                // Windows refuses to read the open session's lock file; it is
+                // local and counted as written by the comparison.
+                let bytes = match fs::read(&path) {
+                    Ok(bytes) => bytes,
+                    Err(_) if name.starts_with(".apiforge/local/") => b"<locked>".to_vec(),
+                    Err(error) => panic!("{name}: {error}"),
+                };
+                into.insert(name, bytes);
             }
         }
     }
