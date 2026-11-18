@@ -73,11 +73,9 @@ fn hidden(harness: &FolderHarness, handle: &str) -> bool {
         .contains(&id_of(harness, handle))
 }
 
-/// *Collapse checks* in the board's view menu, beside *Compact cards*.
+/// *Checks* on the board's bar (LAY-30), which folds or draws every check.
 fn switch_checks(harness: &mut FolderHarness) {
-    harness.get_by_label("Board view").click();
-    settle(harness);
-    harness.get_by_label("Collapse checks").click();
+    harness.get_by_label("Checks").click();
     settle(harness);
     harness.step();
 }
@@ -255,8 +253,7 @@ fn lay11_criterion_4_the_aggregate_opens_the_list() {
 }
 
 /// Criterion 5: *Expand checks here* hangs `checkout`'s checks under it,
-/// shifts the rows below by their height and keeps the camera; a restart
-/// forgets it.
+/// shifts the rows below by their height and keeps the camera.
 #[test]
 fn lay11_criterion_5_expand_here_shifts_the_rows_below() {
     let (project, mut harness) = open(&shop_30(), WIDE);
@@ -302,20 +299,18 @@ fn lay11_criterion_5_expand_here_shifts_the_rows_below() {
     }
     assert_disjoint_cards(&after, "with checkout's checks expanded");
 
-    // Forgotten on restart: the same project opened again folds them.
-    assert!(
-        app(&mut harness)
-            .new_canvas()
-            .debug_expanded_here()
-            .is_empty()
-    );
+    // Kept on this computer since LAY-30 (criterion 7, which replaces "a
+    // restart forgets it"): the same project opened again hangs them.
     drop(harness);
     let mut again = crate::testing::folder_harness_in(project.path(), WIDE, Mode::Diagram);
     app(&mut again).review_open(super::lay16::SCENARIO, None);
     settle(&mut again);
     again.step();
     for check in CHECKOUT_CHECKS {
-        assert!(hidden(&again, check), "{check} is folded after a restart");
+        assert!(
+            !hidden(&again, check),
+            "{check} still hangs after a restart"
+        );
     }
 }
 

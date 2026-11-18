@@ -75,11 +75,9 @@ fn simulate(harness: &mut FolderHarness) {
     harness.step();
 }
 
-/// *Collapse checks* in the board's view menu.
+/// *Checks* on the board's bar (LAY-30), which folds or draws every check.
 fn switch_checks(harness: &mut FolderHarness) {
-    harness.get_by_label("Board view").click();
-    settle(harness);
-    harness.get_by_label("Collapse checks").click();
+    harness.get_by_label("Checks").click();
     settle(harness);
     harness.step();
 }

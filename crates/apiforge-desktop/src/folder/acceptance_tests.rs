@@ -19,6 +19,17 @@ use std::fs;
 // (KTLO-44): a ticket's window tests are a new file there and nothing else.
 include!(concat!(env!("OUT_DIR"), "/acceptance_modules.rs"));
 
+/// Opens the Inspector's *Checks* tab. The board's bar has a *Checks*
+/// switch too (LAY-30); the tab is the one in the Inspector, right of it.
+pub(super) fn open_checks_tab(harness: &mut FolderHarness) {
+    harness
+        .query_all_by_label("Checks")
+        .max_by(|a, b| a.rect().left().total_cmp(&b.rect().left()))
+        .expect("the Inspector has a Checks tab")
+        .click();
+    settle(harness);
+}
+
 /// The accessible name of a document's editor, which is its registry path.
 fn editor(harness: &FolderHarness, document_id: &str) -> String {
     format!(
@@ -12948,8 +12959,7 @@ mod lay08 {
         let document = document(harness);
         app(harness).selections.insert(document, vec![id]);
         settle(harness);
-        harness.get_by_label("Checks").click();
-        settle(harness);
+        super::open_checks_tab(harness);
     }
 
     fn has(harness: &FolderHarness, label: &str) -> bool {
@@ -13217,8 +13227,7 @@ mod lay20 {
         let document = document(harness);
         app(harness).selections.insert(document, vec![id]);
         settle(harness);
-        harness.get_by_label("Checks").click();
-        settle(harness);
+        super::open_checks_tab(harness);
     }
 
     fn has(harness: &FolderHarness, label: &str) -> bool {
