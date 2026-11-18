@@ -367,3 +367,44 @@ fn lay39_criterion_7_nothing_else_moves() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// The camera at `zoom` on the middle between the cards `a` and `b`, moved
+/// `right` points further so that the chips left of a card are in view.
+fn between(harness: &mut FolderHarness, id: &str, a: &str, b: &str, zoom: f32, right: f32) {
+    show(harness, id, a, zoom);
+    let card = |harness: &FolderHarness, handle: &str| {
+        board(harness, id)
+            .debug_world(&super::lay23::id_of(harness, id, handle))
+            .unwrap_or_else(|| panic!("{handle} is drawn"))
+    };
+    let offset = (card(harness, b).center() - card(harness, a).center()) * zoom / 2.0;
+    app(harness)
+        .canvases
+        .get_mut(id)
+        .expect("the board is drawn")
+        .debug_pan(egui::vec2(right, 0.0) - offset);
+    settle(harness);
+    harness.step();
+}
+
+/// The review views for the owner, 1280 × 800: `double-booking` at 54 %
+/// and `booking-day` at 76 % with `first` and `second` in view, and
+/// `double-booking` at 100 % on `first` and on `second`.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_lay39() {
+    let (_project, mut harness, id) = open("double-booking");
+    choose(&mut harness, FIT);
+    harness.step();
+    between(&mut harness, &id, "first", "second", 0.54, 70.0);
+    crate::testing::capture(&mut harness, "lay39-double-booking-54", None);
+    for card in ["first", "second"] {
+        show(&mut harness, &id, card, 1.0);
+        crate::testing::capture(&mut harness, &format!("lay39-double-booking-100-{card}"), None);
+    }
+    let (_project, mut harness, id) = open("booking-day");
+    choose(&mut harness, FIT);
+    harness.step();
+    between(&mut harness, &id, "first", "second", 0.76, 0.0);
+    crate::testing::capture(&mut harness, "lay39-booking-day-76", None);
+}
