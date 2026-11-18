@@ -203,9 +203,12 @@ fn click(harness: &mut FolderHarness, at: Pos2) {
     harness.step();
 }
 
-/// A click on the accessible button `label`.
+/// A click on the accessible button `label`: the pointer leaves
+/// afterwards.
 fn click_label(harness: &mut FolderHarness, label: &str) {
     harness.get_by_label(label).click();
+    harness.step();
+    harness.remove_cursor();
     settle(harness);
     harness.step();
     harness.step();
@@ -412,9 +415,17 @@ fn lay15_criterion_2_a_selected_step_has_its_edge_chips() {
         assert_eq!(chip.targets.len(), 1);
     }
 
-    // Two out of view on one edge: two chips from the start. Zoomed out so
+    // Two out of view on one edge: two chips from the start, none folded
+    // or unfolded. Selected again, its Inspector open, and zoomed out so
     // that `rooms` and `second` are both in view, `slot` and `token` not.
     escape(&mut harness);
+    assert!(edge_chips(&harness, &id).is_empty(), "nothing selected");
+    let second = id_of(&harness, &id, "second");
+    app(&mut harness)
+        .selections
+        .insert(id.clone(), vec![second.clone()]);
+    settle(&mut harness);
+    harness.step();
     show(&mut harness, &id, "second", 0.5);
     let top = board(&harness, &id).debug_board().top();
     let rooms = header(&harness, &id, "rooms");
@@ -425,18 +436,6 @@ fn lay15_criterion_2_a_selected_step_has_its_edge_chips() {
         "second in view"
     );
     assert!(!in_view(&harness, &id, "slot") && !in_view(&harness, &id, "token"));
-    let second = id_of(&harness, &id, "second");
-    let camera = board(&harness, &id).debug_camera();
-    app(&mut harness)
-        .selections
-        .insert(id.clone(), vec![second.clone()]);
-    settle(&mut harness);
-    harness.step();
-    assert_eq!(
-        board(&harness, &id).debug_camera(),
-        camera,
-        "selecting second in view moves nothing"
-    );
     assert_eq!(
         texts(&harness, &id),
         BTreeSet::from([TOKEN.to_owned(), SLOT.to_owned()]),
@@ -735,10 +734,15 @@ fn lay15_criterion_9_the_inspector_keeps_the_place() {
         "the Inspector is open"
     );
     assert!(!edge_chips(&harness, &id).is_empty(), "edge chips are shown");
+    // The board pans no more than UX-18's least pan, which keeps second
+    // whole beside the Inspector: never away from it.
     let after = card(&harness, &id, "second");
+    let focus = board(&harness, &id).debug_focus();
+    let least = (before.right() - focus.right()).max(0.0);
     assert!(
-        (after.min - before.min).length() < 0.5,
-        "second stays where it was: {before:?} then {after:?}"
+        (after.left() - before.left()).abs() <= least + 1.0
+            && (after.top() - before.top()).abs() <= 1.0,
+        "second moves no more than it must: {before:?} then {after:?} in {focus:?}"
     );
     assert!(free(&harness, &id, after), "second whole in the free area");
     for chip in edge_chips(&harness, &id) {
@@ -782,3 +786,4 @@ fn review_lay15() {
     click_label(&mut harness, BACK);
     save(&mut harness, "lay15-selected-after-back-1280");
 }
+
