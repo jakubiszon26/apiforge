@@ -8,6 +8,7 @@ mod checks;
 pub mod drafts;
 mod fields;
 mod response;
+pub mod source_change;
 
 pub use fields::{forget_field_text, type_combo};
 pub use response::sample_output;
@@ -101,6 +102,9 @@ pub struct Inspector {
 struct Focus {
     wanted: Option<String>,
     reached: Option<String>,
+    /// *Change source* on the board (LAY-42): the input and the path of the
+    /// field whose editor is shown, its section open, until it is drawn.
+    field: Option<(String, Vec<String>)>,
     /// A click on a step's aggregate asked for its *Checks* list (LAY-11).
     checks: bool,
 }
@@ -133,6 +137,14 @@ impl Inspector {
         self.focus.wanted = Some(input);
     }
 
+    /// Opens the Configuration tab of the block shown next at the editor of
+    /// `input`'s field at `path`, the section that holds it open: *Change
+    /// source* on the board (LAY-42).
+    pub fn focus_field(&mut self, input: String, path: Vec<String>) {
+        self.focus_input(input.clone());
+        self.focus.field = Some((input, path));
+    }
+
     /// Opens the *Checks* list of the step shown next (LAY-11).
     pub fn open_checks(&mut self) {
         self.tab = Tab::Checks;
@@ -149,6 +161,7 @@ impl Inspector {
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         if self.node_id != context.node.id {
             let wanted = self.focus.wanted.take();
+            let field = self.focus.field.take();
             let checks = std::mem::take(&mut self.focus.checks);
             *self = Self {
                 node_id: context.node.id.clone(),
@@ -156,11 +169,14 @@ impl Inspector {
             };
             if let Some(input) = wanted {
                 self.focus_input(input);
+                self.focus.field = field;
             } else if checks {
                 self.tab = Tab::Checks;
             }
         }
         self.focus.checks = false;
+        // A source held for a field stays while this step is shown (LAY-42).
+        binding::keep_held(ui.ctx(), &context.node.id);
         let mut actions = Vec::new();
         let mut node = context.node.clone();
 
@@ -209,6 +225,9 @@ impl Inspector {
                     Tab::Checks => checks::show(ui, context, &mut actions),
                 }
             });
+        if binding::focus_reached(ui.ctx()) {
+            self.focus.field = None;
+        }
         self.response_choice(ui.ctx(), context, &mut node);
 
         if node != *context.node {
@@ -411,12 +430,23 @@ impl Inspector {
         let binding_context = binding_context(context);
         for port in &ports {
             self.focus.at(ui, &port.name);
+            let stage = binding::Stage {
+                path: Vec::new(),
+                cleanup: context.cleanup,
+                focus: self
+                    .focus
+                    .field
+                    .as_ref()
+                    .filter(|(input, _)| *input == port.name)
+                    .map(|(_, path)| path.as_slice()),
+            };
             reveal = argument(
                 ui,
                 &binding_context,
                 port,
                 node,
                 id.with(("argument", &port.name)),
+                Some(&stage),
             )
             .or(reveal);
             if node.kind == NodeKind::Request
@@ -827,13 +857,15 @@ fn binding_context<'a>(context: &Context<'a>) -> binding::Context<'a> {
 }
 
 /// The editor of one input: sets or removes it. Returns the block to show in the
-/// code panel when the user asked for it.
+/// code panel when the user asked for it. In a `stage`, a change of a
+/// field's source is held until *Apply* (LAY-42).
 fn argument(
     ui: &mut Ui,
     context: &binding::Context<'_>,
     port: &Port,
     node: &mut Node,
     id: Id,
+    stage: Option<&binding::Stage<'_>>,
 ) -> Option<String> {
     let mut value = node.inputs.get(&port.name).cloned();
     let mut changed = false;
@@ -878,13 +910,19 @@ fn argument(
         {
             reveal = Some(node.handle.clone());
         }
+        // *Change source* on one of the body's fields opens the section.
         egui::CollapsingHeader::new("Body value source")
             .id_salt(id.with("body-binding"))
+            .open(
+                stage
+                    .is_some_and(|stage| stage.focus.is_some())
+                    .then_some(true),
+            )
             .show(ui, |ui| {
-                changed |= binding::editor(ui, context, port, &mut value, 0, id);
+                changed |= staged(ui, context, port, &mut value, id, stage);
             });
     } else {
-        changed = binding::editor(ui, context, port, &mut value, 0, id);
+        changed = staged(ui, context, port, &mut value, id, stage);
     }
     if changed {
         match value {
@@ -897,6 +935,21 @@ fn argument(
         }
     }
     reveal
+}
+
+/// The editor of an input, in `stage` when there is one.
+fn staged(
+    ui: &mut Ui,
+    context: &binding::Context<'_>,
+    port: &Port,
+    value: &mut Option<Binding>,
+    id: Id,
+    stage: Option<&binding::Stage<'_>>,
+) -> bool {
+    match stage {
+        Some(stage) => binding::staged_editor(ui, context, port, value, id, stage),
+        None => binding::editor(ui, context, port, value, 0, id),
+    }
 }
 
 fn check(ui: &mut Ui, id: Id, node: &mut Node) {
@@ -1018,6 +1071,7 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
                 &port,
                 node,
                 id.with(("actual", index)),
+                None,
             );
         }
         if predicate.takes_expected()
@@ -1029,6 +1083,7 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
                 &port,
                 node,
                 id.with(("expected", index)),
+                None,
             );
         }
     }
@@ -1105,7 +1160,14 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
     }
     if passes_data && let Some(port) = port(VALUE_INPUT) {
         // A condition has no body, so nothing here asks for the code panel.
-        let _ = argument(ui, &binding_context, &port, node, id.with("passed-on"));
+        let _ = argument(
+            ui,
+            &binding_context,
+            &port,
+            node,
+            id.with("passed-on"),
+            None,
+        );
     }
     widgets::hint(
         ui,
@@ -1304,6 +1366,40 @@ fn remove_request_argument(node: &mut Node, name: &str) {
     if !request_argument_is_used(node, name) {
         node.inputs.shift_remove(name);
     }
+}
+
+/// Whether the Inspector edits `input` of `node` at `path` in a *Result of
+/// another step* editor that holds a change until *Apply*: the input has an
+/// argument editor, the path walks only fields of objects and items of
+/// lists, and a reference stands there (LAY-42).
+pub fn changes_source_at(
+    node: &Node,
+    graph: &Graph,
+    project: &Project,
+    input: &str,
+    path: &[String],
+) -> bool {
+    let Some(mut binding) = node.inputs.get(input) else {
+        return false;
+    };
+    for segment in path {
+        if !matches!(binding, Binding::Object { .. } | Binding::Array { .. }) {
+            return false;
+        }
+        let Some(child) = binding.at(std::slice::from_ref(segment)) else {
+            return false;
+        };
+        binding = child;
+    }
+    let scope = Scope {
+        nodes: &graph.nodes,
+        project,
+        request: (node.kind == NodeKind::Request).then_some(node),
+    };
+    matches!(binding, Binding::Reference { .. })
+        && argument_ports(node, project, scope)
+            .iter()
+            .any(|port| port.name == input)
 }
 
 fn argument_ports(node: &Node, project: &Project, scope: Scope<'_>) -> Vec<Port> {

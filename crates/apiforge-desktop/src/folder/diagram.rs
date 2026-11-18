@@ -512,12 +512,15 @@ impl FolderApp {
                 self.show_checks(document_id, node);
                 None
             }
-            Command::InspectInput { node, input } => {
+            Command::InspectInput { node, input, path } => {
                 self.new_inputs.remove(document_id);
                 self.component_settings.remove(document_id);
                 self.selections.insert(document_id.to_owned(), vec![node]);
                 self.selected_inputs.remove(document_id);
-                self.inspector.focus_input(input);
+                match path {
+                    Some(path) => self.inspector.focus_field(input, path),
+                    None => self.inspector.focus_input(input),
+                }
                 None
             }
             Command::AddNode {

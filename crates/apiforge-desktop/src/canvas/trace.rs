@@ -19,6 +19,10 @@
 //! at the count while it is pointed at, and while its port's wires are drawn
 //! by a click on it.
 //!
+//! A kept statement ends with *Change source* where the Inspector can read
+//! the field from another step (LAY-42): a click selects the reader and opens
+//! the Inspector at that field.
+//!
 //! Rendering only: nothing is saved, and no card, route or camera moves.
 
 use super::{
@@ -29,7 +33,7 @@ use super::{
 };
 use crate::theme;
 use apiforge_core::format::{Graph, Project};
-use eframe::egui::{Color32, Painter, Pos2, Rect, vec2};
+use eframe::egui::{self, Color32, Painter, Pos2, Rect, Sense, Ui, vec2};
 use std::collections::{HashMap, HashSet};
 
 /// Where a kept statement stands.
@@ -72,6 +76,19 @@ struct Traced {
     source: String,
     target: String,
     statement: String,
+    /// The field it goes into, when the Inspector can change its source.
+    field: Option<Field>,
+}
+
+/// A field whose source *Change source* opens in the Inspector (LAY-42):
+/// the reading step, its input, the path in the input, and the field as the
+/// statement names it (`second.body.roomId`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Field {
+    pub reader: String,
+    pub input: String,
+    pub path: Vec<String>,
+    pub name: String,
 }
 
 /// What this frame traces.
@@ -170,10 +187,13 @@ impl Memory {
     /// Paints the statement of what is pointed at (`pointed`, from a chip, a
     /// count, a row or a line), the statement of each click kept and the list
     /// of the count clicked (`listed`, LAY-18), every box whole inside
-    /// `board`.
+    /// `board`. With `editable`, a kept statement's line ends with *Change
+    /// source* where its field allows it, on `ui`; returns the field whose
+    /// button was clicked (LAY-42).
     #[allow(clippy::too_many_arguments)]
     pub fn paint(
         &mut self,
+        ui: &Ui,
         painter: &Painter,
         board: Rect,
         camera: Camera,
@@ -182,7 +202,8 @@ impl Memory {
         listed: Option<&(String, Rect)>,
         tags: &[readers::Tag],
         laid: &[readers::Laid],
-    ) {
+        editable: bool,
+    ) -> Option<Field> {
         self.kept
             .retain(|(wires, _)| wires.iter().any(|wire| trace.kept.contains(wire)));
         let middle = |wire: &str| {
@@ -191,6 +212,8 @@ impl Memory {
             Some(at_pointer(camera.to_screen(*middle)))
         };
         let mut boxes: Vec<(String, Rect)> = Vec::new();
+        // The fields of each kept statement's lines, by statement.
+        let mut fields: Vec<(String, Vec<Option<Field>>)> = Vec::new();
         for (wires, anchor) in &self.kept {
             let live: Vec<String> = wires
                 .iter()
@@ -209,6 +232,7 @@ impl Memory {
                     .map(|(_, laid)| laid.rect),
             };
             if let Some(near) = near.or_else(|| live.first().and_then(|wire| middle(wire))) {
+                fields.push((text.clone(), trace.fields(&live)));
                 boxes.push((text, near));
             }
         }
@@ -223,6 +247,7 @@ impl Memory {
             if let (Some(text), Some(near)) =
                 (trace.statement(std::slice::from_ref(wire)), middle(wire))
             {
+                fields.push((text.clone(), trace.fields(std::slice::from_ref(wire))));
                 boxes.push((text, near));
             }
         }
@@ -236,11 +261,45 @@ impl Memory {
             self.boxes.clear();
             self.board = Some(board);
         }
+        let mut clicked = None;
         for (text, near) in boxes {
-            let _shown = readers::paint_statement(painter, near, &text, board);
+            let lines = fields
+                .iter()
+                .find(|(kept, _)| *kept == text)
+                .map(|(_, lines)| lines.clone())
+                .filter(|lines| editable && lines.iter().any(Option::is_some))
+                .unwrap_or_default();
+            let _shown = if lines.is_empty() {
+                readers::paint_statement(painter, near, &text, board)
+            } else {
+                let actions: Vec<bool> = lines.iter().map(Option::is_some).collect();
+                let (shown, buttons) =
+                    readers::paint_statement_actions(painter, near, &text, &actions, board);
+                for (field, button) in lines.into_iter().zip(buttons) {
+                    let (Some(field), Some(button)) = (field, button) else {
+                        continue;
+                    };
+                    let name = format!("Change source of {}", field.name);
+                    let response = ui
+                        .interact(
+                            button.intersect(board),
+                            ui.id().with(("change-source", &field.name)),
+                            Sense::click(),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    response.widget_info(move || {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+                    });
+                    if response.clicked() {
+                        clicked = Some(field);
+                    }
+                }
+                shown
+            };
             #[cfg(test)]
             self.boxes.push((text, _shown));
         }
+        clicked
     }
 }
 
@@ -306,12 +365,38 @@ impl Trace {
             let statement = node.map_or_else(String::new, |node| {
                 readers::texts(board.graph, board.project, wire, &target.id, node, None).1
             });
+            // A step's field the Inspector reads from another step (LAY-42).
+            let field = board
+                .graph
+                .nodes
+                .iter()
+                .find(|node| node.id == target.id)
+                .filter(|reader| {
+                    node.is_some()
+                        && !statement.is_empty()
+                        && crate::inspector::changes_source_at(
+                            reader,
+                            board.graph,
+                            board.project,
+                            &wire.input,
+                            &wire.operand_path,
+                        )
+                })
+                .and_then(|_| {
+                    Some(Field {
+                        reader: target.id.clone(),
+                        input: wire.input.clone(),
+                        path: wire.operand_path.clone(),
+                        name: statement.rsplit(" → ").next()?.to_owned(),
+                    })
+                });
             wires.insert(
                 id.clone(),
                 Traced {
                     source,
                     target: target.id.clone(),
                     statement,
+                    field,
                 },
             );
         }
@@ -356,6 +441,29 @@ impl Trace {
             }
         }
         (!lines.is_empty()).then(|| lines.join("\n"))
+    }
+
+    /// By line of the statement of `wires`, the field whose source its
+    /// *Change source* opens, if any (LAY-42).
+    fn fields(&self, wires: &[String]) -> Vec<Option<Field>> {
+        let mut lines: Vec<(&str, Option<Field>)> = Vec::new();
+        for wire in wires {
+            let Some(traced) = self.wires.get(wire) else {
+                continue;
+            };
+            if traced.statement.is_empty() {
+                continue;
+            }
+            match lines.iter_mut().find(|(line, _)| *line == traced.statement) {
+                Some((_, field)) => {
+                    if field.is_none() {
+                        *field = traced.field.clone();
+                    }
+                }
+                None => lines.push((&traced.statement, traced.field.clone())),
+            }
+        }
+        lines.into_iter().map(|(_, field)| field).collect()
     }
 
     /// The statement of what is pointed at.
