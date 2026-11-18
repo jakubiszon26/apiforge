@@ -603,13 +603,15 @@ fn lay23_criterion_6_chips_fit_the_gap_at_every_zoom() {
                     assert!(!tag.world.intersects(*mark), "{context} covers a mark");
                 }
                 let arrow_only = tag.shown == "←";
-                let short = tag.shown == format!("← {}", tag.tag.short);
-                assert!(
-                    tag.shown == format!("← {}", tag.tag.text) || short || arrow_only,
-                    "{context}: {}",
-                    tag.shown
-                );
-                shortened |= short && tag.tag.short != tag.tag.text;
+                // One of the chip's forms, widest first: the step and its
+                // field, then the step; with an index, the forms of LAY-39.
+                let form = tag
+                    .tag
+                    .forms
+                    .iter()
+                    .position(|form| tag.shown == format!("← {form}"));
+                assert!(form.is_some() || arrow_only, "{context}: {}", tag.shown);
+                shortened |= form.is_some_and(|form| form > 0);
                 arrows |= arrow_only;
             }
             for count in canvas.debug_counts() {

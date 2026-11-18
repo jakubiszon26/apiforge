@@ -1123,6 +1123,11 @@ mod lay34 {
         let mut found = vec![];
         let mut pending = vec![root.join("fixtures"), root.join("docs")];
         while let Some(directory) = pending.pop() {
+            // A folder project of its own (a fixture with its own components)
+            // is read in its own context, not as a source of the demo shop.
+            if directory.join("apiforge.project.json").is_file() {
+                continue;
+            }
             for entry in std::fs::read_dir(&directory).unwrap() {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
