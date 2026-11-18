@@ -211,6 +211,14 @@ pub fn field_assertion(source: &Node, port: &str, path: &str, value: &Value) -> 
     node
 }
 
+/// The board with `check`, a check on the step `subject`, added (#433).
+pub fn add_check(graph: &Graph, subject: &str, check: Node) -> Graph {
+    let _ = subject;
+    let mut next = graph.clone();
+    next.nodes.push(check);
+    next
+}
+
 /// The board after a response assignment, and the variable's identifier.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssignedVariable {
