@@ -323,6 +323,15 @@ What follows the checkpoint — the owner's order of part B, the tickets added
 ahead of it and in it (DIAG-07, LAY-29 to LAY-34, 120 minutes; LAY-04 closed) and where the notes of
 2026-11-16 go — is in [After the checkpoint](sprints/lay.md#12-after-the-checkpoint-2026-11-16).
 
+**Shortened on 2026-11-18** by the owner (#296): the sprint closes on a
+tester's task on the room-booking scenario, not on the demo plan and the
+task sheet. The criterion, the minimal set that remains (#433, LAY-30
+re-scoped, LAY-41 #437, LAY-15, LAY-42 #439, LAY-39 #435, LAY-40 #436,
+then LAY-12), what moved to LAY-2 (LAY-13 #297, LAY-17 #301, LAY-35 #410,
+LAY-36 #419, LAY-38 #427, `sprint:lay-2`) and what is measured again after
+LANG-13 are in [The close](sprints/lay.md#13-the-close-2026-11-18). No new
+board-geometry work until LAY-2.
+
 Capacity: **385** owner review minutes over 21 tickets. The order of work
 was revised by the [mid-sprint review of 2026-11-10](sprints/lay.md#11-mid-sprint-review-2026-11-10),
 which replaces the waves: **part A**, the coherent board — LAY-16 → LAY-21 →
@@ -331,7 +340,10 @@ LAY-03 on the layout track and LAY-22 on the engine track, in parallel; a **chec
 the owner uses the real board and confirms part B; **part B** — LAY-10 →
 LAY-14, LAY-15 → LAY-19 → LAY-18 → LAY-17, LAY-13 → LAY-05 → LAY-12. The *Wave* column below is the plan of 2026-11-05, kept as the
 record.
-Exit criteria:
+Exit criteria (the last two were replaced on 2026-11-18 by the criterion
+of [The close](sprints/lay.md#131-the-criterion): the owner does the task
+of [LAY-12](tickets/LAY-12.md) on the build that holds the minimal set,
+and the wires pass its hard condition):
 
 - [ ] The three reference scenarios (14, 30, 50 steps) exist and the metric
       command prints their table (LAY-01, #32).
@@ -356,17 +368,17 @@ Exit criteria:
 | [#303](https://github.com/jakubiszon26/apiforge/issues/303) | LAY-19 Failure consequences by cause; [ticket](tickets/LAY-19.md) | M · 20 · `visible UI` | 1 |
 | [#294](https://github.com/jakubiszon26/apiforge/issues/294) | LAY-10 Focus on selection, the relation model; [ticket](tickets/LAY-10.md) | S–M · 20 · `visible UI`, `default` | 1 |
 | [#298](https://github.com/jakubiszon26/apiforge/issues/298) | LAY-14 Wire and input tracing; [ticket](tickets/LAY-14.md) | S–M · 20 · `visible UI` | 1 |
-| [#299](https://github.com/jakubiszon26/apiforge/issues/299) | LAY-15 Off-screen relations, chips and Back; [ticket](tickets/LAY-15.md) | M · 20 · `visible UI` | 1 |
+| [#299](https://github.com/jakubiszon26/apiforge/issues/299) | LAY-15 Off-screen relations: edge chips, the jump and Back; [ticket](tickets/LAY-15.md); amended 2026-11-18 (Q4 = A) | M · 20 · `visible UI` | the close |
 | [#302](https://github.com/jakubiszon26/apiforge/issues/302) | LAY-18 Compact shows the data in use; [ticket](tickets/LAY-18.md) | M · 20 · `visible UI` | 1 |
 | [#295](https://github.com/jakubiszon26/apiforge/issues/295) | LAY-11 Collapse checks; [ticket](tickets/LAY-11.md) | M · 30 · `visible UI`, `default` | 1 |
 | [#33](https://github.com/jakubiszon26/apiforge/issues/33) | LAY-02 Auto-layout on open, chips; [ticket](tickets/LAY-02.md) | S–M · 15 · `default` | 2 |
 | [#37](https://github.com/jakubiszon26/apiforge/issues/37) | LAY-06 The shape: D hybrid; [ticket](tickets/LAY-06.md) | M · 20 · `default` | 2 |
-| [#301](https://github.com/jakubiszon26/apiforge/issues/301) | LAY-17 Wrapping by dependencies; [ticket](tickets/LAY-17.md) | M · 20 · `default` | 2 |
-| [#297](https://github.com/jakubiszon26/apiforge/issues/297) | LAY-13 Branch bands; [ticket](tickets/LAY-13.md) | M · 20 · `visible UI` | 2 (should) |
+| [#301](https://github.com/jakubiszon26/apiforge/issues/301) | LAY-17 Wrapping by dependencies; [ticket](tickets/LAY-17.md); moved to LAY-2 on 2026-11-18 | M · 20 · `default` | 2 |
+| [#297](https://github.com/jakubiszon26/apiforge/issues/297) | LAY-13 Branch bands; [ticket](tickets/LAY-13.md); moved to LAY-2 on 2026-11-18, after LANG-13 | M · 20 · `visible UI` | 2 (should) |
 | [#35](https://github.com/jakubiszon26/apiforge/issues/35) | LAY-04 Ports decide rows; [ticket](tickets/LAY-04.md) | M · 20 | 3 |
 | [#34](https://github.com/jakubiszon26/apiforge/issues/34) | LAY-03 Nudge; [ticket](tickets/LAY-03.md) | S · 15 | 3 (should) |
 | [#36](https://github.com/jakubiszon26/apiforge/issues/36) | LAY-05 Lanes, measured first; [ticket](tickets/LAY-05.md) | M · 15 | 3 (should) |
-| [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 Acceptance: the demo and the timed task sheet; [ticket](tickets/LAY-12.md) | S · 10 | 4 |
+| [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 Acceptance: the owner's task on the room-booking scenario; [ticket](tickets/LAY-12.md); rewritten 2026-11-18 | S · 10 | the close, last |
 | [#311](https://github.com/jakubiszon26/apiforge/issues/311) | LAY-21 Every other card is compact too; [ticket](tickets/LAY-21.md); from LAY-06, which becomes M · 20 | S–M · 20 · `visible UI`, `default` | part A |
 | [#312](https://github.com/jakubiszon26/apiforge/issues/312) | LAY-22 Runner and core groundwork: the started step, the not-run cause, relations; [ticket](tickets/LAY-22.md) | S–M · 10 | part A |
 | [#333](https://github.com/jakubiszon26/apiforge/issues/333) | LAY-23 A value many steps read: thin the board's lines; [ticket](tickets/LAY-23.md); decided 2026-11-12, stage 1 in implementation | M · 30 · `visible UI`, `default`, `removal` | part A, before the checkpoint |
@@ -375,6 +387,12 @@ Exit criteria:
 | [#334](https://github.com/jakubiszon26/apiforge/issues/334) | LAY-24 A mark on the card replaces the `@after` rail into the next step; [ticket](tickets/LAY-24.md); decided 2026-11-15 (the arrow at the badge) | S–M · 20 · `visible UI`, `default`, `removal` | before the checkpoint, after LAY-25 and LAY-26 |
 | [#344](https://github.com/jakubiszon26/apiforge/issues/344) | LAY-27 A collapsed check line carries the checks' numbers (`7 · 1 check`); [ticket](tickets/LAY-27.md); decided 2026-11-15 | S · 15 · `visible UI` | after LAY-25 |
 | [#348](https://github.com/jakubiszon26/apiforge/issues/348), [#349](https://github.com/jakubiszon26/apiforge/issues/349) | LAY-28 Lines in one corridor are ordered so they cross less, and the inputs of a *Data condition* are 20 px apart; [ticket](tickets/LAY-28.md); #349 decided 2026-11-16 (A) | M · 25 · `visible UI` | before the checkpoint, with the owner's decision of 2026-11-16 |
+| [#383](https://github.com/jakubiszon26/apiforge/issues/383) | LAY-30 A step with one check writes it on its folded line; the checks switch on the bar and on each step; re-scoped 2026-11-18 (Q1 = A, Q2 = A), mock-up with the owner | M · 25 · `visible UI` | the close |
+| [#435](https://github.com/jakubiszon26/apiforge/issues/435) | LAY-39 A chip keeps the index of the element it reads; decided 2026-11-18 (Q7 = A) | S · 10 · `visible UI` | the close |
+| [#436](https://github.com/jakubiszon26/apiforge/issues/436) | LAY-40 A scenario opens in Diagram in a project never opened here; decided 2026-11-18 (Q8 = A) | S · 5 · `default` | the close |
+| [#437](https://github.com/jakubiszon26/apiforge/issues/437) | LAY-41 At the Overview zoom a card says what the step is; decided in principle 2026-11-18 (Q3 = A), mock-up with the owner | S · 15 · `visible UI` | the close, after LAY-30 |
+| [#439](https://github.com/jakubiszon26/apiforge/issues/439) | LAY-42 A field's source is changed from the field and applied only on Apply; decided in principle 2026-11-18 (Q5 = A, Q6 = A), mock-up with the owner | M · 25 · `visible UI` | the close |
+| [#433](https://github.com/jakubiszon26/apiforge/issues/433) | A check added from Run results is written in its subject's braces | S · 10 | the close |
 
 Nine UX-1 tickets joined the sprint on 2026-11-05 at the owner's request,
 keeping `sprint:ux` beside `sprint:lay`. Their pull requests were accepted in
