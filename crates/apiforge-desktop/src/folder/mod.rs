@@ -331,6 +331,9 @@ pub struct FolderApp {
     /// The last paste, until its edit is applied (UX-34).
     pasted: Option<PastedOutcome>,
     inspector: Inspector,
+    /// What the Inspector showed when a board's first jump started, by
+    /// document, while that board shows *Back* (LAY-15).
+    jump_views: HashMap<String, crate::inspector::View>,
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
     /// When the editor last changed each document's text, while its error
@@ -545,6 +548,7 @@ impl FolderApp {
             clipboard: None,
             pasted: None,
             inspector: Inspector::default(),
+            jump_views: HashMap::new(),
             changed_at: None,
             marks_quiet_at: HashMap::new(),
             notices: Notices::default(),
@@ -841,7 +845,7 @@ impl FolderApp {
     /// (LAY-15).
     #[cfg(test)]
     pub(crate) fn debug_inspector_sections(&self) -> Vec<(String, bool)> {
-        self.inspector.debug_sections()
+        self.inspector.debug_sections(&self.ui_context)
     }
 
     fn activate_tab(&mut self, id: &str) {

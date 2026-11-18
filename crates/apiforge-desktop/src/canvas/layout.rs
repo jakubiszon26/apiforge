@@ -600,7 +600,6 @@ impl Card {
 
     /// The card's header row, on the board: its name and what it does
     /// (LAY-15 counts a card as in view while this row is).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn header_rect(&self) -> Rect {
         let height = if self.compact.is_some() {
             COMPACT_HEADER

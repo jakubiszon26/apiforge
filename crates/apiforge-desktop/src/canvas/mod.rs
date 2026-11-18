@@ -20,9 +20,7 @@ mod variables;
 
 pub use collapse::collapsible;
 #[cfg(test)]
-pub(crate) use edge::DrawnEdge;
-#[cfg_attr(not(test), allow(unused_imports))]
-pub use edge::Side;
+pub(crate) use edge::{DrawnEdge, Side};
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
@@ -169,6 +167,12 @@ pub enum Command {
     /// *Save shared values as variables* in the right-click menu: every
     /// value of `Input::shared` (LAY-25).
     SaveSharedValues,
+    /// The first jump to a card out of view by its edge chip (LAY-15): the
+    /// window keeps what *Back* restores beside the board, the Inspector.
+    Jumped,
+    /// *Back* (LAY-15): select these again, and restore what the window
+    /// kept at the first jump.
+    Back(Vec<String>),
 }
 
 /// Where a carried wire may land on a card, and how near it must come: within
@@ -490,6 +494,8 @@ pub struct Canvas {
     selected_wires: Vec<String>,
     /// What tracing keeps between frames (LAY-14).
     trace: trace::Memory,
+    /// The edge chips' unfolded edges and *Back* (LAY-15).
+    edges: edge::Memory,
     inline: Option<InlineEdit>,
     error: Option<String>,
     router: routing::Router,
@@ -694,6 +700,7 @@ impl Default for Canvas {
             port_menu: None,
             selected_wires: Vec::new(),
             trace: trace::Memory::default(),
+            edges: edge::Memory::default(),
             inline: None,
             error: None,
             #[cfg(test)]
@@ -1383,6 +1390,7 @@ impl Canvas {
             self.selected_wires.clear();
             self.shown_port = None;
             self.error = None;
+            self.edges_reset();
         }
         let viewport = Self::viewport(ui);
         let measures = self.measure_overlays(ui, input);
@@ -1653,9 +1661,30 @@ impl Canvas {
         if self.selected_wires.len() != kept {
             ui.ctx().request_repaint();
         }
+        self.edges_follow(input.graph, input.selection);
         // One selected step rings what it is related to and dims the rest
         // (LAY-10); its wires are lit, every other wire is dimmed.
         let focus = Focus::of(input.graph, input.selection, &board_wires, &cards);
+        let traced_board = trace::Board {
+            graph: input.graph,
+            project: input.project,
+            cards: &cards,
+            chips: &chips,
+            wires: &board_wires,
+        };
+        // The related cards out of view, while a step is selected or a
+        // trace is kept (LAY-15).
+        let free = edge::Free {
+            board: overlays.board,
+            minimap: overlays.minimap,
+        };
+        let away = edge::away(
+            &traced_board,
+            input.selection,
+            &self.selected_wires,
+            camera,
+            free,
+        );
         let mut lit: HashSet<String> = focus.as_ref().map_or_else(HashSet::new, |focus| {
             board_wires
                 .iter()
@@ -1782,13 +1811,7 @@ impl Canvas {
                 Some((self.trace.pointed(camera, pointer, over)?, pointer))
             });
         let traced = trace::Trace::of(
-            &trace::Board {
-                graph: input.graph,
-                project: input.project,
-                cards: &cards,
-                chips: &chips,
-                wires: &board_wires,
-            },
+            &traced_board,
             pointed_wire.as_ref().map(|(wire, _)| wire.as_str()),
             pointed_input
                 .as_ref()
@@ -2578,6 +2601,28 @@ impl Canvas {
                 self.shown_port.as_ref() == Some(&(count.source.clone(), count.port.clone()))
             })
             .map(list);
+        // *Back* and the edge chips, over the cards and under the
+        // statements, which keep clear of them (LAY-15).
+        let avoid: Vec<Rect> = cards
+            .iter()
+            .filter(|card| selection.contains(card.id.as_str()))
+            .map(|card| camera.rect(card.rect()))
+            .chain([overlays.zoom_controls])
+            .collect();
+        let taken = self.show_edges(
+            &mut board_ui,
+            &painter,
+            &away,
+            &edge::Frame {
+                cards: &cards,
+                selection: input.selection,
+                viewport,
+                focus: overlays.focus,
+                free,
+                avoid: &avoid,
+            },
+            &mut commands,
+        );
         self.trace.paint(
             &painter,
             overlays.board,
@@ -2587,6 +2632,7 @@ impl Canvas {
             listed.as_ref(),
             &shown_tags,
             &laid_tags,
+            &taken,
         );
 
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);

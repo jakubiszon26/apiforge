@@ -2423,6 +2423,8 @@ impl App {
                     | Command::Copy
                     | Command::SetWireStyle(_)
                     | Command::SetBridges(_)
+                    | Command::Jumped
+                    | Command::Back(_)
             )
         {
             return;
@@ -2438,7 +2440,11 @@ impl App {
             | Command::SetWires(_)
             // This window proposes no variable (LAY-25).
             | Command::SaveValues { .. }
-            | Command::SaveSharedValues => {}
+            | Command::SaveSharedValues
+            // The board keeps where Back returns to; this window keeps no
+            // Inspector state for it.
+            | Command::Jumped => {}
+            Command::Back(ids) => self.editor.selection = ids,
             Command::InspectInput { node, .. } => self.editor.selection = vec![node],
             Command::ShowChecks(node) => {
                 self.editor.selection = vec![node];
