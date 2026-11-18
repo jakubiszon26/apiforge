@@ -312,6 +312,10 @@ pub struct Card {
     pub origin: Pos2,
     /// The compact box of a request at the compact density (LAY-16).
     pub compact: Option<Compact>,
+    /// What the step is, in one line under the name at the Overview zoom
+    /// (LAY-41): a request's method and path, a call's component and
+    /// revision, a condition, a value's source or content.
+    pub overview: Option<String>,
 }
 
 /// What one row of a compact card stands for.
@@ -440,6 +444,7 @@ impl Card {
         if density == CardDensity::Compact && compacts(node.kind) {
             card.compact = Some(compact(&card, node, reference_graph, project));
         }
+        card.overview = overview_line(&card, node, reference_graph, project);
         card
     }
 
@@ -532,6 +537,7 @@ impl Card {
             controls,
             origin: pos2(node.position.x as f32, node.position.y as f32),
             compact: None,
+            overview: None,
         }
     }
 
@@ -1433,6 +1439,53 @@ impl Chip {
         let mut chip = self.clone();
         chip.origin += offset;
         chip
+    }
+}
+
+/// The one line a card carries at the Overview zoom (LAY-41): a request's
+/// method and path (`POST /bookings`), a component call's handle and
+/// revision (`sign_in · r1`), the condition of an `if`, a check or a *Data
+/// condition* and a value's source or content in the words of the compact
+/// card's line; none for the other kinds.
+fn overview_line(
+    card: &Card,
+    node: &Node,
+    reference_graph: &Graph,
+    project: &Project,
+) -> Option<String> {
+    match node.kind {
+        // The subtitle's two spaces after the method become one.
+        NodeKind::Request => card
+            .subtitle
+            .as_deref()
+            .map(|subtitle| subtitle.replacen("  ", " ", 1)),
+        NodeKind::Component => {
+            let handle = node
+                .config
+                .component_id
+                .as_deref()
+                .and_then(|id| {
+                    project
+                        .components
+                        .iter()
+                        .find(|component| component.id == id)
+                })
+                .map(|component| component.handle.as_str());
+            Some(match (handle, node.config.revision) {
+                (Some(handle), Some(revision)) => format!("{handle} · r{revision}"),
+                (Some(handle), None) => handle.to_owned(),
+                (None, _) => card.caption.clone(),
+            })
+        }
+        NodeKind::Value | NodeKind::Assert | NodeKind::Condition | NodeKind::If => {
+            let scope = Scope {
+                nodes: &reference_graph.nodes,
+                project,
+                request: Some(node),
+            };
+            Some(satellite_line(card, node, scope, reference_graph).0)
+        }
+        _ => None,
     }
 }
 

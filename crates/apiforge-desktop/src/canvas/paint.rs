@@ -517,6 +517,22 @@ pub enum TextKind {
     Subtitle,
     /// Any other line: an input, an output, a caption.
     Line,
+    /// The line under the name at the Overview zoom: what the step is
+    /// (LAY-41).
+    Overview,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether a card draws its Overview line: a test seam that compares
+    /// the board with and without it (LAY-41).
+    static OVERVIEW_LINE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Draws the Overview line on this thread's boards, or not (LAY-41).
+#[cfg(test)]
+pub(crate) fn debug_overview_line(on: bool) {
+    OVERVIEW_LINE.with(|line| line.set(on));
 }
 
 /// A text a card drew: what it says, its size on screen and its colour.
@@ -795,9 +811,32 @@ fn count_under(
     zoom: f32,
     cost: Option<Cost>,
 ) {
-    let Some(cost) = cost.filter(|_| zoom >= LABELS_FROM) else {
+    let Some((area, text, font, color)) = count_room(painter, card, top, centred, zoom, cost)
+    else {
         return;
     };
+    drawn.label(
+        painter,
+        area,
+        &text,
+        TextKind::Result,
+        font,
+        color,
+        egui::Align::Min,
+    );
+}
+
+/// Where [`count_under`] writes the count, its text, font and colour;
+/// `None` where it has no room.
+fn count_room(
+    painter: &Painter,
+    card: Rect,
+    top: f32,
+    centred: bool,
+    zoom: f32,
+    cost: Option<Cost>,
+) -> Option<(Rect, String, FontId, Color32)> {
+    let cost = cost.filter(|_| zoom >= LABELS_FROM)?;
     let text = not_run::short_count_text(cost.count);
     let font = FontId::new(
         min_on_screen(LINE_TEXT, zoom, LINE_MIN),
@@ -813,18 +852,116 @@ fn count_under(
         card.left() + 10.0
     };
     let area = Rect::from_min_size(pos2(left, top), size);
-    if area.bottom() > card.bottom() - 4.0 || size.x > card.width() - 14.0 {
-        return;
+    (area.bottom() <= card.bottom() - 4.0 && size.x <= card.width() - 14.0)
+        .then(|| (area, text, font, cost_color(cost)))
+}
+
+/// The size of the Overview line on screen, at every zoom it is drawn
+/// (LAY-41).
+const OVERVIEW_TEXT: f32 = 9.0;
+/// The Overview line keeps this far from the card's sides, where its
+/// sockets are.
+const OVERVIEW_EDGE: f32 = 5.0;
+
+/// The line under a card's name at the Overview zoom (LAY-41): what the
+/// step is, in the code face at a fixed 9 px.
+struct OverviewLine {
+    rect: Rect,
+    text: String,
+    font: FontId,
+    centred: bool,
+}
+
+impl OverviewLine {
+    /// How tall the line is on screen, where the card has one to draw.
+    fn height(painter: &Painter, card: &Card, zoom: f32) -> Option<f32> {
+        #[cfg(test)]
+        if !OVERVIEW_LINE.with(std::cell::Cell::get) {
+            return None;
+        }
+        let text = card.overview.as_ref().filter(|_| zoom >= LABELS_FROM)?;
+        Some(
+            painter
+                .layout_no_wrap(text.clone(), FontId::monospace(OVERVIEW_TEXT), theme::MUTED)
+                .size()
+                .y,
+        )
     }
-    drawn.label(
-        painter,
-        area,
-        &text,
-        TextKind::Result,
-        font,
-        cost_color(cost),
-        egui::Align::Min,
-    );
+
+    /// The line under a name whose row ends at `top`, at the left or
+    /// centred, cut with `…` at the card's edge; `None` where the card
+    /// `rect` is too low for it.
+    fn layout(
+        painter: &Painter,
+        card: &Card,
+        rect: Rect,
+        top: f32,
+        centred: bool,
+        zoom: f32,
+    ) -> Option<Self> {
+        let height = Self::height(painter, card, zoom)?;
+        let text = card.overview.as_deref()?;
+        let font = FontId::monospace(OVERVIEW_TEXT);
+        let area = Rect::from_min_max(
+            pos2(rect.left() + OVERVIEW_EDGE, top),
+            pos2(rect.right() - OVERVIEW_EDGE, top + height),
+        );
+        if area.bottom() > rect.bottom() - 1.0 || area.width() <= 0.0 {
+            return None;
+        }
+        let text = cut(painter, text, &font, area.width());
+        (text != "…").then_some(Self {
+            rect: area,
+            text,
+            font,
+            centred,
+        })
+    }
+
+    fn draw(self, painter: &Painter, drawn: &mut Drawn) {
+        drawn.label(
+            painter,
+            self.rect,
+            &self.text,
+            TextKind::Overview,
+            self.font,
+            theme::MUTED,
+            if self.centred {
+                egui::Align::Center
+            } else {
+                egui::Align::Min
+            },
+        );
+    }
+}
+
+/// Whether the Overview line keeps what a card shows under its name
+/// (LAY-41): the checks pill and the count, laid out from `without`, the
+/// name's row, and from `with`, the line's bottom. A card that would lose
+/// either draws no line.
+#[allow(clippy::too_many_arguments)]
+fn line_keeps(
+    painter: &Painter,
+    card: Rect,
+    without: f32,
+    with: f32,
+    centred: bool,
+    zoom: f32,
+    aggregate: Option<&Aggregate>,
+    cost: Option<Cost>,
+) -> bool {
+    let shows = |top: f32| {
+        let pill = aggregate
+            .and_then(|aggregate| Pill::layout(painter, card, top + 1.0, centred, zoom, aggregate));
+        let below = pill.as_ref().map_or(top, |pill| pill.rect.bottom());
+        (
+            pill.is_some(),
+            count_room(painter, card, below + 1.0, centred, zoom, cost).is_some(),
+        )
+    };
+    let (pill, count) = shows(without);
+    let (pill_kept, count_kept) = shows(with);
+    (pill_kept || !pill) && (count_kept || !count)
 }
 
 /// The checks pill under a card's name at Overview (Q5 = A), as it would be
@@ -1289,8 +1426,9 @@ pub fn card(
 
     if detail == CardDetail::Overview {
         // A small diagram tile, not a miniature form. Its one readable title
-        // has the tile to itself, the checks pill under it (Q5 = A); values
-        // live in the Inspector.
+        // has the tile to itself, the line saying what the step is and the
+        // checks pill under it (Q5 = A, LAY-41); values live in the
+        // Inspector.
         let accent = Rect::from_min_max(
             rect.left_top() + vec2(4.0, 4.0),
             rect.right_top() + vec2(-4.0, 6.0),
@@ -1304,12 +1442,41 @@ pub fn card(
         let area = rect.shrink2(vec2(5.0, 8.0));
         // Below 25 % only where the tile holds the name, two letters wide.
         if z >= LABELS_FROM || (area.height() >= height && area.width() >= 2.0 * NAME_MIN) {
-            let name = Rect::from_center_size(
-                area.center() - vec2(0.0, pill_height / 2.0),
-                vec2(area.width(), height),
-            );
+            // The name, then the line saying what the step is (LAY-41),
+            // then the pill, centred together; without the line where the
+            // tile does not hold it and what it shows under the name.
+            let place = |under: f32| {
+                Rect::from_center_size(
+                    area.center() - vec2(0.0, under / 2.0),
+                    vec2(area.width(), height),
+                )
+            };
+            let plain = place(pill_height);
+            let overview = OverviewLine::height(&clipped, card, z).and_then(|line_height| {
+                let name = place(pill_height + line_height);
+                let line = OverviewLine::layout(&clipped, card, rect, name.bottom(), true, z)?;
+                (name.top() >= area.top()
+                    && line_keeps(
+                        &clipped,
+                        rect,
+                        plain.bottom(),
+                        line.rect.bottom(),
+                        true,
+                        z,
+                        aggregate,
+                        run.cost,
+                    ))
+                .then_some((name, line))
+            });
+            let (name, overview) = match overview {
+                Some((name, line)) => (name, Some(line)),
+                None => (plain, None),
+            };
+            let under_name = overview
+                .as_ref()
+                .map_or(name.bottom(), |line| line.rect.bottom());
             let pill = aggregate.and_then(|aggregate| {
-                Pill::layout(&clipped, rect, name.bottom() + 1.0, true, z, aggregate)
+                Pill::layout(&clipped, rect, under_name + 1.0, true, z, aggregate)
             });
             let name = match aggregate {
                 Some(aggregate) if pill.is_none() => numbers_on_name_row(
@@ -1333,9 +1500,10 @@ pub fn card(
                 theme::TEXT,
                 egui::Align::Center,
             );
-            let below = pill
-                .as_ref()
-                .map_or(name.bottom(), |pill| pill.rect.bottom());
+            if let Some(line) = overview {
+                line.draw(&clipped, &mut drawn);
+            }
+            let below = pill.as_ref().map_or(under_name, |pill| pill.rect.bottom());
             if let (Some(pill), Some(aggregate)) = (pill, aggregate) {
                 pill.draw(&clipped, &mut drawn, aggregate);
             }
@@ -1693,7 +1861,8 @@ pub fn compact_card(
     theme::block_icon(&clipped, icon, card.block, color);
     let call = card.kind == NodeKind::Component;
     // The rows are written from Medium on; at Overview the card is its band,
-    // its name and its checks pill (LAY-09).
+    // its name, the line saying what the step is (LAY-41) and its checks
+    // pill (LAY-09).
     let legible = detail != CardDetail::Overview;
     let name_font = FontId::new(min_on_screen(NAME_TEXT, z, NAME_MIN), theme::bold_family());
     let right = if call && legible {
@@ -1718,14 +1887,32 @@ pub fn compact_card(
             || (name.bottom() <= rect.bottom() - 1.0 && name.width() >= 2.0 * NAME_MIN))
             .then_some(name)
     };
-    // At Overview the checks pill under the name, or the numbers of the
-    // folded checks on the name's row where it has no room (LAY-27).
+    // At Overview the line saying what the step is under the name, where
+    // the card holds it and what it shows under the name (LAY-41).
     let aggregate_at_overview = aggregate.filter(|_| !legible);
-    let pill = name
+    let overview = name.filter(|_| !legible).and_then(|name| {
+        OverviewLine::layout(&clipped, card, rect, name.bottom(), false, z).filter(|line| {
+            line_keeps(
+                &clipped,
+                rect,
+                name.bottom(),
+                line.rect.bottom(),
+                false,
+                z,
+                aggregate_at_overview,
+                run.cost,
+            )
+        })
+    });
+    let under_name = overview
+        .as_ref()
+        .map(|line| line.rect.bottom())
+        .or(name.map(|name| name.bottom()));
+    // Then the checks pill, or the numbers of the folded checks on the
+    // name's row where it has no room (LAY-27).
+    let pill = under_name
         .zip(aggregate_at_overview)
-        .and_then(|(name, aggregate)| {
-            Pill::layout(&clipped, rect, name.bottom() + 1.0, false, z, aggregate)
-        });
+        .and_then(|(top, aggregate)| Pill::layout(&clipped, rect, top + 1.0, false, z, aggregate));
     let name = match (name, aggregate_at_overview) {
         (Some(row), Some(aggregate)) if pill.is_none() => Some(numbers_on_name_row(
             &clipped,
@@ -1749,10 +1936,10 @@ pub fn compact_card(
             egui::Align::Min,
         );
     }
-    let below = pill
-        .as_ref()
-        .map(|pill| pill.rect.bottom())
-        .or(name.map(|name| name.bottom()));
+    if let Some(line) = overview {
+        line.draw(&clipped, &mut drawn);
+    }
+    let below = pill.as_ref().map(|pill| pill.rect.bottom()).or(under_name);
     if let (Some(pill), Some(aggregate)) = (pill, aggregate_at_overview) {
         pill.draw(&clipped, &mut drawn, aggregate);
     }
@@ -2294,7 +2481,11 @@ mod tests {
                 let mut labels = 0;
                 for shape in &output.shapes {
                     if let Shape::Text(text) = &shape.shape {
-                        labels += 1;
+                        // The line saying what the step is (LAY-41) is not
+                        // a micro-form label.
+                        if !overview_line(&card, &text.galley.job.text) {
+                            labels += 1;
+                        }
                         let text_bounds = text.galley.rect.translate(text.pos.to_vec2());
                         assert!(
                             bounds.expand(0.75).contains_rect(shape.clip_rect),
@@ -2320,6 +2511,16 @@ mod tests {
                 output.textures_delta.clear();
             }
         }
+    }
+
+    /// Whether `text` is the card's Overview line, whole or cut (LAY-41).
+    fn overview_line(card: &Card, text: &str) -> bool {
+        let start = text.trim_end_matches('…');
+        !start.is_empty()
+            && card
+                .overview
+                .as_deref()
+                .is_some_and(|line| line.starts_with(start))
     }
 
     /// The compact card and its trays (LAY-16) keep every label inside its cell
@@ -2394,7 +2595,9 @@ mod tests {
                 for shape in &output.shapes {
                     if let Shape::Text(text) = &shape.shape {
                         let text_bounds = text.galley.rect.translate(text.pos.to_vec2());
-                        if !icon.contains(text_bounds.center()) {
+                        if !icon.contains(text_bounds.center())
+                            && !overview_line(&card, &text.galley.job.text)
+                        {
                             labels += 1;
                         }
                         assert!(
