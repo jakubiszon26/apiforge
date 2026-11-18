@@ -1084,6 +1084,116 @@ pub fn paint_statement(painter: &Painter, near: Rect, text: &str, within: Rect) 
     rect
 }
 
+/// What a kept statement offers at the end of a line whose field the
+/// Inspector can read from another step (LAY-42).
+const CHANGE_SOURCE: &str = "Change source";
+
+/// The side of the icon before [`CHANGE_SOURCE`].
+const ACTION_ICON: f32 = 11.0;
+
+/// The width *Change source* adds to a statement's box: a divider, the
+/// icon, the words and their margins.
+fn action_width(painter: &Painter) -> f32 {
+    let words = painter.layout_no_wrap(
+        CHANGE_SOURCE.to_owned(),
+        FontId::proportional(theme::FONT_META),
+        theme::ACCENT,
+    );
+    6.0 + 5.0 + ACTION_ICON + 4.0 + words.size().x + 8.0
+}
+
+/// The size of the box of a statement `text`, with *Change source* at the
+/// end of its lines when `actions` (LAY-42).
+pub fn statement_size(painter: &Painter, text: &str, actions: bool) -> Vec2 {
+    let size = painter
+        .layout_no_wrap(
+            text.to_owned(),
+            FontId::proportional(theme::FONT_META),
+            theme::TEXT,
+        )
+        .size()
+        + vec2(12.0, 6.0);
+    if actions {
+        size + vec2(action_width(painter), 0.0)
+    } else {
+        size
+    }
+}
+
+/// Paints a kept statement as [`paint_statement`] does, each line marked in
+/// `actions` ending with *Change source* (LAY-42). Returns the box and, by
+/// line, the button's rect.
+pub fn paint_statement_actions(
+    painter: &Painter,
+    near: Rect,
+    text: &str,
+    actions: &[bool],
+    within: Rect,
+) -> (Rect, Vec<Option<Rect>>) {
+    let font = FontId::proportional(theme::FONT_META);
+    let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), theme::TEXT);
+    let text_width = galley.size().x;
+    let size = statement_size(painter, text, true);
+    let mut at = pos2(near.left(), near.top() - size.y - 4.0);
+    if at.y < within.top() {
+        at.y = near.bottom() + 4.0;
+    }
+    at.x = at.x.min(within.right() - size.x).max(within.left());
+    at.y = at.y.min(within.bottom() - size.y).max(within.top());
+    let rect = Rect::from_min_size(at, size);
+    painter.rect(
+        rect,
+        4.0,
+        theme::WHITE,
+        Stroke::new(1.0, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    painter.galley(rect.min + vec2(6.0, 3.0), galley, theme::TEXT);
+    let divider = rect.left() + 6.0 + text_width + 6.0;
+    painter.line_segment(
+        [
+            pos2(divider, rect.top() + 3.0),
+            pos2(divider, rect.bottom() - 3.0),
+        ],
+        Stroke::new(1.0, theme::BORDER),
+    );
+    let lines = actions.len().max(1);
+    let row = (size.y - 6.0) / lines as f32;
+    let buttons = actions
+        .iter()
+        .enumerate()
+        .map(|(index, action)| {
+            if !*action {
+                return None;
+            }
+            let top = if index == 0 {
+                rect.top() + 1.0
+            } else {
+                rect.top() + 3.0 + row * index as f32
+            };
+            let bottom = if index + 1 == lines {
+                rect.bottom() - 1.0
+            } else {
+                rect.top() + 3.0 + row * (index + 1) as f32
+            };
+            let button =
+                Rect::from_min_max(pos2(divider + 1.0, top), pos2(rect.right() - 1.0, bottom));
+            painter.rect_filled(button, 3.0, theme::ACCENT_SOFT);
+            let icon = Rect::from_min_size(
+                pos2(divider + 5.0, button.center().y - ACTION_ICON / 2.0),
+                Vec2::splat(ACTION_ICON),
+            );
+            crate::icons::Icon::Wire.paint(painter, icon, theme::ACCENT);
+            let words =
+                painter.layout_no_wrap(CHANGE_SOURCE.to_owned(), font.clone(), theme::ACCENT);
+            let y = button.center().y - words.size().y / 2.0;
+            painter.galley(pos2(icon.right() + 4.0, y), words, theme::ACCENT);
+            Some(button)
+        })
+        .collect();
+    (rect, buttons)
+}
+
 #[cfg(test)]
 mod tests {
     //! LAY-37 review findings: a chip or a count placed anywhere its search

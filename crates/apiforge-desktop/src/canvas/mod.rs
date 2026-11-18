@@ -152,10 +152,13 @@ pub enum Command {
     /// aggregate in its footer (LAY-11).
     ShowChecks(String),
     /// Select a block and open the Inspector on one of its inputs: a
-    /// double-click on the input's row (LAY-16).
+    /// double-click on the input's row (LAY-16). With a `path`, at the
+    /// editor of that field of the input, the section holding it open:
+    /// *Change source* on a kept statement (LAY-42).
     InspectInput {
         node: String,
         input: String,
+        path: Option<Vec<String>>,
     },
     /// Save values in variables (LAY-25), in one edit: each read through
     /// the variable that holds it or a new one after its step. `first` is
@@ -2189,6 +2192,7 @@ impl Canvas {
                     commands.push(Command::InspectInput {
                         node: card.id.clone(),
                         input: card.inputs[index].name.clone(),
+                        path: None,
                     });
                 } else if card.kind == NodeKind::Component {
                     commands.push(Command::EditComponent(card.id.clone()));
@@ -2623,7 +2627,10 @@ impl Canvas {
             },
             &mut commands,
         );
-        self.trace.paint(
+        // *Change source* on a kept statement opens the Inspector at the
+        // field (LAY-42).
+        if let Some(field) = self.trace.paint(
+            &board_ui,
             &painter,
             overlays.board,
             camera,
@@ -2633,7 +2640,15 @@ impl Canvas {
             &shown_tags,
             &laid_tags,
             &taken,
-        );
+            !input.read_only,
+        ) {
+            clicked_card = true;
+            commands.push(Command::InspectInput {
+                node: field.reader,
+                input: field.input,
+                path: Some(field.path),
+            });
+        }
 
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(

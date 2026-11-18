@@ -1,7 +1,7 @@
 //! Editing one argument: a literal, another step's output, a nested operator block,
 //! an object, a list, a text template, a parameter or an environment value.
 
-use super::{fields, response};
+use super::{fields, response, source_change};
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
@@ -121,6 +121,75 @@ fn argument_names(context: &Context<'_>) -> Vec<String> {
         .collect()
 }
 
+/// Where an editor stands in its input when a change of source there is
+/// held until *Apply* (LAY-42): through the fields of objects and the items
+/// of lists from the input, never inside an operator or a text with values.
+#[derive(Clone)]
+pub struct Stage<'a> {
+    /// From the input to this editor: field names and item indexes.
+    pub path: Vec<String>,
+    /// The Cleanup steps, which may read the old source too.
+    pub cleanup: Option<&'a Graph>,
+    /// The field *Change source* asked the panel to show.
+    pub focus: Option<&'a [String]>,
+}
+
+impl Stage<'_> {
+    fn child(&self, segment: String) -> Self {
+        let mut path = self.path.clone();
+        path.push(segment);
+        Self { path, ..*self }
+    }
+}
+
+/// A source chosen in a field's *Result of another step* editor and not
+/// applied yet (LAY-42): one at a time, dropped when the panel shows another
+/// step or is closed.
+#[derive(Clone)]
+struct Held {
+    reader: String,
+    input: String,
+    path: Vec<String>,
+    source: source_change::Source,
+    /// The last pass the panel showed the reader.
+    seen: u64,
+    /// The choice *Apply* was last brought into view for.
+    revealed: Option<source_change::Source>,
+}
+
+fn held_id() -> Id {
+    Id::new("inspector-held-source")
+}
+
+fn focus_reached_id() -> Id {
+    Id::new("inspector-field-reached")
+}
+
+/// Keeps the held choice while the panel shows its reader, frame after
+/// frame; drops it when the panel shows another step or was not shown.
+pub fn keep_held(ctx: &egui::Context, reader: &str) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| match data.get_temp::<Held>(held_id()) {
+        Some(held) if held.reader == reader && held.seen + 1 >= pass => {
+            data.insert_temp(held_id(), Held { seen: pass, ..held });
+        }
+        Some(_) => data.remove::<Held>(held_id()),
+        None => {}
+    });
+}
+
+/// Drops the held choice, if any.
+fn drop_held(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<Held>(held_id()));
+}
+
+/// Whether the field *Change source* asked for was shown since the last
+/// call.
+pub fn focus_reached(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|data| data.remove_temp::<bool>(focus_reached_id()))
+        .unwrap_or(false)
+}
+
 /// Shows the editor and updates `value`; returns whether it changed.
 pub fn editor(
     ui: &mut Ui,
@@ -129,6 +198,31 @@ pub fn editor(
     value: &mut Option<Binding>,
     depth: usize,
     id: Id,
+) -> bool {
+    editor_at(ui, context, port, value, depth, id, None)
+}
+
+/// The editor of a whole input, whose fields hold a change of source until
+/// *Apply* (LAY-42); returns whether `value` changed.
+pub fn staged_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    value: &mut Option<Binding>,
+    id: Id,
+    stage: &Stage<'_>,
+) -> bool {
+    editor_at(ui, context, port, value, 0, id, Some(stage))
+}
+
+fn editor_at(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    value: &mut Option<Binding>,
+    depth: usize,
+    id: Id,
+    stage: Option<&Stage<'_>>,
 ) -> bool {
     let root_context = Context {
         input: if depth == 0 {
@@ -168,9 +262,16 @@ pub fn editor(
             });
             // Give source selection its own line: long argument names must not
             // compete with a dropdown in a narrow inspector or nested operator.
-            changed |= kind_combo(ui, context, port, value, depth, id);
+            if kind_combo(ui, context, port, value, depth, id) {
+                changed = true;
+                // Another kind of source is written as chosen: a source
+                // held for this field goes.
+                if stage.is_some() {
+                    drop_held(ui.ctx());
+                }
+            }
             ui.add_space(3.0);
-            changed |= body(ui, context, port, value, depth, id);
+            changed |= body(ui, context, port, value, depth, id, stage);
             if value.is_none() && port.is_required() {
                 ui.colored_label(
                     theme::DANGER,
@@ -179,6 +280,14 @@ pub fn editor(
             }
         })
         .response;
+    // *Change source* shows this field's editor at the top of the panel.
+    if let Some(stage) = stage
+        && stage.focus == Some(stage.path.as_slice())
+    {
+        response.scroll_to_me(Some(egui::Align::Min));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(focus_reached_id(), true));
+    }
 
     // Dropping a variable replaces the source; dropping an operator wraps the value.
     if let Some(payload) = response.dnd_hover_payload::<Payload>() {
@@ -311,6 +420,7 @@ fn body(
     value: &mut Option<Binding>,
     depth: usize,
     id: Id,
+    stage: Option<&Stage<'_>>,
 ) -> bool {
     match value {
         None => false,
@@ -329,7 +439,7 @@ fn body(
             node_id,
             port: output,
             path,
-        }) => reference_editor(ui, context, port, node_id, output, path, id),
+        }) => reference_editor(ui, context, port, node_id, output, path, id, stage),
         Some(Binding::Argument { name, path }) => {
             let names = argument_names(context);
             let mut changed =
@@ -365,8 +475,8 @@ fn body(
                 .changed();
             changed
         }
-        Some(Binding::Object { fields }) => object_editor(ui, context, fields, depth, id),
-        Some(Binding::Array { items }) => list_editor(ui, context, items, depth, id),
+        Some(Binding::Object { fields }) => object_editor(ui, context, fields, depth, id, stage),
+        Some(Binding::Array { items }) => list_editor(ui, context, items, depth, id, stage),
         Some(Binding::Template { parts }) => {
             let changed = template_editor(ui, context, parts, depth, id);
             if !parts
@@ -673,10 +783,11 @@ fn nested(
     binding: &mut Binding,
     depth: usize,
     id: Id,
+    stage: Option<&Stage<'_>>,
 ) -> bool {
     let mut slot = Some(binding.clone());
     let port = Port::new(label, ValueType::Any);
-    if editor(ui, context, &port, &mut slot, depth + 1, id) {
+    if editor_at(ui, context, &port, &mut slot, depth + 1, id, stage) {
         *binding = slot.unwrap_or_else(|| Binding::literal(Value::Null));
         return true;
     }
@@ -689,6 +800,7 @@ fn object_editor(
     fields: &mut indexmap::IndexMap<String, Binding>,
     depth: usize,
     id: Id,
+    stage: Option<&Stage<'_>>,
 ) -> bool {
     let mut changed = false;
     let mut removed = None;
@@ -717,7 +829,8 @@ fn object_editor(
                 removed = Some(index);
             }
         });
-        changed |= nested(ui, context, name, child, depth, row);
+        let stage = stage.map(|stage| stage.child(name.clone()));
+        changed |= nested(ui, context, name, child, depth, row, stage.as_ref());
     }
     if let Some((index, next)) = renamed
         && !next.is_empty()
@@ -751,6 +864,7 @@ fn list_editor(
     items: &mut Vec<Binding>,
     depth: usize,
     id: Id,
+    stage: Option<&Stage<'_>>,
 ) -> bool {
     let mut changed = false;
     let mut removed = None;
@@ -758,6 +872,7 @@ fn list_editor(
         if removable_row(ui, format!("Item {}", index + 1), true) {
             removed = Some(index);
         }
+        let stage = stage.map(|stage| stage.child(index.to_string()));
         changed |= nested(
             ui,
             context,
@@ -765,6 +880,7 @@ fn list_editor(
             item,
             depth,
             id.with(("item", index)),
+            stage.as_ref(),
         );
     }
     if let Some(index) = removed {
@@ -823,7 +939,8 @@ fn template_editor(
                 if removable_row(ui, label.as_str(), true) {
                     removed = Some(index);
                 }
-                changed |= nested(ui, context, &label, binding, depth, row);
+                // A value inside a text is written as chosen.
+                changed |= nested(ui, context, &label, binding, depth, row, None);
             }
         }
     }
@@ -878,8 +995,184 @@ pub fn operator_combo(ui: &mut Ui, id: Id, value: &mut Operator) {
     widgets::named(combo.response, "Operator");
 }
 
+/// A field's *Result of another step* editor. Where it stands in a
+/// [`Stage`], a step, an output or a field chosen is held, framed and
+/// summarised, and written only by *Apply* (LAY-42); elsewhere, as inside an
+/// operator, a choice is written at once.
 #[allow(clippy::too_many_arguments)]
 fn reference_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    node_id: &mut String,
+    output: &mut String,
+    field: &mut String,
+    id: Id,
+    stage: Option<&Stage<'_>>,
+) -> bool {
+    // A field of an input holds its choice; an input read whole, as a
+    // check's *Actual*, is written as chosen.
+    let Some(stage) = stage.filter(|stage| !stage.path.is_empty()) else {
+        return reference_controls(ui, context, port, node_id, output, field, id);
+    };
+    let input = context.input.unwrap_or(port.name.as_str()).to_owned();
+    let current = source_change::Source {
+        node_id: node_id.clone(),
+        output: output.clone(),
+        field: field.clone(),
+    };
+    let held = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<Held>(held_id()))
+        .filter(|held| {
+            held.reader == context.node.id && held.input == input && held.path == stage.path
+        });
+    let Some(mut held) = held else {
+        // The controls show the source written; a choice in them is held.
+        let mut chosen = current.clone();
+        if reference_controls(
+            ui,
+            context,
+            port,
+            &mut chosen.node_id,
+            &mut chosen.output,
+            &mut chosen.field,
+            id,
+        ) && chosen != current
+        {
+            let held = Held {
+                reader: context.node.id.clone(),
+                input,
+                path: stage.path.clone(),
+                source: chosen,
+                seen: ui.ctx().cumulative_pass_nr(),
+                revealed: None,
+            };
+            ui.ctx().data_mut(|data| data.insert_temp(held_id(), held));
+            ui.ctx().request_repaint();
+        }
+        return false;
+    };
+    let (mut apply, mut cancel) = (false, false);
+    egui::Frame::new()
+        .stroke(Stroke::new(1.5, theme::ACCENT))
+        .corner_radius(8)
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} · NEW SOURCE · NOT APPLIED YET",
+                    port.display_name()
+                ))
+                .size(10.5)
+                .strong()
+                .color(theme::ACCENT),
+            );
+            ui.add_space(2.0);
+            // The same controls, on the choice held.
+            let source = &mut held.source;
+            reference_controls(
+                ui,
+                context,
+                port,
+                &mut source.node_id,
+                &mut source.output,
+                &mut source.field,
+                id,
+            );
+            ui.add_space(6.0);
+            let document = source_change::Document {
+                graph: context.graph,
+                cleanup: stage.cleanup,
+                project: context.project,
+                run: context.run,
+            };
+            let sentences = source_change::summary(
+                &document,
+                &source_change::Change {
+                    reader: context.node,
+                    input: &input,
+                    path: &stage.path,
+                    old: &current,
+                    new: &held.source,
+                },
+            );
+            egui::Frame::new()
+                .fill(theme::ACCENT_SOFT)
+                .corner_radius(6)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    for (index, sentence) in sentences.iter().enumerate() {
+                        if index > 0 {
+                            ui.add_space(3.0);
+                        }
+                        sentence_label(ui, sentence);
+                    }
+                });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let applied = ui.add(widgets::primary_button("Apply"));
+                apply = applied.clicked();
+                cancel = ui.add(egui::Button::new("Cancel")).clicked();
+                // Each new choice brings *Apply* into view.
+                if held.revealed.as_ref() != Some(&held.source) {
+                    applied.scroll_to_me(None);
+                    held.revealed = Some(held.source.clone());
+                }
+            });
+        });
+    // Esc drops the choice, unless it closes a list or the field picker.
+    let picking = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<String>(id.with("picker")).is_some());
+    if !picking
+        && !egui::Popup::is_any_open(ui.ctx())
+        && ui.input(|input| input.key_pressed(egui::Key::Escape))
+    {
+        cancel = true;
+    }
+    if apply {
+        drop_held(ui.ctx());
+        *node_id = held.source.node_id;
+        *output = held.source.output;
+        *field = held.source.field;
+        return true;
+    }
+    if cancel || held.source == current {
+        drop_held(ui.ctx());
+    } else {
+        ui.ctx().data_mut(|data| data.insert_temp(held_id(), held));
+    }
+    false
+}
+
+/// A sentence of the summary, its code parts in the monospace face.
+fn sentence_label(ui: &mut Ui, sentence: &[source_change::Part]) {
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = ui.available_width();
+    for (text, code) in sentence {
+        job.append(
+            text,
+            0.0,
+            egui::TextFormat {
+                font_id: if *code {
+                    egui::FontId::monospace(11.5)
+                } else {
+                    egui::FontId::proportional(12.0)
+                },
+                color: theme::TEXT,
+                ..Default::default()
+            },
+        );
+    }
+    ui.label(job);
+}
+
+/// The Step, Output and Response field of a reference; returns whether a
+/// choice changed them.
+#[allow(clippy::too_many_arguments)]
+fn reference_controls(
     ui: &mut Ui,
     context: &Context<'_>,
     port: &Port,
