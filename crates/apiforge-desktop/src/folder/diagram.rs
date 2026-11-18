@@ -204,6 +204,7 @@ impl FolderApp {
         if !self.canvases.contains_key(document_id) {
             let canvas = self.new_canvas();
             self.canvases.insert(document_id.to_owned(), canvas);
+            self.show_checks_here(document_id);
         }
         let mode = self.workbench.mode;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
@@ -385,6 +386,7 @@ impl FolderApp {
                     // document (LAY-11).
                     | Command::SetChecksCollapsed(_)
                     | Command::ShowChecks(_)
+                    | Command::ToggleChecksHere(_)
                     // Neither does the Wires setting (LAY-23).
                     | Command::SetWires(_)
                     // A jump and Back are navigation (LAY-15).
@@ -521,6 +523,13 @@ impl FolderApp {
             }
             Command::ShowChecks(node) => {
                 self.show_checks(document_id, node);
+                None
+            }
+            Command::ToggleChecksHere(node) => {
+                if let Some(step) = graph.nodes.iter().find(|step| step.id == node) {
+                    let chosen = self.checks_chosen(document_id, &step.handle);
+                    self.choose_checks_here(document_id, &step.handle, !chosen);
+                }
                 None
             }
             // The first jump on the board: what Back restores beside it.
@@ -895,7 +904,7 @@ impl FolderApp {
         let expand_here = self
             .canvases
             .get(document_id)
-            .and_then(|canvas| canvas.expand_here_state(graph, in_cleanup, &node.id));
+            .and_then(|canvas| canvas.checks_here(graph, in_cleanup, &node.id));
         // Adopt fields the session changed before the inspector reads them.
         self.sync_field_drafts(document_id, &project_id);
         let mut close = false;
@@ -940,11 +949,10 @@ impl FolderApp {
         for action in actions {
             match action {
                 inspector::Action::Reveal(handle) => self.reveal_in_code(document_id, &handle),
-                // A view of this session, which changes no document.
-                inspector::Action::ExpandChecksHere(expanded) => {
-                    if let Some(canvas) = self.canvases.get_mut(document_id) {
-                        canvas.expand_here(&node.id, expanded);
-                    }
+                // A view kept on this computer, which changes no document
+                // (LAY-30).
+                inspector::Action::ExpandChecksHere(chosen) => {
+                    self.choose_checks_here(document_id, &node.handle, chosen);
                 }
                 _ if !snapshot.editable => {}
                 inspector::Action::UpdateNode(updated) => {

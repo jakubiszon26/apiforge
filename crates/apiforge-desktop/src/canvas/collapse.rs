@@ -107,6 +107,9 @@ pub struct Aggregate {
     /// board does not draw as cards (LAY-27): the numbers their badges would
     /// carry.
     pub numbers: Vec<usize>,
+    /// The predicate of the subject's one check, as its line writes it
+    /// (LAY-30): set while that check is folded and nothing else is counted.
+    pub single: Option<String>,
 }
 
 impl Aggregate {
@@ -148,13 +151,23 @@ impl Aggregate {
     /// `3 checks` before a run, never a tick for a check that did not run;
     /// `✓ 2 checks` when every one passed; `✕ 1/3 failed · 1 skipped` when
     /// one failed; else the state of each (`1 ✓ · 1 waiting`). Gates
-    /// follow, counted apart.
+    /// follow, counted apart. A step whose one check is folded, with no
+    /// gate, writes it instead of the count (`9 · ✓ status == 409`), unless
+    /// it did not run (LAY-30, Q1 = A, Q3 = A).
     pub fn text(&self) -> String {
         let mut parts = Vec::new();
         if !self.numbers.is_empty() {
             parts.push(self.numbers_text());
         }
-        if self.checks > 0 {
+        if let Some(single) = self.written() {
+            parts.push(if self.failed > 0 {
+                format!("✕ {single}")
+            } else if self.passed > 0 {
+                format!("✓ {single}")
+            } else {
+                single.to_owned()
+            });
+        } else if self.checks > 0 {
             if !self.run {
                 parts.push(plural(self.checks, "check"));
             } else if self.failed > 0 {
@@ -183,6 +196,13 @@ impl Aggregate {
             parts.push(plural(self.gates, "gate"));
         }
         parts.join(" · ")
+    }
+
+    /// The predicate the line writes in place of the count, if any.
+    fn written(&self) -> Option<&str> {
+        self.single
+            .as_deref()
+            .filter(|_| self.checks == 1 && self.gates == 0 && self.skipped == 0)
     }
 }
 
@@ -241,6 +261,75 @@ pub fn aggregates(
         }
     }
     result
+}
+
+/// The one check each subject counts while it is folded (LAY-30), by the
+/// subject's node id: the check its line may write. `later` is as in
+/// [`aggregates`]; a subject with a gate or a second check has none.
+pub fn singles(
+    graph: &Graph,
+    later: Option<&Graph>,
+    folded: &HashSet<&str>,
+) -> HashMap<String, String> {
+    let mut graphs = vec![graph];
+    graphs.extend(later);
+    let mut counted: HashMap<String, Vec<&str>> = HashMap::new();
+    for check in graph.nodes.iter().filter(|node| is_check(node)) {
+        for subject in check_subjects_in(&graphs, check).subjects {
+            let entry = counted.entry(subject.step.to_owned()).or_default();
+            // A gate counts too, so that its subject writes no predicate.
+            entry.push(if subject.gate { "" } else { check.id.as_str() });
+        }
+    }
+    counted
+        .into_iter()
+        .filter_map(|(subject, checks)| match checks.as_slice() {
+            [one] if !one.is_empty() && folded.contains(one) => Some((subject, (*one).to_owned())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A check as the line of its subject `subject` writes it (LAY-30): the
+/// operands as a card's line prints a reference, the subject's own name
+/// left out, and the sign the script prints (`status == 409`,
+/// `body.items[0].id == first.body.id`, `nonempty body.items`). `None` for
+/// a check the line does not write: a *Data condition* keeps the count.
+pub fn written(
+    graph: &Graph,
+    project: &apiforge_core::format::Project,
+    check: &Node,
+    subject: &str,
+) -> Option<String> {
+    if check.kind != NodeKind::Assert {
+        return None;
+    }
+    let scope = apiforge_core::template_text::Scope {
+        nodes: &graph.nodes,
+        project,
+        request: None,
+    };
+    let operand = |name: &str| {
+        check.inputs.get(name).map_or_else(
+            || "?".to_owned(),
+            |binding| super::layout::own_source_text(binding, scope, graph, subject),
+        )
+    };
+    let predicate = apiforge_core::graph::predicate(check);
+    let sign = apiforge_script::predicate_symbol(predicate);
+    let mut text = if predicate.takes_expected() {
+        format!("{} {sign} {}", operand("actual"), operand("expected"))
+    } else {
+        format!("{sign} {}", operand("actual"))
+    };
+    if predicate == apiforge_core::model::Predicate::Approximately {
+        let tolerance = check.config.tolerance.unwrap_or(0.0);
+        text.push_str(&format!(
+            " within {}",
+            apiforge_core::js::number_to_string(tolerance)
+        ));
+    }
+    Some(text)
 }
 
 #[cfg(test)]
@@ -304,6 +393,7 @@ mod tests {
             gates: 0,
             run: true,
             numbers: Vec::new(),
+            single: None,
         }
     }
 
@@ -406,5 +496,124 @@ mod tests {
         let drawn = aggregates(&main, None, None, &HashSet::new(), &numbers);
         assert!(drawn.values().all(|aggregate| aggregate.numbers.is_empty()));
         assert_eq!(drawn["cart"].text(), "2 checks");
+    }
+
+    /// LAY-30 Q1 = A: a step with exactly one folded check writes it after
+    /// its number, with ✓ or ✕ after a run; a check that did not run, a
+    /// gate beside it or a second check leave the count (Q3 = A).
+    #[test]
+    fn lay30_one_check_is_written_on_the_line() {
+        let one = |run: Aggregate| Aggregate {
+            numbers: vec![9],
+            single: Some("status == 409".into()),
+            ..run
+        };
+        let before = one(Aggregate {
+            checks: 1,
+            waiting: 1,
+            ..Aggregate::default()
+        });
+        assert_eq!(before.text(), "9 · status == 409");
+        assert_eq!(one(aggregate(1, 1, 0, 0)).text(), "9 · ✓ status == 409");
+        assert_eq!(one(aggregate(1, 0, 1, 0)).text(), "9 · ✕ status == 409");
+        assert_eq!(one(aggregate(1, 0, 0, 1)).text(), "9 · 1 skipped");
+        let gate = Aggregate {
+            gates: 1,
+            ..before.clone()
+        };
+        assert_eq!(gate.text(), "9 · 1 check · 1 gate");
+        let two = Aggregate {
+            checks: 2,
+            waiting: 2,
+            numbers: vec![7, 11],
+            ..before.clone()
+        };
+        assert_eq!(two.text(), "7, 11 · 2 checks");
+        // Shown as a card, the check is not written: the line as before.
+        let drawn = Aggregate {
+            numbers: Vec::new(),
+            single: None,
+            ..before
+        };
+        assert_eq!(drawn.text(), "1 check");
+    }
+
+    /// LAY-30: the predicate as the code writes it, the subject's own name
+    /// left out; another step's value keeps its name, so a check of two
+    /// steps reads on both.
+    #[test]
+    fn lay30_the_line_leaves_out_its_own_name() {
+        use apiforge_core::model::Predicate;
+        let request = |id: &str| node(NodeKind::Request, id);
+        let assert =
+            |id: &str, predicate: Predicate, actual: Binding, expected: Option<Binding>| {
+                let mut check = node(NodeKind::Assert, id);
+                check.config.predicate = Some(predicate);
+                check.inputs.insert("actual".into(), actual);
+                if let Some(expected) = expected {
+                    check.inputs.insert("expected".into(), expected);
+                }
+                check
+            };
+        let refused = assert(
+            "refused",
+            Predicate::Equals,
+            Binding::reference("second", "status", ""),
+            Some(Binding::Literal { value: 409.into() }),
+        );
+        let one_booking = assert(
+            "one_booking",
+            Predicate::Equals,
+            Binding::reference("calendar", "body", "items[0].id"),
+            Some(Binding::reference("first", "body", "id")),
+        );
+        let has_floors = assert(
+            "has_floors",
+            Predicate::NotEmpty,
+            Binding::reference("floors", "body", "items"),
+            None,
+        );
+        let has_screen = assert(
+            "has_screen",
+            Predicate::Contains,
+            Binding::reference("equipment", "body", "items"),
+            Some(Binding::Literal {
+                value: "screen".into(),
+            }),
+        );
+        let graph = Graph {
+            nodes: vec![
+                request("first"),
+                request("second"),
+                request("calendar"),
+                request("floors"),
+                request("equipment"),
+                refused.clone(),
+                one_booking.clone(),
+                has_floors.clone(),
+                has_screen.clone(),
+            ],
+            edges: Vec::new(),
+            proxies: Vec::new(),
+        };
+        let project = apiforge_core::demos::empty_project();
+        let line = |check: &Node, subject: &str| written(&graph, &project, check, subject);
+        assert_eq!(line(&refused, "second").as_deref(), Some("status == 409"));
+        assert_eq!(
+            line(&one_booking, "calendar").as_deref(),
+            Some("body.items[0].id == first.body.id")
+        );
+        assert_eq!(
+            line(&one_booking, "first").as_deref(),
+            Some("calendar.body.items[0].id == body.id")
+        );
+        assert_eq!(
+            line(&has_floors, "floors").as_deref(),
+            Some("nonempty body.items")
+        );
+        assert_eq!(
+            line(&has_screen, "equipment").as_deref(),
+            Some(r#"body.items contains "screen""#)
+        );
     }
 }

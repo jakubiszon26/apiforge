@@ -46,10 +46,8 @@ fn open(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
     app(&mut harness).review_open(SCENARIO, None);
     settle(&mut harness);
     // Checks on cards of their own, so that choosing a check's row selects
-    // the check on the board rather than its subject.
-    harness.get_by_label("Board view").click();
-    settle(&mut harness);
-    harness.get_by_label("Collapse checks").click();
+    // the check on the board rather than its subject: *Checks* on the bar.
+    harness.get_by_label("Checks").click();
     settle(&mut harness);
     let id = only(&harness, DocumentKind::Scenario);
     (project, harness, id)
@@ -167,8 +165,7 @@ fn diag03_the_checks_tab_names_the_requirement_of_a_failed_check() {
         .clone();
     app(&mut harness).selections.insert(id, vec![again]);
     settle(&mut harness);
-    harness.get_by_label("Checks").click();
-    settle(&mut harness);
+    super::open_checks_tab(&mut harness);
     assert!(
         harness
             .query_by_label_contains("got 202, expected ≠ 202")

@@ -465,28 +465,46 @@ pub(super) fn show(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<super::
             .size(theme::FONT_LABEL)
             .color(tone.color()),
     );
-    // While the board folds the checks, they can hang under this step for
-    // the session, the rows below making room (LAY-11).
-    if let Some(expanded) = context.expand_here {
-        expand_here(ui, line.rect, expanded, actions);
+    // The step's own switch of its checks, against the board's setting
+    // (LAY-11, LAY-30).
+    if let Some(switch) = context.expand_here {
+        expand_here(ui, line.rect, switch, actions);
     }
     for line in &rows {
         row(ui, line);
     }
 }
 
-/// *Expand checks here*, at the right end of the line above the list when
-/// it fits there, so that the three rows below still fit the smallest
+/// *Expand checks here* while the board folds checks, *Collapse checks
+/// here* while it draws them, pressed while the step's own choice differs
+/// from the board's (LAY-30); at the right end of the line above the list
+/// when it fits there, so that the three rows below still fit the smallest
 /// window (LAY-08, criterion 5); on a line of its own when it does not.
-fn expand_here(ui: &mut Ui, line: egui::Rect, expanded: bool, actions: &mut Vec<super::Action>) {
-    const NAME: &str = "Expand checks here";
-    let text = if expanded {
-        "✓ Expand checks here"
+fn expand_here(
+    ui: &mut Ui,
+    line: egui::Rect,
+    switch: crate::canvas::ChecksHere,
+    actions: &mut Vec<super::Action>,
+) {
+    let (name, hover) = if switch.board_folds {
+        (
+            "Expand checks here",
+            "Show this step's checks as cards under it on the board",
+        )
     } else {
-        NAME
+        (
+            "Collapse checks here",
+            "Fold this step's checks into its line on the board",
+        )
+    };
+    let expanded = switch.chosen;
+    let text = if expanded {
+        format!("✓ {name}")
+    } else {
+        name.to_owned()
     };
     let galley = ui.painter().layout_no_wrap(
-        text.to_owned(),
+        text,
         egui::FontId::proportional(theme::FONT_LABEL),
         theme::LINK,
     );
@@ -507,9 +525,9 @@ fn expand_here(ui: &mut Ui, line: egui::Rect, expanded: bool, actions: &mut Vec<
             egui::Sense::click(),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text("Show this step's checks under it on the board, for this session");
+        .on_hover_text(hover);
     response
-        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, expanded, NAME));
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, expanded, name));
     if expanded || response.hovered() {
         ui.painter().rect_filled(rect, 4.0, theme::ACCENT_SOFT);
     }

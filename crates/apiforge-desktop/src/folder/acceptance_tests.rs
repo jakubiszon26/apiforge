@@ -19,6 +19,27 @@ use std::fs;
 // (KTLO-44): a ticket's window tests are a new file there and nothing else.
 include!(concat!(env!("OUT_DIR"), "/acceptance_modules.rs"));
 
+/// The Inspector's tab `label`, if it has one. The board's bar has a
+/// *Checks* switch too (LAY-30): the tab is the one right of the Inspector's
+/// edge.
+pub(super) fn inspector_tab<'a>(
+    harness: &'a FolderHarness,
+    label: &'a str,
+) -> Option<egui_kittest::Node<'a>> {
+    let edge = harness.query_by_label("Resize inspector")?.rect().left();
+    harness
+        .query_all_by_label(label)
+        .find(|node| node.rect().left() > edge)
+}
+
+/// Opens the Inspector's *Checks* tab.
+pub(super) fn open_checks_tab(harness: &mut FolderHarness) {
+    inspector_tab(harness, "Checks")
+        .expect("the Inspector has a Checks tab")
+        .click();
+    settle(harness);
+}
+
 /// The accessible name of a document's editor, which is its registry path.
 fn editor(harness: &FolderHarness, document_id: &str) -> String {
     format!(
@@ -12948,8 +12969,7 @@ mod lay08 {
         let document = document(harness);
         app(harness).selections.insert(document, vec![id]);
         settle(harness);
-        harness.get_by_label("Checks").click();
-        settle(harness);
+        super::open_checks_tab(harness);
     }
 
     fn has(harness: &FolderHarness, label: &str) -> bool {
@@ -13217,8 +13237,7 @@ mod lay20 {
         let document = document(harness);
         app(harness).selections.insert(document, vec![id]);
         settle(harness);
-        harness.get_by_label("Checks").click();
-        settle(harness);
+        super::open_checks_tab(harness);
     }
 
     fn has(harness: &FolderHarness, label: &str) -> bool {
