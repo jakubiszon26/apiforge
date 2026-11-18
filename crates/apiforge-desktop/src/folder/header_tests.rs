@@ -14,8 +14,9 @@ use egui_kittest::kittest::{NodeT, Queryable};
 /// The demo scenario's file name and kind, as the Diagram header shows them.
 const NAME: &str = "promotion-and-cart-price.afs";
 const KIND: &str = "Scenario";
-/// The board's two tool buttons, after Add step.
-const TOOLS: [&str; 2] = ["Tidy up", "Board view"];
+/// The board's tool buttons after Add step: *Checks* sits between them
+/// (LAY-30).
+const TOOLS: [&str; 3] = ["Tidy up", "Checks", "Board view"];
 /// The top app bar, which this ticket does not change.
 const APP_BAR: [&str; 8] = [
     "Project",
@@ -173,7 +174,7 @@ fn the_row_shows_its_parts_left_to_right() {
     assert_left_to_right(&order, "Diagram");
     assert_disjoint(
         &diagram,
-        &["Main", "Cleanup", "Add step", TOOLS[0], TOOLS[1]],
+        &["Main", "Cleanup", "Add step", TOOLS[0], TOOLS[1], TOOLS[2]],
     );
 
     let (_project, split) = open(WIDE, "Split");
@@ -274,7 +275,7 @@ fn assert_row_stops_together(visited: &[String], row: &[&str], context: &str) {
 /// past it starts from the next stop after the editor, its resize handle.
 #[test]
 fn tab_runs_from_the_name_through_main_and_cleanup_to_add_step_and_the_tools() {
-    let board = ["Main", "Cleanup", "Add step", TOOLS[0], TOOLS[1]];
+    let board = ["Main", "Cleanup", "Add step", TOOLS[0], TOOLS[1], TOOLS[2]];
     for size in [MINIMUM, WIDE] {
         let (_project, mut diagram) = open(size, "Diagram");
         let visited = tab_order(&mut diagram, 40);
@@ -340,7 +341,10 @@ fn at_the_minimum_window_the_row_fits_without_overlap() {
     let row = common_row(&split);
     assert_inside(&split, &row, "Split at 960 × 540");
     assert_left_to_right(&row, "Split at 960 × 540");
-    assert_disjoint(&split, &["Main", "Cleanup", "Add step", TOOLS[0], TOOLS[1]]);
+    assert_disjoint(
+        &split,
+        &["Main", "Cleanup", "Add step", TOOLS[0], TOOLS[1], TOOLS[2]],
+    );
 }
 
 /// How much of the Diagram row has been given up: 0 nothing, 1 the kind,

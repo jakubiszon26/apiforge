@@ -6,6 +6,7 @@
 
 mod after;
 mod collapse;
+mod edge;
 mod layout;
 mod menu;
 mod paint;
@@ -18,6 +19,8 @@ mod trace;
 mod variables;
 
 pub use collapse::collapsible;
+#[cfg(test)]
+pub(crate) use edge::{DrawnEdge, Side};
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
@@ -142,17 +145,24 @@ pub enum Command {
     /// Switch *Compact cards* (LAY-16): a user setting, which the board
     /// follows with a Tidy up.
     SetCompactCards(bool),
-    /// Switch *Collapse checks* (LAY-11): a user setting that moves no card
-    /// and no camera.
+    /// *Checks* on the bar (LAY-11, LAY-30): fold every check, or draw
+    /// every one; a user setting that moves no card and no camera, and
+    /// forgets each step's own choice.
     SetChecksCollapsed(bool),
+    /// The arrow at the end of a step's checks line (LAY-30): show or fold
+    /// that step's checks only, against the board's setting.
+    ToggleChecksHere(String),
     /// Select a step and open the Inspector's *Checks* list: a click on the
     /// aggregate in its footer (LAY-11).
     ShowChecks(String),
     /// Select a block and open the Inspector on one of its inputs: a
-    /// double-click on the input's row (LAY-16).
+    /// double-click on the input's row (LAY-16). With a `path`, at the
+    /// editor of that field of the input, the section holding it open:
+    /// *Change source* on a kept statement (LAY-42).
     InspectInput {
         node: String,
         input: String,
+        path: Option<Vec<String>>,
     },
     /// Save values in variables (LAY-25), in one edit: each read through
     /// the variable that holds it or a new one after its step. `first` is
@@ -164,6 +174,12 @@ pub enum Command {
     /// *Save shared values as variables* in the right-click menu: every
     /// value of `Input::shared` (LAY-25).
     SaveSharedValues,
+    /// The first jump to a card out of view by its edge chip (LAY-15): the
+    /// window keeps what *Back* restores beside the board, the Inspector.
+    Jumped,
+    /// *Back* (LAY-15): select these again, and restore what the window
+    /// kept at the first jump.
+    Back(Vec<String>),
 }
 
 /// Where a carried wire may land on a card, and how near it must come: within
@@ -339,6 +355,10 @@ pub struct SettingsButton {
     pub header_width: f32,
 }
 
+/// *Checks* on the board's bar (LAY-30): every check card drawn or folded.
+pub const CHECKS_SWITCH: &str = "Checks";
+/// The board's width from which *Checks* carries its word (LAY-30).
+const CHECKS_LABEL_FROM: f32 = 1000.0;
 /// The button's name, also its label when the header row has room.
 pub const SETTINGS: &str = "Component settings";
 const SETTINGS_HOVER: &str = "Component settings: name, description, action, inputs and outputs";
@@ -485,6 +505,8 @@ pub struct Canvas {
     selected_wires: Vec<String>,
     /// What tracing keeps between frames (LAY-14).
     trace: trace::Memory,
+    /// The edge chips' unfolded edges and *Back* (LAY-15).
+    edges: edge::Memory,
     inline: Option<InlineEdit>,
     error: Option<String>,
     router: routing::Router,
@@ -505,14 +527,16 @@ pub struct Canvas {
     pub bridges: bool,
     /// What a request card's box holds, from the user's settings (LAY-16).
     density: CardDensity,
-    /// Whether the toolbar offers *Compact cards* and *Collapse checks*.
+    /// Whether the toolbar offers *Compact cards* and *Checks*.
     pub density_switch: bool,
     /// Whether check cards with a subject are folded into its footer, from
     /// the user's settings (LAY-11).
     collapsed: bool,
-    /// The steps whose checks hang under them while the board is collapsed:
-    /// *Expand checks here*, for this session only (LAY-11).
-    expanded_here: HashSet<String>,
+    /// The steps, by handle, whose own choice differs from the board's
+    /// (LAY-30): their checks hang under them while the board folds them,
+    /// and fold while it draws them. The window keeps the choice per
+    /// document on this computer.
+    here: HashSet<String>,
     /// The cards of the last frame, in board coordinates.
     #[cfg(test)]
     cards: Vec<Card>,
@@ -571,6 +595,9 @@ pub struct Canvas {
     /// The ports the last frame ringed for the selected step (LAY-10).
     #[cfg(test)]
     ringed_ports: Vec<(String, Pos2)>,
+    /// The minimap and the zoom bar of the last frame, on screen.
+    #[cfg(test)]
+    chrome: (Option<Rect>, Rect),
 }
 
 /// A wire as the last frame drew it: its id, its source and target cards,
@@ -648,6 +675,29 @@ pub(crate) struct DrawnCount {
     pub world: Rect,
 }
 
+/// The switch of one step's checks (LAY-30), as the Inspector's list offers
+/// it: *Expand checks here* while the board folds checks, *Collapse checks
+/// here* while it draws them; `chosen` while the step's own choice differs
+/// from the board's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChecksHere {
+    pub board_folds: bool,
+    pub chosen: bool,
+}
+
+/// What the board does with its checks in one frame (LAY-11, LAY-30).
+#[derive(Default)]
+struct Folding {
+    /// The checks not drawn, each with the subject it folds into and its
+    /// name.
+    folded: HashMap<String, (String, String)>,
+    /// The checks a step shows under it while the board folds the others,
+    /// each with that step and its name: their `@after` is drawn from the
+    /// step, as when they are folded, and no order or branch line is drawn
+    /// into them, so that opening them reroutes no line.
+    hung: HashMap<String, (String, String)>,
+}
+
 impl Default for Canvas {
     fn default() -> Self {
         Self {
@@ -679,13 +729,14 @@ impl Default for Canvas {
             density: CardDensity::default(),
             density_switch: true,
             collapsed: false,
-            expanded_here: HashSet::new(),
+            here: HashSet::new(),
             drag: None,
             menu: None,
             offer: None,
             port_menu: None,
             selected_wires: Vec::new(),
             trace: trace::Memory::default(),
+            edges: edge::Memory::default(),
             inline: None,
             error: None,
             #[cfg(test)]
@@ -726,6 +777,8 @@ impl Default for Canvas {
             drawn: Vec::new(),
             #[cfg(test)]
             ringed_ports: Vec::new(),
+            #[cfg(test)]
+            chrome: (None, Rect::NOTHING),
         }
     }
 }
@@ -887,6 +940,30 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_ringed_ports(&self) -> Vec<(String, Pos2)> {
         self.ringed_ports.clone()
+    }
+
+    /// The header row of the card `id`, on screen in the last frame
+    /// (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_header(&self, id: &str) -> Option<Rect> {
+        let card = self.cards.iter().find(|card| card.id == id)?;
+        Some(
+            self.screen_camera(self.last_viewport)
+                .rect(card.header_rect()),
+        )
+    }
+
+    /// The minimap of the last frame, on screen, where the board has room
+    /// for one.
+    #[cfg(test)]
+    pub(crate) fn debug_minimap(&self) -> Option<Rect> {
+        self.chrome.0
+    }
+
+    /// The zoom bar of the last frame, on screen.
+    #[cfg(test)]
+    pub(crate) fn debug_zoom_bar(&self) -> Rect {
+        self.chrome.1
     }
 
     /// A box on the board, on screen in the last frame.
@@ -1060,13 +1137,6 @@ impl Canvas {
         self.collapsed = false;
     }
 
-    #[cfg(test)]
-    pub(crate) fn debug_expanded_here(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self.expanded_here.iter().cloned().collect();
-        ids.sort();
-        ids
-    }
-
     /// Which data wires the board draws (LAY-23).
     #[cfg(test)]
     pub(crate) fn wire_mode(&self) -> WireMode {
@@ -1099,89 +1169,117 @@ impl Canvas {
         self.collapsed = collapsed;
     }
 
-    /// *Expand checks here*: the checks of `step` hang under it while the
-    /// board is collapsed, for this session only.
-    pub fn expand_here(&mut self, step: &str, expanded: bool) {
-        if expanded {
-            self.expanded_here.insert(step.to_owned());
-        } else {
-            self.expanded_here.remove(step);
-        }
+    /// The steps, by handle, whose own choice differs from the board's
+    /// (LAY-30): shown while the board folds checks, folded while it draws
+    /// them.
+    pub fn set_here(&mut self, steps: impl IntoIterator<Item = String>) {
+        self.here = steps.into_iter().collect();
     }
 
-    /// Whether *Expand checks here* is offered for `step`, and if so whether
-    /// it is on: `None` unless the board folds checks into the step. `later`
-    /// is as in [`collapsible`].
-    pub fn expand_here_state(
+    /// Whether the step `id` of `graph` has its own choice.
+    fn chosen(&self, graph: &Graph, id: &str) -> bool {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .is_some_and(|node| self.here.contains(&node.handle))
+    }
+
+    /// The switch of `step`'s own checks (LAY-30), or `None` when the board
+    /// folds none of them: a gate, or a check another step reads, keeps its
+    /// card whatever the switch. `later` is as in [`collapsible`].
+    pub fn checks_here(
         &self,
         graph: &Graph,
         later: Option<&Graph>,
         step: &str,
-    ) -> Option<bool> {
-        let folds = self.collapsed
-            && collapsible(graph, later)
-                .iter()
-                .any(|candidate| candidate.subjects.iter().any(|subject| subject == step));
-        folds.then(|| self.expanded_here.contains(step))
+    ) -> Option<ChecksHere> {
+        collapsible(graph, later)
+            .iter()
+            .any(|candidate| candidate.subjects.iter().any(|subject| subject == step))
+            .then(|| ChecksHere {
+                board_folds: self.collapsed,
+                chosen: self.chosen(graph, step),
+            })
     }
 
     /// The subject a check of `graph` is folded into on this board, or
     /// `None` while its card is drawn. `later` is as in [`collapsible`].
     pub fn folded_into(&self, graph: &Graph, later: Option<&Graph>, id: &str) -> Option<String> {
-        if !self.collapsed {
-            return None;
-        }
         collapsible(graph, later)
             .into_iter()
             .find(|candidate| candidate.check == id)
             .filter(|candidate| {
-                !candidate
+                let chosen = candidate
                     .subjects
                     .iter()
-                    .any(|subject| self.expanded_here.contains(subject))
+                    .any(|subject| self.chosen(graph, subject));
+                // Folded by the board unless a subject shows it; drawn by the
+                // board unless a subject folds it.
+                self.collapsed != chosen
             })
             .map(|candidate| candidate.anchor)
     }
 
     /// Takes the folded checks out of `cards`, and hangs those of a step
-    /// expanded here under it, the rows below shifted by their height.
-    /// Returns each folded check with the subject it folds into and its name.
+    /// that shows its own under it (LAY-30). Returns each folded check with
+    /// the subject it folds into and its name, and each hung check with the
+    /// step it hangs under and its name.
     fn fold(
         &self,
         graph: &Graph,
         later: Option<&Graph>,
         cards: &mut Vec<Card>,
         chips: &mut [Chip],
-    ) -> HashMap<String, (String, String)> {
-        let mut folded = HashMap::new();
-        if !self.collapsed {
-            return folded;
-        }
+    ) -> Folding {
+        let mut folding = Folding::default();
         let present: HashSet<String> = cards.iter().map(|card| card.id.clone()).collect();
+        let name_of = |cards: &[Card], id: &str| {
+            cards
+                .iter()
+                .find(|card| card.id == id)
+                .map(|card| card.name.clone())
+                .unwrap_or_default()
+        };
         let mut hung: Vec<(String, String)> = Vec::new();
         for candidate in collapsible(graph, later) {
             if !present.contains(&candidate.check) {
                 continue;
             }
+            let chooses =
+                |subject: &&String| present.contains(*subject) && self.chosen(graph, subject);
+            if !self.collapsed {
+                // A board that draws its checks folds a step's that it chose
+                // to fold, into the subject it hangs under.
+                if candidate.subjects.iter().any(|subject| chooses(&subject))
+                    && present.contains(&candidate.anchor)
+                {
+                    let name = name_of(cards, &candidate.check);
+                    folding
+                        .folded
+                        .insert(candidate.check, (candidate.anchor, name));
+                }
+                continue;
+            }
             let host = std::iter::once(&candidate.anchor)
                 .chain(&candidate.subjects)
-                .find(|subject| {
-                    self.expanded_here.contains(*subject) && present.contains(*subject)
-                });
+                .find(chooses);
             match host {
                 Some(host) => hung.push((host.clone(), candidate.check)),
                 None if present.contains(&candidate.anchor) => {
-                    let name = cards
-                        .iter()
-                        .find(|card| card.id == candidate.check)
-                        .map(|card| card.name.clone())
-                        .unwrap_or_default();
-                    folded.insert(candidate.check, (candidate.anchor, name));
+                    let name = name_of(cards, &candidate.check);
+                    folding
+                        .folded
+                        .insert(candidate.check, (candidate.anchor, name));
                 }
                 None => {}
             }
         }
-        cards.retain(|card| !folded.contains_key(&card.id));
+        cards.retain(|card| !folding.folded.contains_key(&card.id));
+        for (host, check) in &hung {
+            let name = name_of(cards, check);
+            folding.hung.insert(check.clone(), (host.clone(), name));
+        }
         let mut hosts: Vec<(f32, f32, String)> = Vec::new();
         for (host, _) in &hung {
             if hosts.iter().any(|(_, _, known)| known == host) {
@@ -1207,19 +1305,33 @@ impl Canvas {
                 .filter(|card| mine.contains(&card.id.as_str()))
                 .map(|card| card.height() + collapse::HANG_GAP)
                 .sum();
-            // The rows below make room; what is beside or above stays, and
-            // the camera with it.
-            for card in cards.iter_mut() {
-                if &card.id != host
-                    && !pending.contains(card.id.as_str())
-                    && card.rect().top() >= rect.bottom()
-                {
-                    *card = card.translated(vec2(0.0, height));
+            // Where the checks fit in the free room under their step, with
+            // the stack gap below them, nothing moves (LAY-30, criterion 8);
+            // else the rows below make room (LAY-11). What is beside or
+            // above stays, and the camera with it.
+            let room = Rect::from_min_max(
+                rect.left_bottom(),
+                egui::pos2(rect.right(), rect.bottom() + height + collapse::HANG_GAP),
+            );
+            let fits = !cards
+                .iter()
+                .filter(|card| &card.id != host && !pending.contains(card.id.as_str()))
+                .map(Card::rect)
+                .chain(chips.iter().map(Chip::rect))
+                .any(|other| other.intersects(room));
+            if !fits {
+                for card in cards.iter_mut() {
+                    if &card.id != host
+                        && !pending.contains(card.id.as_str())
+                        && card.rect().top() >= rect.bottom()
+                    {
+                        *card = card.translated(vec2(0.0, height));
+                    }
                 }
-            }
-            for chip in chips.iter_mut() {
-                if chip.rect().top() >= rect.bottom() {
-                    *chip = chip.translated(vec2(0.0, height));
+                for chip in chips.iter_mut() {
+                    if chip.rect().top() >= rect.bottom() {
+                        *chip = chip.translated(vec2(0.0, height));
+                    }
                 }
             }
             let mut top = rect.bottom() + collapse::HANG_GAP;
@@ -1231,7 +1343,7 @@ impl Canvas {
                 pending.remove(check);
             }
         }
-        folded
+        folding
     }
 
     /// Switches what a request card's box holds. The camera stays where it
@@ -1349,10 +1461,15 @@ impl Canvas {
             self.selected_wires.clear();
             self.shown_port = None;
             self.error = None;
+            self.edges_reset();
         }
         let viewport = Self::viewport(ui);
         let measures = self.measure_overlays(ui, input);
         let overlays = layout::board_overlays(viewport, &measures);
+        #[cfg(test)]
+        {
+            self.chrome = (overlays.minimap, overlays.zoom_controls);
+        }
         // The toolbar comes before the board in the keyboard order: it ends the
         // header row, which reads before the board below it (KTLO-12).
         self.toolbar(ui, viewport, &overlays, input, &mut commands);
@@ -1415,7 +1532,13 @@ impl Canvas {
             .collect();
         // Folded checks are not drawn, are no obstacle and take no part in
         // the camera; their subjects' footers sum them up (LAY-11).
-        let folded = self.fold(input.graph, input.later, &mut cards, &mut chips);
+        let Folding { folded, hung } = self.fold(input.graph, input.later, &mut cards, &mut chips);
+        // The steps whose line ends with the switch of their own checks
+        // (LAY-30): those the board can fold a check into.
+        let switchable: HashSet<String> = collapsible(input.graph, input.later)
+            .into_iter()
+            .flat_map(|candidate| candidate.subjects)
+            .collect();
         // Every step's place in the engine's order, the number of its row
         // in Run results (LAY-07, Q2 = A); a pure function of the graph.
         let numbers: HashMap<&str, usize> = sequence(input.graph)
@@ -1425,13 +1548,22 @@ impl Canvas {
             .collect();
         // A folded check has no badge; its subjects' lines carry its number
         // (LAY-27).
-        let aggregates = collapse::aggregates(
-            input.graph,
-            input.later,
-            input.steps,
-            &folded.keys().map(String::as_str).collect(),
-            &numbers,
-        );
+        let folded_ids: HashSet<&str> = folded.keys().map(String::as_str).collect();
+        let mut aggregates =
+            collapse::aggregates(input.graph, input.later, input.steps, &folded_ids, &numbers);
+        // A step whose one check is folded writes it (LAY-30, Q1 = A).
+        for (subject, check) in collapse::singles(input.graph, input.later, &folded_ids) {
+            let check = input
+                .reference_graph
+                .nodes
+                .iter()
+                .chain(&input.graph.nodes)
+                .find(|node| node.id == check);
+            if let (Some(aggregate), Some(check)) = (aggregates.get_mut(&subject), check) {
+                aggregate.single =
+                    collapse::written(input.reference_graph, input.project, check, &subject);
+            }
+        }
         // The steps a failure kept from running, on the card that holds it:
         // a folded check's on its subject (LAY-19).
         let resolved;
@@ -1473,12 +1605,19 @@ impl Canvas {
         {
             self.marks = marks.clone();
         }
+        // An `@after` of a folded check, or of one a step shows under it, is
+        // drawn from that step (LAY-11, LAY-30).
+        let redrawn: HashMap<String, (String, String)> = folded
+            .iter()
+            .chain(&hung)
+            .map(|(check, place)| (check.clone(), place.clone()))
+            .collect();
         // Which data wires are chips is decided on the cards where they rest,
         // before a drag moves them: a card being dragged turns no wire into a
         // chip or back until it is dropped (LAY-23).
         let rest_wires = match self.wire_mode {
             WireMode::All => Vec::new(),
-            WireMode::Chips => folded_wires(input.graph, &cards, &chips, &folded).0,
+            WireMode::Chips => folded_wires(input.graph, &cards, &chips, &redrawn).0,
         };
         let chipped = match self.wire_mode {
             WireMode::All => HashSet::new(),
@@ -1606,7 +1745,7 @@ impl Canvas {
         // Wires go under the cards. They are routed around the cards and chips, so
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
-        let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &folded);
+        let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &redrawn);
         // A kept wire the board no longer has, after an edit, an Undo or a
         // fold, is no longer kept: it does not come back kept (LAY-14).
         let kept = self.selected_wires.len();
@@ -1615,9 +1754,30 @@ impl Canvas {
         if self.selected_wires.len() != kept {
             ui.ctx().request_repaint();
         }
+        self.edges_follow(input.graph, input.selection);
         // One selected step rings what it is related to and dims the rest
         // (LAY-10); its wires are lit, every other wire is dimmed.
         let focus = Focus::of(input.graph, input.selection, &board_wires, &cards);
+        let traced_board = trace::Board {
+            graph: input.graph,
+            project: input.project,
+            cards: &cards,
+            chips: &chips,
+            wires: &board_wires,
+        };
+        // The related cards out of view, while a step is selected or a
+        // trace is kept (LAY-15).
+        let free = edge::Free {
+            board: overlays.board,
+            minimap: overlays.minimap,
+        };
+        let away = edge::away(
+            &traced_board,
+            input.selection,
+            &self.selected_wires,
+            camera,
+            free,
+        );
         let mut lit: HashSet<String> = focus.as_ref().map_or_else(HashSet::new, |focus| {
             board_wires
                 .iter()
@@ -1744,13 +1904,7 @@ impl Canvas {
                 Some((self.trace.pointed(camera, pointer, over)?, pointer))
             });
         let traced = trace::Trace::of(
-            &trace::Board {
-                graph: input.graph,
-                project: input.project,
-                cards: &cards,
-                chips: &chips,
-                wires: &board_wires,
-            },
+            &traced_board,
             pointed_wire.as_ref().map(|(wire, _)| wire.as_str()),
             pointed_input
                 .as_ref()
@@ -2060,6 +2214,9 @@ impl Canvas {
 
         // Each drawn step's badge, on screen: the arrows point into them.
         let mut badges: Vec<(String, Rect)> = Vec::new();
+        // The switch of a step's own checks, on screen: whether it shows
+        // them, and whether it is pointed at (LAY-30).
+        let mut switches: Vec<(Rect, bool, bool)> = Vec::new();
         for card in &cards {
             let rect = camera.rect(card.rect());
             if !rect.intersects(overlays.board) {
@@ -2128,6 +2285,7 @@ impl Canvas {
                     commands.push(Command::InspectInput {
                         node: card.id.clone(),
                         input: card.inputs[index].name.clone(),
+                        path: None,
                     });
                 } else if card.kind == NodeKind::Component {
                     commands.push(Command::EditComponent(card.id.clone()));
@@ -2206,14 +2364,23 @@ impl Canvas {
                 pointer,
             );
             // The checks line sums up the step's checks; a click on it opens
-            // their list in the Inspector (LAY-11).
+            // their list in the Inspector (LAY-11). It ends with the switch
+            // of the step's own checks (LAY-30).
             let aggregate = aggregates
                 .get(&card.id)
                 .filter(|aggregate| aggregate.checks + aggregate.gates > 0);
-            if let (Some(_), Some(area)) = (aggregate, card.aggregate_area(camera.zoom)) {
-                let area = camera.rect(area);
+            let switch = card
+                .checks_switch(camera.zoom)
+                .filter(|_| aggregate.is_some() && switchable.contains(&card.id))
+                .map(|rect| camera.rect(rect));
+            if let (Some(aggregate), Some(area)) = (aggregate, card.aggregate_area(camera.zoom)) {
+                let mut area = camera.rect(area);
+                if let Some(switch) = switch {
+                    area.max.x = switch.left() - 2.0 * camera.zoom;
+                }
                 if area.intersects(overlays.board) {
                     let name = format!("Checks of {}", card.name);
+                    let whole = aggregate.text();
                     let response = board_ui
                         .interact(
                             area.intersect(overlays.board),
@@ -2221,7 +2388,14 @@ impl Canvas {
                             Sense::click(),
                         )
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text("Show the checks of this step in the Inspector");
+                        // The line whole, however much of it the row shows.
+                        .on_hover_ui(|ui| {
+                            ui.label(&whole);
+                            ui.label(
+                                egui::RichText::new("Click to list the checks in the Inspector")
+                                    .color(theme::MUTED),
+                            );
+                        });
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
                     });
@@ -2232,6 +2406,35 @@ impl Canvas {
                         commands.push(Command::ShowChecks(card.id.clone()));
                     }
                 }
+            }
+            if let Some(switch) = switch.filter(|switch| switch.intersects(overlays.board)) {
+                let folds = self.collapsed != self.chosen(input.graph, &card.id);
+                let name = format!(
+                    "{} checks of {}",
+                    if folds { "Expand" } else { "Collapse" },
+                    card.name
+                );
+                let response = board_ui
+                    .interact(
+                        switch.expand(2.0 * camera.zoom).intersect(overlays.board),
+                        board_ui.id().with(("checks-switch", &card.id)),
+                        Sense::click(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(if folds {
+                        "Show this step's checks as cards under it"
+                    } else {
+                        "Fold this step's checks into this line"
+                    });
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
+                });
+                if response.clicked() {
+                    clicked_card = true;
+                    self.menu = None;
+                    commands.push(Command::ToggleChecksHere(card.id.clone()));
+                }
+                switches.push((switch, folds, response.hovered()));
             }
             // A failed or running card is never dimmed (LAY-10).
             let failed = step
@@ -2247,6 +2450,7 @@ impl Canvas {
                 }) || traced.dims_card(&card.id))
                     && !failed
                     && !run.running,
+                switch,
             };
             let drawn_card = if card.compact.is_some() {
                 let drawn = paint::compact_card(
@@ -2290,6 +2494,9 @@ impl Canvas {
             };
             if let Some(badge) = &drawn_card.badge {
                 badges.push((card.id.clone(), badge.rect));
+            }
+            for (switch, folds, hovered) in switches.drain(..) {
+                paint::checks_switch(&board_painter, switch, folds, hovered, camera.zoom);
             }
             #[cfg(test)]
             {
@@ -2540,7 +2747,32 @@ impl Canvas {
                 self.shown_port.as_ref() == Some(&(count.source.clone(), count.port.clone()))
             })
             .map(list);
-        self.trace.paint(
+        // *Back* and the edge chips, over the cards and under the
+        // statements, which keep clear of them (LAY-15).
+        let avoid: Vec<Rect> = cards
+            .iter()
+            .filter(|card| selection.contains(card.id.as_str()))
+            .map(|card| camera.rect(card.rect()))
+            .chain([overlays.zoom_controls])
+            .collect();
+        let taken = self.show_edges(
+            &mut board_ui,
+            &painter,
+            &away,
+            &edge::Frame {
+                cards: &cards,
+                selection: input.selection,
+                viewport,
+                focus: overlays.focus,
+                free,
+                avoid: &avoid,
+            },
+            &mut commands,
+        );
+        // *Change source* on a kept statement opens the Inspector at the
+        // field (LAY-42).
+        if let Some(field) = self.trace.paint(
+            &board_ui,
             &painter,
             overlays.board,
             camera,
@@ -2549,7 +2781,16 @@ impl Canvas {
             listed.as_ref(),
             &shown_tags,
             &laid_tags,
-        );
+            &taken,
+            !input.read_only,
+        ) {
+            clicked_card = true;
+            commands.push(Command::InspectInput {
+                node: field.reader,
+                input: field.input,
+                path: Some(field.path),
+            });
+        }
 
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(
@@ -2818,7 +3059,16 @@ impl Canvas {
             !self.selected_wires.is_empty(),
             input.can_paste,
             settings,
+            Self::checks_labelled(ui),
         ))
+    }
+
+    /// Whether *Checks* on the bar carries its word beside the eye (LAY-30):
+    /// on a board as wide as [`CHECKS_LABEL_FROM`]; on a narrower one it is
+    /// the eye alone, its name in its tooltip, so that the header row keeps
+    /// what it showed before.
+    fn checks_labelled(ui: &egui::Ui) -> bool {
+        Self::viewport(ui).width() >= CHECKS_LABEL_FROM
     }
 
     fn toolbar_measured(
@@ -2833,9 +3083,15 @@ impl Canvas {
 
     /// The toolbar's width before it has been drawn in a shape, with the
     /// settings button as an icon when it has one.
-    fn toolbar_estimate(&self, input: &Input<'_>) -> f32 {
+    fn toolbar_estimate(&self, ui: &egui::Ui, input: &Input<'_>) -> f32 {
         let has_selection = !input.selection.is_empty() || !self.selected_wires.is_empty();
-        96.0 + if input.can_paste { 56.0 } else { 0.0 }
+        let checks = match (self.density_switch, Self::checks_labelled(ui)) {
+            (false, _) => 0.0,
+            (true, true) => 84.0,
+            (true, false) => 30.0,
+        };
+        96.0 + checks
+            + if input.can_paste { 56.0 } else { 0.0 }
             + if has_selection { 108.0 } else { 0.0 }
             + if input.settings.is_some() { 44.0 } else { 0.0 }
     }
@@ -2867,7 +3123,7 @@ impl Canvas {
                 self.toolbar_measured(ui, input, SettingsShape::Icon)
                     .map(|size| size.x + extra)
             })
-            .unwrap_or_else(|| self.toolbar_estimate(input) + extra);
+            .unwrap_or_else(|| self.toolbar_estimate(ui, input) + extra);
         let room = Self::viewport(ui).width()
             - layout::OVERLAY_PADDING_LEFT
             - layout::OVERLAY_PADDING_RIGHT
@@ -2883,7 +3139,7 @@ impl Canvas {
     fn measure_overlays(&self, ui: &egui::Ui, input: &Input<'_>) -> OverlayMeasures {
         let toolbar_size = self
             .toolbar_measured(ui, input, self.settings_shape(ui, input))
-            .unwrap_or(vec2(self.toolbar_estimate(input), 30.0));
+            .unwrap_or(vec2(self.toolbar_estimate(ui, input), 30.0));
         let banner_height = toolbar_size.y.max(26.0);
 
         let hint_galley = ui.fonts_mut(|fonts| {
@@ -3878,6 +4134,7 @@ impl Canvas {
     ) {
         let has_selection = !input.selection.is_empty();
         let shape = self.settings_shape(ui, input);
+        let checks_labelled = Self::checks_labelled(ui);
         let measured = egui::Area::new(ui.id().with("board-toolbar"))
             .enabled(ui.is_enabled())
             .constrain_to(viewport)
@@ -3894,6 +4151,12 @@ impl Canvas {
                     .inner_margin(egui::Margin::symmetric(6, 3))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
+                            // On a narrow board *Checks* is an eye alone and
+                            // the tools stand closer, so that the header row
+                            // keeps what it showed before it (LAY-30).
+                            if self.density_switch && !checks_labelled {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                            }
                             let editable = !input.read_only;
                             if let Some(settings) = input.settings {
                                 let labelled = shape == SettingsShape::Labelled;
@@ -3961,6 +4224,35 @@ impl Canvas {
                             {
                                 commands.push(Command::TidyUp(input.selection.to_vec()));
                             }
+                            // Every check as a card, or folded into its
+                            // step's line: the eye open while they are drawn
+                            // (LAY-30, out of the view menu).
+                            if self.density_switch {
+                                let shown = !self.collapsed;
+                                let icon = if shown { Icon::Eye } else { Icon::EyeOff };
+                                let hover = if shown {
+                                    "Checks are drawn as cards under their steps. Click to fold them into each step's line"
+                                } else {
+                                    "Checks are folded into each step's line. Click to draw them as cards"
+                                };
+                                // An icon's own tooltip is its label: there
+                                // the longer text, under the button's name.
+                                let labelled = checks_labelled;
+                                let button = if labelled {
+                                    widgets::action(icon, CHECKS_SWITCH).compact().quiet()
+                                } else {
+                                    widgets::icon_button(icon, hover)
+                                        .named(CHECKS_SWITCH)
+                                        .compact()
+                                };
+                                let mut response = ui.add(button.toggle(shown));
+                                if labelled {
+                                    response = response.on_hover_text(hover);
+                                }
+                                if response.clicked() {
+                                    commands.push(Command::SetChecksCollapsed(shown));
+                                }
+                            }
                             widgets::action_menu(
                                 ui,
                                 // How the board draws, beside each other: wires, and
@@ -4026,29 +4318,6 @@ impl Canvas {
                                             .clicked()
                                         {
                                             commands.push(Command::SetCompactCards(!compact));
-                                            ui.close();
-                                        }
-                                        // Beside the density: what the board
-                                        // draws of its checks (LAY-11).
-                                        if ui
-                                            .add(
-                                                widgets::action(
-                                                    if self.collapsed {
-                                                        Icon::Check
-                                                    } else {
-                                                        Icon::Layers
-                                                    },
-                                                    "Collapse checks",
-                                                )
-                                                .quiet(),
-                                            )
-                                            .on_hover_text(
-                                                "Fold the checks of each step into its footer; a click there lists them",
-                                            )
-                                            .clicked()
-                                        {
-                                            commands
-                                                .push(Command::SetChecksCollapsed(!self.collapsed));
                                             ui.close();
                                         }
                                         // Which data wires are drawn (LAY-23).
@@ -4466,6 +4735,12 @@ fn folded_wires(
             Some((subject, name)) if wire.kind == WireKind::Order => Some((subject, name)),
             _ => None,
         };
+        // Nor is the order or the branch into it drawn: a check a step shows
+        // under it while the board folds the others reads as part of that
+        // step, as when it is folded, so that no line is rerouted (LAY-30).
+        if wire.kind == WireKind::Order && folded.contains_key(&wire.target) {
+            continue;
+        }
         let source_id = redrawn.map_or(wire.source.as_str(), |(subject, _)| subject.as_str());
         let (Some(source), Some(target)) = (card_of(source_id), card_of(&wire.target)) else {
             continue;

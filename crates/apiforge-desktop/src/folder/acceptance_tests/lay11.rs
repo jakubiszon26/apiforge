@@ -73,11 +73,9 @@ fn hidden(harness: &FolderHarness, handle: &str) -> bool {
         .contains(&id_of(harness, handle))
 }
 
-/// *Collapse checks* in the board's view menu, beside *Compact cards*.
+/// *Checks* on the board's bar (LAY-30), which folds or draws every check.
 fn switch_checks(harness: &mut FolderHarness) {
-    harness.get_by_label("Board view").click();
-    settle(harness);
-    harness.get_by_label("Collapse checks").click();
+    harness.get_by_label("Checks").click();
     settle(harness);
     harness.step();
 }
@@ -255,8 +253,8 @@ fn lay11_criterion_4_the_aggregate_opens_the_list() {
 }
 
 /// Criterion 5: *Expand checks here* hangs `checkout`'s checks under it,
-/// shifts the rows below by their height and keeps the camera; a restart
-/// forgets it.
+/// shifts the rows below by their height where they do not fit under it
+/// (LAY-30) and keeps the camera.
 #[test]
 fn lay11_criterion_5_expand_here_shifts_the_rows_below() {
     let (project, mut harness) = open(&shop_30(), WIDE);
@@ -288,8 +286,10 @@ fn lay11_criterion_5_expand_here_shifts_the_rows_below() {
         .find(|(_, rect)| rect.top() >= subject.bottom())
         .expect("a row lies below checkout");
     let shift = world_of_in(&after, below).top() - world_of_in(&before, below).top();
+    // Since LAY-30 (criterion 8) nothing moves where the checks fit in the
+    // free room under their step; else the rows below make room.
     assert!(
-        shift >= height,
+        shift == 0.0 || shift >= height,
         "the rows below make room: {shift} for {height}"
     );
     for (handle, rect) in &before {
@@ -302,20 +302,18 @@ fn lay11_criterion_5_expand_here_shifts_the_rows_below() {
     }
     assert_disjoint_cards(&after, "with checkout's checks expanded");
 
-    // Forgotten on restart: the same project opened again folds them.
-    assert!(
-        app(&mut harness)
-            .new_canvas()
-            .debug_expanded_here()
-            .is_empty()
-    );
+    // Kept on this computer since LAY-30 (criterion 7, which replaces "a
+    // restart forgets it"): the same project opened again hangs them.
     drop(harness);
     let mut again = crate::testing::folder_harness_in(project.path(), WIDE, Mode::Diagram);
     app(&mut again).review_open(super::lay16::SCENARIO, None);
     settle(&mut again);
     again.step();
     for check in CHECKOUT_CHECKS {
-        assert!(hidden(&again, check), "{check} is folded after a restart");
+        assert!(
+            !hidden(&again, check),
+            "{check} still hangs after a restart"
+        );
     }
 }
 
@@ -334,9 +332,13 @@ fn lay11_criterion_6_a_shared_check_is_counted_twice() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
     show(&mut harness, "cart", 0.6);
     assert!(hidden(&harness, "receipt_total"));
-    // 27 is `receipt_total`'s number, in both lines (LAY-27).
+    // 27 is `receipt_total`'s number, in both lines (LAY-27); `receipt`'s
+    // one check is written out (LAY-30).
     assert_eq!(aggregate(&harness, "cart"), "13–14, 27 · 3 checks");
-    assert_eq!(aggregate(&harness, "receipt"), "27 · 1 check");
+    assert_eq!(
+        aggregate(&harness, "receipt"),
+        "27 · body.total ~= cart.body.total within 0.01"
+    );
 
     open_aggregate(&mut harness, "receipt");
     assert_eq!(selected(&harness), vec![id_of(&harness, "receipt")]);

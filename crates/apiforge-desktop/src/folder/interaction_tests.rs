@@ -1,8 +1,8 @@
 //! Folder window behaviour through named widgets (ADR 0013).
 use super::*;
 use crate::testing::{
-    MINIMUM, WIDE, assert_disjoint, assert_within_window, folder, folder_harness, settle,
-    shop_project,
+    MINIMUM, WIDE, assert_disjoint, assert_within_window, first_open_harness, folder,
+    folder_harness, settle, shop_project,
 };
 use egui_kittest::kittest::Queryable;
 
@@ -29,12 +29,12 @@ const CARDS: [&str; 6] = [
 #[test]
 fn the_mode_switches_change_the_view() {
     let project = shop_project();
-    let mut harness = folder_harness(project.path(), WIDE);
-    assert_eq!(folder(&harness).workbench.mode, Mode::Code);
+    let mut harness = first_open_harness(project.path(), WIDE, None);
+    assert_eq!(folder(&harness).workbench.mode, Mode::Diagram);
     for (label, mode) in [
-        ("Diagram", Mode::Diagram),
-        ("Split", Mode::Split),
         ("Code", Mode::Code),
+        ("Split", Mode::Split),
+        ("Diagram", Mode::Diagram),
     ] {
         harness.get_by_label(label).click();
         settle(&mut harness);

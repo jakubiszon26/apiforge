@@ -2338,7 +2338,8 @@ impl App {
         };
         let assertion = edit::field_assertion(&node, port, path, value);
         let label = if path.is_empty() { port } else { path };
-        self.push_node(assertion);
+        let edit = self.with_board(|board| board.push_check(source, assertion));
+        self.apply_edit(Ok(edit));
         self.notice = Some(format!(
             "Added a comparison for “{label}”. Check the expected value or type in its configuration."
         ));
@@ -2423,6 +2424,8 @@ impl App {
                     | Command::Copy
                     | Command::SetWireStyle(_)
                     | Command::SetBridges(_)
+                    | Command::Jumped
+                    | Command::Back(_)
             )
         {
             return;
@@ -2435,10 +2438,15 @@ impl App {
             | Command::ComponentSettings
             | Command::SetCompactCards(_)
             | Command::SetChecksCollapsed(_)
+            | Command::ToggleChecksHere(_)
             | Command::SetWires(_)
             // This window proposes no variable (LAY-25).
             | Command::SaveValues { .. }
-            | Command::SaveSharedValues => {}
+            | Command::SaveSharedValues
+            // The board keeps where Back returns to; this window keeps no
+            // Inspector state for it.
+            | Command::Jumped => {}
+            Command::Back(ids) => self.editor.selection = ids,
             Command::InspectInput { node, .. } => self.editor.selection = vec![node],
             Command::ShowChecks(node) => {
                 self.editor.selection = vec![node];

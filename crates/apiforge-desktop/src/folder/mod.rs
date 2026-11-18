@@ -11,6 +11,7 @@
 mod activation;
 pub use activation::{Refusal, Start, decide as managed_start};
 mod analysis;
+mod checks_here;
 mod chrome;
 mod code_view;
 mod component_settings;
@@ -223,6 +224,21 @@ fn session_has(session: Option<&ProjectSession>, tab: &str) -> bool {
     })
 }
 
+/// The document a first open shows, with its kind: the first scenario by
+/// path, or the first document when there is no scenario.
+fn first_document(session: &ProjectSession) -> Option<(String, DocumentKind)> {
+    session
+        .documents()
+        .iter()
+        .min_by_key(|document| {
+            (
+                document.entry().kind != DocumentKind::Scenario,
+                document.entry().path.as_str(),
+            )
+        })
+        .map(|document| (document.id().to_owned(), document.entry().kind))
+}
+
 /// The bar's words for a followed commit: its first change, and how many
 /// more there were.
 fn describe_commit(changes: &[apiforge_project::CommitChange]) -> Option<String> {
@@ -260,6 +276,11 @@ pub struct FolderApp {
     /// The requested mode shown, and the folder's own, which is what the view
     /// state keeps while the requested one is still shown.
     shown_instead: Option<(Mode, Mode)>,
+    /// The view a project with no stored view starts in, in place of the
+    /// one LAY-40 chooses; set only by the shared test harnesses, and kept
+    /// when the window reopens or switches its project.
+    #[cfg(test)]
+    first_view: Option<Mode>,
     analyser: Analyser,
     watcher: Watcher,
     explorer: ExplorerState,
@@ -300,6 +321,8 @@ pub struct FolderApp {
     /// context are the same: deriving it reads every block and sample.
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
+    /// Each step's own choice of its checks, per document (LAY-30).
+    checks_here: checks_here::ChecksHere,
     /// The steps the Cleanup board's cards read, kept while the model is the
     /// same: building them copies the Main graph (UX-16).
     cleanup_reference: Option<(Arc<Document>, Arc<Graph>)>,
@@ -331,6 +354,9 @@ pub struct FolderApp {
     /// The last paste, until its edit is applied (UX-34).
     pasted: Option<PastedOutcome>,
     inspector: Inspector,
+    /// What the Inspector showed when a board's first jump started, by
+    /// document, while that board shows *Back* (LAY-15).
+    jump_views: HashMap<String, crate::inspector::View>,
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
     /// When the editor last changed each document's text, while its error
@@ -512,7 +538,8 @@ impl FolderApp {
             survey: Vec::new(),
             new_name: String::new(),
             open_error: None,
-            workbench: Workbench::restore(None, |_| false),
+            // An empty window has no board: no first document, so Code.
+            workbench: Workbench::restore(None, None, |_| false),
             saved_view: None,
             mode_request: None,
             shown_instead: None,
@@ -534,6 +561,7 @@ impl FolderApp {
             caret_statement: None,
             completion_names: None,
             canvases: HashMap::new(),
+            checks_here: checks_here::ChecksHere::default(),
             cleanup_reference: None,
             shared_values: None,
             selections: HashMap::new(),
@@ -545,6 +573,7 @@ impl FolderApp {
             clipboard: None,
             pasted: None,
             inspector: Inspector::default(),
+            jump_views: HashMap::new(),
             changed_at: None,
             marks_quiet_at: HashMap::new(),
             notices: Notices::default(),
@@ -581,6 +610,8 @@ impl FolderApp {
             run_mode: crate::run_mode::RunModeStore::load(),
             follow: follow::Follow::default(),
             #[cfg(test)]
+            first_view: None,
+            #[cfg(test)]
             lines_in_view: None,
             #[cfg(test)]
             marks_clock: None,
@@ -595,29 +626,40 @@ impl FolderApp {
         app
     }
 
+    /// Replaces this window with one opening `root` afresh.
+    fn reopen(&mut self, context: &egui::Context, root: PathBuf) {
+        #[cfg(test)]
+        let first_view = self.first_view;
+        *self = Self::open(context, root);
+        #[cfg(test)]
+        {
+            self.first_view = first_view;
+        }
+    }
+
     fn install(&mut self, session: ProjectSession, state: Option<WorkspaceState>) {
-        let first_open = state.is_none();
-        self.workbench = Workbench::restore(state.clone(), |id| {
-            session.document(id).is_some() || id.starts_with(TEXT_TAB)
-        });
+        // A project opened for the first time on this computer shows its
+        // first scenario, in Diagram (LAY-40); a project without one shows
+        // its first document, in Code.
+        let first = state.is_none().then(|| first_document(&session)).flatten();
+        self.workbench =
+            Workbench::restore(state.clone(), first.as_ref().map(|(_, kind)| *kind), |id| {
+                session.document(id).is_some() || id.starts_with(TEXT_TAB)
+            });
+        #[cfg(test)]
+        if state.is_none()
+            && let Some(mode) = self.first_view
+        {
+            self.workbench.mode = mode;
+        }
         self.saved_view = state;
         self.shown_instead = None;
         if let Some(mode) = self.mode_request.take() {
             self.shown_instead = Some((mode, self.workbench.mode));
             self.workbench.mode = mode;
         }
-        // A project opened for the first time shows its first scenario.
-        if first_open {
-            let mut documents: Vec<_> = session.documents().iter().collect();
-            documents.sort_by_key(|document| {
-                (
-                    document.entry().kind != DocumentKind::Scenario,
-                    document.entry().path.as_str().to_owned(),
-                )
-            });
-            if let Some(document) = documents.first() {
-                self.activate_tab(document.id());
-            }
+        if let Some((id, _)) = first {
+            self.activate_tab(&id);
         }
         // Unsaved work comes back with its own caret.
         for document in session.documents() {
@@ -647,6 +689,7 @@ impl FolderApp {
         self.uninitialised = false;
         self.session = Some(session);
         self.open_run_journal();
+        self.load_checks_here();
         self.reload_field_drafts();
         self.restore_text_tabs();
         self.remember_project();
@@ -688,6 +731,15 @@ impl FolderApp {
     /// for `--screenshot --mode` (KTLO-08).
     pub fn request_mode(&mut self, mode: Mode) {
         self.mode_request = Some(mode);
+    }
+
+    /// Makes every project this window opens with no stored view start in
+    /// `mode` instead of the view LAY-40 chooses, as a stored view would.
+    /// The shared test harnesses pin Code, the first view the tests that are
+    /// not about the first view were written against.
+    #[cfg(test)]
+    pub(crate) fn pin_first_view(&mut self, mode: Mode) {
+        self.first_view = Some(mode);
     }
 
     pub fn has_document(&self) -> bool {
@@ -758,7 +810,8 @@ impl FolderApp {
     }
 
     /// Folds the checks of every board into their subjects, or shows them
-    /// again, and remembers it as *Collapse checks* (LAY-11).
+    /// again, and remembers it as *Checks* on the bar (LAY-11, LAY-30):
+    /// every step's own choice is forgotten.
     fn collapse_checks(&mut self, collapsed: bool) {
         self.preferences.checks_collapsed = collapsed;
         self.card_density.set_lines(lines_of(&self.preferences));
@@ -771,6 +824,7 @@ impl FolderApp {
         for canvas in self.canvases.values_mut() {
             canvas.set_collapsed(collapsed);
         }
+        self.forget_checks_here(collapsed);
     }
 
     /// Draws every check as a card, as before LAY-11, for tests that measure
@@ -817,6 +871,31 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn debug_inspector_focus(&self) -> Option<String> {
         self.inspector.focused_input().map(str::to_owned)
+    }
+
+    /// The block the Inspector shows, while its panel is open (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_node(&self) -> Option<String> {
+        let open = self
+            .workbench
+            .active()
+            .and_then(|id| self.selections.get(id))
+            .is_some_and(|selection| selection.len() == 1);
+        open.then(|| self.inspector.debug_node().map(str::to_owned))
+            .flatten()
+    }
+
+    /// The Inspector's scroll offset in the last frame (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_offset(&self) -> f32 {
+        self.inspector.debug_offset()
+    }
+
+    /// The Inspector's sections in the last frame and whether each is open
+    /// (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_sections(&self) -> Vec<(String, bool)> {
+        self.inspector.debug_sections(&self.ui_context)
     }
 
     fn activate_tab(&mut self, id: &str) {
@@ -1229,7 +1308,7 @@ impl FolderApp {
                         self.review_transaction(self.root.clone());
                     }
                     if ui.button("Try opening again").clicked() {
-                        *self = Self::open(&self.ui_context.clone(), self.root.clone());
+                        self.reopen(&self.ui_context.clone(), self.root.clone());
                     }
                     return;
                 }

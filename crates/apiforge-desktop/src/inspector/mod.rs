@@ -8,6 +8,7 @@ mod checks;
 pub mod drafts;
 mod fields;
 mod response;
+pub mod source_change;
 
 pub use fields::{forget_field_text, type_combo};
 pub use response::sample_output;
@@ -46,8 +47,9 @@ pub enum Action {
     },
     /// Show this block in the code panel, by handle.
     Reveal(String),
-    /// *Expand checks here* switched for the selected step: its checks hang
-    /// under it on the collapsed board, for this session (LAY-11).
+    /// The selected step's own switch of its checks, set to differ from the
+    /// board's setting or not (LAY-11, LAY-30): *Expand checks here* or
+    /// *Collapse checks here*.
     ExpandChecksHere(bool),
     /// *Read directly again* on a variable that holds a plain reference: its
     /// readers read the value and the variable goes (LAY-25).
@@ -68,12 +70,12 @@ pub struct Context<'a> {
     pub parameters: &'a [String],
     pub run: Option<&'a RunResult>,
     pub step: Option<&'a StepResult>,
-    /// *Expand checks here* in the *Checks* list: `None` when the board does
-    /// not fold checks into this step, else whether it is on (LAY-11).
-    pub expand_here: Option<bool>,
+    /// The switch of the step's own checks in the *Checks* list: `None`
+    /// when the board folds no check into this step (LAY-11, LAY-30).
+    pub expand_here: Option<crate::canvas::ChecksHere>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tab {
     Configuration,
     Outputs,
@@ -93,6 +95,46 @@ pub struct Inspector {
     tab: Tab,
     choosing_response: Option<ResponseChoiceState>,
     focus: Focus,
+    /// The scroll offset of the panel in the last frame (LAY-15).
+    offset: f32,
+    /// The sections the panel drew in the last frame: their names and ids.
+    sections: Vec<(&'static str, Id)>,
+    /// What *Back* restores when the panel shows its block next (LAY-15).
+    restoring: Option<View>,
+}
+
+/// What the Inspector shows of a block, for *Back* to restore after a jump
+/// on the board (LAY-15): the block, the tab, the scroll offset and which
+/// sections are open.
+#[derive(Clone, Debug)]
+pub struct View {
+    node_id: String,
+    tab: Tab,
+    offset: f32,
+    sections: Vec<(Id, bool)>,
+}
+
+/// The sections a frame of the panel drew, by name and id.
+#[derive(Clone, Default)]
+struct Sections(Vec<(&'static str, Id)>);
+
+fn sections_id() -> Id {
+    Id::new("inspector-sections")
+}
+
+/// Whether the collapsing section `id` is open.
+fn open(context: &egui::Context, id: Id) -> bool {
+    egui::collapsing_header::CollapsingState::load(context, id).is_some_and(|state| state.is_open())
+}
+
+/// Remembers a collapsing section the panel drew this frame, by the id of
+/// its header, so that *Back* can open and close it as it was (LAY-15).
+fn section(ui: &Ui, name: &'static str, header: &egui::Response) {
+    ui.ctx().data_mut(|data| {
+        data.get_temp_mut_or_default::<Sections>(sections_id())
+            .0
+            .push((name, header.id));
+    });
 }
 
 /// The input a double-click on the board asked the Inspector to show
@@ -101,6 +143,9 @@ pub struct Inspector {
 struct Focus {
     wanted: Option<String>,
     reached: Option<String>,
+    /// *Change source* on the board (LAY-42): the input and the path of the
+    /// field whose editor is shown, its section open, until it is drawn.
+    field: Option<(String, Vec<String>)>,
     /// A click on a step's aggregate asked for its *Checks* list (LAY-11).
     checks: bool,
 }
@@ -122,6 +167,9 @@ impl Default for Inspector {
             tab: Tab::Configuration,
             choosing_response: None,
             focus: Focus::default(),
+            offset: 0.0,
+            sections: Vec::new(),
+            restoring: None,
         }
     }
 }
@@ -131,6 +179,14 @@ impl Inspector {
     pub fn focus_input(&mut self, input: String) {
         self.tab = Tab::Configuration;
         self.focus.wanted = Some(input);
+    }
+
+    /// Opens the Configuration tab of the block shown next at the editor of
+    /// `input`'s field at `path`, the section that holds it open: *Change
+    /// source* on the board (LAY-42).
+    pub fn focus_field(&mut self, input: String, path: Vec<String>) {
+        self.focus_input(input.clone());
+        self.focus.field = Some((input, path));
     }
 
     /// Opens the *Checks* list of the step shown next (LAY-11).
@@ -146,21 +202,86 @@ impl Inspector {
         self.focus.reached.as_deref()
     }
 
+    /// The block the Inspector showed last, if any.
+    #[cfg(test)]
+    pub fn debug_node(&self) -> Option<&str> {
+        (!self.node_id.is_empty()).then_some(self.node_id.as_str())
+    }
+
+    /// The panel's scroll offset in the last frame (LAY-15).
+    #[cfg(test)]
+    pub fn debug_offset(&self) -> f32 {
+        self.offset
+    }
+
+    /// The sections the panel drew in the last frame, by name, and whether
+    /// each is open (LAY-15).
+    #[cfg(test)]
+    pub fn debug_sections(&self, context: &egui::Context) -> Vec<(String, bool)> {
+        self.sections
+            .iter()
+            .map(|(name, id)| ((*name).to_owned(), open(context, *id)))
+            .collect()
+    }
+
+    /// What the panel shows now: its block, tab, scroll offset and open
+    /// sections (LAY-15).
+    pub fn view(&self, context: &egui::Context) -> View {
+        View {
+            node_id: self.node_id.clone(),
+            tab: self.tab,
+            offset: self.offset,
+            sections: self
+                .sections
+                .iter()
+                .map(|(_, id)| (*id, open(context, *id)))
+                .collect(),
+        }
+    }
+
+    /// Shows `view` again: its sections open and closed as they were now,
+    /// and its tab and scroll offset when the panel shows its block next.
+    pub fn restore(&mut self, context: &egui::Context, view: View) {
+        for (id, open) in &view.sections {
+            let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                context, *id, false,
+            );
+            state.set_open(*open);
+            state.store(context);
+        }
+        self.restoring = Some(view);
+    }
+
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         if self.node_id != context.node.id {
             let wanted = self.focus.wanted.take();
+            let field = self.focus.field.take();
             let checks = std::mem::take(&mut self.focus.checks);
+            let restoring = self.restoring.take();
             *self = Self {
                 node_id: context.node.id.clone(),
+                restoring,
                 ..Self::default()
             };
             if let Some(input) = wanted {
                 self.focus_input(input);
+                self.focus.field = field;
             } else if checks {
                 self.tab = Tab::Checks;
             }
         }
         self.focus.checks = false;
+        // A source held for a field stays while this step is shown (LAY-42).
+        binding::keep_held(ui.ctx(), &context.node.id);
+        // *Back* shows the block as it was: its tab and its scroll offset.
+        let restored = self
+            .restoring
+            .take()
+            .filter(|view| view.node_id == context.node.id)
+            .map(|view| {
+                self.tab = view.tab;
+                view.offset
+            });
         let mut actions = Vec::new();
         let mut node = context.node.clone();
 
@@ -199,16 +320,29 @@ impl Inspector {
         }
         ui.separator();
 
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_width((ui.available_width() - theme::SPACE_SM).max(0.0));
-                match self.tab {
-                    Tab::Configuration => self.configuration(ui, context, &mut node, &mut actions),
-                    Tab::Outputs => outputs(ui, context, &mut actions),
-                    Tab::Checks => checks::show(ui, context, &mut actions),
-                }
-            });
+        ui.ctx()
+            .data_mut(|data| data.remove_temp::<Sections>(sections_id()));
+        let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        if let Some(offset) = restored {
+            area = area.vertical_scroll_offset(offset);
+        }
+        let scrolled = area.show(ui, |ui| {
+            ui.set_width((ui.available_width() - theme::SPACE_SM).max(0.0));
+            match self.tab {
+                Tab::Configuration => self.configuration(ui, context, &mut node, &mut actions),
+                Tab::Outputs => outputs(ui, context, &mut actions),
+                Tab::Checks => checks::show(ui, context, &mut actions),
+            }
+        });
+        self.offset = scrolled.state.offset.y;
+        self.sections = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<Sections>(sections_id()))
+            .unwrap_or_default()
+            .0;
+        if binding::focus_reached(ui.ctx()) {
+            self.focus.field = None;
+        }
         self.response_choice(ui.ctx(), context, &mut node);
 
         if node != *context.node {
@@ -411,12 +545,23 @@ impl Inspector {
         let binding_context = binding_context(context);
         for port in &ports {
             self.focus.at(ui, &port.name);
+            let stage = binding::Stage {
+                path: Vec::new(),
+                cleanup: context.cleanup,
+                focus: self
+                    .focus
+                    .field
+                    .as_ref()
+                    .filter(|(input, _)| *input == port.name)
+                    .map(|(_, path)| path.as_slice()),
+            };
             reveal = argument(
                 ui,
                 &binding_context,
                 port,
                 node,
                 id.with(("argument", &port.name)),
+                Some(&stage),
             )
             .or(reveal);
             if node.kind == NodeKind::Request
@@ -827,13 +972,15 @@ fn binding_context<'a>(context: &Context<'a>) -> binding::Context<'a> {
 }
 
 /// The editor of one input: sets or removes it. Returns the block to show in the
-/// code panel when the user asked for it.
+/// code panel when the user asked for it. In a `stage`, a change of a
+/// field's source is held until *Apply* (LAY-42).
 fn argument(
     ui: &mut Ui,
     context: &binding::Context<'_>,
     port: &Port,
     node: &mut Node,
     id: Id,
+    stage: Option<&binding::Stage<'_>>,
 ) -> Option<String> {
     let mut value = node.inputs.get(&port.name).cloned();
     let mut changed = false;
@@ -878,13 +1025,20 @@ fn argument(
         {
             reveal = Some(node.handle.clone());
         }
-        egui::CollapsingHeader::new("Body value source")
+        // *Change source* on one of the body's fields opens the section.
+        let shown = egui::CollapsingHeader::new("Body value source")
             .id_salt(id.with("body-binding"))
+            .open(
+                stage
+                    .is_some_and(|stage| stage.focus.is_some())
+                    .then_some(true),
+            )
             .show(ui, |ui| {
-                changed |= binding::editor(ui, context, port, &mut value, 0, id);
+                changed |= staged(ui, context, port, &mut value, id, stage);
             });
+        section(ui, "body-binding", &shown.header_response);
     } else {
-        changed = binding::editor(ui, context, port, &mut value, 0, id);
+        changed = staged(ui, context, port, &mut value, id, stage);
     }
     if changed {
         match value {
@@ -897,6 +1051,21 @@ fn argument(
         }
     }
     reveal
+}
+
+/// The editor of an input, in `stage` when there is one.
+fn staged(
+    ui: &mut Ui,
+    context: &binding::Context<'_>,
+    port: &Port,
+    value: &mut Option<Binding>,
+    id: Id,
+    stage: Option<&binding::Stage<'_>>,
+) -> bool {
+    match stage {
+        Some(stage) => binding::staged_editor(ui, context, port, value, id, stage),
+        None => binding::editor(ui, context, port, value, 0, id),
+    }
 }
 
 fn check(ui: &mut Ui, id: Id, node: &mut Node) {
@@ -1018,6 +1187,7 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
                 &port,
                 node,
                 id.with(("actual", index)),
+                None,
             );
         }
         if predicate.takes_expected()
@@ -1029,6 +1199,7 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
                 &port,
                 node,
                 id.with(("expected", index)),
+                None,
             );
         }
     }
@@ -1105,7 +1276,14 @@ fn condition_checks(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node)
     }
     if passes_data && let Some(port) = port(VALUE_INPUT) {
         // A condition has no body, so nothing here asks for the code panel.
-        let _ = argument(ui, &binding_context, &port, node, id.with("passed-on"));
+        let _ = argument(
+            ui,
+            &binding_context,
+            &port,
+            node,
+            id.with("passed-on"),
+            None,
+        );
     }
     widgets::hint(
         ui,
@@ -1139,7 +1317,7 @@ fn contract_combo(ui: &mut Ui, id: Id, context: &Context<'_>, contract: &mut Opt
 
 fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
     ui.add_space(8.0);
-    egui::CollapsingHeader::new(RichText::new("Contract and sample response").strong())
+    let shown = egui::CollapsingHeader::new(RichText::new("Contract and sample response").strong())
         .id_salt(id.with("samples"))
         .show(ui, |ui| {
             contract_combo(ui, id.with("contract"), context, &mut node.config.contract_id);
@@ -1158,6 +1336,7 @@ fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
             }
             widgets::hint(ui, "Samples drive suggestions and simulation. A field in the sample does not create an assertion.");
         });
+    section(ui, "samples", &shown.header_response);
 }
 
 fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
@@ -1304,6 +1483,43 @@ fn remove_request_argument(node: &mut Node, name: &str) {
     if !request_argument_is_used(node, name) {
         node.inputs.shift_remove(name);
     }
+}
+
+/// Whether the Inspector edits `input` of `node` at `path` in a *Result of
+/// another step* editor that holds a change until *Apply*: the input has an
+/// argument editor, the path, never empty, walks only fields of objects and
+/// items of lists, and a reference stands there (LAY-42).
+pub fn changes_source_at(
+    node: &Node,
+    graph: &Graph,
+    project: &Project,
+    input: &str,
+    path: &[String],
+) -> bool {
+    let Some(mut binding) = node.inputs.get(input) else {
+        return false;
+    };
+    if path.is_empty() {
+        return false;
+    }
+    for segment in path {
+        if !matches!(binding, Binding::Object { .. } | Binding::Array { .. }) {
+            return false;
+        }
+        let Some(child) = binding.at(std::slice::from_ref(segment)) else {
+            return false;
+        };
+        binding = child;
+    }
+    let scope = Scope {
+        nodes: &graph.nodes,
+        project,
+        request: (node.kind == NodeKind::Request).then_some(node),
+    };
+    matches!(binding, Binding::Reference { .. })
+        && argument_ports(node, project, scope)
+            .iter()
+            .any(|port| port.name == input)
 }
 
 fn argument_ports(node: &Node, project: &Project, scope: Scope<'_>) -> Vec<Port> {

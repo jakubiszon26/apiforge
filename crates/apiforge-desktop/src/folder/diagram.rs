@@ -204,6 +204,7 @@ impl FolderApp {
         if !self.canvases.contains_key(document_id) {
             let canvas = self.new_canvas();
             self.canvases.insert(document_id.to_owned(), canvas);
+            self.show_checks_here(document_id);
         }
         let mode = self.workbench.mode;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
@@ -265,6 +266,14 @@ impl FolderApp {
         }
         for command in commands {
             self.board_command(document_id, &model, cleanup, snapshot.editable, command);
+        }
+        // What Back restores beside the board lasts as long as Back.
+        if !self
+            .canvases
+            .get(document_id)
+            .is_some_and(canvas::Canvas::has_back)
+        {
+            self.jump_views.remove(document_id);
         }
     }
 
@@ -377,8 +386,12 @@ impl FolderApp {
                     // document (LAY-11).
                     | Command::SetChecksCollapsed(_)
                     | Command::ShowChecks(_)
+                    | Command::ToggleChecksHere(_)
                     // Neither does the Wires setting (LAY-23).
                     | Command::SetWires(_)
+                    // A jump and Back are navigation (LAY-15).
+                    | Command::Jumped
+                    | Command::Back(_)
             )
         {
             return;
@@ -512,12 +525,42 @@ impl FolderApp {
                 self.show_checks(document_id, node);
                 None
             }
-            Command::InspectInput { node, input } => {
+            Command::ToggleChecksHere(node) => {
+                if let Some(step) = graph.nodes.iter().find(|step| step.id == node) {
+                    let chosen = self.checks_chosen(document_id, &step.handle);
+                    self.choose_checks_here(document_id, &step.handle, !chosen);
+                }
+                None
+            }
+            // The first jump on the board: what Back restores beside it.
+            Command::Jumped => {
+                let view = self.inspector.view(&self.ui_context);
+                self.jump_views.insert(document_id.to_owned(), view);
+                None
+            }
+            // Back: the selection and the Inspector as they were (LAY-15).
+            Command::Back(ids) => {
+                let view = self.jump_views.remove(document_id);
+                if !ids.is_empty() {
+                    self.new_inputs.remove(document_id);
+                    self.component_settings.remove(document_id);
+                }
+                if let (Some(view), [_]) = (view, ids.as_slice()) {
+                    self.inspector.restore(&self.ui_context, view);
+                }
+                self.selections.insert(document_id.to_owned(), ids);
+                self.selected_inputs.remove(document_id);
+                None
+            }
+            Command::InspectInput { node, input, path } => {
                 self.new_inputs.remove(document_id);
                 self.component_settings.remove(document_id);
                 self.selections.insert(document_id.to_owned(), vec![node]);
                 self.selected_inputs.remove(document_id);
-                self.inspector.focus_input(input);
+                match path {
+                    Some(path) => self.inspector.focus_field(input, path),
+                    None => self.inspector.focus_input(input),
+                }
                 None
             }
             Command::AddNode {
@@ -861,7 +904,7 @@ impl FolderApp {
         let expand_here = self
             .canvases
             .get(document_id)
-            .and_then(|canvas| canvas.expand_here_state(graph, in_cleanup, &node.id));
+            .and_then(|canvas| canvas.checks_here(graph, in_cleanup, &node.id));
         // Adopt fields the session changed before the inspector reads them.
         self.sync_field_drafts(document_id, &project_id);
         let mut close = false;
@@ -906,11 +949,10 @@ impl FolderApp {
         for action in actions {
             match action {
                 inspector::Action::Reveal(handle) => self.reveal_in_code(document_id, &handle),
-                // A view of this session, which changes no document.
-                inspector::Action::ExpandChecksHere(expanded) => {
-                    if let Some(canvas) = self.canvases.get_mut(document_id) {
-                        canvas.expand_here(&node.id, expanded);
-                    }
+                // A view kept on this computer, which changes no document
+                // (LAY-30).
+                inspector::Action::ExpandChecksHere(chosen) => {
+                    self.choose_checks_here(document_id, &node.handle, chosen);
                 }
                 _ if !snapshot.editable => {}
                 inspector::Action::UpdateNode(updated) => {
