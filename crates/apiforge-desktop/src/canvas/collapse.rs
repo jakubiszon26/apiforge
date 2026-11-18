@@ -107,6 +107,9 @@ pub struct Aggregate {
     /// board does not draw as cards (LAY-27): the numbers their badges would
     /// carry.
     pub numbers: Vec<usize>,
+    /// Mock (LAY-30 re-scoped): the predicate of the step's one check, as
+    /// its line writes it, the subject's own name left out.
+    pub single: Option<String>,
 }
 
 impl Aggregate {
@@ -154,7 +157,19 @@ impl Aggregate {
         if !self.numbers.is_empty() {
             parts.push(self.numbers_text());
         }
-        if self.checks > 0 {
+        if let Some(single) = self
+            .single
+            .as_ref()
+            .filter(|_| self.checks == 1 && self.gates == 0 && self.skipped == 0)
+        {
+            parts.push(if !self.run || self.waiting > 0 {
+                single.clone()
+            } else if self.failed > 0 {
+                format!("✕ {single}")
+            } else {
+                format!("✓ {single}")
+            });
+        } else if self.checks > 0 {
             if !self.run {
                 parts.push(plural(self.checks, "check"));
             } else if self.failed > 0 {
@@ -225,6 +240,8 @@ pub fn aggregates(
                 continue;
             }
             aggregate.checks += 1;
+            aggregate.single = (aggregate.checks == 1)
+                .then(|| mock_predicate(&graphs, check, subject.step));
             if folded.contains(check.id.as_str())
                 && let Some(number) = numbers.get(check.id.as_str())
             {
@@ -241,6 +258,54 @@ pub fn aggregates(
         }
     }
     result
+}
+
+/// Mock (LAY-30 re-scoped): a check as its subject's line writes it:
+/// `status == 409`, `body.items[0].id == first.body.id`.
+fn mock_predicate(graphs: &[&Graph], check: &Node, subject: &str) -> String {
+    use apiforge_core::{format::Binding, model::Predicate};
+    let operand = |name: &str| match check.inputs.get(name) {
+        Some(Binding::Reference {
+            node_id,
+            port,
+            path,
+        }) => {
+            let handle = graphs
+                .iter()
+                .flat_map(|graph| &graph.nodes)
+                .find(|node| &node.id == node_id)
+                .map_or("?", |node| node.handle.as_str());
+            [
+                if node_id == subject { "" } else { handle },
+                port.as_str(),
+                path.as_str(),
+            ]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(".")
+        }
+        Some(Binding::Literal { value }) => apiforge_core::js::json_stringify(value),
+        Some(_) => "…".to_owned(),
+        None => "?".to_owned(),
+    };
+    let predicate = apiforge_core::graph::predicate(check);
+    let sign = match predicate {
+        Predicate::Equals => "==",
+        Predicate::NotEquals => "!=",
+        Predicate::Greater => ">",
+        Predicate::Less => "<",
+        Predicate::Exists => "exists",
+        Predicate::NotEmpty => "nonempty",
+        Predicate::Contains => "contains",
+        Predicate::Type => "is",
+        Predicate::Approximately => "~=",
+    };
+    if predicate.takes_expected() {
+        format!("{} {sign} {}", operand("actual"), operand("expected"))
+    } else {
+        format!("{sign} {}", operand("actual"))
+    }
 }
 
 #[cfg(test)]
@@ -304,6 +369,7 @@ mod tests {
             gates: 0,
             run: true,
             numbers: Vec::new(),
+            single: None,
         }
     }
 

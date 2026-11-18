@@ -878,8 +878,242 @@ pub fn operator_combo(ui: &mut Ui, id: Id, value: &mut Operator) {
     widgets::named(combo.response, "Operator");
 }
 
+/// Mock (the staged source editor): set by the review view; the editor of
+/// `second.body.roomId` then shows a source chosen and not yet applied.
+pub static MOCK_STAGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn mock_staged() -> bool {
+    MOCK_STAGED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn ordinal(number: usize) -> String {
+    let suffix = match (number % 10, number % 100) {
+        (1, 11) | (2, 12) | (3, 13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{number}{suffix}")
+}
+
+/// Text with its code parts in the monospace face.
+fn mock_line(ui: &mut Ui, parts: &[(&str, bool)]) {
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = ui.available_width();
+    for (text, code) in parts {
+        job.append(
+            text,
+            0.0,
+            egui::TextFormat {
+                font_id: if *code {
+                    egui::FontId::monospace(11.5)
+                } else {
+                    egui::FontId::proportional(12.0)
+                },
+                color: theme::TEXT,
+                ..Default::default()
+            },
+        );
+    }
+    ui.label(job);
+}
+
+/// The mock's staged editor: the choice is shown, nothing is written; the
+/// summary is computed from the bindings and the static sequence.
 #[allow(clippy::too_many_arguments)]
 fn reference_editor(
+    ui: &mut Ui,
+    context: &Context<'_>,
+    port: &Port,
+    node_id: &mut String,
+    output: &mut String,
+    field: &mut String,
+    id: Id,
+) -> bool {
+    let handle = |id: &str| {
+        context
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .map_or_else(String::new, |node| node.handle.clone())
+    };
+    let staged = mock_staged()
+        && context.node.handle == "second"
+        && handle(node_id) == "rooms"
+        && field == "items[1].id";
+    if !staged {
+        return reference_editor_inner(ui, context, port, node_id, output, field, id);
+    }
+    let by_handle = |name: &str| context.graph.nodes.iter().find(|node| node.handle == name);
+    let (Some(old), Some(new)) = (by_handle("rooms"), by_handle("first")) else {
+        return false;
+    };
+    let (old_output, old_field) = (output.clone(), field.clone());
+    let (mut new_id, mut new_output, mut new_field) =
+        (new.id.clone(), old_output.clone(), "roomId".to_owned());
+    let sample = |node: &Node, output: &str, field: &str| {
+        response::source(node, output, context.project, context.run)
+            .value
+            .as_ref()
+            .and_then(|value| path::resolve(value, field).map(|value| value.into_owned()))
+            .map_or_else(
+                || "no sample".to_owned(),
+                |value| apiforge_core::js::json_stringify(&value),
+            )
+    };
+    let written = |node: &Node, output: &str, field: &str| {
+        let port = if output_ports(node, context.project).len() == 1 {
+            ""
+        } else {
+            output
+        };
+        [node.handle.as_str(), port, field]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(".")
+    };
+    ui.scroll_to_rect(
+        egui::Rect::from_min_size(ui.cursor().min - egui::vec2(0.0, 10.0), egui::vec2(10.0, 300.0)),
+        Some(egui::Align::Min),
+    );
+    egui::Frame::new()
+        .stroke(Stroke::new(1.5, theme::ACCENT))
+        .corner_radius(8.0)
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new("roomId · NEW SOURCE · NOT APPLIED YET")
+                    .size(10.5)
+                    .strong()
+                    .color(theme::ACCENT),
+            );
+            ui.add_space(2.0);
+            // The choice, held: the same controls, their values not written.
+            let _ = reference_editor_inner(
+                ui,
+                context,
+                port,
+                &mut new_id,
+                &mut new_output,
+                &mut new_field,
+                id,
+            );
+            ui.add_space(6.0);
+            let order = apiforge_core::graph::sequence(context.graph);
+            let place = |id: &str| order.iter().position(|step| *step == id).map(|at| at + 1);
+            let number = place(&context.node.id).unwrap_or_default();
+            let branch = context
+                .graph
+                .edges
+                .iter()
+                .find(|edge| edge.target == context.node.id && edge.branch.is_some())
+                .map(|edge| {
+                    format!(
+                        "{} → {}",
+                        handle(&edge.source),
+                        match edge.branch {
+                            Some(apiforge_core::model::Branch::False) => "No",
+                            _ => "Yes",
+                        }
+                    )
+                });
+            let readers: Vec<String> = context
+                .graph
+                .nodes
+                .iter()
+                .filter(|node| node.id != context.node.id)
+                .filter(|node| {
+                    !matches!(node.kind, apiforge_core::model::NodeKind::Assert | apiforge_core::model::NodeKind::Condition)
+                        && node
+                            .inputs
+                            .values()
+                            .any(|binding| binding.references_node(&old.id))
+                })
+                .map(|node| node.handle.clone())
+                .collect();
+            egui::Frame::new()
+                .fill(theme::ACCENT_SOFT)
+                .corner_radius(6.0)
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let new_text = written(new, &new_output, &new_field);
+                    let old_text = written(old, &old_output, &old_field);
+                    let new_sample = sample(new, &new_output, &new_field);
+                    let old_sample = sample(old, &old_output, &old_field);
+                    mock_line(
+                        ui,
+                        &[
+                            (&context.node.handle, true),
+                            (" · Body · ", false),
+                            ("roomId", true),
+                            (" will read ", false),
+                            (&new_text, true),
+                            (" (sample ", false),
+                            (&new_sample, true),
+                            (") instead of ", false),
+                            (&old_text, true),
+                            (" (sample ", false),
+                            (&old_sample, true),
+                            (").", false),
+                        ],
+                    );
+                    ui.add_space(3.0);
+                    mock_line(ui, &[("Only this field changes.", false)]);
+                    ui.add_space(3.0);
+                    let mut where_it_runs = vec![
+                        (context.node.handle.as_str(), true),
+                        (" still runs ", false),
+                    ];
+                    let nth = ordinal(number);
+                    where_it_runs.push((&nth, false));
+                    if let Some(branch) = &branch {
+                        where_it_runs.push((", in ", false));
+                        where_it_runs.push((branch, true));
+                    }
+                    if place(&new.id) < place(&context.node.id) {
+                        where_it_runs.push((", after ", false));
+                        where_it_runs.push((&new.handle, true));
+                    }
+                    where_it_runs.push((".", false));
+                    mock_line(ui, &where_it_runs);
+                    ui.add_space(3.0);
+                    if readers.is_empty() {
+                        mock_line(
+                            ui,
+                            &[(&old.handle, true), (" is no longer read by anything.", false)],
+                        );
+                    } else {
+                        let list = match readers.as_slice() {
+                            [one] => one.clone(),
+                            [most @ .., last] => format!("{} and {last}", most.join(", ")),
+                            [] => String::new(),
+                        };
+                        mock_line(
+                            ui,
+                            &[
+                                (&old.handle, true),
+                                (" is still read by ", false),
+                                (&list, true),
+                                (".", false),
+                            ],
+                        );
+                    }
+                });
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                let _ = ui.add(widgets::primary_button("Apply"));
+                let _ = ui.add(egui::Button::new("Cancel"));
+            });
+        });
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reference_editor_inner(
     ui: &mut Ui,
     context: &Context<'_>,
     port: &Port,

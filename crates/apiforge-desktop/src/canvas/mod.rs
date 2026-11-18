@@ -2060,6 +2060,7 @@ impl Canvas {
 
         // Each drawn step's badge, on screen: the arrows point into them.
         let mut badges: Vec<(String, Rect)> = Vec::new();
+        let mut mock_arrows: Vec<(Rect, bool)> = Vec::new();
         for card in &cards {
             let rect = camera.rect(card.rect());
             if !rect.intersects(overlays.board) {
@@ -2210,6 +2211,19 @@ impl Canvas {
             let aggregate = aggregates
                 .get(&card.id)
                 .filter(|aggregate| aggregate.checks + aggregate.gates > 0);
+            // Mock (LAY-30 re-scoped): the step's own switch at the end of
+            // its checks line; painted only.
+            if let (Some(_), Some(area)) = (aggregate, card.aggregate_area(camera.zoom)) {
+                let area = camera.rect(area);
+                let side = (area.height() - 4.0 * camera.zoom).min(16.0 * camera.zoom);
+                let button = Rect::from_center_size(
+                    egui::pos2(area.right() - 8.0 * camera.zoom - side * 0.5, area.center().y),
+                    vec2(side, side),
+                );
+                if area.intersects(overlays.board) {
+                    mock_arrows.push((button, self.expanded_here.contains(&card.id)));
+                }
+            }
             if let (Some(_), Some(area)) = (aggregate, card.aggregate_area(camera.zoom)) {
                 let area = camera.rect(area);
                 if area.intersects(overlays.board) {
@@ -2290,6 +2304,21 @@ impl Canvas {
             };
             if let Some(badge) = &drawn_card.badge {
                 badges.push((card.id.clone(), badge.rect));
+            }
+            for (button, open) in mock_arrows.drain(..) {
+                board_painter.rect(
+                    button.expand(2.0 * camera.zoom),
+                    3.0 * camera.zoom,
+                    theme::FIELD,
+                    Stroke::new(0.75, theme::BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                if open {
+                    Icon::ChevronDown
+                } else {
+                    Icon::ChevronRight
+                }
+                .paint(&board_painter, button, theme::TEXT);
             }
             #[cfg(test)]
             {
@@ -3961,6 +3990,30 @@ impl Canvas {
                             {
                                 commands.push(Command::TidyUp(input.selection.to_vec()));
                             }
+                            // Mock (LAY-30 re-scoped): the switch of the
+                            // checks on the bar; folded stays the default.
+                            if self.density_switch {
+                                let shown = !self.collapsed;
+                                if ui
+                                    .add(
+                                        widgets::action(
+                                            if shown { Icon::Eye } else { Icon::EyeOff },
+                                            "Checks",
+                                        )
+                                        .compact()
+                                        .quiet()
+                                        .toggle(shown),
+                                    )
+                                    .on_hover_text(if shown {
+                                        "Checks are shown as cards under their steps. Click to fold them into each step's line"
+                                    } else {
+                                        "Checks are folded into each step's line. Click to show them as cards"
+                                    })
+                                    .clicked()
+                                {
+                                    commands.push(Command::SetChecksCollapsed(shown));
+                                }
+                            }
                             widgets::action_menu(
                                 ui,
                                 // How the board draws, beside each other: wires, and
@@ -4030,7 +4083,7 @@ impl Canvas {
                                         }
                                         // Beside the density: what the board
                                         // draws of its checks (LAY-11).
-                                        if ui
+                                        if false && ui
                                             .add(
                                                 widgets::action(
                                                     if self.collapsed {

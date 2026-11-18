@@ -3,7 +3,7 @@
 //! The inspector edits a copy of the node and returns [`Action`]s; the application
 //! applies them as undoable edits.
 
-mod binding;
+pub(crate) mod binding;
 mod checks;
 pub mod drafts;
 mod fields;
@@ -880,6 +880,7 @@ fn argument(
         }
         egui::CollapsingHeader::new("Body value source")
             .id_salt(id.with("body-binding"))
+            .open(binding::mock_staged().then_some(true))
             .show(ui, |ui| {
                 changed |= binding::editor(ui, context, port, &mut value, 0, id);
             });

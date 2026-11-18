@@ -804,6 +804,13 @@ impl Pill {
                 .size()
         };
         let mut size = measure(&text);
+        // Mock: a predicate wider than the pill gives way to the count.
+        if size.x + 10.0 > card.width() - 10.0 && aggregate.single.is_some() {
+            let mut counted = aggregate.clone();
+            counted.single = None;
+            text = counted.text();
+            size = measure(&text);
+        }
         if size.x + 10.0 > card.width() - 10.0 && !aggregate.numbers.is_empty() {
             text = aggregate.numbers_text();
             size = measure(&text);
@@ -1646,11 +1653,53 @@ pub fn compact_card(
     // At Overview the checks pill under the name, or the numbers of the
     // folded checks on the name's row where it has no room (LAY-27).
     let aggregate_at_overview = aggregate.filter(|_| !legible);
-    let pill = name
+    // Mock (the Overview line): what the step is, one line at a fixed 9 px
+    // under the name — method and path, the call, the condition — where the
+    // card holds it; the card's box is as it was.
+    let what = name.filter(|_| !legible && z >= LABELS_FROM).and_then(|name| {
+        let row = compact.rows.iter().find(|row| {
+            matches!(
+                row.role,
+                CompactRole::Subtitle | CompactRole::Caption | CompactRole::Line
+            )
+        })?;
+        let text = if row.role == CompactRole::Caption {
+            // Placeholder: the mock names the room project's one component.
+            row.text.replacen("Component", "sign_in", 1)
+        } else {
+            row.text.split_whitespace().collect::<Vec<_>>().join(" ")
+        };
+        let font = FontId::monospace(9.0);
+        let height = clipped
+            .layout_no_wrap(text.clone(), font.clone(), theme::MUTED)
+            .size()
+            .y;
+        let area = Rect::from_min_max(
+            pos2(rect.left() + 5.0, name.bottom()),
+            pos2(rect.right() - 4.0, name.bottom() + height),
+        );
+        (area.bottom() <= rect.bottom() - 1.0).then_some((area, text, font))
+    });
+    let under_name = what
+        .as_ref()
+        .map(|(area, _, _)| area.bottom())
+        .or(name.map(|name| name.bottom()));
+    let pill = under_name
         .zip(aggregate_at_overview)
-        .and_then(|(name, aggregate)| {
-            Pill::layout(&clipped, rect, name.bottom() + 1.0, false, z, aggregate)
+        .and_then(|(top, aggregate)| {
+            Pill::layout(&clipped, rect, top + 1.0, false, z, aggregate)
         });
+    if let Some((area, text, font)) = &what {
+        drawn.label(
+            &clipped,
+            *area,
+            text,
+            TextKind::Line,
+            font.clone(),
+            theme::MUTED,
+            egui::Align::Min,
+        );
+    }
     let name = match (name, aggregate_at_overview) {
         (Some(row), Some(aggregate)) if pill.is_none() => Some(numbers_on_name_row(
             &clipped,
@@ -1677,7 +1726,7 @@ pub fn compact_card(
     let below = pill
         .as_ref()
         .map(|pill| pill.rect.bottom())
-        .or(name.map(|name| name.bottom()));
+        .or(under_name);
     if let (Some(pill), Some(aggregate)) = (pill, aggregate_at_overview) {
         pill.draw(&clipped, &mut drawn, aggregate);
     }

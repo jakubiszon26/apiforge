@@ -226,6 +226,7 @@ impl Memory {
                 boxes.push((text, near));
             }
         }
+        let kept_boxes = boxes.len();
         for (text, near) in listed.into_iter().chain(pointed) {
             if !boxes.iter().any(|(kept, _)| kept == text) {
                 boxes.push((text.clone(), *near));
@@ -236,8 +237,13 @@ impl Memory {
             self.boxes.clear();
             self.board = Some(board);
         }
-        for (text, near) in boxes {
-            let _shown = readers::paint_statement(painter, near, &text, board);
+        for (index, (text, near)) in boxes.into_iter().enumerate() {
+            // Mock: a statement kept by a click offers *Change source*.
+            let _shown = if index < kept_boxes {
+                readers::paint_statement_with_action(painter, near, &text, board)
+            } else {
+                readers::paint_statement(painter, near, &text, board)
+            };
             #[cfg(test)]
             self.boxes.push((text, _shown));
         }

@@ -1008,6 +1008,58 @@ pub fn paint_statement(painter: &Painter, near: Rect, text: &str, within: Rect) 
     rect
 }
 
+/// Mock (the staged source editor): a kept statement with *Change source*
+/// at its end; painted only. Returns the box.
+pub fn paint_statement_with_action(
+    painter: &Painter,
+    near: Rect,
+    text: &str,
+    within: Rect,
+) -> Rect {
+    let font = FontId::proportional(theme::FONT_META);
+    let galley = painter.layout_no_wrap(text.to_owned(), font.clone(), theme::TEXT);
+    let action = painter.layout_no_wrap("Change source".to_owned(), font, theme::ACCENT);
+    let icon = 11.0;
+    let size = vec2(
+        galley.size().x + 12.0 + 9.0 + icon + 4.0 + action.size().x + 8.0,
+        galley.size().y + 6.0,
+    );
+    let mut at = pos2(near.left(), near.top() - size.y - 4.0);
+    if at.y < within.top() {
+        at.y = near.bottom() + 4.0;
+    }
+    at.x = at.x.min(within.right() - size.x).max(within.left());
+    at.y = at.y.min(within.bottom() - size.y).max(within.top());
+    let rect = Rect::from_min_size(at, size);
+    painter.rect(
+        rect,
+        4.0,
+        theme::WHITE,
+        Stroke::new(1.0, theme::ACCENT),
+        StrokeKind::Inside,
+    );
+    let text_right = rect.left() + 6.0 + galley.size().x;
+    painter.galley(rect.min + vec2(6.0, 3.0), galley, theme::TEXT);
+    let divider = text_right + 6.0;
+    painter.line_segment(
+        [pos2(divider, rect.top() + 3.0), pos2(divider, rect.bottom() - 3.0)],
+        Stroke::new(1.0, theme::BORDER),
+    );
+    let button = Rect::from_min_max(pos2(divider + 1.0, rect.top() + 1.0), rect.max - vec2(1.0, 1.0));
+    painter.rect_filled(button, 3.0, theme::ACCENT_SOFT);
+    let icon_rect = Rect::from_min_size(
+        pos2(divider + 5.0, rect.center().y - icon / 2.0),
+        Vec2::splat(icon),
+    );
+    crate::icons::Icon::Wire.paint(painter, icon_rect, theme::ACCENT);
+    painter.galley(
+        pos2(icon_rect.right() + 4.0, rect.top() + 3.0),
+        action,
+        theme::ACCENT,
+    );
+    rect
+}
+
 #[cfg(test)]
 mod tests {
     //! LAY-37 review findings: a chip or a count placed anywhere its search
