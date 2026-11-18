@@ -106,7 +106,7 @@ action.
 | # | Flow | Pass when |
 | --- | --- | --- |
 | 1 | Start with no arguments | The managed project opens; no error on stderr |
-| 2 | Open a folder project | Explorer shows the tree; a scenario opens in Code |
+| 2 | Open a folder project | A scenario opens; in Diagram the first time on this computer (LAY-40), then in the view it was left in; the Files panel or Explorer shows the tree |
 | 3 | Add a block from the library panel | A card appears on the board and in the source |
 | 4 | Wire two blocks | The wire routes around cards; source updates |
 | 5 | Edit source, see the board | Board follows within 500 ms (the analysis pause is 250 ms, ADR 0007); invalid source holds the board |

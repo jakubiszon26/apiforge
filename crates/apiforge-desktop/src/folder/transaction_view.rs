@@ -248,7 +248,7 @@ impl FolderApp {
                 if self.session.is_some() {
                     self.request_switch(root);
                 } else {
-                    *self = Self::open(context, root);
+                    self.reopen(context, root);
                 }
                 return self.prompt.take();
             }

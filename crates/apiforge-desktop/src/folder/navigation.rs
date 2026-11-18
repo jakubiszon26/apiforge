@@ -377,6 +377,10 @@ impl FolderApp {
         // The switched-to session's placer holds this handle (LAY-02).
         next.card_density = self.card_density.clone();
         next.navigation.recent = self.navigation.recent.clone();
+        #[cfg(test)]
+        {
+            next.first_view = self.first_view;
+        }
         next.install_destination(destination);
         *self = next;
     }

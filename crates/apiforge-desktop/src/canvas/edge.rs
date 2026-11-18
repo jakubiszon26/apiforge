@@ -208,7 +208,7 @@ pub fn away(
         _ => None,
     };
     let sides = |wire: &super::routing::BoardWire, source: usize, target: usize| {
-        let (_, _, statement) = super::readers::texts(
+        let (_, statement) = super::readers::texts(
             board.graph,
             board.project,
             wire,

@@ -223,6 +223,21 @@ fn session_has(session: Option<&ProjectSession>, tab: &str) -> bool {
     })
 }
 
+/// The document a first open shows, with its kind: the first scenario by
+/// path, or the first document when there is no scenario.
+fn first_document(session: &ProjectSession) -> Option<(String, DocumentKind)> {
+    session
+        .documents()
+        .iter()
+        .min_by_key(|document| {
+            (
+                document.entry().kind != DocumentKind::Scenario,
+                document.entry().path.as_str(),
+            )
+        })
+        .map(|document| (document.id().to_owned(), document.entry().kind))
+}
+
 /// The bar's words for a followed commit: its first change, and how many
 /// more there were.
 fn describe_commit(changes: &[apiforge_project::CommitChange]) -> Option<String> {
@@ -260,6 +275,11 @@ pub struct FolderApp {
     /// The requested mode shown, and the folder's own, which is what the view
     /// state keeps while the requested one is still shown.
     shown_instead: Option<(Mode, Mode)>,
+    /// The view a project with no stored view starts in, in place of the
+    /// one LAY-40 chooses; set only by the shared test harnesses, and kept
+    /// when the window reopens or switches its project.
+    #[cfg(test)]
+    first_view: Option<Mode>,
     analyser: Analyser,
     watcher: Watcher,
     explorer: ExplorerState,
@@ -515,7 +535,8 @@ impl FolderApp {
             survey: Vec::new(),
             new_name: String::new(),
             open_error: None,
-            workbench: Workbench::restore(None, |_| false),
+            // An empty window has no board: no first document, so Code.
+            workbench: Workbench::restore(None, None, |_| false),
             saved_view: None,
             mode_request: None,
             shown_instead: None,
@@ -585,6 +606,8 @@ impl FolderApp {
             run_mode: crate::run_mode::RunModeStore::load(),
             follow: follow::Follow::default(),
             #[cfg(test)]
+            first_view: None,
+            #[cfg(test)]
             lines_in_view: None,
             #[cfg(test)]
             marks_clock: None,
@@ -599,29 +622,40 @@ impl FolderApp {
         app
     }
 
+    /// Replaces this window with one opening `root` afresh.
+    fn reopen(&mut self, context: &egui::Context, root: PathBuf) {
+        #[cfg(test)]
+        let first_view = self.first_view;
+        *self = Self::open(context, root);
+        #[cfg(test)]
+        {
+            self.first_view = first_view;
+        }
+    }
+
     fn install(&mut self, session: ProjectSession, state: Option<WorkspaceState>) {
-        let first_open = state.is_none();
-        self.workbench = Workbench::restore(state.clone(), |id| {
-            session.document(id).is_some() || id.starts_with(TEXT_TAB)
-        });
+        // A project opened for the first time on this computer shows its
+        // first scenario, in Diagram (LAY-40); a project without one shows
+        // its first document, in Code.
+        let first = state.is_none().then(|| first_document(&session)).flatten();
+        self.workbench =
+            Workbench::restore(state.clone(), first.as_ref().map(|(_, kind)| *kind), |id| {
+                session.document(id).is_some() || id.starts_with(TEXT_TAB)
+            });
+        #[cfg(test)]
+        if state.is_none()
+            && let Some(mode) = self.first_view
+        {
+            self.workbench.mode = mode;
+        }
         self.saved_view = state;
         self.shown_instead = None;
         if let Some(mode) = self.mode_request.take() {
             self.shown_instead = Some((mode, self.workbench.mode));
             self.workbench.mode = mode;
         }
-        // A project opened for the first time shows its first scenario.
-        if first_open {
-            let mut documents: Vec<_> = session.documents().iter().collect();
-            documents.sort_by_key(|document| {
-                (
-                    document.entry().kind != DocumentKind::Scenario,
-                    document.entry().path.as_str().to_owned(),
-                )
-            });
-            if let Some(document) = documents.first() {
-                self.activate_tab(document.id());
-            }
+        if let Some((id, _)) = first {
+            self.activate_tab(&id);
         }
         // Unsaved work comes back with its own caret.
         for document in session.documents() {
@@ -692,6 +726,15 @@ impl FolderApp {
     /// for `--screenshot --mode` (KTLO-08).
     pub fn request_mode(&mut self, mode: Mode) {
         self.mode_request = Some(mode);
+    }
+
+    /// Makes every project this window opens with no stored view start in
+    /// `mode` instead of the view LAY-40 chooses, as a stored view would.
+    /// The shared test harnesses pin Code, the first view the tests that are
+    /// not about the first view were written against.
+    #[cfg(test)]
+    pub(crate) fn pin_first_view(&mut self, mode: Mode) {
+        self.first_view = Some(mode);
     }
 
     pub fn has_document(&self) -> bool {
@@ -1258,7 +1301,7 @@ impl FolderApp {
                         self.review_transaction(self.root.clone());
                     }
                     if ui.button("Try opening again").clicked() {
-                        *self = Self::open(&self.ui_context.clone(), self.root.clone());
+                        self.reopen(&self.ui_context.clone(), self.root.clone());
                     }
                     return;
                 }

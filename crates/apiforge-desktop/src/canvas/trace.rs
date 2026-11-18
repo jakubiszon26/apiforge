@@ -360,7 +360,7 @@ impl Trace {
                 }
             };
             let statement = node.map_or_else(String::new, |node| {
-                readers::texts(board.graph, board.project, wire, &target.id, node, None).2
+                readers::texts(board.graph, board.project, wire, &target.id, node, None).1
             });
             wires.insert(
                 id.clone(),
