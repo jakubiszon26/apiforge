@@ -54,7 +54,7 @@ project at Fit, 1280 × 800, in
 | --- | --- |
 | `double-booking` as it first opens, library open, 36 %: `sign_in · r1`, `GET /rooms`, `POST /bookings` twice, `first.status is…`, `GET /rooms/{{ro…`; `slot` and `begin` have no line | [lay41-overview-first-open](../qa/2026-11-18/LAY-41/lay41-overview-first-open.png) |
 | The same with the library folded, 45 % on the label and still Overview: `slot` now has room for `{ start: "2026-12-01…` | [lay41-overview-library-folded](../qa/2026-11-18/LAY-41/lay41-overview-library-folded.png) |
-| `booking-day`, 29 steps, 36 %: sixteen requests named by method and path | [lay41-overview-booking-day](../qa/2026-11-18/LAY-41/lay41-overview-booking-day.png) |
+| `booking-day`, 29 steps, 36 %: fourteen requests named by method and path | [lay41-overview-booking-day](../qa/2026-11-18/LAY-41/lay41-overview-booking-day.png) |
 
 The captures also carry LAY-30's pill (`9 · status == 409`) and bar
 button; they are not part of this ticket. The mock-up writes the
