@@ -2,6 +2,7 @@
 //! shows. Pure state, so the mode and tab rules are tested without a window.
 //! Switching a mode or a tab never saves, closes or resets a document.
 
+use apiforge_project::DocumentKind;
 use apiforge_storage::project::{
     DEFAULT_LIBRARY_WIDTH, PanelSizes, TabState, TextSelection, WorkspaceState,
 };
@@ -30,11 +31,24 @@ pub struct Workbench {
 
 impl Workbench {
     /// The folder's last view, without tabs of documents that no longer exist.
-    /// A project without one starts in Code.
-    pub fn restore(state: Option<WorkspaceState>, exists: impl Fn(&str) -> bool) -> Self {
+    ///
+    /// A project without one, never opened on this computer, starts in the
+    /// view of the document its first open shows, of kind `first`: Diagram
+    /// for a scenario, Code for a component, and Code when there is no
+    /// document, as in a new project or the empty window before a project
+    /// is loaded (LAY-40, owner decision #296 Q8 = A). A stored view always
+    /// wins, Code included.
+    pub fn restore(
+        state: Option<WorkspaceState>,
+        first: Option<DocumentKind>,
+        exists: impl Fn(&str) -> bool,
+    ) -> Self {
         let Some(state) = state else {
             return Self {
-                mode: Mode::Code,
+                mode: match first {
+                    Some(DocumentKind::Scenario) => Mode::Diagram,
+                    Some(DocumentKind::Component) | None => Mode::Code,
+                },
                 tabs: Vec::new(),
                 active: None,
                 panels: DEFAULT_PANELS,
@@ -193,7 +207,7 @@ mod tests {
     use super::*;
 
     fn opened(ids: &[&str]) -> Workbench {
-        let mut workbench = Workbench::restore(None, |_| true);
+        let mut workbench = Workbench::restore(None, None, |_| true);
         for id in ids {
             workbench.open(id);
         }
@@ -209,9 +223,40 @@ mod tests {
     }
 
     #[test]
+    fn a_first_open_of_a_scenario_starts_in_diagram() {
+        let workbench = Workbench::restore(None, Some(DocumentKind::Scenario), |_| true);
+        assert_eq!(workbench.mode, Mode::Diagram);
+    }
+
+    #[test]
+    fn a_first_open_without_a_scenario_starts_in_code() {
+        for first in [Some(DocumentKind::Component), None] {
+            let workbench = Workbench::restore(None, first, |_| true);
+            assert_eq!(workbench.mode, Mode::Code, "first document {first:?}");
+        }
+    }
+
+    #[test]
+    fn a_stored_view_wins_over_the_first_view() {
+        for mode in [Mode::Code, Mode::Diagram, Mode::Split] {
+            let mut workbench = opened(&["a"]);
+            workbench.mode = mode;
+            let state = workbench.state("project");
+            for first in [
+                Some(DocumentKind::Scenario),
+                Some(DocumentKind::Component),
+                None,
+            ] {
+                let restored = Workbench::restore(Some(state.clone()), first, |_| true);
+                assert_eq!(restored.mode, mode, "stored {mode:?}, first {first:?}");
+            }
+        }
+    }
+
+    #[test]
     fn ctrl_e_swaps_code_and_diagram_and_leaves_split_for_code() {
         let mut workbench = opened(&[]);
-        assert_eq!(workbench.mode, Mode::Code, "a new project starts in Code");
+        assert_eq!(workbench.mode, Mode::Code);
         workbench.toggle();
         assert_eq!(workbench.mode, Mode::Diagram);
         workbench.toggle();
@@ -274,11 +319,11 @@ mod tests {
         };
         workbench.open("c");
         let state = workbench.state("project");
-        let restored = Workbench::restore(Some(state.clone()), |id| id != "c");
+        let restored = Workbench::restore(Some(state.clone()), None, |id| id != "c");
         assert_eq!(restored.mode, Mode::Split, "the folder's last mode");
         assert_eq!(order(&restored), ["a", "b"]);
         assert_eq!(restored.active(), Some("a"), "the active document is gone");
         assert_eq!(restored.tabs()[1].selection, state.tabs[1].selection);
-        assert_eq!(Workbench::restore(Some(state), |_| true), workbench);
+        assert_eq!(Workbench::restore(Some(state), None, |_| true), workbench);
     }
 }

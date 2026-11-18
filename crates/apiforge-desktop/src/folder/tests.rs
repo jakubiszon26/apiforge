@@ -80,9 +80,12 @@ fn shop() -> tempfile::TempDir {
     directory
 }
 
+/// Opens the folder; a project with no stored view starts in the shared
+/// harnesses' [`crate::testing::FIRST_VIEW`].
 fn open(root: &std::path::Path) -> (egui::Context, FolderApp) {
     let context = egui::Context::default();
     let mut app = FolderApp::open(&context, root.to_owned());
+    app.pin_first_view(crate::testing::FIRST_VIEW);
     wait_storage(&mut app, &context);
     frame(&mut app, &context, vec![]);
     (context, app)
