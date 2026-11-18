@@ -33,7 +33,7 @@ use super::{
 };
 use crate::theme;
 use apiforge_core::format::{Graph, Project};
-use eframe::egui::{self, Color32, Painter, Pos2, Rect, Sense, Ui, vec2};
+use eframe::egui::{self, Color32, Painter, Pos2, Rect, Sense, Ui, pos2, vec2};
 use std::collections::{HashMap, HashSet};
 
 /// Where a kept statement stands.
@@ -167,6 +167,17 @@ impl Memory {
         self.kept.push((wires, at));
     }
 
+    /// Where the statement of each click kept stands, for *Back* to restore
+    /// (LAY-15).
+    pub fn anchors(&self) -> Vec<(Vec<String>, Anchor)> {
+        self.kept.clone()
+    }
+
+    /// Puts back the statements' places `anchors` remembered (LAY-15).
+    pub fn restore(&mut self, anchors: Vec<(Vec<String>, Anchor)>) {
+        self.kept = anchors;
+    }
+
     /// A click on a chip keeps its wires, or with `add` (Ctrl+click) adds
     /// them to the wires kept, or takes them away when they are all kept.
     pub fn keep_chip(&mut self, selected: &mut Vec<String>, wires: &[String], add: bool) {
@@ -187,9 +198,10 @@ impl Memory {
     /// Paints the statement of what is pointed at (`pointed`, from a chip, a
     /// count, a row or a line), the statement of each click kept and the list
     /// of the count clicked (`listed`, LAY-18), every box whole inside
-    /// `board`. With `editable`, a kept statement's line ends with *Change
-    /// source* where its field allows it, on `ui`; returns the field whose
-    /// button was clicked (LAY-42).
+    /// `board` and clear of `taken`: *Back* and the edge chips (LAY-15).
+    /// With `editable`, a kept statement's line ends with *Change source*
+    /// where its field allows it, on `ui`; returns the field whose button
+    /// was clicked (LAY-42).
     #[allow(clippy::too_many_arguments)]
     pub fn paint(
         &mut self,
@@ -202,6 +214,7 @@ impl Memory {
         listed: Option<&(String, Rect)>,
         tags: &[readers::Tag],
         laid: &[readers::Laid],
+        taken: &[Rect],
         editable: bool,
     ) -> Option<Field> {
         self.kept
@@ -269,12 +282,13 @@ impl Memory {
                 .map(|(_, lines)| lines.clone())
                 .filter(|lines| editable && lines.iter().any(Option::is_some))
                 .unwrap_or_default();
+            let within = clear_of(painter, near, &text, board, taken, !lines.is_empty());
             let _shown = if lines.is_empty() {
-                readers::paint_statement(painter, near, &text, board)
+                readers::paint_statement(painter, near, &text, within)
             } else {
                 let actions: Vec<bool> = lines.iter().map(Option::is_some).collect();
                 let (shown, buttons) =
-                    readers::paint_statement_actions(painter, near, &text, &actions, board);
+                    readers::paint_statement_actions(painter, near, &text, &actions, within);
                 for (field, button) in lines.into_iter().zip(buttons) {
                     let (Some(field), Some(button)) = (field, button) else {
                         continue;
@@ -301,6 +315,49 @@ impl Memory {
         }
         clicked
     }
+}
+
+/// Where a statement at `near` stands as `readers::paint_statement` places
+/// it inside `within`, wider by *Change source* with `actions` (LAY-42).
+fn statement_box(painter: &Painter, near: Rect, text: &str, within: Rect, actions: bool) -> Rect {
+    let size = readers::statement_size(painter, text, actions);
+    let mut at = pos2(near.left(), near.top() - size.y - 4.0);
+    if at.y < within.top() {
+        at.y = near.bottom() + 4.0;
+    }
+    at.x = at.x.min(within.right() - size.x).max(within.left());
+    at.y = at.y.min(within.bottom() - size.y).max(within.top());
+    Rect::from_min_size(at, size)
+}
+
+/// The part of `board` a statement at `near` is placed in so that it keeps
+/// clear of `taken`: where it would stand under one of them, it stands
+/// below it, or above it where there is no room below (LAY-15).
+fn clear_of(
+    painter: &Painter,
+    near: Rect,
+    text: &str,
+    board: Rect,
+    taken: &[Rect],
+    actions: bool,
+) -> Rect {
+    let mut within = board;
+    for _ in 0..8 {
+        let shown = statement_box(painter, near, text, within, actions);
+        let Some(over) = taken.iter().find(|rect| rect.expand(2.0).intersects(shown)) else {
+            break;
+        };
+        let below = Rect::from_min_max(pos2(within.left(), over.bottom() + 4.0), within.max);
+        let above = Rect::from_min_max(within.min, pos2(within.right(), over.top() - 4.0));
+        within = if below.height() >= shown.height() {
+            below
+        } else if above.height() >= shown.height() {
+            above
+        } else {
+            break;
+        };
+    }
+    within
 }
 
 impl Trace {

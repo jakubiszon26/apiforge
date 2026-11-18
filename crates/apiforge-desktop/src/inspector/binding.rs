@@ -1276,7 +1276,7 @@ fn reference_controls(
             changed = true;
         }
     }
-    egui::CollapsingHeader::new(RichText::new("Edit path manually").size(11.0))
+    let shown = egui::CollapsingHeader::new(RichText::new("Edit path manually").size(11.0))
         .id_salt(id.with("manual-path"))
         .show(ui, |ui| {
             changed |= widgets::named(
@@ -1290,6 +1290,7 @@ fn reference_controls(
             )
             .changed();
         });
+    super::section(ui, "manual-path", &shown.header_response);
     if field.is_empty()
         && let Some(output_port) = outputs.iter().find(|candidate| &candidate.name == output)
         && !compatible(output_port, port)
