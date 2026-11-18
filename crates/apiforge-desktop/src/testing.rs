@@ -81,6 +81,13 @@ pub fn folder_harness_in(root: &Path, size: egui::Vec2, mode: Mode) -> FolderHar
     folder_harness_with(root, size, 1.0, Some(mode))
 }
 
+/// The folder window as a person's first open of a project shows it: the
+/// view the application chooses for a project with no stored view (LAY-40),
+/// with `request` asked for at startup as `--mode` asks.
+pub fn first_open_harness(root: &Path, size: egui::Vec2, request: Option<Mode>) -> FolderHarness {
+    folder_harness_with(root, size, 1.0, request)
+}
+
 fn folder_harness_with(
     root: &Path,
     size: egui::Vec2,
