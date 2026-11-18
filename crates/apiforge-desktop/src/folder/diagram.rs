@@ -266,6 +266,14 @@ impl FolderApp {
         for command in commands {
             self.board_command(document_id, &model, cleanup, snapshot.editable, command);
         }
+        // What Back restores beside the board lasts as long as Back.
+        if !self
+            .canvases
+            .get(document_id)
+            .is_some_and(canvas::Canvas::has_back)
+        {
+            self.jump_views.remove(document_id);
+        }
     }
 
     /// The values of `model` worth a variable, from the cache while the
@@ -379,6 +387,9 @@ impl FolderApp {
                     | Command::ShowChecks(_)
                     // Neither does the Wires setting (LAY-23).
                     | Command::SetWires(_)
+                    // A jump and Back are navigation (LAY-15).
+                    | Command::Jumped
+                    | Command::Back(_)
             )
         {
             return;
@@ -510,6 +521,26 @@ impl FolderApp {
             }
             Command::ShowChecks(node) => {
                 self.show_checks(document_id, node);
+                None
+            }
+            // The first jump on the board: what Back restores beside it.
+            Command::Jumped => {
+                let view = self.inspector.view(&self.ui_context);
+                self.jump_views.insert(document_id.to_owned(), view);
+                None
+            }
+            // Back: the selection and the Inspector as they were (LAY-15).
+            Command::Back(ids) => {
+                let view = self.jump_views.remove(document_id);
+                if !ids.is_empty() {
+                    self.new_inputs.remove(document_id);
+                    self.component_settings.remove(document_id);
+                }
+                if let (Some(view), [_]) = (view, ids.as_slice()) {
+                    self.inspector.restore(&self.ui_context, view);
+                }
+                self.selections.insert(document_id.to_owned(), ids);
+                self.selected_inputs.remove(document_id);
                 None
             }
             Command::InspectInput { node, input } => {

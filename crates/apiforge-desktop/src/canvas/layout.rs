@@ -598,6 +598,17 @@ impl Card {
         Rect::from_min_size(self.origin, vec2(WIDTH, self.height()))
     }
 
+    /// The card's header row, on the board: its name and what it does
+    /// (LAY-15 counts a card as in view while this row is).
+    pub fn header_rect(&self) -> Rect {
+        let height = if self.compact.is_some() {
+            COMPACT_HEADER
+        } else {
+            self.header_height()
+        };
+        Rect::from_min_size(self.origin, vec2(WIDTH, height.min(self.height())))
+    }
+
     pub fn input_row_top(&self, index: usize) -> f32 {
         self.header_height() + index as f32 * INPUT_ROW
     }
