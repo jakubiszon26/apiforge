@@ -410,6 +410,14 @@ fn assert_numbers_below_45(harness: &FolderHarness, context: &str) -> Seen {
                     "{context}, {id}: the numbers alone only when {full:?} is wider than \
                      the card"
                 );
+            } else if pill.text != full && pill.text.ends_with("1 check") {
+                // A written check gives way to the count where it is wider
+                // than the card (LAY-30).
+                assert!(
+                    width(harness, &full, size.clone()) + 10.0 > card.width() - 10.0,
+                    "{context}, {id}: the count for {full:?} only when it is wider than the card"
+                );
+                assert!(pill.text.starts_with(&format!("{numbers} · ")));
             } else {
                 assert_eq!(pill.text, full, "{context}, {id}: the pill reads the line");
                 assert!(full.starts_with(&format!("{numbers} · ")));
@@ -446,19 +454,28 @@ fn lay27_criterion_2_far_value_names_its_folded_checks() {
         (7, 19, 21, 23),
         "the engine's order"
     );
-    assert_eq!(line(&harness, "quantity"), "7 · 1 check");
+    // A step with one check writes it (LAY-30); a Data condition is
+    // counted.
+    assert_eq!(line(&harness, "quantity"), "7 · status == 200");
     assert_eq!(line(&harness, "checkout"), "21, 23 · 2 checks");
     assert_eq!(line(&harness, "lookup"), "23 · 1 check");
-    // `same_item` compares `view` with `cart`'s product: under both.
-    assert_eq!(line(&harness, "cart"), "19 · 1 check");
-    assert_eq!(line(&harness, "view"), "19 · 1 check");
+    // `same_item` compares `view` with `cart`'s product: under both, each
+    // leaving out its own name.
+    assert_eq!(
+        line(&harness, "cart"),
+        "19 · view.body.items[0].id == productId"
+    );
+    assert_eq!(
+        line(&harness, "view"),
+        "19 · body.items[0].id == cart.productId"
+    );
     let lines: Vec<String> = in_view(&harness)
         .into_iter()
         .flat_map(|(_, _, texts)| texts)
         .filter(|text| text.kind == TextKind::Result)
         .map(|text| text.text)
         .collect();
-    for written in ["7 · 1 check", "21, 23 · 2 checks", "23 · 1 check"] {
+    for written in ["7 · status == 200", "21, 23 · 2 checks", "23 · 1 check"] {
         assert!(
             lines.iter().any(|line| line == written),
             "{written} is on the board: {lines:?}"
@@ -479,9 +496,10 @@ fn lay27_criterion_3_ranges_branches_and_two_subjects() {
     assert!(login.contains('–'), "a range: {login}");
     assert_eq!(line(&harness, "login"), format!("{login} · 2 checks"));
     let receipt_total = order["receipt_total"];
+    // Its one check is written out (LAY-30).
     assert_eq!(
         line(&harness, "receipt"),
-        format!("{receipt_total} · 1 check")
+        format!("{receipt_total} · body.total ~= cart.body.total within 0.01")
     );
     assert_eq!(
         line(&harness, "cart"),
@@ -603,7 +621,7 @@ fn lay27_criterion_5_the_cleanup_board_numbers_from_one() {
         .id;
     assert_eq!(
         canvas(&harness).debug_aggregate(removed).as_deref(),
-        Some("2 · 1 check")
+        Some("2 · status == 204")
     );
     assert_eq!(
         canvas(&harness)

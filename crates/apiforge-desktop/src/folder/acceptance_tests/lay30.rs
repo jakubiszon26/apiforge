@@ -212,6 +212,8 @@ fn lay30_criterion_2_the_run_marks_the_written_check() {
     let project = room_project(DOUBLE, accepted);
     let (mut harness, id) = open_in(project.path(), DOUBLE, SIZE);
     simulate(&mut harness);
+    // In view, so that its card is drawn.
+    show(&mut harness, &id, "second", 1.0);
     assert_eq!(line(&harness, &id, "second"), "9 · ✕ status == 409");
     assert!(marked(&harness, &id, "second"), "second's footer is red");
     assert_eq!(
@@ -462,7 +464,10 @@ fn lay30_criterion_6_a_step_shows_or_folds_its_own_checks() {
     // And with the board folded, the other direction.
     app(&mut harness).selections.insert(id.clone(), Vec::new());
     settle(&mut harness);
+    // The Inspector closes and the bar moves with the board's edge.
+    crate::testing::quiesce(&mut harness);
     click(&mut harness, CHECKS);
+    assert!(board(&harness, &id).debug_collapsed());
     show(&mut harness, &id, "second", 1.0);
     click(&mut harness, "Checks of second");
     assert!(!pressed(&harness, "Expand checks here"));
@@ -712,26 +717,48 @@ fn lay30_criterion_9_a_folded_failure_is_red_and_a_gate_stays() {
     assert!(!hidden(&harness, &id, "open_rooms"), "the gate stays drawn");
 }
 
-/// The captures of the pull request, at 1280 × 800 on the room project:
-/// at rest, passed, failed and one step opened.
+/// The board of `double-booking` as the mock-up shows it: the library
+/// folded, the whole board readable at 56 %.
+fn as_mocked(harness: &mut FolderHarness, id: &str) {
+    app(harness).workbench.panels.library_collapsed = true;
+    settle(harness);
+    show(harness, id, "rooms", 0.56);
+    app(harness)
+        .canvases
+        .get_mut(id)
+        .expect("the board")
+        .debug_pan(egui::vec2(140.0, -85.0));
+    settle(harness);
+    harness.step();
+}
+
+/// A simulation, its results folded to their bar: the views are of the
+/// board.
+fn simulate_folded(harness: &mut FolderHarness) {
+    simulate(harness);
+    choose(harness, "Run results");
+    settle(harness);
+    harness.step();
+}
+
+/// The captures of the pull request, at 1280 × 800 on the room project, as
+/// the accepted mock-up shows them: at rest, passed, failed, and `second`'s
+/// checks opened after a passing run.
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_lay30_checks_line() {
     let (_project, mut harness, id) = open(DOUBLE);
-    choose(&mut harness, "Fit the view");
-    harness.step();
-    show(&mut harness, &id, "second", 0.56);
-    crate::testing::capture(&mut harness, "lay30-line-at-rest", None);
-    simulate(&mut harness);
-    crate::testing::capture(&mut harness, "lay30-line-passed", None);
+    as_mocked(&mut harness, &id);
+    crate::testing::capture(&mut harness, "lay30-built-at-rest", None);
+    simulate_folded(&mut harness);
+    as_mocked(&mut harness, &id);
+    crate::testing::capture(&mut harness, "lay30-built-passed", None);
     click(&mut harness, "Expand checks of second");
-    crate::testing::capture(&mut harness, "lay30-step-open", None);
+    crate::testing::capture(&mut harness, "lay30-built-step-open", None);
 
     let project = room_project(DOUBLE, accepted);
     let (mut harness, id) = open_in(project.path(), DOUBLE, SIZE);
-    choose(&mut harness, "Fit the view");
-    harness.step();
-    show(&mut harness, &id, "second", 0.56);
-    simulate(&mut harness);
-    crate::testing::capture(&mut harness, "lay30-line-failed", None);
+    simulate_folded(&mut harness);
+    as_mocked(&mut harness, &id);
+    crate::testing::capture(&mut harness, "lay30-built-failed", None);
 }

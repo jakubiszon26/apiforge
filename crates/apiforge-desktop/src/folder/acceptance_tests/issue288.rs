@@ -113,7 +113,7 @@ fn assert_selection_changes_nothing(source: &str, what: &str, least: usize) {
                     .selections
                     .insert(id.clone(), vec![node.clone()]);
                 settle(&mut harness);
-                if let Some(button) = harness.query_by_label(tab) {
+                if let Some(button) = super::inspector_tab(&harness, tab) {
                     button.click();
                     settle(&mut harness);
                 } else {

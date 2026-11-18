@@ -19,12 +19,22 @@ use std::fs;
 // (KTLO-44): a ticket's window tests are a new file there and nothing else.
 include!(concat!(env!("OUT_DIR"), "/acceptance_modules.rs"));
 
-/// Opens the Inspector's *Checks* tab. The board's bar has a *Checks*
-/// switch too (LAY-30); the tab is the one in the Inspector, right of it.
-pub(super) fn open_checks_tab(harness: &mut FolderHarness) {
+/// The Inspector's tab `label`, if it has one. The board's bar has a
+/// *Checks* switch too (LAY-30): the tab is the one right of the Inspector's
+/// edge.
+pub(super) fn inspector_tab<'a>(
+    harness: &'a FolderHarness,
+    label: &'a str,
+) -> Option<egui_kittest::Node<'a>> {
+    let edge = harness.query_by_label("Resize inspector")?.rect().left();
     harness
-        .query_all_by_label("Checks")
-        .max_by(|a, b| a.rect().left().total_cmp(&b.rect().left()))
+        .query_all_by_label(label)
+        .find(|node| node.rect().left() > edge)
+}
+
+/// Opens the Inspector's *Checks* tab.
+pub(super) fn open_checks_tab(harness: &mut FolderHarness) {
+    inspector_tab(harness, "Checks")
         .expect("the Inspector has a Checks tab")
         .click();
     settle(harness);
