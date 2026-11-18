@@ -72,13 +72,18 @@ pub struct Tag {
     pub port: String,
     pub input: String,
     pub path: Vec<String>,
-    /// What the chip says: the variable's name, or the step and the last
-    /// field it reads (`login.token`).
+    /// What the chip says where it has room: the variable's name, or the
+    /// step and the last field it reads (`login.token`), its index kept
+    /// (`rooms…[1].id`, LAY-39). The first of `forms`.
     pub text: String,
-    /// The source step alone, for a zoom where the text has no room; for a
-    /// variable, the number of its card's badge (`7`, LAY-07), so that the
-    /// chip still points at it (LAY-25).
-    pub short: String,
+    /// Every text the chip may say, widest first; where none fits, the
+    /// arrow alone. A step's read: the step and its last field, then the
+    /// step (`login.token`, `login`); through a list element, the step, the
+    /// last index and the field after it, then the step and the index, then
+    /// the index alone (`rooms…[1].id`, `rooms…[1]`, `…[1]`, LAY-39). A
+    /// variable: its name, then the number of its card's badge (`7`,
+    /// LAY-07), so that the chip still points at it (LAY-25).
+    pub forms: Vec<String>,
     /// The whole reference, `cartId → checkout.body.cartId`: the chip's
     /// accessible name and what pointing at it shows.
     pub statement: String,
@@ -239,8 +244,91 @@ fn fields(binding: Option<&Binding>, path: &[String]) -> Vec<String> {
     fields
 }
 
-/// What a chip says, its shorter form, and the reference written whole.
-/// `number` is the source's place in the engine's order, its badge.
+/// The last index of a path, `[n]`, with what stands before it and after
+/// it: `items[1].id` → (`items`, `[1]`, `.id`). A quoted key (`["[2]"]`) is
+/// not an index.
+fn last_index(path: &str) -> Option<(&str, &str, &str)> {
+    let bytes = path.as_bytes();
+    let mut found = None;
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'"' => {
+                // A quoted key, to its closing quote.
+                at += 1;
+                while at < bytes.len() && bytes[at] != b'"' {
+                    at += if bytes[at] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'[' => {
+                let digits = bytes[at + 1..]
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_digit())
+                    .count();
+                if digits > 0 && bytes.get(at + 1 + digits) == Some(&b']') {
+                    found = Some((at, at + digits + 2));
+                    at += digits + 1;
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    found.map(|(start, end)| (&path[..start], &path[start..end], &path[end..]))
+}
+
+/// What the chip of a step's read may say, widest first: the step and the
+/// last field of `path` (`port` where the path is empty), then the step.
+/// Through a list element the last index is kept (LAY-39): the step, `…`
+/// where something between it and the index is left out (`port_named`, or
+/// a path before the index), the index and what follows it; then the step
+/// and the index; then the index alone.
+fn step_forms(step: &str, port: &str, port_named: bool, path: &str) -> Vec<String> {
+    let mut forms = match last_index(path) {
+        Some((before, index, after)) => {
+            let left_out = if port_named || !before.is_empty() {
+                "…"
+            } else {
+                ""
+            };
+            vec![
+                format!("{step}{left_out}{index}{after}"),
+                format!("{step}{left_out}{index}"),
+                format!("…{index}"),
+            ]
+        }
+        None => {
+            let last = path.rsplit('.').next().filter(|last| !last.is_empty());
+            vec![format!("{step}.{}", last.unwrap_or(port)), step.to_owned()]
+        }
+    };
+    forms.dedup();
+    forms
+}
+
+/// What the chip of a variable may say: its name, else the number on its
+/// card, never the bare arrow while a number fits (LAY-25).
+fn variable_forms(handle: &str, number: Option<usize>) -> Vec<String> {
+    let mut forms = vec![handle.to_owned()];
+    forms.extend(number.map(|number| number.to_string()));
+    forms
+}
+
+/// The reference written whole, as the code writes it, and its reader:
+/// `rooms.body.items[1].id → second.body.roomId`. `port` is empty where the
+/// code names the source without it.
+fn statement(source: &str, port: &str, path: &str, target: &str) -> String {
+    let whole = [source, port, path]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(".");
+    format!("{whole} → {target}")
+}
+
+/// What a chip may say, widest first (see [`Tag::forms`]), and the
+/// reference written whole. `number` is the source's place in the engine's
+/// order, its badge.
 pub(super) fn texts(
     graph: &Graph,
     project: &Project,
@@ -248,7 +336,7 @@ pub(super) fn texts(
     reader: &str,
     source: &str,
     number: Option<usize>,
-) -> (String, String, String) {
+) -> (Vec<String>, String) {
     let reader = graph.nodes.iter().find(|node| node.id == reader);
     let source_node = graph.nodes.iter().find(|node| node.id == source);
     let (Some(reader), Some(source_node)) = (reader, source_node) else {
@@ -260,39 +348,29 @@ pub(super) fn texts(
         Some(Binding::Reference { port, path, .. }) => (port.clone(), path.clone()),
         _ => (String::new(), String::new()),
     };
-    let (text, short, whole) = if source_node.is_variable() {
-        let whole = if field.is_empty() {
-            source_node.handle.clone()
-        } else {
-            format!("{}.{field}", source_node.handle)
-        };
-        // Its name, else the number on its card: never the bare arrow
-        // while a number fits (LAY-25).
-        let short = number.map_or_else(|| source_node.handle.clone(), |n| n.to_string());
-        (source_node.handle.clone(), short, whole)
-    } else {
-        let last = field.rsplit('.').next().filter(|last| !last.is_empty());
-        let text = format!("{}.{}", source_node.handle, last.unwrap_or(&port));
-        // As the code writes it: a step with one output port is named
-        // without it (`cart.id`, not `cart.<port>.id`).
-        let port = if graph::output_ports(source_node, project).len() == 1 {
-            ""
-        } else {
-            port.as_str()
-        };
-        let whole = [source_node.handle.as_str(), port, field.as_str()]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join(".");
-        (text, source_node.handle.clone(), whole)
-    };
     let target = std::iter::once(reader.handle.clone())
         .chain(std::iter::once(wire.input.clone()))
         .chain(fields(binding, &wire.operand_path))
         .collect::<Vec<_>>()
         .join(".");
-    (text, short, format!("{whole} → {target}"))
+    if source_node.is_variable() {
+        return (
+            variable_forms(&source_node.handle, number),
+            statement(&source_node.handle, "", &field, &target),
+        );
+    }
+    // As the code writes it: a step with one output port is named without
+    // it (`cart.id`, not `cart.<port>.id`).
+    let named = graph::output_ports(source_node, project).len() != 1;
+    (
+        step_forms(&source_node.handle, &port, named, &field),
+        statement(
+            &source_node.handle,
+            if named { &port } else { "" },
+            &field,
+            &target,
+        ),
+    )
 }
 
 /// How many readers a line of a count's list names (LAY-18); the Inspector
@@ -462,7 +540,7 @@ pub fn plan(
             continue;
         };
         let number = numbers.get(source.id.as_str()).copied();
-        let (text, short, statement) = texts(graph, project, wire, &reader.id, &source.id, number);
+        let (forms, statement) = texts(graph, project, wire, &reader.id, &source.id, number);
         // One chip per value at a socket: a second read of it adds nothing.
         if let Some(tag) = tags
             .iter_mut()
@@ -477,8 +555,8 @@ pub fn plan(
                 port: port.clone(),
                 input: wire.input.clone(),
                 path: wire.operand_path.clone(),
-                text,
-                short,
+                text: forms.first().cloned().unwrap_or_default(),
+                forms,
                 statement,
                 wires: vec![wire.id.clone()],
                 anchor,
@@ -742,12 +820,13 @@ fn down_columns(anchors: impl Iterator<Item = Pos2>) -> Vec<usize> {
 }
 
 /// The chips of `tags` left of their sockets, in the gap between two
-/// columns; their text keeps a legible size at any zoom and shortens to the
-/// source step (a variable's badge number), then to the arrow, where the gap
-/// has no room for it. The chips of one column stand one under the other,
-/// [`CLEAR`] apart, and keep that room from the cards and the lines in
-/// `clear` (LAY-37): a chip that would come nearer moves up or down, its
-/// stub bent to its socket, else it shortens.
+/// columns; their text keeps a legible size at any zoom and shortens through
+/// its forms (the source step, a variable's badge number, a list element's
+/// index), then to the arrow, where the gap has no room for it. The chips
+/// of one column stand one under the other, [`CLEAR`] apart, and keep that
+/// room from the cards and the lines in `clear` (LAY-37): a chip that would
+/// come nearer moves up or down, its stub bent to its socket, else it
+/// shortens.
 pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera, clear: &Clear<'_>) -> Vec<Laid> {
     let font = paint::min_on_screen(TEXT, camera.zoom, paint::LINE_MIN);
     let font_id = FontId::proportional(font);
@@ -759,16 +838,13 @@ pub fn lay_tags(painter: &Painter, tags: &[Tag], camera: Camera, clear: &Clear<'
     for index in down_columns(tags.iter().map(|tag| camera.to_screen(tag.anchor))) {
         let tag = &tags[index];
         let anchor = camera.to_screen(tag.anchor);
-        let texts = fitting(
-            painter,
-            &[
-                format!("← {}", tag.text),
-                format!("← {}", tag.short),
-                "←".to_owned(),
-            ],
-            &font_id,
-            room,
-        );
+        let forms: Vec<String> = tag
+            .forms
+            .iter()
+            .map(|form| format!("← {form}"))
+            .chain(std::iter::once("←".to_owned()))
+            .collect();
+        let texts = fitting(painter, &forms, &font_id, room);
         // Under the chip above it in its column.
         let lowest = match below {
             Some((x, bottom)) if (x - anchor.x).abs() < 1.0 => bottom + CLEAR,
@@ -1048,7 +1124,7 @@ mod tests {
             input: "query".into(),
             path: Vec::new(),
             text: "cart.id".into(),
-            short: "cart".into(),
+            forms: vec!["cart.id".into(), "cart".into()],
             statement: "cart.id → reader.query".into(),
             wires: vec!["w".into()],
             anchor,
@@ -1181,6 +1257,75 @@ mod tests {
             let laid = lay_counts(painter, &counts, camera(), &clear, &[]);
             assert_clear(&laid[0], &clear, fallback, "a count");
         });
+    }
+
+    /// LAY-39 criterion 1: a read through a list element offers the step,
+    /// the last index and the field after it; then the step and the index;
+    /// then the index alone.
+    #[test]
+    fn lay39_a_read_through_an_element_keeps_its_index() {
+        assert_eq!(
+            step_forms("rooms", "body", true, "items[1].id"),
+            ["rooms…[1].id", "rooms…[1]", "…[1]"]
+        );
+        assert_eq!(
+            step_forms("rooms", "body", true, "items[0].id"),
+            ["rooms…[0].id", "rooms…[0]", "…[0]"]
+        );
+    }
+
+    /// LAY-39 criterion 2: a path with no index gives today's forms and
+    /// nothing else; a variable gives its name and its badge number; a path
+    /// ending at an element gives `x…[n]`, then `…[n]`; with two indices the
+    /// last is kept; nothing is left out, no `…` is written.
+    #[test]
+    fn lay39_the_forms_of_other_reads() {
+        assert_eq!(
+            step_forms("slot", "", false, "start"),
+            ["slot.start", "slot"]
+        );
+        assert_eq!(
+            step_forms("login", "body", true, "token"),
+            ["login.token", "login"]
+        );
+        // No field: the port names it, as before.
+        assert_eq!(
+            step_forms("login", "status", true, ""),
+            ["login.status", "login"]
+        );
+        assert_eq!(variable_forms("cartId", Some(7)), ["cartId", "7"]);
+        assert_eq!(variable_forms("cartId", None), ["cartId"]);
+        assert_eq!(
+            step_forms("rooms", "body", true, "items[1]"),
+            ["rooms…[1]", "…[1]"]
+        );
+        assert_eq!(
+            step_forms("a", "body", true, "rows[2].cells[0].value"),
+            ["a…[0].value", "a…[0]", "…[0]"]
+        );
+        assert_eq!(
+            step_forms("list", "", false, "[3].name"),
+            ["list[3].name", "list[3]", "…[3]"]
+        );
+        // A quoted key is not an index.
+        assert_eq!(
+            step_forms("map", "body", true, r#"["[2]"].id"#),
+            ["map.id", "map"]
+        );
+    }
+
+    /// LAY-39 criterion 3: the statement is the reference written whole,
+    /// whatever the chip says.
+    #[test]
+    fn lay39_the_statement_is_the_reference_whole() {
+        assert_eq!(
+            statement("rooms", "body", "items[1].id", "second.body.roomId"),
+            "rooms.body.items[1].id → second.body.roomId"
+        );
+        assert_eq!(
+            statement("slot", "", "start", "second.body.start"),
+            "slot.start → second.body.start"
+        );
     }
 
     /// Finding 2: a chip pushed down by the chip above it to the end of its

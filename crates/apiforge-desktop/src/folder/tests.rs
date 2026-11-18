@@ -80,7 +80,20 @@ fn shop() -> tempfile::TempDir {
     directory
 }
 
+/// Opens the folder; a project with no stored view starts in the shared
+/// harnesses' [`crate::testing::FIRST_VIEW`].
 fn open(root: &std::path::Path) -> (egui::Context, FolderApp) {
+    let context = egui::Context::default();
+    let mut app = FolderApp::open(&context, root.to_owned());
+    app.pin_first_view(crate::testing::FIRST_VIEW);
+    wait_storage(&mut app, &context);
+    frame(&mut app, &context, vec![]);
+    (context, app)
+}
+
+/// Opens the folder with the first view the application chooses for a
+/// project with no stored view (LAY-40).
+fn open_as_installed(root: &std::path::Path) -> (egui::Context, FolderApp) {
     let context = egui::Context::default();
     let mut app = FolderApp::open(&context, root.to_owned());
     wait_storage(&mut app, &context);
@@ -175,7 +188,7 @@ fn move_first_node(app: &mut FolderApp, document_id: &str, to: Position) {
 #[test]
 fn a_folder_without_a_project_is_written_only_when_initialised() {
     let directory = tempfile::tempdir().unwrap();
-    let (context, mut app) = open(directory.path());
+    let (context, mut app) = open_as_installed(directory.path());
     frame(&mut app, &context, vec![]);
     assert!(app.uninitialised && !app.has_document());
     assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
@@ -195,10 +208,10 @@ fn a_folder_without_a_project_is_written_only_when_initialised() {
 }
 
 #[test]
-fn a_first_open_shows_the_first_scenario_in_code() {
+fn a_first_open_shows_the_first_scenario_in_diagram() {
     let directory = shop();
-    let (_context, app) = open(directory.path());
-    assert_eq!(app.workbench.mode, Mode::Code);
+    let (_context, app) = open_as_installed(directory.path());
+    assert_eq!(app.workbench.mode, Mode::Diagram);
     assert_eq!(
         app.workbench.active(),
         Some(document(&app, SCENARIO).as_str())

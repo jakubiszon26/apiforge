@@ -1209,6 +1209,8 @@ below says otherwise.
 - Checks are **expanded by default** and their switch sits on the board's
   bar (LAY-30, #383). This answers the checkpoint's question on Q4 and
   reverses decision 4 of [5.1](#51-decisions-taken-2026-11-05).
+  *Withdrawn on 2026-11-18 as to the default: checks stay folded, decision
+  4 of 5.1 stands; the switch on the bar stays ([13](#13-the-close-2026-11-18)).*
 - A step and its checks are one group (LAY-31, #384); a value shown as a
   chip is read only through chips (LAY-32, #387); a wire never runs under
   its own card (LAY-29, #382).
@@ -1307,6 +1309,145 @@ LANG sprint, after LAY. Read against the open tickets of this sprint:
   when a step is *blocked* under `on_error continue`; LAY-19 reads the
   cause the engine gives and its criteria use `stop` and a missing value,
   which do not change.
+
+## 13. The close (2026-11-18)
+
+The owner shortened the sprint and replaced its acceptance
+([#296](https://github.com/jakubiszon26/apiforge/issues/296)). Sections 9
+and 10 no longer define the end of LAY; the order of part B in 12.1 ends
+here. What is on `main` stays.
+
+### 13.1 The criterion
+
+A tester's task on a scenario he has not seen
+([LAY-12](../tickets/LAY-12.md)): on the room-booking project
+(`fixtures/scenarios/lay/rooms/`, fictional API, simulation only) find
+that a green test checks only the status; trace `second.roomId` to its
+source; change that one field's source in the window without code; add
+`error.code == "slot_conflict"` from Run results, see the simulation fail
+and a control sample pass; read the `.afs` diff; read dependencies on a
+larger board too.
+
+Wire readability is a hard condition. A finding stays in LAY when the
+tester loses a line, misassigns data, confuses data flow with order, or
+must click several wires or pan back and forth for one connection. Kinks,
+crossings and asymmetry that still read with certainty go to LAY-2.
+**No new board-geometry work until LAY-2**: nothing in the set below moves
+a card or changes a route.
+
+### 13.2 What the trial found
+
+An agent ran the task on `main` 2f6922c at 1280 × 800 before the owner
+does. By criterion: (1) the flow and the two bookings are readable once
+the board is zoomed, but it opens in Code, at Fit the cards are blank, and
+what `second` asserts is two actions away; (2) the source is one click on
+the input's chip, but the chip does not carry the index and on the larger
+board nothing jumps to the source or returns; (3) the per-field editor
+exists, three screens down a folded section, and writes each click at once
+with no statement of scope; (4) holds entirely in the window; (5) the diff
+is the two edits and nothing else, but the new check is written after the
+`if`, not in its braces.
+
+| # | Finding on the wires | Where it goes |
+| --- | --- | --- |
+| W1 | The source is out of view: one connection needs a pan up and a pan back | **LAY**: LAY-15 |
+| W2 | The room chips of both bookings read `← rooms.id`, or a bare `←` | **LAY**: LAY-39 |
+| W3 | The new check is drawn in the branch and written outside it | **LAY**: #433 |
+| W4 | A selected step's source lines nest round the card; one detours behind the minimap | LAY-2 |
+| W5 | A selected step's lines run through another card's chips of the same names, three parallel lines about 15 px apart | LAY-2, unless the owner misreads it in his own run (Q10 = A) |
+| W6 | Two source lines 9 px apart for 100 px, both ends labelled | LAY-2 |
+| W7 | After a step's checks are opened the board is not laid again | The routing: LAY-2. That opening displaces no chip and covers no card: LAY-30, criterion 8 |
+| W8 | The tray of hidden outputs covers a neighbour's chips; a tooltip covers the zoom bar | LAY-2 |
+| W9 | With checks drawn, one dashed branch line per statement in the braces (#167) | LAY-2, with LAY-13 after LANG-13 |
+
+### 13.3 Decided by the owner (2026-11-18)
+
+| | Decision | Lands in |
+| --- | --- | --- |
+| Q1 = A | A step with exactly one check writes the predicate on its folded line (`9 · status == 409`, after a run ✓ or ✕); two or more stay a count | LAY-30 |
+| Q2 = A | Checks are folded by default for everyone; "expanded by default" (12.1) and LAY-30's decision 4 of 2026-11-17 are withdrawn. The switch on the bar and the arrow on a step stay | LAY-30 |
+| Q3 = A | At the Overview zoom a card shows one line — method and path, call, or condition — at a fixed small size; the card's size is unchanged. This amends LAY-09's table of what each zoom shows | LAY-41 |
+| Q4 = A | LAY-15, the whole ticket, before the close; *Back* also restores the Inspector's scroll and open section; a kept trace gets the edge chip | LAY-15 |
+| Q5 = A | Changing a field's source is staged: nothing is written until *Apply*; above it a summary of the old and new source with samples, that only this field changes, the step's place in the run and its branch, and who still reads the old source — worded without `@after`, so it survives LANG-13 | LAY-42 |
+| Q6 = A | *Change source* on the relation statement a chip or line click keeps opens the Inspector at that field | LAY-42 |
+| Q7 = A | A chip keeps the last index and field (`← rooms…[1].id`), never a bare `←` while there is room; text only | LAY-39 |
+| Q8 = A | A scenario in a project never opened on this computer opens in Diagram; a remembered choice still wins | LAY-40 |
+| Q9 = A | `git diff` satisfies the diff criterion for 0.2.0; a changes view in the window is a ticket of the language and editor sprint | — |
+| Q10 = A | W5 goes to LAY-2 unless the owner misreads it in his own run | — |
+
+Every visible change is accepted on a capture before it is merged; the
+three with a new look (LAY-30 re-scoped, LAY-41, LAY-42) on a mock-up
+first.
+
+### 13.4 The minimal set
+
+In order; "must" means a criterion fails without it.
+
+| Issue | Ticket | Estimate · risk | State on 2026-11-18 |
+| --- | --- | --- | --- |
+| [#433](https://github.com/jakubiszon26/apiforge/issues/433) | A check added from Run results is written in its subject's braces (W3) — must | S · 10 | pull request open |
+| [#430](https://github.com/jakubiszon26/apiforge/issues/430) | `@after(<if>)` is accepted in a folder project — must, finishes LANG-14 | S | merged |
+| [#383](https://github.com/jakubiszon26/apiforge/issues/383) | LAY-30 re-scoped: one check written on the folded line, the bar switch, the step's arrow; ticket on `feat/lay-30-checks-line` — must | M · 25 · `visible UI` | mock-up with the owner |
+| [#437](https://github.com/jakubiszon26/apiforge/issues/437) | LAY-41 the Overview line — must | S · 15 · `visible UI` | mock-up with the owner |
+| [#299](https://github.com/jakubiszon26/apiforge/issues/299) | LAY-15 edge chips, the jump and *Back*; [ticket](../tickets/LAY-15.md) — must (W1) | M · 20 · `visible UI` | `ready:opus` |
+| [#439](https://github.com/jakubiszon26/apiforge/issues/439) | LAY-42 a field's source changed from the field, applied on *Apply* — must | M · 25 · `visible UI` | mock-up with the owner |
+| [#435](https://github.com/jakubiszon26/apiforge/issues/435) | LAY-39 a chip keeps the index — should (W2) | S · 10 · `visible UI` | `ready:opus` |
+| [#436](https://github.com/jakubiszon26/apiforge/issues/436) | LAY-40 a scenario opens in Diagram — should | S · 5 · `default` | `ready:opus` |
+| [#296](https://github.com/jakubiszon26/apiforge/issues/296) | LAY-12 the owner's run on the build that holds the set; [ticket](../tickets/LAY-12.md) | S · 10 | after the set |
+
+About 120 owner minutes. Tracks: #433 is core and runs beside everything;
+LAY-30 → LAY-41 → LAY-39 are one line of work on the cards (`canvas/`);
+LAY-15 touches the camera in `canvas/mod.rs` and follows LAY-30; LAY-42 is
+the Inspector and runs beside the cards; LAY-40 is `folder/`. The flaky
+`lay18_criterion_4` (#432) is fixed or ignored with its ticket before the
+close, not after.
+
+### 13.5 Deferred to LAY-2
+
+Moved by the owner's decision; each issue carries `sprint:lay-2`.
+
+| Issue | Ticket | Why it waits |
+| --- | --- | --- |
+| [#297](https://github.com/jakubiszon26/apiforge/issues/297) | LAY-13 branch bands | After LANG-13 and DIAG-06: "the band is the braces" is built on the written-order edges. The branch was read from the dashed line and *Yes*; the mock-up stays approved |
+| [#301](https://github.com/jakubiszon26/apiforge/issues/301) | LAY-17 wrapping by dependencies | Row breaks misled nowhere in the task; the layers change with LANG-13 and RUN-01 |
+| [#410](https://github.com/jakubiszon26/apiforge/issues/410) | LAY-35 a folded check as a far reader | Not met in the task (no variable); shares the far-reader rule, read again after LANG |
+| [#419](https://github.com/jakubiszon26/apiforge/issues/419) | LAY-36 two rails on one track | Geometry; `lay03_criterion_6` stays ignored naming this ticket |
+| [#427](https://github.com/jakubiszon26/apiforge/issues/427) | LAY-38 the chip's arrow and shape | Direction was never misread; what was met is the chip's text (LAY-39). The mock branch stays |
+
+With them, without issues of their own yet: **W4**, **W5** (Q10), **W6**,
+**W7**'s routing, **W8**, **W9** of 13.2; the Inspector covering the card
+being compared; Fit using the minimap's column. Outside LAY-2: a changes
+view in the window (Q9, the language and editor sprint); #399 (*Add
+comparison* before a run).
+
+The exit criteria of the backlog that named LAY-17 and the task sheet are
+replaced by 13.1.
+
+### 13.6 To measure again after LANG-13
+
+Tuning the layout further now would tune graphs that are about to change:
+`@after` goes, with it 34 of the 52 ordering edges of the reference
+scenarios (check → step), and *Start* cannot fan out.
+
+- LAY-01's table — crossings per wire, coincident pairs, board size, Fit at
+  1600 × 1000 and at 1280 × 800 — on `shop-30`, `shop-50`, `fan-out` and
+  the three room scenarios; LAY-28's crossing caps and LAY-31's accepted
+  limits.
+- Fit against the 45 % level on the room scenarios (36, 45, 39 and 40 %
+  today): whether LAY-41 is still needed once the rails are gone.
+- Where rows break (LAY-17) and what a branch's edges look like (LAY-13,
+  W9, #167): whether the written-order language still lowers one edge per
+  statement in the braces.
+- Badge numbers once checks no longer order steps; RUN-01's *blocked*
+  under `on_error continue`.
+- #433 and DIAG-06: where a new check or step is written when the place in
+  the text is the order.
+- LAY-42's sentences on a written-order file: same wording, same facts.
+- W4–W6 and LAY-36: rails brought back, parallel lines under 20 px (the
+  owner's rule of 2026-11-15).
+- The far-reader warning and LAY-35, which share one rule.
+- The three room scenarios themselves, rewritten without `@after` by the
+  language's fix; then the task of LAY-12 once more.
 
 ## Technical appendix
 

@@ -77,14 +77,14 @@ fn crosses(rect: Rect, a: Pos2, b: Pos2) -> bool {
 /// What breaks the clearance on one board at one zoom: chip and chip, chip
 /// and card, chip and line; and a chip that left its socket to keep it.
 #[derive(Debug, Default)]
-struct Breaches {
-    chips: Vec<String>,
-    cards: Vec<String>,
-    lines: Vec<String>,
-    strays: Vec<String>,
+pub(super) struct Breaches {
+    pub(super) chips: Vec<String>,
+    pub(super) cards: Vec<String>,
+    pub(super) lines: Vec<String>,
+    pub(super) strays: Vec<String>,
 }
 
-fn breaches(harness: &FolderHarness, id: &str, zoom: f32) -> Breaches {
+pub(super) fn breaches(harness: &FolderHarness, id: &str, zoom: f32) -> Breaches {
     let canvas = board(harness, id);
     let graph = graph(harness, id);
     let handle = |id: &str| {

@@ -1,77 +1,92 @@
-# LAY-12: Acceptance of the LAY sprint — the demo and the timed task sheet
+# LAY-12: Acceptance of the LAY sprint — the owner's task on the room-booking scenario
 
-- Size: S · Owner review: 10 min · Risk: none
-- State: Backlog (issue #296) · in must by the second opinion of 2026-11-04
-  (4.7) and the owner's Q12 of 2026-11-05 · LAY sprint, wave 4, last
-- Analysis model: Fable · Implementation model: Opus (the measurements), the
-  owner at the window for the timed tasks
+- Size: S · Owner review: 10 min, plus the owner's own run · Risk: none
+- State: rewritten on 2026-11-18 by the owner's decision (#296): the demo
+  plan and the timed task sheet are replaced by one task a tester does on
+  a scenario he has not seen. An agent ran it on `main` 2f6922c and the
+  result set the minimal set below; the owner runs it on the build that
+  holds that set · issue #296 · LAY sprint, last
+- Analysis model: Fable · Implementation model: — (the owner at the window)
 
 ## Goal
 
-The sprint is accepted on the three reference scenarios, not on captures:
-opened cold, read, run (simulation and live loopback), a failure found; the
-UX task sheet is timed once before the sprint's first ticket and once at its
-end, and the two small-window goals are checked at 960 × 540.
+The sprint is accepted when a tester, given an unfamiliar scenario and one
+sentence, can find out from the window what a test really checks, follow a
+value to its source, change that source without writing code, prove the
+change, and read what was changed in the file — and can read dependencies
+on a larger board too.
+
+## The task
+
+Project: `fixtures/scenarios/lay/rooms/` — a fictional room-booking API,
+simulation only — copied fresh, no stored settings, window 1280 × 800.
+Scenario **Double booking is refused**. The instruction, and nothing else:
+
+> Check whether this test really detects a double booking of the same
+> room. If you find a gap, fix the test and show how you know it now
+> detects it.
+
+Planted: the test is green; its second booking asks for **room B**
+(`rooms.body.items[1].id`), which is closed for maintenance, and the test
+asserts only `second.status == 409`. Variants for the wires:
+**Double booking with a notice in between** and **Room booking day** (29
+steps).
+
+## Acceptance criteria
+
+The owner judges each at the window; none is timed.
+
+1. **What the test checks.** From the board: the order of the steps, that
+   `first` and `second` are two bookings, and that the only check on
+   `second` is its status.
+2. **The source.** `second.body.roomId` is traced to its exact source —
+   the producer step and the field, index included — and the place one
+   started from is recovered. The same on *Room booking day*, where the
+   source is out of view.
+3. **The change.** That one field is made to read the room `first` booked,
+   in the window, without typing code, knowing before it is applied that
+   only this field changes.
+4. **The proof.** From Run results the check `error.code ==
+   "slot_conflict"` is added to `second`; the simulation fails
+   (`room_unavailable`); with the sample of a real conflict (the control)
+   it passes.
+5. **The diff.** `git diff` of the `.afs` shows exactly the edits made:
+   the one expression and the one new check, in its branch's braces, every
+   other byte as written (`git diff` is the accepted way for 0.2.0, Q9 = A).
+6. **The wires — a hard condition.** A finding is fixed in LAY when the
+   tester loses a line, assigns data to the wrong source, takes a data
+   line for order or order for data, or has to click several wires or pan
+   back and forth to read one connection. A kink, a crossing or an
+   asymmetry that still reads with certainty goes to LAY-2.
+7. Every LAY issue is closed, or carried to LAY-2 with its reason in
+   [lay.md section 13](../sprints/lay.md#13-the-close-2026-11-18).
 
 ## What the owner will see
 
-- Nothing new on screen. A pull request whose body holds the demo plan of
-  [lay.md section 10](../sprints/lay.md#10-demo-plan) run end to end at
-  1600 × 1000 and 960 × 540, the task sheet of
-  [section 9](../sprints/lay.md#9-metrics-and-qa) with times and the number
-  of zoom and pan actions before and after, and the LAY-01 metric table
-  before and after each ticket.
-- Task 8 (the return-to-work walk) is asserted by clicks in a test, as round
-  4's proof 4 did (four clicks, no pans).
-
-## The checkpoint (added 2026-11-10)
-
-The task sheet is run twice more than planned: once at the checkpoint of
-the [review](../sprints/lay.md#11-mid-sprint-review-2026-11-10), when part A
-is on `main`, and at the sprint's end. At the checkpoint the owner uses
-`shop-30` and one scenario of his own on the real build and confirms,
-reorders or drops part B's tickets; the result is recorded on #296. The
-sheet has ten tasks: 9 and 10 edit the scenario, because moving editing off
-the card (Q16 = A) is the one thing the reading tasks cannot measure.
-
-The checkpoint is run as an experiment ([lay.md 11.5](../sprints/lay.md#115-what-published-studies-say-and-what-they-do-not)):
-the baseline on a build of `8248b93`; tasks 2 and 4 with checks collapsed
-and expanded (the default of Q4 follows the result); crossings per wire on
-shape D for `shop-30`, after LAY-04 and LAY-03, beside the timed tasks;
-the sheet once in Code view.
+Nothing new from this ticket. The build under test holds the minimal set
+of [section 13](../sprints/lay.md#13-the-close-2026-11-18); each visible
+change in it was accepted on a capture before its merge.
 
 ## Mock-up
 
 Not applicable: no interface change.
 
-## Acceptance criteria
-
-1. The demo plan's eight steps run at 1600 × 1000 and 960 × 540 on
-   `order-flow.afs`, `shop-30.afs` and `shop-50.afs` in the demo shop
-   project, in simulation and against the live loopback sample; each
-   combination has one capture under `docs/qa/<date>/LAY-12/` named
-   `lay12-<scenario>-<step>-<size>-<mode>` and the pull request body lists
-   the matrix (3 scenarios × 2 sizes × 2 modes).
-2. The UX task sheet's eight tasks are timed before the sprint (on `main`
-   at the sprint's start) and at its end, by the owner or an agent at the
-   window; the two columns are in the pull request body. Task 8 is LAY-15's
-   `lay15_criterion_4_the_walk_by_clicks`, re-run here.
-3. The two small-window goals of 4.7 item 9 hold at 960 × 540 on
-   `shop-50.afs` after a failed run: at Fit the failures and the selection's
-   row are found without zooming; at 60 % the producers and readers of the
-   selected step are named from the board and the chips. Both timed.
-4. The LAY-01 table is printed on `main` before and after the sprint for the
-   three scenarios: crossings, bends, close pairs, board width, fit zoom.
-5. Every LAY ticket's issue is closed or carried into LAY-2 with a reason in
-   the backlog.
-
 ## Not in scope
 
-New behaviour; fixing what the demo finds (new tickets).
+- New behaviour; fixing what the run finds (a new ticket, in LAY only
+  under criterion 6).
+- The demo plan of [lay.md section 10](../sprints/lay.md#10-demo-plan) and
+  the timed task sheet of [section 9](../sprints/lay.md#9-metrics-and-qa):
+  withdrawn as the acceptance of the sprint. The checkpoint's runs of the
+  sheet stay recorded on #296.
+- The LAY-01 table before and after: measured again after LANG-13
+  ([section 13](../sprints/lay.md#13-the-close-2026-11-18)), when the
+  reference scenarios change.
 
 ## Technical appendix
 
-The timed tasks are manual by design (the plan, section 9); the deterministic
-parts (badge equals row, failed check visible collapsed, no card moved by a
-toggle, same positions from two opens, dimming never hides the selection)
-are the tickets' own tests and are only re-run here.
+The agent-run trial (planning model, egui host, 1280 × 800, `main`
+2f6922c) is summarised on #296: criteria 1 and 3 reachable with friction,
+2 without a jump or a return on the larger board, 4 fully in the window,
+5 right except that the new check was written outside its branch (#433).
+Its findings W1–W9 are placed in section 13.
