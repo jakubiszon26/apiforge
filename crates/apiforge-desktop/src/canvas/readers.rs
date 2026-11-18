@@ -1048,7 +1048,7 @@ mod tests {
             input: "query".into(),
             path: Vec::new(),
             text: "cart.id".into(),
-            short: "cart".into(),
+            forms: vec!["cart.id".into(), "cart".into()],
             statement: "cart.id → reader.query".into(),
             wires: vec!["w".into()],
             anchor,
@@ -1181,6 +1181,75 @@ mod tests {
             let laid = lay_counts(painter, &counts, camera(), &clear, &[]);
             assert_clear(&laid[0], &clear, fallback, "a count");
         });
+    }
+
+    /// LAY-39 criterion 1: a read through a list element offers the step,
+    /// the last index and the field after it; then the step and the index;
+    /// then the index alone.
+    #[test]
+    fn lay39_a_read_through_an_element_keeps_its_index() {
+        assert_eq!(
+            step_forms("rooms", "body", true, "items[1].id"),
+            ["rooms…[1].id", "rooms…[1]", "…[1]"]
+        );
+        assert_eq!(
+            step_forms("rooms", "body", true, "items[0].id"),
+            ["rooms…[0].id", "rooms…[0]", "…[0]"]
+        );
+    }
+
+    /// LAY-39 criterion 2: a path with no index gives today's forms and
+    /// nothing else; a variable gives its name and its badge number; a path
+    /// ending at an element gives `x…[n]`, then `…[n]`; with two indices the
+    /// last is kept; nothing is left out, no `…` is written.
+    #[test]
+    fn lay39_the_forms_of_other_reads() {
+        assert_eq!(
+            step_forms("slot", "", false, "start"),
+            ["slot.start", "slot"]
+        );
+        assert_eq!(
+            step_forms("login", "body", true, "token"),
+            ["login.token", "login"]
+        );
+        // No field: the port names it, as before.
+        assert_eq!(
+            step_forms("login", "status", true, ""),
+            ["login.status", "login"]
+        );
+        assert_eq!(variable_forms("cartId", Some(7)), ["cartId", "7"]);
+        assert_eq!(variable_forms("cartId", None), ["cartId"]);
+        assert_eq!(
+            step_forms("rooms", "body", true, "items[1]"),
+            ["rooms…[1]", "…[1]"]
+        );
+        assert_eq!(
+            step_forms("a", "body", true, "rows[2].cells[0].value"),
+            ["a…[0].value", "a…[0]", "…[0]"]
+        );
+        assert_eq!(
+            step_forms("list", "", false, "[3].name"),
+            ["list[3].name", "list[3]", "…[3]"]
+        );
+        // A quoted key is not an index.
+        assert_eq!(
+            step_forms("map", "body", true, r#"["[2]"].id"#),
+            ["map.id", "map"]
+        );
+    }
+
+    /// LAY-39 criterion 3: the statement is the reference written whole,
+    /// whatever the chip says.
+    #[test]
+    fn lay39_the_statement_is_the_reference_whole() {
+        assert_eq!(
+            statement("rooms", "body", "items[1].id", "second.body.roomId"),
+            "rooms.body.items[1].id → second.body.roomId"
+        );
+        assert_eq!(
+            statement("slot", "", "start", "second.body.start"),
+            "slot.start → second.body.start"
+        );
     }
 
     /// Finding 2: a chip pushed down by the chip above it to the end of its
