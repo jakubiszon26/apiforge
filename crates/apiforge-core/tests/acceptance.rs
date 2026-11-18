@@ -631,3 +631,147 @@ fn lang10_criterion_1_a_seeded_uuid_is_version_4_reproducible_and_new_per_call()
     assert_eq!(draw(&mut seeded(7)), drawn[0]);
     assert_ne!(draw(&mut seeded(8)), drawn[0]);
 }
+
+// #433 ------------------------------------------------------------------------
+
+/// A check added from Run results or the Inspector on a step is written in
+/// the braces that step stands in, right after the step's checks, and runs
+/// on its branch only; on a top-level step it is written as before.
+mod issue433 {
+    use super::*;
+    use apiforge_core::{
+        edit::{add_check, field_assertion},
+        run::NotRunCause,
+    };
+    use serde_json::json;
+
+    /// The room-booking scenario of the LAY acceptance trial, without its
+    /// sign-in component.
+    const SOURCE: &str = r#"scenario "Double booking is refused" {
+  begin = start
+  @after(begin)
+  first = POST "/bookings" {
+    sample 201 { id: "bk-1" }
+  }
+  booked = if first.status == 201 {
+    second = POST "/bookings" {
+      sample 409 { error: { code: "room_unavailable" } }
+    }
+    refused = assert second.status == 409
+    @after(refused)
+    calendar = GET "/bookings" {
+      sample 200 { items: [{ id: "bk-1" }] }
+    }
+    one_booking = assert calendar.body.items[0].id == first.body.id
+  } else {
+    not_booked = assert first.status == 201
+  }
+  cleanup {
+    cancelled = DELETE "/bookings/{{first.body.id}}" {
+      sample 204 {}
+    }
+    gone = assert cancelled.status == 204
+  }
+}
+"#;
+
+    /// `scenario` with a check of `path` in `subject`'s `body` added as Run
+    /// results adds it, and the check's identifier.
+    fn checked(scenario: &Scenario, subject: &str, path: &str, value: &str) -> (Scenario, String) {
+        let source = node_by_handle(&scenario.graph, subject).clone();
+        let check = field_assertion(&source, "body", path, &json!(value));
+        let id = check.id.clone();
+        let mut next = scenario.clone();
+        next.graph = add_check(&scenario.graph, &source.id, check);
+        (next, id)
+    }
+
+    /// `SOURCE` as a board edit writes `next` into it (LAY-34).
+    fn written(project: &Project, scenario: &Scenario, next: &Scenario) -> String {
+        apiforge_script::edit_folder_document(
+            project,
+            SOURCE,
+            &Document::Scenario(scenario.clone()),
+            &Document::Scenario(next.clone()),
+        )
+        .expect("the edit is written")
+    }
+
+    /// A check on `second`, which stands in `booked`'s `then`, is written in
+    /// those braces right after `refused`, before `@after(refused) calendar`,
+    /// and nothing else in the file changes.
+    #[test]
+    fn a_check_on_a_step_in_a_branch_is_written_in_its_braces() {
+        let (project, scenario) = lowered_scenario(SOURCE);
+        let (next, _) = checked(&scenario, "second", "error.code", "slot_conflict");
+        assert_eq!(
+            written(&project, &scenario, &next),
+            SOURCE.replace(
+                "    refused = assert second.status == 409\n",
+                "    refused = assert second.status == 409\n    \
+                 @label(\"Check error.code\")\n    \
+                 check_error_code = assert second.body.error.code == \"slot_conflict\"\n",
+            )
+        );
+    }
+
+    /// The check follows `booked`'s `then` as `refused` does, so it runs right
+    /// after `refused` on that branch, and reads *outside path* like its
+    /// siblings when the other branch runs.
+    #[tokio::test]
+    async fn a_check_on_a_step_in_a_branch_runs_on_that_branch_only() {
+        let (project, scenario) = lowered_scenario(SOURCE);
+        let (next, check) = checked(&scenario, "second", "error.code", "slot_conflict");
+        let run = simulate(project, &next).await;
+        let order = executed(&run, Phase::Main);
+        let at = |id: &str| {
+            order
+                .iter()
+                .position(|step| *step == id)
+                .unwrap_or_else(|| panic!("{} ran", handle_of(&next.graph, id)))
+        };
+        let refused = node_by_handle(&next.graph, "refused").id.clone();
+        let calendar = node_by_handle(&next.graph, "calendar").id.clone();
+        assert_eq!(at(&check), at(&refused) + 1, "right after refused");
+        assert!(at(&check) < at(&calendar), "before calendar");
+
+        let other = SOURCE.replace("sample 201 { id: \"bk-1\" }", "sample 500 {}");
+        let (project, scenario) = lowered_scenario(&other);
+        let (next, check) = checked(&scenario, "second", "error.code", "slot_conflict");
+        let run = simulate(project, &next).await;
+        let cause = |id: &str| {
+            run.steps
+                .iter()
+                .find(|step| step.node_id == id)
+                .unwrap_or_else(|| panic!("{} is reported", handle_of(&next.graph, id)))
+                .cause
+                .clone()
+        };
+        let refused = node_by_handle(&next.graph, "refused").id.clone();
+        assert_eq!(cause(&refused), Some(NotRunCause::OutsidePath));
+        assert_eq!(cause(&check), Some(NotRunCause::OutsidePath));
+    }
+
+    /// A check on `first`, a top-level step, is added as before: last on the
+    /// board without an ordering edge, written after the whole `if`.
+    #[test]
+    fn a_check_on_a_top_level_step_is_added_as_before() {
+        let (project, scenario) = lowered_scenario(SOURCE);
+        let first = node_by_handle(&scenario.graph, "first").clone();
+        let check = field_assertion(&first, "body", "id", &json!("bk-1"));
+        let mut before = scenario.graph.clone();
+        before.nodes.push(check.clone());
+        assert_eq!(add_check(&scenario.graph, &first.id, check), before);
+
+        let (next, _) = checked(&scenario, "first", "id", "bk-1");
+        assert_eq!(
+            written(&project, &scenario, &next),
+            SOURCE.replace(
+                "    not_booked = assert first.status == 201\n  }\n",
+                "    not_booked = assert first.status == 201\n  }\n  \
+                 @label(\"Check id\")\n  \
+                 check_id = assert first.body.id == \"bk-1\"\n",
+            )
+        );
+    }
+}
