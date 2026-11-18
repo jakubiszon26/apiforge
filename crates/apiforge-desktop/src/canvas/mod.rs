@@ -690,7 +690,8 @@ struct Folding {
     folded: HashMap<String, (String, String)>,
     /// The checks a step shows under it while the board folds the others,
     /// each with that step and its name: their `@after` is drawn from the
-    /// step, as when they are folded, so that opening them reroutes no line.
+    /// step, as when they are folded, and no order or branch line is drawn
+    /// into them, so that opening them reroutes no line.
     hung: HashMap<String, (String, String)>,
 }
 
@@ -4719,6 +4720,12 @@ fn folded_wires(
             Some((subject, name)) if wire.kind == WireKind::Order => Some((subject, name)),
             _ => None,
         };
+        // Nor is the order or the branch into it drawn: a check a step shows
+        // under it while the board folds the others reads as part of that
+        // step, as when it is folded, so that no line is rerouted (LAY-30).
+        if wire.kind == WireKind::Order && folded.contains_key(&wire.target) {
+            continue;
+        }
         let source_id = redrawn.map_or(wire.source.as_str(), |(subject, _)| subject.as_str());
         let (Some(source), Some(target)) = (card_of(source_id), card_of(&wire.target)) else {
             continue;
