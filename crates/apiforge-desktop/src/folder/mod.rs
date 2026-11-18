@@ -354,6 +354,9 @@ pub struct FolderApp {
     /// The last paste, until its edit is applied (UX-34).
     pasted: Option<PastedOutcome>,
     inspector: Inspector,
+    /// What the Inspector showed when a board's first jump started, by
+    /// document, while that board shows *Back* (LAY-15).
+    jump_views: HashMap<String, crate::inspector::View>,
     /// When unsaved work or the view last changed, for the recovery pause.
     changed_at: Option<Instant>,
     /// When the editor last changed each document's text, while its error
@@ -570,6 +573,7 @@ impl FolderApp {
             clipboard: None,
             pasted: None,
             inspector: Inspector::default(),
+            jump_views: HashMap::new(),
             changed_at: None,
             marks_quiet_at: HashMap::new(),
             notices: Notices::default(),
@@ -867,6 +871,31 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn debug_inspector_focus(&self) -> Option<String> {
         self.inspector.focused_input().map(str::to_owned)
+    }
+
+    /// The block the Inspector shows, while its panel is open (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_node(&self) -> Option<String> {
+        let open = self
+            .workbench
+            .active()
+            .and_then(|id| self.selections.get(id))
+            .is_some_and(|selection| selection.len() == 1);
+        open.then(|| self.inspector.debug_node().map(str::to_owned))
+            .flatten()
+    }
+
+    /// The Inspector's scroll offset in the last frame (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_offset(&self) -> f32 {
+        self.inspector.debug_offset()
+    }
+
+    /// The Inspector's sections in the last frame and whether each is open
+    /// (LAY-15).
+    #[cfg(test)]
+    pub(crate) fn debug_inspector_sections(&self) -> Vec<(String, bool)> {
+        self.inspector.debug_sections(&self.ui_context)
     }
 
     fn activate_tab(&mut self, id: &str) {
