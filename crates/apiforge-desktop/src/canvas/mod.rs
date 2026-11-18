@@ -23,6 +23,8 @@ pub use collapse::collapsible;
 pub(crate) use edge::{DrawnEdge, Side};
 pub use layout::{Card, CardDensity, Chip, parse_inline};
 #[cfg(test)]
+pub(crate) use paint::debug_overview_line;
+#[cfg(test)]
 pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
 pub use readers::WireMode;
 pub use resting::{Drawn, LANE, Lane, Lines, resting};

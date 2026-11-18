@@ -517,6 +517,22 @@ pub enum TextKind {
     Subtitle,
     /// Any other line: an input, an output, a caption.
     Line,
+    /// The line under the name at the Overview zoom: what the step is
+    /// (LAY-41).
+    Overview,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether a card draws its Overview line: a test seam that compares
+    /// the board with and without it (LAY-41).
+    static OVERVIEW_LINE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Draws the Overview line on this thread's boards, or not (LAY-41).
+#[cfg(test)]
+pub(crate) fn debug_overview_line(on: bool) {
+    OVERVIEW_LINE.with(|line| line.set(on));
 }
 
 /// A text a card drew: what it says, its size on screen and its colour.
