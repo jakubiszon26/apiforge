@@ -67,18 +67,33 @@ pub fn shop_project_without_far_reads() -> tempfile::TempDir {
     directory
 }
 
+/// The view a project with no stored view starts in under the shared
+/// harnesses. The application chooses Diagram for a scenario (LAY-40); the
+/// tests that are not about the first view were written against Code and
+/// keep it, as if the project had been left in Code. A test of the first
+/// view itself opens with [`first_open_harness`].
+pub const FIRST_VIEW: Mode = Mode::Code;
+
 /// Opens the folder window at `root` and waits until opening has finished.
+/// A project with no stored view starts in [`FIRST_VIEW`].
 pub fn folder_harness(root: &Path, size: egui::Vec2) -> FolderHarness {
     folder_harness_scaled(root, size, 1.0)
 }
 
 pub fn folder_harness_scaled(root: &Path, size: egui::Vec2, scale: f32) -> FolderHarness {
-    folder_harness_with(root, size, scale, None)
+    folder_harness_with(root, size, scale, None, Some(FIRST_VIEW))
 }
 
 /// The folder window asked for a mode at startup, as `--screenshot --mode` asks.
 pub fn folder_harness_in(root: &Path, size: egui::Vec2, mode: Mode) -> FolderHarness {
-    folder_harness_with(root, size, 1.0, Some(mode))
+    folder_harness_with(root, size, 1.0, Some(mode), Some(FIRST_VIEW))
+}
+
+/// The folder window as a person's first open of a project shows it: the
+/// view the application chooses for a project with no stored view (LAY-40),
+/// with `request` asked for at startup as `--mode` asks.
+pub fn first_open_harness(root: &Path, size: egui::Vec2, request: Option<Mode>) -> FolderHarness {
+    folder_harness_with(root, size, 1.0, request, None)
 }
 
 fn folder_harness_with(
@@ -86,6 +101,7 @@ fn folder_harness_with(
     size: egui::Vec2,
     scale: f32,
     mode: Option<Mode>,
+    first_view: Option<Mode>,
 ) -> FolderHarness {
     // The builder draws one frame before the application exists.
     let mut harness = Harness::builder()
@@ -102,6 +118,9 @@ fn folder_harness_with(
     // The application keeps its context, so it must be the harness's own.
     let context = harness.ctx.clone();
     let mut app = FolderApp::open(&context, root.to_owned());
+    if let Some(first_view) = first_view {
+        app.pin_first_view(first_view);
+    }
     if let Some(mode) = mode {
         app.request_mode(mode);
     }
@@ -111,7 +130,8 @@ fn folder_harness_with(
 }
 
 /// The folder window started from an application data directory, as managed
-/// startup starts it, and settled once it has resolved to a project.
+/// startup starts it, and settled once it has resolved to a project. A
+/// project with no stored view starts in [`FIRST_VIEW`].
 pub fn managed_harness(data: &Path, size: egui::Vec2) -> FolderHarness {
     let mut harness = Harness::builder().with_size(size).build_ui_state(
         |ui, app: &mut Option<FolderApp>| {
@@ -122,7 +142,9 @@ pub fn managed_harness(data: &Path, size: egui::Vec2) -> FolderHarness {
         None,
     );
     let context = harness.ctx.clone();
-    *harness.state_mut() = Some(FolderApp::start_managed(&context, data.to_owned()));
+    let mut app = FolderApp::start_managed(&context, data.to_owned());
+    app.pin_first_view(FIRST_VIEW);
+    *harness.state_mut() = Some(app);
     settle(&mut harness);
     harness
 }
