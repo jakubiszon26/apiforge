@@ -181,3 +181,30 @@ chips on, checks folded, zoom 76 %, 1280 × 800, the camera placed so that
 - The fixture `fixtures/scenarios/lay/rooms/` is added by this ticket's
   first commit (the same files ride on LAY-39's branch; identical content
   merges cleanly).
+
+## As implemented
+
+- `canvas/edge.rs` holds the edge chips, the jump and *Back*; the board
+  draws them after the cards, and the kept statements keep clear of them.
+  The relations are the data wires of the selected step (its sources and
+  readers, checks left out) or the kept wires, which also name the
+  references: `readers::texts`, as the chip statement does.
+- Labels not named above: several reads of one reader are
+  `Reader: calendar · 2 fields ↓`; a folded chip of readers is
+  `↓ 3 readers`, and of both roles `↓ 3 related`. The accessible names
+  are the text without the arrow and `(jump)`, and a folded chip's text
+  and `(unfold)`.
+- The chips of an edge stand in a row in the order of their cards, each
+  as near its card as the row allows; where the row does not fit (960 ×
+  540 with the Inspector open), a chip moves along the edge or a row
+  further in.
+- *Back*'s Inspector state: the folder window takes the Inspector's step,
+  tab, scroll offset and the open state of each section it drew (by the
+  sections' ids) at the first jump and gives them back with the selection.
+- Criterion 9's test asserts that the board pans no more than UX-18's
+  least pan, which keeps the selected card whole beside the Inspector:
+  opening the Inspector at 1280 × 800 pans `second` 59 px sideways, as on
+  `main`. The test as first committed asked for no move at all. For the
+  same pan, criterion 2's test selects `second` before it zooms out to
+  50 %, and its accessible clicks take the pointer away afterwards, so
+  that nothing is pointed at where the button was.
