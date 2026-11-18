@@ -211,6 +211,32 @@ pub fn field_assertion(source: &Node, port: &str, path: &str, value: &Value) -> 
     node
 }
 
+/// The board with `check`, a check on the step `subject`, added (#433).
+///
+/// A subject that stands in the braces of an `if` branch keeps its check in
+/// them: the check follows the branches the subject follows, as its other
+/// checks do, and is written right after the subject and its checks and
+/// values. A check on any other subject is written last without an ordering
+/// edge.
+pub fn add_check(graph: &Graph, subject: &str, check: Node) -> Graph {
+    let mut next = graph.clone();
+    let branches: Vec<_> = graph
+        .edges
+        .iter()
+        .filter(|edge| edge.target == subject && edge.branch.is_some())
+        .collect();
+    if branches.is_empty() {
+        next.nodes.push(check);
+        return next;
+    }
+    for edge in branches {
+        let edge = order_edge(&next, &edge.source, &check.id, edge.branch);
+        next.edges.push(edge);
+    }
+    next.nodes.insert(after_step(graph, subject), check);
+    next
+}
+
 /// The board after a response assignment, and the variable's identifier.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssignedVariable {

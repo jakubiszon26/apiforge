@@ -577,6 +577,16 @@ impl Board<'_> {
         }
     }
 
+    /// Adds a check on `subject` and selects it, in the braces the subject
+    /// stands in (#433), keeping it clear of occupied positions.
+    pub fn push_check(&self, subject: &str, check: Node) -> Edit {
+        let id = check.id.clone();
+        Edit {
+            graph: self.free_slot_for(edit::add_check(self.graph, subject, check), &id),
+            selection: Some(vec![id]),
+        }
+    }
+
     /// Sets a slot of a node: a whole input, or the binding at `path` inside it.
     /// `Ok(None)` when the node does not exist.
     pub fn set_input(
