@@ -168,7 +168,10 @@ fn stubs(name: &str) -> BTreeMap<(&'static str, u32), (f32, f32)> {
         "double-booking-notice" => &[
             ("first", [(1630.0, 107.35), (1630.0, 98.0), (1630.0, 98.0)]),
             ("second", [(870.0, 521.35), (870.0, 512.0), (870.0, 512.0)]),
-            ("calendar", [(1250.0, 465.0), (1250.0, 465.0), (1250.0, 465.0)]),
+            (
+                "calendar",
+                [(1250.0, 465.0), (1250.0, 465.0), (1250.0, 465.0)],
+            ),
         ],
         "booking-day" => &[
             (
@@ -176,8 +179,14 @@ fn stubs(name: &str) -> BTreeMap<(&'static str, u32), (f32, f32)> {
                 [(1010.0, 417.0), (1010.0, 417.0), (1010.0, 417.0)],
             ),
             ("first", [(-10.0, 863.35), (-10.0, 854.0), (-10.0, 854.0)]),
-            ("second", [(-10.0, 1277.35), (-10.0, 1268.0), (-10.0, 1268.0)]),
-            ("calendar", [(510.0, 1221.0), (510.0, 1221.0), (510.0, 1221.0)]),
+            (
+                "second",
+                [(-10.0, 1277.35), (-10.0, 1268.0), (-10.0, 1268.0)],
+            ),
+            (
+                "calendar",
+                [(510.0, 1221.0), (510.0, 1221.0), (510.0, 1221.0)],
+            ),
         ],
         _ => unreachable!("a room scenario"),
     };
@@ -314,7 +323,10 @@ fn lay39_criterion_5_booking_day_at_76() {
 fn lay39_criterion_6_whole_at_100() {
     let (_project, mut harness, id) = open("double-booking");
     at(&mut harness, &id, 1.0);
-    assert_eq!(chip(&harness, &id, "first", "rooms.").shown, "← rooms…[0].id");
+    assert_eq!(
+        chip(&harness, &id, "first", "rooms.").shown,
+        "← rooms…[0].id"
+    );
     assert_eq!(
         chip(&harness, &id, "second", "rooms.").shown,
         "← rooms…[1].id"
@@ -344,7 +356,11 @@ fn lay39_criterion_7_nothing_else_moves() {
                     failures.push(format!("{name} at {zoom}, {kind}: {item}"));
                 }
             }
-            for tag in board(&harness, &id).debug_tags().iter().filter(|tag| indexed(tag)) {
+            for tag in board(&harness, &id)
+                .debug_tags()
+                .iter()
+                .filter(|tag| indexed(tag))
+            {
                 let reader = handle_of(&graph, &tag.tag.reader);
                 let key = expected
                     .keys()
@@ -400,7 +416,11 @@ fn review_lay39() {
     crate::testing::capture(&mut harness, "lay39-double-booking-54", None);
     for card in ["first", "second"] {
         show(&mut harness, &id, card, 1.0);
-        crate::testing::capture(&mut harness, &format!("lay39-double-booking-100-{card}"), None);
+        crate::testing::capture(
+            &mut harness,
+            &format!("lay39-double-booking-100-{card}"),
+            None,
+        );
     }
     let (_project, mut harness, id) = open("booking-day");
     choose(&mut harness, FIT);
