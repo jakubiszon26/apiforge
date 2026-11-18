@@ -1,11 +1,11 @@
 # LAY-41: At the Overview zoom a card says what the step is
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: **mock-up waits for the owner.** Decided in principle on
+- State: **ready** — mock-up accepted by the owner on 2026-11-18. Decided in principle on
   2026-11-18 (Q3 = A, #296): one line — method and path, call, or
-  condition — at a fixed small size, the card's size unchanged. Not ready · issue #437 ·
+  condition — at a fixed small size, the card's size unchanged. Ready · issue #437 ·
   LAY sprint, part of its close, the cards track (after LAY-30)
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -60,7 +60,12 @@ The captures also carry LAY-30's pill (`9 · status == 409`) and bar
 button; they are not part of this ticket. The mock-up writes the
 component's name statically.
 
-## Questions for the owner
+## Questions for the owner — decided
+
+The owner accepted the mock-up on 2026-11-18 with every recommended option (1 = A, 2 = A; quiz, recorded on #437). The questions are kept below as asked. Folded into the ticket by Opus 5.5: Fable has no tokens left until 2026-11-22 (model policy).
+
+Merge order: after LAY-15 (#442: `canvas/edge.rs`, `trace.rs`, `layout.rs` `Card::header_rect`, `app.rs`) and LAY-39 (#438: `canvas/readers.rs`) where this ticket touches the same files; merge `origin/main` first. After LAY-30 (the cards track, `paint.rs`, `layout.rs`).
+
 
 1. **The line as drawn** — 9 px, code face, under the name, above the
    pill. **A (recommended):** as drawn. **B:** the same in the interface
