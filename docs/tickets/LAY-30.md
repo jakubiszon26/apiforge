@@ -132,7 +132,7 @@ tests of the text in `canvas/collapse.rs`.
    `.apiforge/diagram.json` are byte for byte the same. The board's switch
    forgets the single choices.
 8. **Opening one step's checks displaces nothing (W7).** On `booking-day`
-   at 76 %, the arrow of a step in a middle row (`rooms`) opened: its
+   at 76 %, the arrow of a step in a middle row (`hold`) opened: its
    check card overlaps no card; every chip and count of every other card
    has the rectangle and the text it had before; no line at rest runs
    through a chip. Folding it again gives the board of before.
