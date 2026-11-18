@@ -1,13 +1,13 @@
 # LAY-42: Changing a field's source is reached from the field and applied only on Apply
 
 - Size: M · Owner review: 25 min · Risk: `visible UI`
-- State: **mock-up waits for the owner.** Decided in principle on
+- State: **ready** — mock-up accepted by the owner on 2026-11-18. Decided in principle on
   2026-11-18 (#296): Q5 = A, a change of source is staged — nothing is
   written until *Apply*, with a summary above it, worded without `@after`;
   Q6 = A, *Change source* on the relation statement a chip or line click
-  keeps opens the Inspector at that field. Not ready · issue #439 · LAY sprint, part of
+  keeps opens the Inspector at that field. Ready · issue #439 · LAY sprint, part of
   its close, beside the cards track
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -92,7 +92,12 @@ The summary in the capture is computed by the mock from the document (the
 samples, the 8th place, the branch, the two readers), not typed in. The
 button on the statement is painted only.
 
-## Questions for the owner
+## Questions for the owner — decided
+
+The owner accepted the mock-up on 2026-11-18 with every recommended option (1 = A, 2 = A, 3 = A; quiz, recorded on #439). The questions are kept below as asked. Folded into the ticket by Opus 5.5: Fable has no tokens left until 2026-11-22 (model policy).
+
+Merge order: after LAY-15 (#442: `canvas/edge.rs`, `trace.rs`, `layout.rs` `Card::header_rect`, `app.rs`) and LAY-39 (#438: `canvas/readers.rs`) where this ticket touches the same files; merge `origin/main` first. Beside the cards track; the Inspector part is its own.
+
 
 1. **The two views as drawn.** **A (recommended):** approve. **B:** send
    back with what to change.
