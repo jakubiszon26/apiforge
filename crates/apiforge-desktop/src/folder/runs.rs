@@ -763,7 +763,8 @@ impl FolderApp {
                         satellites: true,
                         lines: lines_of(&self.preferences),
                     };
-                    let pushed = board.push_node(edit::field_assertion(node, &port, &path, &value));
+                    let pushed = board
+                        .push_check(&node_id, edit::field_assertion(node, &port, &path, &value));
                     // The check is counted when its edit applies, which may
                     // first ask about unattached comments (UX-35).
                     self.component_action(

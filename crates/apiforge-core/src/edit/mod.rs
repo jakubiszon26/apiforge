@@ -40,7 +40,8 @@ pub use inspect::{
     collect_response_fields, collect_response_fields_bounded, sample_paths,
 };
 pub use nodes::{
-    AddedNode, AssignedVariable, OutputRef, add_node, assign_response_variable, field_assertion,
+    AddedNode, AssignedVariable, OutputRef, add_check, add_node, assign_response_variable,
+    field_assertion,
 };
 pub use proxies::{
     add_proxy, move_proxies, proxy_binding, proxy_source, prune_proxies, remove_proxies,

@@ -2338,7 +2338,8 @@ impl App {
         };
         let assertion = edit::field_assertion(&node, port, path, value);
         let label = if path.is_empty() { port } else { path };
-        self.push_node(assertion);
+        let edit = self.with_board(|board| board.push_check(source, assertion));
+        self.apply_edit(Ok(edit));
         self.notice = Some(format!(
             "Added a comparison for “{label}”. Check the expected value or type in its configuration."
         ));
