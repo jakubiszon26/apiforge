@@ -1195,3 +1195,97 @@ mod fixture_351 {
         }
     }
 }
+
+/// #430: `@after(<if>)` (LANG-14, #390) runs a statement after the whole
+/// `if` in a folder project as it does in the runner: the example of the
+/// language reference, § Branches, checks and simulates to its last step.
+mod issue430 {
+    use super::run;
+    use apiforge_core::run::{Phase, RunResult, RunStatus, StepStatus};
+    use apiforge_project::prepare_project;
+    use std::{ffi::OsStr, fs};
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    /// The example of `docs/language/reference.md` § Branches.
+    const TEXT: &str = r#"scenario "Branches" {
+  param quantity = 2
+  cart = POST "/carts" {
+    body { productId: 123, quantity: param.quantity }
+    sample 201 { id: "c-1", total: 160 }
+  }
+  created = if cart.status == 201 {
+    receipt = GET "/carts/{{cart.body.id}}" {
+      sample 200 { id: "c-1" }
+    }
+    @after(receipt)
+    items = GET "/carts/{{cart.body.id}}/items" {
+      sample 200 { items: [] }
+    }
+  } else {
+    failed = assert cart.status == 201
+  }
+  @after(created)
+  logout = POST "/logout" {
+    sample 204 {}
+  }
+}
+"#;
+
+    fn shop() -> tempfile::TempDir {
+        let directory = tempfile::tempdir().unwrap();
+        prepare_project(directory.path(), &apiforge_core::demos::shop_project()).unwrap();
+        fs::write(directory.path().join(SCENARIO), TEXT).unwrap();
+        directory
+    }
+
+    #[test]
+    fn issue430_the_reference_example_checks_in_a_folder() {
+        let directory = shop();
+        let output = run(directory.path(), "check", &[]);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn issue430_the_reference_example_simulates_after_the_whole_if() {
+        let directory = shop();
+        let output = run(
+            directory.path(),
+            "run",
+            &[
+                OsStr::new("--scenario"),
+                OsStr::new(SCENARIO),
+                OsStr::new("--json"),
+            ],
+        );
+        let report: RunResult = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "no report ({error}); stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+        let order: Vec<&str> = report
+            .steps
+            .iter()
+            .filter(|step| step.phase == Phase::Main)
+            .map(|step| step.handle.as_str())
+            .collect();
+        let position = |handle: &str| order.iter().position(|h| *h == handle);
+        assert!(position("items").is_some(), "{order:?}");
+        assert!(position("logout") > position("items"), "{order:?}");
+        for step in report.steps.iter().filter(|step| step.phase == Phase::Main) {
+            // `then` is taken, so `else`'s assert stays off the path.
+            let expected = if step.handle == "failed" {
+                StepStatus::Skipped
+            } else {
+                StepStatus::Passed
+            };
+            assert_eq!(step.status, expected, "{}", step.handle);
+        }
+        assert_eq!(report.status, RunStatus::Passed);
+    }
+}
