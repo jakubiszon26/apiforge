@@ -49,7 +49,8 @@ fn rooms_project() -> tempfile::TempDir {
     }
     let directory = tempfile::tempdir().unwrap();
     copy(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/scenarios/lay/rooms"),
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/scenarios/lay/rooms"),
         directory.path(),
     );
     directory
@@ -560,9 +561,7 @@ fn lay15_criterion_5_back_restores_the_inspector() {
     assert_eq!(before.0, Some(second.clone()));
     assert!(before.1 > 0.0, "the Inspector is scrolled: {before:?}");
     assert!(
-        before
-            .2
-            .contains(&("body-binding".to_owned(), true)),
+        before.2.contains(&("body-binding".to_owned(), true)),
         "Body value source is open: {before:?}"
     );
     assert!(
@@ -574,7 +573,11 @@ fn lay15_criterion_5_back_restores_the_inspector() {
     click_label(&mut harness, ROOMS_JUMP);
     select(&mut harness, &id, "rooms");
     let rooms = id_of(&harness, &id, "rooms");
-    assert_eq!(inspector(&harness).0, Some(rooms), "the Inspector shows rooms");
+    assert_eq!(
+        inspector(&harness).0,
+        Some(rooms),
+        "the Inspector shows rooms"
+    );
 
     click_label(&mut harness, BACK);
     assert_eq!(selection(&harness, &id), vec![second]);
@@ -733,7 +736,10 @@ fn lay15_criterion_9_the_inspector_keeps_the_place() {
         harness.query_by_label("Close Inspector").is_some(),
         "the Inspector is open"
     );
-    assert!(!edge_chips(&harness, &id).is_empty(), "edge chips are shown");
+    assert!(
+        !edge_chips(&harness, &id).is_empty(),
+        "edge chips are shown"
+    );
     // The board pans no more than UX-18's least pan, which keeps second
     // whole beside the Inspector: never away from it.
     let after = card(&harness, &id, "second");
@@ -786,4 +792,3 @@ fn review_lay15() {
     click_label(&mut harness, BACK);
     save(&mut harness, "lay15-selected-after-back-1280");
 }
-
