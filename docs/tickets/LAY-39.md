@@ -4,7 +4,7 @@
 - State: decided by the owner on 2026-11-18 (Q7 = A, #296): a chip keeps
   the last index and field, `← rooms…[1].id`, and is never a bare `←` while
   there is room; text only. Accepted on a capture before merge (#296,
-  Plan A) · LAY sprint, part of its close
+  Plan A) · issue #435 · LAY sprint, part of its close
 - Analysis model: Fable · Implementation model: Opus
 
 ## Goal
