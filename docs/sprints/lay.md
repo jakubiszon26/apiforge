@@ -243,7 +243,9 @@ reference scenario.
 - **P3 Semantic zoom (LAY-09).** The thresholds are decided after round 3
   (Q7); the content changes. Overview: status band, badge, the name drawn at
   a minimum on-screen size (11 px whatever the zoom, clipped to the card),
-  aggregate pill. Compact: plus method and short path, the result line and
+  from 0.25 one line saying what the step is at a fixed 9 px (method and
+  path, call, condition or value; amended by LAY-41, Q3 = A), aggregate
+  pill. Compact: plus method and short path, the result line and
   the ports in use (Q13); a failed or blocked card has a 2 px red or amber
   border at every level. Full: as today plus the badge; a check's subtitle
   names its subject and predicate (`cart.total ≈ total`). Zooming never

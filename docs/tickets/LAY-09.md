@@ -20,7 +20,14 @@ level.
 
 - Overview (below 0.45): the status band, the badge, the name drawn at a
   minimum on-screen size of 11 px whatever the zoom, clipped to the card,
-  and the checks aggregate as a pill under the name (Q5).
+  and the checks aggregate as a pill under the name (Q5). *Amended by
+  [LAY-41](LAY-41.md) (#437, Q3 = A):* from 0.25, one line between the
+  name and the pill says what the step is — a request's method and path, a
+  component call's handle and revision (`sign_in · r1`), the condition of an
+  `if`, a check or a *Data condition*, a value's source or content — in the
+  code face at a fixed 9 px on screen, cut with `…` at the card's edge;
+  a card too low for it, or that would lose its pill or count to it, draws
+  none. The card's box is unchanged.
 - Medium (0.45 to 0.75): plus method and short path, two result lines
   (execution, checks), the ports in use and one summary line per configured
   input (`Body · 2 fields`, Q13 = A); unconnected output ports, *Optional*
