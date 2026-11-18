@@ -46,8 +46,9 @@ pub enum Action {
     },
     /// Show this block in the code panel, by handle.
     Reveal(String),
-    /// *Expand checks here* switched for the selected step: its checks hang
-    /// under it on the collapsed board, for this session (LAY-11).
+    /// The selected step's own switch of its checks, set to differ from the
+    /// board's setting or not (LAY-11, LAY-30): *Expand checks here* or
+    /// *Collapse checks here*.
     ExpandChecksHere(bool),
     /// *Read directly again* on a variable that holds a plain reference: its
     /// readers read the value and the variable goes (LAY-25).
@@ -68,9 +69,9 @@ pub struct Context<'a> {
     pub parameters: &'a [String],
     pub run: Option<&'a RunResult>,
     pub step: Option<&'a StepResult>,
-    /// *Expand checks here* in the *Checks* list: `None` when the board does
-    /// not fold checks into this step, else whether it is on (LAY-11).
-    pub expand_here: Option<bool>,
+    /// The switch of the step's own checks in the *Checks* list: `None`
+    /// when the board folds no check into this step (LAY-11, LAY-30).
+    pub expand_here: Option<crate::canvas::ChecksHere>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

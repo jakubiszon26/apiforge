@@ -11,6 +11,7 @@
 mod activation;
 pub use activation::{Refusal, Start, decide as managed_start};
 mod analysis;
+mod checks_here;
 mod chrome;
 mod code_view;
 mod component_settings;
@@ -320,6 +321,8 @@ pub struct FolderApp {
     /// context are the same: deriving it reads every block and sample.
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
+    /// Each step's own choice of its checks, per document (LAY-30).
+    checks_here: checks_here::ChecksHere,
     /// The steps the Cleanup board's cards read, kept while the model is the
     /// same: building them copies the Main graph (UX-16).
     cleanup_reference: Option<(Arc<Document>, Arc<Graph>)>,
@@ -555,6 +558,7 @@ impl FolderApp {
             caret_statement: None,
             completion_names: None,
             canvases: HashMap::new(),
+            checks_here: checks_here::ChecksHere::default(),
             cleanup_reference: None,
             shared_values: None,
             selections: HashMap::new(),
@@ -681,6 +685,7 @@ impl FolderApp {
         self.uninitialised = false;
         self.session = Some(session);
         self.open_run_journal();
+        self.load_checks_here();
         self.reload_field_drafts();
         self.restore_text_tabs();
         self.remember_project();
@@ -801,7 +806,8 @@ impl FolderApp {
     }
 
     /// Folds the checks of every board into their subjects, or shows them
-    /// again, and remembers it as *Collapse checks* (LAY-11).
+    /// again, and remembers it as *Checks* on the bar (LAY-11, LAY-30):
+    /// every step's own choice is forgotten.
     fn collapse_checks(&mut self, collapsed: bool) {
         self.preferences.checks_collapsed = collapsed;
         self.card_density.set_lines(lines_of(&self.preferences));
@@ -814,6 +820,7 @@ impl FolderApp {
         for canvas in self.canvases.values_mut() {
             canvas.set_collapsed(collapsed);
         }
+        self.forget_checks_here(collapsed);
     }
 
     /// Draws every check as a card, as before LAY-11, for tests that measure

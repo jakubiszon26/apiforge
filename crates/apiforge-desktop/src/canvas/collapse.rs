@@ -151,13 +151,23 @@ impl Aggregate {
     /// `3 checks` before a run, never a tick for a check that did not run;
     /// `✓ 2 checks` when every one passed; `✕ 1/3 failed · 1 skipped` when
     /// one failed; else the state of each (`1 ✓ · 1 waiting`). Gates
-    /// follow, counted apart.
+    /// follow, counted apart. A step whose one check is folded, with no
+    /// gate, writes it instead of the count (`9 · ✓ status == 409`), unless
+    /// it did not run (LAY-30, Q1 = A, Q3 = A).
     pub fn text(&self) -> String {
         let mut parts = Vec::new();
         if !self.numbers.is_empty() {
             parts.push(self.numbers_text());
         }
-        if self.checks > 0 {
+        if let Some(single) = self.written() {
+            parts.push(if self.failed > 0 {
+                format!("✕ {single}")
+            } else if self.passed > 0 {
+                format!("✓ {single}")
+            } else {
+                single.to_owned()
+            });
+        } else if self.checks > 0 {
             if !self.run {
                 parts.push(plural(self.checks, "check"));
             } else if self.failed > 0 {
@@ -186,6 +196,13 @@ impl Aggregate {
             parts.push(plural(self.gates, "gate"));
         }
         parts.join(" · ")
+    }
+
+    /// The predicate the line writes in place of the count, if any.
+    fn written(&self) -> Option<&str> {
+        self.single
+            .as_deref()
+            .filter(|_| self.checks == 1 && self.gates == 0 && self.skipped == 0)
     }
 }
 
@@ -246,18 +263,73 @@ pub fn aggregates(
     result
 }
 
+/// The one check each subject counts while it is folded (LAY-30), by the
+/// subject's node id: the check its line may write. `later` is as in
+/// [`aggregates`]; a subject with a gate or a second check has none.
+pub fn singles(
+    graph: &Graph,
+    later: Option<&Graph>,
+    folded: &HashSet<&str>,
+) -> HashMap<String, String> {
+    let mut graphs = vec![graph];
+    graphs.extend(later);
+    let mut counted: HashMap<String, Vec<&str>> = HashMap::new();
+    for check in graph.nodes.iter().filter(|node| is_check(node)) {
+        for subject in check_subjects_in(&graphs, check).subjects {
+            let entry = counted.entry(subject.step.to_owned()).or_default();
+            // A gate counts too, so that its subject writes no predicate.
+            entry.push(if subject.gate { "" } else { check.id.as_str() });
+        }
+    }
+    counted
+        .into_iter()
+        .filter_map(|(subject, checks)| match checks.as_slice() {
+            [one] if !one.is_empty() && folded.contains(one) => Some((subject, (*one).to_owned())),
+            _ => None,
+        })
+        .collect()
+}
+
 /// A check as the line of its subject `subject` writes it (LAY-30): the
 /// operands as a card's line prints a reference, the subject's own name
 /// left out, and the sign the script prints (`status == 409`,
 /// `body.items[0].id == first.body.id`, `nonempty body.items`). `None` for
-/// a check the line does not write.
+/// a check the line does not write: a *Data condition* keeps the count.
 pub fn written(
-    _graph: &Graph,
-    _project: &apiforge_core::format::Project,
-    _check: &Node,
-    _subject: &str,
+    graph: &Graph,
+    project: &apiforge_core::format::Project,
+    check: &Node,
+    subject: &str,
 ) -> Option<String> {
-    None
+    if check.kind != NodeKind::Assert {
+        return None;
+    }
+    let scope = apiforge_core::template_text::Scope {
+        nodes: &graph.nodes,
+        project,
+        request: None,
+    };
+    let operand = |name: &str| {
+        check.inputs.get(name).map_or_else(
+            || "?".to_owned(),
+            |binding| super::layout::own_source_text(binding, scope, graph, subject),
+        )
+    };
+    let predicate = apiforge_core::graph::predicate(check);
+    let sign = apiforge_script::predicate_symbol(predicate);
+    let mut text = if predicate.takes_expected() {
+        format!("{} {sign} {}", operand("actual"), operand("expected"))
+    } else {
+        format!("{sign} {}", operand("actual"))
+    };
+    if predicate == apiforge_core::model::Predicate::Approximately {
+        let tolerance = check.config.tolerance.unwrap_or(0.0);
+        text.push_str(&format!(
+            " within {}",
+            apiforge_core::js::number_to_string(tolerance)
+        ));
+    }
+    Some(text)
 }
 
 #[cfg(test)]

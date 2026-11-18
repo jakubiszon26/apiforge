@@ -711,7 +711,8 @@ fn binary_symbol(operator: Operator) -> Option<&'static str> {
         _ => return None,
     })
 }
-fn predicate_symbol(predicate: Predicate) -> &'static str {
+/// The sign a check is written with in the script: `==`, `nonempty`, `~=`.
+pub fn predicate_symbol(predicate: Predicate) -> &'static str {
     match predicate {
         Predicate::Equals => "==",
         Predicate::NotEquals => "!=",

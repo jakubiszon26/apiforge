@@ -754,6 +754,18 @@ impl Card {
         })
     }
 
+    /// The switch of the step's own checks at the right end of its checks
+    /// line (LAY-30): a square as high as the line allows, at most 16 px at
+    /// 100 %, 8 px from the line's end. `None` where the line has no area.
+    pub fn checks_switch(&self, zoom: f32) -> Option<Rect> {
+        let area = self.aggregate_area(zoom)?;
+        let side = (area.height() - 4.0).min(16.0);
+        Some(Rect::from_center_size(
+            pos2(area.right() - 8.0 - side / 2.0, area.center().y),
+            vec2(side, side),
+        ))
+    }
+
     fn row_rect(&self, row: &CompactRow) -> Rect {
         Rect::from_min_size(self.origin + vec2(0.0, row.top), vec2(WIDTH, row.height))
     }
@@ -1132,13 +1144,56 @@ fn sentence(
 /// signs (`promoted.promotion.price × 2 + second.price`). `outer` is the
 /// binding strength of the operator around it, for brackets.
 fn source_text(binding: &Binding, scope: Scope<'_>, graph: &Graph, outer: u8) -> String {
+    source_text_of(binding, scope, graph, outer, None)
+}
+
+/// A check's operand as the line of its subject `own` writes it (LAY-30):
+/// as [`source_text`], a reference to `own` without its name
+/// (`second.status` → `status`).
+pub(super) fn own_source_text(
+    binding: &Binding,
+    scope: Scope<'_>,
+    graph: &Graph,
+    own: &str,
+) -> String {
+    source_text_of(binding, scope, graph, 0, Some(own))
+}
+
+fn source_text_of(
+    binding: &Binding,
+    scope: Scope<'_>,
+    graph: &Graph,
+    outer: u8,
+    own: Option<&str>,
+) -> String {
     use apiforge_core::operator::Operator as O;
     match binding {
         Binding::Reference { .. }
         | Binding::Parameter { .. }
         | Binding::Environment { .. }
-        | Binding::Argument { .. } => apiforge_core::template_text::print_reference(binding, scope)
-            .unwrap_or_else(|| labels::binding(binding, graph)),
+        | Binding::Argument { .. } => {
+            let text = apiforge_core::template_text::print_reference(binding, scope)
+                .unwrap_or_else(|| labels::binding(binding, graph));
+            match (binding, own) {
+                (Binding::Reference { node_id, .. }, Some(own)) if node_id == own => {
+                    let handle = scope
+                        .nodes
+                        .iter()
+                        .find(|node| &node.id == node_id)
+                        .map_or("", |node| node.handle.as_str());
+                    match text.strip_prefix(handle) {
+                        Some(rest) if !handle.is_empty() && rest.starts_with('.') => {
+                            rest[1..].to_owned()
+                        }
+                        Some(rest) if !handle.is_empty() && rest.starts_with('[') => {
+                            rest.to_owned()
+                        }
+                        _ => text,
+                    }
+                }
+                _ => text,
+            }
+        }
         Binding::Literal { value } => apiforge_core::js::json_stringify(value),
         Binding::Template { .. } => print_template(binding, scope).map_or_else(
             || labels::binding(binding, graph),
@@ -1148,7 +1203,10 @@ fn source_text(binding: &Binding, scope: Scope<'_>, graph: &Graph, outer: u8) ->
             "{{ {} }}",
             fields
                 .iter()
-                .map(|(key, field)| format!("{key}: {}", source_text(field, scope, graph, 0)))
+                .map(|(key, field)| format!(
+                    "{key}: {}",
+                    source_text_of(field, scope, graph, 0, own)
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -1156,7 +1214,7 @@ fn source_text(binding: &Binding, scope: Scope<'_>, graph: &Graph, outer: u8) ->
             "[{}]",
             items
                 .iter()
-                .map(|item| source_text(item, scope, graph, 0))
+                .map(|item| source_text_of(item, scope, graph, 0, own))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
@@ -1181,8 +1239,8 @@ fn source_text(binding: &Binding, scope: Scope<'_>, graph: &Graph, outer: u8) ->
                 (Some((sign, strength)), Some(left), Some(right)) if inputs.len() == 2 => {
                     let text = format!(
                         "{} {sign} {}",
-                        source_text(left, scope, graph, strength),
-                        source_text(right, scope, graph, strength + 1)
+                        source_text_of(left, scope, graph, strength, own),
+                        source_text_of(right, scope, graph, strength + 1, own)
                     );
                     if strength < outer {
                         format!("({text})")
@@ -1197,7 +1255,7 @@ fn source_text(binding: &Binding, scope: Scope<'_>, graph: &Graph, outer: u8) ->
                         .unwrap_or_else(|| operator.label().to_owned());
                     let arguments: Vec<String> = inputs
                         .values()
-                        .map(|input| source_text(input, scope, graph, 0))
+                        .map(|input| source_text_of(input, scope, graph, 0, own))
                         .collect();
                     format!("{name}({})", arguments.join(", "))
                 }

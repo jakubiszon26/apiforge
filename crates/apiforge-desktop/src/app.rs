@@ -2436,6 +2436,7 @@ impl App {
             | Command::ComponentSettings
             | Command::SetCompactCards(_)
             | Command::SetChecksCollapsed(_)
+            | Command::ToggleChecksHere(_)
             | Command::SetWires(_)
             // This window proposes no variable (LAY-25).
             | Command::SaveValues { .. }

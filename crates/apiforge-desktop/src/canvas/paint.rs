@@ -365,12 +365,66 @@ pub fn check_ring() -> Color32 {
 }
 
 /// How a card stands to the selected step (LAY-10).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Look {
     /// The halo of a related card, in its colour.
     pub ring: Option<Color32>,
     /// Another step is selected and this one is not related to it.
     pub dimmed: bool,
+    /// The switch of the step's own checks at the end of its checks line,
+    /// on screen (LAY-30): the line's text ends before it.
+    pub switch: Option<Rect>,
+}
+
+/// `text` as wide as `width` allows in `font`: whole where it fits, else
+/// cut with `…` (LAY-30).
+fn cut(painter: &Painter, text: &str, font: &FontId, width: f32) -> String {
+    let fits = |text: &str| {
+        painter
+            .layout_no_wrap(text.to_owned(), font.clone(), theme::MUTED)
+            .size()
+            .x
+            <= width
+    };
+    if fits(text) {
+        return text.to_owned();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let (mut low, mut high) = (0, chars.len());
+    // The longest start that fits with the ellipsis after it.
+    while low < high {
+        let middle = (low + high).div_ceil(2);
+        let candidate: String = chars[..middle].iter().collect();
+        if fits(&format!("{}…", candidate.trim_end())) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    let start: String = chars[..low].iter().collect();
+    format!("{}…", start.trim_end())
+}
+
+/// The switch of a step's own checks (LAY-30): `›` while they are folded,
+/// `⌄` while they hang under it, in a small framed square.
+pub fn checks_switch(painter: &Painter, rect: Rect, folded: bool, hovered: bool, zoom: f32) {
+    painter.rect(
+        rect.expand(2.0 * zoom),
+        3.0 * zoom,
+        if hovered {
+            theme::ACCENT_SOFT
+        } else {
+            theme::FIELD
+        },
+        Stroke::new(0.75, theme::BORDER),
+        egui::StrokeKind::Inside,
+    );
+    if folded {
+        Icon::ChevronRight
+    } else {
+        Icon::ChevronDown
+    }
+    .paint(painter, rect, theme::TEXT);
 }
 
 /// The board painted over a dimmed card, so that [`CARD_KEEP`] of it shows.
@@ -804,6 +858,16 @@ impl Pill {
                 .size()
         };
         let mut size = measure(&text);
+        // A written check gives way to the count where it does not fit
+        // (LAY-30).
+        if size.x + 10.0 > card.width() - 10.0 && aggregate.single.is_some() {
+            let counted = Aggregate {
+                single: None,
+                ..aggregate.clone()
+            };
+            text = counted.text();
+            size = measure(&text);
+        }
         if size.x + 10.0 > card.width() - 10.0 && !aggregate.numbers.is_empty() {
             text = aggregate.numbers_text();
             size = measure(&text);
@@ -1465,6 +1529,17 @@ pub fn card(
                     color = theme::DANGER;
                 }
             }
+            // It ends before the switch of the step's checks (LAY-30).
+            let mut status_rect = status_rect;
+            if let Some(switch) = look.switch {
+                status_rect.max.x = status_rect.max.x.min(switch.left() - 4.0 * z);
+                status = cut(
+                    &clipped,
+                    &status,
+                    &FontId::proportional(line(11.0)),
+                    status_rect.width(),
+                );
+            }
             drawn.label(
                 &clipped,
                 status_rect,
@@ -1790,11 +1865,23 @@ pub fn compact_card(
                         theme::DANGER.gamma_multiply(0.12),
                     );
                 }
+                let mut line = aggregate
+                    .map(Aggregate::text)
+                    .filter(|text| !text.is_empty())
+                    .map_or(Cow::Borrowed(text.as_str()), Cow::Owned);
+                // It ends before the switch of the step's checks, cut with
+                // `…` where it is wider (LAY-30).
+                if let Some(switch) = look.switch {
+                    area.max.x = area.max.x.min(switch.left() - 4.0 * z);
+                    line = Cow::Owned(cut(
+                        &clipped,
+                        &line,
+                        &FontId::proportional(small),
+                        area.width(),
+                    ));
+                }
                 (
-                    aggregate
-                        .map(Aggregate::text)
-                        .filter(|text| !text.is_empty())
-                        .map_or(Cow::Borrowed(text.as_str()), Cow::Owned),
+                    line,
                     FontId::proportional(small),
                     if failed_check {
                         theme::DANGER
