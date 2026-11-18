@@ -1010,7 +1010,9 @@ fn reference_editor(
     id: Id,
     stage: Option<&Stage<'_>>,
 ) -> bool {
-    let Some(stage) = stage else {
+    // A field of an input holds its choice; an input read whole, as a
+    // check's *Actual*, is written as chosen.
+    let Some(stage) = stage.filter(|stage| !stage.path.is_empty()) else {
         return reference_controls(ui, context, port, node_id, output, field, id);
     };
     let input = context.input.unwrap_or(port.name.as_str()).to_owned();

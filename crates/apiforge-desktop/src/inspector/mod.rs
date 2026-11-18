@@ -1486,8 +1486,8 @@ fn remove_request_argument(node: &mut Node, name: &str) {
 
 /// Whether the Inspector edits `input` of `node` at `path` in a *Result of
 /// another step* editor that holds a change until *Apply*: the input has an
-/// argument editor, the path walks only fields of objects and items of
-/// lists, and a reference stands there (LAY-42).
+/// argument editor, the path, never empty, walks only fields of objects and
+/// items of lists, and a reference stands there (LAY-42).
 pub fn changes_source_at(
     node: &Node,
     graph: &Graph,
@@ -1498,6 +1498,9 @@ pub fn changes_source_at(
     let Some(mut binding) = node.inputs.get(input) else {
         return false;
     };
+    if path.is_empty() {
+        return false;
+    }
     for segment in path {
         if !matches!(binding, Binding::Object { .. } | Binding::Array { .. }) {
             return false;
