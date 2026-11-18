@@ -1,0 +1,10 @@
+component sign_in "Sign in" {
+  description "Open a session on the room booking API and return its token."
+  @label("User")
+  input user: string = "tester"
+  session = POST "/sessions" {
+    body { user: param.user, password: "secret" }
+    sample 201 { token: "tok-1" }
+  }
+  export token: string = session.body.token
+}
