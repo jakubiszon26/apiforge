@@ -74,9 +74,16 @@ fn lay40_criterion_1_a_first_open_shows_the_scenario_in_diagram() {
     let project = shop_project();
     let harness = first_open_harness(project.path(), WIDE, None);
     let (id, kind) = active(&harness);
-    assert_eq!(kind, DocumentKind::Scenario, "the first tab is the scenario");
+    assert_eq!(
+        kind,
+        DocumentKind::Scenario,
+        "the first tab is the scenario"
+    );
     assert_eq!(folder(&harness).workbench.mode, Mode::Diagram);
-    assert!(selected(&harness, "Diagram"), "the Diagram switch is selected");
+    assert!(
+        selected(&harness, "Diagram"),
+        "the Diagram switch is selected"
+    );
     assert!(!selected(&harness, "Code") && !selected(&harness, "Split"));
     let board = folder(&harness)
         .canvases
