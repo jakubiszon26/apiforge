@@ -10,7 +10,7 @@ use super::lay14::{LINE, empty_point, line, point_on};
 use super::lay16::{press, release};
 use super::lay23::{Checks, board, fixture, graph, id_of, revealed, show, tidied, tidied_text};
 use super::*;
-use crate::testing::MINIMUM;
+use crate::testing::{MINIMUM, quiesce};
 use egui::{Pos2, Rect, Vec2, vec2};
 use serde_json::Value;
 
@@ -27,6 +27,12 @@ fn opened(size: Vec2) -> (tempfile::TempDir, FolderHarness, String) {
         "Compact is the default"
     );
     show(&mut harness, &id, "login", 0.6);
+    // Tidy is a change: a second of wall time later the window protects it,
+    // and on a slow runner the storage band then shows under the tabs while
+    // the count is pointed at or clicked: the board moves 38 px down and its
+    // camera pans by as much. The protection is done before anything is
+    // measured (#432).
+    quiesce(&mut harness);
     (project, harness, id)
 }
 
