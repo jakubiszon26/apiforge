@@ -1,12 +1,12 @@
 # LAY-30: A step with one check writes it on its folded line; the checks switch sits on the board's bar and on each step
 
 - Size: M · Owner review: 25 min · Risk: `visible UI`
-- State: **mock-up waits for the owner.** Re-scoped by the owner's
+- State: **ready** — mock-up accepted by the owner on 2026-11-18. Re-scoped by the owner's
   decisions of 2026-11-18 (Q1 = A, Q2 = A, #296); the switch on the bar and
-  the arrow on a step stay as approved on 2026-11-17 (#383). Not ready ·
+  the arrow on a step stay as approved on 2026-11-17 (#383). Ready ·
   issue #383 · LAY sprint, part of its close, the cards track (before
   LAY-41)
-- Analysis model: Fable · Implementation model: —
+- Analysis model: Fable · Implementation model: Opus 5.5
 
 ## Goal
 
@@ -84,7 +84,12 @@ The bar's button and the arrow are those approved on 2026-11-17
 (`mock/lay-30-checks-switch` at c11925d). In the mock-up the cut of a long
 predicate is the row's clip, not yet `…`.
 
-## Questions for the owner
+## Questions for the owner — decided
+
+The owner accepted the mock-up on 2026-11-18 with every recommended option (1 = A, 2 = A, 3 = A; quiz, recorded on #383). The questions are kept below as asked. Folded into the ticket by Opus 5.5: Fable has no tokens left until 2026-11-22 (model policy).
+
+Merge order: after LAY-15 (#442: `canvas/edge.rs`, `trace.rs`, `layout.rs` `Card::header_rect`, `app.rs`) and LAY-39 (#438: `canvas/readers.rs`) where this ticket touches the same files; merge `origin/main` first.
+
 
 1. **The line as drawn** — number, then ✓ or ✕, then the predicate.
    **A (recommended):** as drawn. **B:** the sign first (`✓ 9 · status ==
