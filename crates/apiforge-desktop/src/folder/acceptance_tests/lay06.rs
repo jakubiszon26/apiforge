@@ -22,7 +22,7 @@ const FIT: &str = "Fit the view";
 const BOARDS: &str = "../apiforge-layout/examples/support/boards.txt";
 /// Writing it again instead of comparing: `APIFORGE_WRITE_BOARDS=1`.
 const WRITE: &str = "APIFORGE_WRITE_BOARDS";
-const REFERENCE: [&str; 4] = ["order-flow", "shop-30", "shop-50", "fan-out"];
+const REFERENCE: [&str; 5] = ["order-flow", "shop-30", "shop-50", "fan-out", "labels"];
 
 fn fixture(name: &str) -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

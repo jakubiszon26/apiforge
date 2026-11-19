@@ -119,7 +119,7 @@ fn reference() -> Vec<Board> {
             _ => {}
         }
     }
-    assert_eq!(boards.len(), 24, "the reference boards");
+    assert_eq!(boards.len(), 30, "the reference boards");
     boards
 }
 

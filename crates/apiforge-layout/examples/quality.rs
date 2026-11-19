@@ -768,8 +768,8 @@ mod tests {
         let boards = boards(BOARDS).expect("the board file reads");
         assert_eq!(
             boards.len(),
-            24,
-            "four scenarios, two densities, two states, and chips at the compact density"
+            30,
+            "five scenarios, two densities, two states, and chips at the compact density"
         );
         for board in &boards {
             assert!(

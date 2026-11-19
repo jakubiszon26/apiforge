@@ -67,6 +67,16 @@ pub fn shop_project_without_far_reads() -> tempfile::TempDir {
     directory
 }
 
+/// Where [`labels_board`] keeps the `labels` reference scenario.
+pub const LABELS: &str = "scenarios/labels.afs";
+
+/// `fixtures/scenarios/lay/labels.afs` (FIX-01) as the only document of a
+/// folder project of its own, open on its board at `size` with nothing
+/// selected: the project, the window and the scenario's document id.
+pub fn labels_board(_size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    unimplemented!("FIX-01: the helper comes with the fixture")
+}
+
 /// The view a project with no stored view starts in under the shared
 /// harnesses. The application chooses Diagram for a scenario (LAY-40); the
 /// tests that are not about the first view were written against Code and
