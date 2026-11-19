@@ -6,6 +6,8 @@
 
 mod after;
 mod collapse;
+#[cfg(test)]
+pub(crate) mod diag06;
 mod edge;
 mod layout;
 mod menu;
@@ -1514,6 +1516,9 @@ impl Canvas {
             .map(|node| Card::build(node, input.reference_graph, input.project, self.density))
             .collect();
         self.apply_missing_steps(input.graph, input.reference_graph, &mut cards);
+        // MOCK (DIAG-06): a scene places some cards by hand.
+        #[cfg(test)]
+        diag06::place(&mut cards);
         #[cfg(test)]
         {
             self.sources = cards
@@ -1602,6 +1607,9 @@ impl Canvas {
 
         // The row ends of a board in shape D name the next step (LAY-06).
         let marks = shape::marks(input.graph, &cards);
+        // MOCK (DIAG-06): the chain is drawn by the scene.
+        #[cfg(test)]
+        let marks = if diag06::on() { Vec::new() } else { marks };
         let mark_rects: Vec<Rect> = marks.iter().map(|mark| mark.rect).collect();
         #[cfg(test)]
         {
@@ -1630,6 +1638,12 @@ impl Canvas {
         // An `@after` into the next step is an arrow at the step's badge, in
         // the same mode as the chips (LAY-24).
         let after_marks = after::marks(input.graph, input.later, &cards, &rest_wires);
+        #[cfg(test)]
+        let after_marks = if diag06::on() {
+            Vec::new()
+        } else {
+            after_marks
+        };
         // Fit shows the chips, the counts and the arrows whole, the first
         // column's too.
         let mut extents = mark_rects.clone();
@@ -1740,14 +1754,27 @@ impl Canvas {
         } else {
             marks
         };
+        #[cfg(test)]
+        let marks = if diag06::on() { Vec::new() } else { marks };
 
         let board_painter = painter.with_clip_rect(overlays.board);
         paint::grid(&board_painter, overlays.board, camera);
+        #[cfg(test)]
+        diag06::under(&board_painter, &cards, camera);
 
         // Wires go under the cards. They are routed around the cards and chips, so
         // what is drawn is also what hit testing uses.
         let selection: HashSet<&str> = input.selection.iter().map(String::as_str).collect();
         let (board_wires, wire_labels) = folded_wires(input.graph, &cards, &chips, &redrawn);
+        #[cfg(test)]
+        let board_wires: Vec<routing::BoardWire> = if diag06::on() {
+            board_wires
+                .into_iter()
+                .filter(|wire| !wire.control)
+                .collect()
+        } else {
+            board_wires
+        };
         // A kept wire the board no longer has, after an edit, an Undo or a
         // fold, is no longer kept: it does not come back kept (LAY-14).
         let kept = self.selected_wires.len();
@@ -2519,6 +2546,8 @@ impl Canvas {
         for (_, at, color) in &port_rings {
             paint::port_ring(&board_painter, *at, *color, camera.zoom);
         }
+        #[cfg(test)]
+        diag06::over(&board_painter, &cards, camera, overlays.board);
         #[cfg(test)]
         {
             self.ringed_ports = port_rings

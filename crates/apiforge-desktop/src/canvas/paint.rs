@@ -1772,12 +1772,20 @@ pub fn card(
             socket(&edge, camera.to_screen(anchor), false, z);
         }
     }
+    // MOCK (DIAG-06): the order sockets are drawn on the card's sides.
+    #[cfg(test)]
+    let sideways = super::diag06::on();
+    #[cfg(not(test))]
+    let sideways = false;
     for (port, _) in &card.controls {
+        if sideways && *port == apiforge_core::graph::ORDER_PORT {
+            continue;
+        }
         if let Some(anchor) = card.output_anchor(port) {
             socket(&edge, camera.to_screen(anchor), true, z);
         }
     }
-    if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
+    if !sideways && let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
         socket(&edge, camera.to_screen(anchor), true, z);
     }
     if let Some(color) = look.ring {
@@ -2122,12 +2130,20 @@ pub fn compact_card(
             socket(&edge, camera.to_screen(anchor), false, z);
         }
     }
+    // MOCK (DIAG-06): the order sockets are drawn on the card's sides.
+    #[cfg(test)]
+    let sideways = super::diag06::on();
+    #[cfg(not(test))]
+    let sideways = false;
     for (port, _) in &card.controls {
+        if sideways && *port == apiforge_core::graph::ORDER_PORT {
+            continue;
+        }
         if let Some(anchor) = card.output_anchor(port) {
             socket(&edge, camera.to_screen(anchor), true, z);
         }
     }
-    if let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
+    if !sideways && let Some(anchor) = card.input_anchor(apiforge_core::graph::ORDER_PORT, &[]) {
         socket(&edge, camera.to_screen(anchor), true, z);
     }
     if let Some(color) = look.ring {
