@@ -20,10 +20,10 @@ this page points at them and orders the next day.
   five exit criteria met, one in two parts of three, one replaced; three
   actions.
 - **LANG is the current sprint, started by the owner on 2026-11-20**: part
-  A to 0.2.0 ([plan](sprints/lang.md)). Development begins with its first
-  row, RUN-01 [#126](https://github.com/jakubiszon26/apiforge/issues/126) beside LANG-15 [#412](https://github.com/jakubiszon26/apiforge/issues/412). The part A tickets are
-  being made ready on their issues, and DIAG-06's mock-up ([#391](https://github.com/jakubiszon26/apiforge/issues/391)) is in
-  preparation; both are separate pieces of work from this pull request.
+  A to 0.2.0 ([plan](sprints/lang.md)). FIX-01 [#454](https://github.com/jakubiszon26/apiforge/issues/454), RUN-01 [#126](https://github.com/jakubiszon26/apiforge/issues/126),
+  LANG-15 [#412](https://github.com/jakubiszon26/apiforge/issues/412) and LANG-13 [#386](https://github.com/jakubiszon26/apiforge/issues/386) are being implemented on
+  2026-11-20 and merge in that order; LANG-20 [#481](https://github.com/jakubiszon26/apiforge/issues/481) was split from
+  LANG-13 and follows it. Tracks and shared files: [#411](https://github.com/jakubiszon26/apiforge/issues/411#issuecomment-7025097154).
 - **REQ is the next sprint** ([plan](sprints/req.md), `sprint:req`),
   decided on first-round mock-ups; it follows 0.2.0.
 - **LAY-2** is not scheduled: [#297](https://github.com/jakubiszon26/apiforge/issues/297), [#301](https://github.com/jakubiszon26/apiforge/issues/301), [#410](https://github.com/jakubiszon26/apiforge/issues/410), [#419](https://github.com/jakubiszon26/apiforge/issues/419),
@@ -44,12 +44,12 @@ process change that an analysis carries proposals). No code is in review.
 **LANG**, the current sprint: the `ready:*` labels on the issues of part A
 say what may be taken; `gh issue list --label sprint:lang` lists them.
 
-**REQ**, four tickets labelled `ready:opus`, approved and bounded; none is
-started. They do not depend on the language and are taken when the owner
+**REQ**, four tickets labelled `ready:opus`, approved and bounded; FIX-01 is
+in implementation, the others are not started. They do not depend on the language and are taken when the owner
 opens the sprint or pulls them forward:
 
 1. FIX-01 [#454](https://github.com/jakubiszon26/apiforge/issues/454) — the reference scenario `labels`. First: the others'
-   tests use it. Taken before LANG-13 it is added with its `@after` lines.
+   tests use it. It merges before LANG-13, with its `@after` lines.
 2. DIAG-02 [#145](https://github.com/jakubiszon26/apiforge/issues/145) and REP-08 [#455](https://github.com/jakubiszon26/apiforge/issues/455) — side by side (`canvas/` and
    `inspector/checks.rs`; `report.rs`).
 3. REP-07 [#381](https://github.com/jakubiszon26/apiforge/issues/381) — after both.
@@ -61,8 +61,8 @@ design-review capture is an aid, not that evidence.
 
 ## 4. Next, in order
 
-1. LANG part A in the plan's order: RUN-01 and LANG-15, then LANG-13 and
-   DIAG-06, then LANG-06 with KTLO-37 and LANG-05, then REL-05.
+1. LANG part A in the merge order: FIX-01 → RUN-01 → LANG-15 → LANG-13 →
+   LANG-20, DIAG-06 and LANG-06 with KTLO-37 → LANG-05 → REL-05.
 2. The retrospective's process actions: KTLO-44 (#476, open), KTLO-45
    [#479](https://github.com/jakubiszon26/apiforge/issues/479), KTLO-46 [#480](https://github.com/jakubiszon26/apiforge/issues/480).
 3. LANG-16 [#413](https://github.com/jakubiszon26/apiforge/issues/413), the analysis of the second half, now with LANG-17,
@@ -74,8 +74,16 @@ design-review capture is an aid, not that evidence.
 ## 5. Waiting for the owner
 
 - The acceptance of #474 and #476.
-- Whether the four ready REQ tickets start now, beside LANG, or with the
-  sprint; whether FIX-01 is taken before LANG-13.
+- DIAG-06 [#391](https://github.com/jakubiszon26/apiforge/issues/391): the mock-up and twelve questions, with the proposed
+  order LAY-45 → DIAG-06a → DIAG-06b → LAY-13.
+- LANG-05 [#142](https://github.com/jakubiszon26/apiforge/issues/142): the canonical form of a check (A/B/C). LANG-21
+  [#482](https://github.com/jakubiszon26/apiforge/issues/482): whether the window offers *Update the project* in 0.2.0.
+- LANG-13: four consequences to confirm at its acceptance, listed on
+  [#386](https://github.com/jakubiszon26/apiforge/issues/386).
+- The work-in-progress limit: #474 and #476 await acceptance, and four
+  implementation tracks open drafts tonight.
+- Whether DIAG-02, REP-08 and REP-07 start beside LANG once FIX-01 is on
+  `main`, or with the REQ sprint.
 - The five questions of REQ-05 [#462](https://github.com/jakubiszon26/apiforge/issues/462), the live permission of a single
   send among them; the questions listed on REQ-00.
 - LAY-39 [#435](https://github.com/jakubiszon26/apiforge/issues/435): two of its acceptance tests are still ignored as
@@ -94,7 +102,9 @@ design-review capture is an aid, not that evidence.
   sprint's issues; the current sprint label is `sprint:lang`.
 - LAY-46 [#469](https://github.com/jakubiszon26/apiforge/issues/469) was seen at the Overview zoom only and is not yet
   reproduced at 100 %.
-- #452 (Windows test speed) is open; the Windows job runs on `main` only.
+- #452 (Windows test speed) is open. Windows runs on `main` only; pull
+  request #484 (#483), open, moves it from every push to `main` to a
+  nightly run, with Linux on each push.
 - No automatic review until 2026-12-01: each pull request gets a written
   review before it merges.
 - The mock-ups of 2026-11-19 are drawings; the Fit of 65–70 % on LAY-44's
