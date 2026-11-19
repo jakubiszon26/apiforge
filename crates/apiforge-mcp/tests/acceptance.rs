@@ -1289,7 +1289,8 @@ fn mcp03_criterion_12_the_language_reference_and_its_version() {
     let served = tools::language_reference().unwrap();
     assert_eq!(served.text, text);
     assert_eq!(served.version, "1");
-    assert!(text.starts_with("Reference version: 1 "));
+    // LANG-15 renamed the line: it names the language version.
+    assert!(text.starts_with("Language version: 1 "));
     assert_eq!(reference::version(), "1");
     let directory = checkout();
     assert_eq!(
@@ -5115,6 +5116,178 @@ fn run04_criterion_7_an_agent_reads_stopped_on_every_step_not_reached() {
             step["cause"],
             json!({ "kind": "stopped", "by": "broken" }),
             "{handle}"
+        );
+    }
+}
+
+#[path = "../../apiforge-project/tests/support/language.rs"]
+mod language;
+
+/// LANG-15 (#412): a project names its language version. The build reads
+/// `LANGUAGE_VERSION`; LANG-20 (#481) raises it to 2, and the tests of an
+/// older project wait for that.
+mod lang15 {
+    use super::language::{language_of, write_language};
+    use super::{
+        CancellationToken, ErrorCode, Kind, MANIFEST, PRODUCT, SCENARIO, Wrote, agent, arguments,
+        checkout, create_args, live, live_server, publish_args, simulate, tree, write_args,
+    };
+    use apiforge_mcp::{resources, tools};
+    use apiforge_script::LANGUAGE_VERSION;
+    use std::fs;
+
+    fn newer_sentence() -> String {
+        format!(
+            "This project is written in language {}; this build reads language {LANGUAGE_VERSION}. Update API Forge.",
+            LANGUAGE_VERSION + 1
+        )
+    }
+
+    /// Criterion 3: every tool that opens a project written in a newer
+    /// language refuses with the sentence that names both versions; no file
+    /// of the project changes, none is created.
+    #[test]
+    fn lang15_criterion_3_every_tool_refuses_a_newer_project() {
+        let directory = checkout();
+        let root = directory.path();
+        let product = fs::read_to_string(root.join(PRODUCT)).unwrap();
+        let hash = tools::read_source(root, PRODUCT)
+            .unwrap()
+            .source_sha256
+            .unwrap();
+        write_language(root, LANGUAGE_VERSION + 1);
+        let before = tree(root);
+        let session = agent(root);
+        let server = live_server(root, true, &[]);
+        let refusals: Vec<(&str, apiforge_mcp::ToolError)> = vec![
+            (
+                "project_overview",
+                tools::project_overview(root).unwrap_err(),
+            ),
+            (
+                "read_source",
+                tools::read_source(root, PRODUCT).unwrap_err(),
+            ),
+            ("check", tools::check(root, None).unwrap_err()),
+            (
+                "check of a file",
+                tools::check(root, Some(PRODUCT)).unwrap_err(),
+            ),
+            ("print", tools::print(root, PRODUCT).unwrap_err()),
+            (
+                "check_text",
+                tools::check_text(root, PRODUCT, &product).unwrap_err(),
+            ),
+            ("run", simulate(root, &arguments(SCENARIO)).unwrap_err()),
+            (
+                "live run",
+                server
+                    .run_tool(live(SCENARIO), CancellationToken::new())
+                    .unwrap_err(),
+            ),
+            ("resources list", resources::list(root).unwrap_err()),
+            (
+                "resources read",
+                resources::read(root, &format!("apiforge://source/{PRODUCT}")).unwrap_err(),
+            ),
+            (
+                "write_source",
+                session
+                    .write_source(&write_args(PRODUCT, &product, &hash))
+                    .unwrap_err(),
+            ),
+            (
+                "create_document",
+                session
+                    .create_document(&create_args(
+                        Kind::Scenario,
+                        "scenarios/new.afs",
+                        "scenario \"New\" {\n}\n",
+                    ))
+                    .unwrap_err(),
+            ),
+            (
+                "publish",
+                session.publish(&publish_args(PRODUCT, &hash)).unwrap_err(),
+            ),
+        ];
+        for (tool, error) in refusals {
+            assert_eq!(error.code, ErrorCode::ProjectUnreadable, "{tool}: {error}");
+            assert_eq!(error.message, newer_sentence(), "{tool}");
+            assert_eq!(error.wrote, Wrote::No, "{tool}");
+        }
+        assert!(!session.is_active(), "no tool took the project");
+        assert_eq!(tree(root), before, "no file of the project changed");
+    }
+
+    /// Criterion 6: the overview names the build's language and the
+    /// project's; `reference_version` keeps its name and reads the same
+    /// number as the build's language.
+    #[test]
+    fn lang15_criterion_6_overview() {
+        let directory = checkout();
+        let overview = tools::project_overview(directory.path()).unwrap();
+        assert_eq!(overview.language_version, LANGUAGE_VERSION);
+        assert_eq!(overview.project_language_version, LANGUAGE_VERSION);
+        assert_eq!(overview.reference_version, LANGUAGE_VERSION.to_string());
+        let schema = serde_json::to_value(schemars::schema_for!(tools::ProjectOverview)).unwrap();
+        for field in ["language_version", "project_language_version"] {
+            assert!(
+                schema["required"]
+                    .as_array()
+                    .is_some_and(|required| required.iter().any(|name| name == field)),
+                "{field} is in the overview's schema"
+            );
+        }
+    }
+
+    /// Criterion 4: an older project opens; `check` carries the problem at
+    /// the manifest with both versions and the fix, `run` (simulated and
+    /// live) is refused with it and sends nothing, and a write still works.
+    #[test]
+    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
+    fn lang15_criterion_4_an_older_project_is_checked_and_does_not_run() {
+        let directory = checkout();
+        let root = directory.path();
+        let older = LANGUAGE_VERSION - 1;
+        write_language(root, older);
+        let both = format!(
+            "This project is written in language {older}; this build reads language {LANGUAGE_VERSION}."
+        );
+
+        let overview = tools::project_overview(root).unwrap();
+        assert_eq!(overview.project_language_version, older);
+
+        let checked = tools::check(root, None).unwrap();
+        assert!(!checked.valid);
+        let first = &checked.documents[0];
+        assert_eq!(first.path, MANIFEST);
+        assert!(!first.valid);
+        let message = &first.diagnostics[0].message;
+        assert!(message.starts_with(&both), "{message}");
+        assert!(message.contains("apiforge fix --folder"), "{message}");
+
+        for error in [
+            simulate(root, &arguments(SCENARIO)).unwrap_err(),
+            live_server(root, true, &[])
+                .run_tool(live(SCENARIO), CancellationToken::new())
+                .unwrap_err(),
+        ] {
+            assert!(error.message.starts_with(&both), "{error}");
+            assert!(error.message.contains("apiforge fix --folder"), "{error}");
+        }
+
+        let (text, hash, _) = super::read(root, PRODUCT);
+        let session = agent(root);
+        let written = session
+            .write_source(&write_args(PRODUCT, &format!("{text}\n"), &hash))
+            .unwrap();
+        assert!(written.wrote);
+        session.finish_editing();
+        assert_eq!(
+            language_of(root),
+            older,
+            "a write does not raise the language"
         );
     }
 }

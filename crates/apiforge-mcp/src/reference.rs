@@ -19,5 +19,11 @@ mod tests {
     fn the_first_line_declares_the_version() {
         assert!(!super::version().is_empty());
         assert!(super::version().chars().all(|c| c.is_ascii_digit()));
+        // LANG-15, criterion 6: the language this build reads.
+        assert!(super::TEXT.starts_with("Language version: "));
+        assert_eq!(
+            super::version(),
+            apiforge_script::LANGUAGE_VERSION.to_string()
+        );
     }
 }
