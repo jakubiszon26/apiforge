@@ -44,6 +44,11 @@ Numbered, each one testable by a person at the window or by a test.
 ## Not in scope
 What this ticket deliberately leaves out, and which ticket takes it.
 
+## Proposals beyond the request
+The planning model's [own proposals](#the-planning-models-own-proposals),
+one row each: problem solved · size and risk · trade-offs · where it would
+go. Or "none". A ticket of size S may leave the section out.
+
 ## Technical appendix (optional)
 Crates and files touched, reuse of existing code, open technical questions.
 The owner is not expected to read this section.
@@ -175,6 +180,7 @@ Before asking for approval:
       in the ticket.
 - [ ] The planning model's [own proposals](#the-planning-models-own-proposals)
       are in the analysis, or it says there are none, and the strongest are
-      candidate issues.
+      candidate issues (a one-ticket analysis of size `S` may leave them
+      out).
 - [ ] The analysis was written by the model the [process](README.md#which-model-does-what)
       assigns to it.
