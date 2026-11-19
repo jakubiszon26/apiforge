@@ -982,25 +982,23 @@ async fn lang14_criterion_1_after_the_whole_if_waits_for_else_or_runs_at_once() 
     assert_eq!(by_handle(&run, "later").status, StepStatus::Passed);
 }
 
-/// Criterion 2: the step after the `if` does not run when the branch taken
-/// ended in a step that errored or was blocked.
+/// Criterion 2, as RUN-01 (#126, ADR 0015) replaced it: under `on_error
+/// continue` the step after the `if` runs when the branch taken ended in a
+/// step that errored or was blocked, because it reads nothing from it.
 #[tokio::test]
-async fn lang14_criterion_2_after_a_broken_branch_the_step_does_not_run() {
-    let id = |run: &RunResult, handle: &str| by_handle(run, handle).node_id.clone();
-    // Without a sample `second` errors; without one for `made`, `second` is blocked.
+async fn lang14_criterion_2_after_a_broken_branch_the_step_runs_under_continue() {
+    // Without a sample `second` errors; without one for `made`, `second`,
+    // which reads `made`, is blocked.
+    let reads_made = "query { id: made.body.id }\n      sample 200 {}";
     for (made, second, last) in [
         (MADE, "", StepStatus::Error),
-        ("", SECOND, StepStatus::Blocked),
+        ("", reads_made, StepStatus::Blocked),
     ] {
         let (project, scenario) = lowered(&after_the_whole_if(true, made, second, OTHER));
         let run = simulate(project, &scenario).await;
         assert_eq!(by_handle(&run, "second").status, last, "{run:#?}");
-        assert_eq!(by_handle(&run, "later").status, StepStatus::Blocked);
-        assert_eq!(
-            by_handle(&run, "later").cause,
-            Some(NotRunCause::BlockedBy {
-                step: id(&run, "second")
-            })
-        );
+        assert_eq!(by_handle(&run, "later").status, StepStatus::Passed);
+        assert_eq!(by_handle(&run, "later").cause, None);
+        assert!(position(&run, "second") < position(&run, "later"));
     }
 }

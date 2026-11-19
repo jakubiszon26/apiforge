@@ -6,9 +6,10 @@
 //! nodes a data statement (a value, a check, a condition, an export) goes before a
 //! step, so a step's checks run before the next request, call or IF, and within
 //! each the order of `graph.nodes` decides. Ordering edges activate a path (IF
-//! branches select one, alternatives merge with OR); data references additionally
-//! require producers whose results are usable. A graph without Start keeps the
-//! legacy behaviour where every root runs.
+//! branches select one, alternatives merge with OR). Under `on_error stop` a
+//! step also needs every source to have succeeded; under `continue`, and in the
+//! cleanup, a step needs only the outputs it reads to exist (RUN-01, ADR 0015).
+//! A graph without Start keeps the legacy behaviour where every root runs.
 //!
 //! Raw values are used for execution. Only redacted copies leave the engine.
 
@@ -29,7 +30,7 @@ use apiforge_core::{
     },
     journal::{EffectState, JournalEntry, JournalRun, JournalSink},
     js::{self, js_key_order},
-    model::{BodyFormat, Branch, HttpMethod, Match, NodeKind, ValueType},
+    model::{BodyFormat, Branch, ErrorPolicy, HttpMethod, Match, NodeKind, ValueType},
     operator::{Operator, OperatorError, RandomSource, simulated_uuid},
     path,
     predicate::PredicateError,
@@ -635,8 +636,29 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
     }
 
     /// Decides whether a ready node is on the active path and has usable inputs.
+    ///
+    /// The main flow under `on_error stop` keeps the gate it had before RUN-01;
+    /// the main flow under `continue` and every cleanup wait for a step to
+    /// have finished and judge only the values a step reads (ADR 0015).
     fn gate(
         &self,
+        graph: &Graph,
+        plan: &ExecutionPlan<'_>,
+        node: &Node,
+        context: &Context,
+        bypass: bool,
+    ) -> Gate {
+        if context.phase == Phase::Main && self.scenario.error_policy == ErrorPolicy::Stop {
+            Self::gate_until_stop(graph, plan, node, context, bypass)
+        } else {
+            gate_after_finished(graph, plan, node, context, bypass)
+        }
+    }
+
+    /// The gate of the main flow under `on_error stop`, as it was before
+    /// RUN-01: a step waits on every source to have succeeded. After the first
+    /// failure the run stops anyway (RUN-04).
+    fn gate_until_stop(
         graph: &Graph,
         plan: &ExecutionPlan<'_>,
         node: &Node,
@@ -726,21 +748,9 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             let Some(source) = context.outputs.get(*id) else {
                 return true;
             };
-            let mut used = references
-                .iter()
-                .filter(|reference| reference.node_id == *id)
-                .peekable();
-            let data_dependency = used.peek().is_some();
+            let data_dependency = references.iter().any(|reference| reference.node_id == *id);
             if !data_dependency && active_order > 0 && source.status == StepStatus::Skipped {
                 return false;
-            }
-            if context.phase == Phase::Cleanup {
-                // A component may create a resource and fail later. Exported resource
-                // IDs remain usable for cleanup, while main-phase steps stay blocked.
-                // An order-only cleanup dependency means "after completion".
-                if !data_dependency || used.all(|reference| is_available(reference, context)) {
-                    return false;
-                }
             }
             source.status.is_unavailable()
         });
@@ -760,18 +770,10 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 step: id.to_owned(),
             },
         });
-        let missing_cleanup_input = (context.phase == Phase::Cleanup)
-            .then(|| {
-                references
-                    .iter()
-                    .find(|reference| !is_available(reference, context))
-                    .map(|reference| reference.node_id.to_owned())
-            })
-            .flatten();
         Gate {
             inactive,
             blocked,
-            missing_cleanup_input,
+            missing_cleanup_input: None,
         }
     }
 
@@ -1373,12 +1375,136 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
     }
 }
 
+/// The gate of the main flow under `on_error continue` and of every cleanup
+/// (RUN-01, ADR 0015). Ordering waits for a step to have finished, whatever its
+/// result; a step that reads an output which does not exist is blocked by the
+/// statement that should have made it; an `if` that could not decide blocks
+/// what stands in its braces.
+fn gate_after_finished(
+    graph: &Graph,
+    plan: &ExecutionPlan<'_>,
+    node: &Node,
+    context: &Context,
+    bypass: bool,
+) -> Gate {
+    let not_run = |cause: NotRunCause| Gate {
+        inactive: None,
+        blocked: Some(cause),
+        missing_cleanup_input: None,
+    };
+    let dependencies: Vec<&str> = plan.dependencies_of(&node.id).collect();
+    // Off the path: a branch not taken, or a step skipped as outside the path.
+    // A step that errored, failed, was blocked or skipped for a missing value
+    // is on it: it has finished.
+    let off_path = |id: &str, branch: Option<Branch>| {
+        context.outputs.get(id).is_some_and(|source| {
+            (source.status == StepStatus::Skipped
+                && matches!(source.cause, None | Some(NotRunCause::OutsidePath)))
+                || (branch.is_some()
+                    && source.status == StepStatus::Passed
+                    && source.outputs.get("passed")
+                        != Some(&Value::Bool(branch == Some(Branch::True))))
+        })
+    };
+    let incoming: Vec<_> = graph
+        .edges
+        .iter()
+        .filter(|edge| edge.target == node.id)
+        .collect();
+    let inactive = !bypass
+        && (!plan.is_reachable(&node.id)
+            || (!incoming.is_empty()
+                && incoming
+                    .iter()
+                    .all(|edge| off_path(&edge.source, edge.branch)))
+            || (incoming.is_empty() && dependencies.iter().any(|id| off_path(id, None))));
+    if inactive {
+        return Gate {
+            inactive: Some(NotRunCause::OutsidePath),
+            blocked: None,
+            missing_cleanup_input: None,
+        };
+    }
+    // The outermost `if` that could not decide among those whose braces hold
+    // the node: what it would have chosen never came into being.
+    let undecided =
+        plan.enclosing(&node.id)
+            .filter(|(id, _)| {
+                context.outputs.get(*id).is_some_and(|source| {
+                    !source.outputs.contains_key("passed") && !off_path(id, None)
+                })
+            })
+            .last();
+    if let Some((id, _)) = undecided {
+        return not_run(NotRunCause::BlockedBy {
+            step: id.to_owned(),
+        });
+    }
+    let references: Vec<Reference<'_>> =
+        node.inputs.values().flat_map(Binding::references).collect();
+    let mut missing_cleanup_input = None;
+    for id in dependencies {
+        let blocked_by = || {
+            not_run(NotRunCause::BlockedBy {
+                step: id.to_owned(),
+            })
+        };
+        // A source that never ran, outside a selected part of the graph, has
+        // neither finished nor made anything.
+        let Some(source) = context.outputs.get(id) else {
+            return blocked_by();
+        };
+        let used: Vec<&Reference<'_>> = references
+            .iter()
+            .filter(|reference| reference.node_id == id)
+            .collect();
+        if used.is_empty() {
+            continue;
+        }
+        // A false Data condition guards the data of the steps that read it.
+        if context.phase == Phase::Main
+            && source.kind == NodeKind::Condition
+            && source.cause.is_none()
+            && source.outputs.get("passed") == Some(&Value::Bool(false))
+        {
+            return not_run(NotRunCause::ConditionUnmet {
+                condition: id.to_owned(),
+            });
+        }
+        // A value exists when its statement made the output, whatever that
+        // statement's result. The field read inside it is the reading step's
+        // own concern in the main flow; the cleanup judges the whole path.
+        if used
+            .iter()
+            .any(|reference| !source.outputs.contains_key(reference.port))
+        {
+            return blocked_by();
+        }
+        if context.phase == Phase::Cleanup
+            && missing_cleanup_input.is_none()
+            && used
+                .iter()
+                .any(|reference| !is_available(reference, context))
+        {
+            missing_cleanup_input = Some(id.to_owned());
+        }
+    }
+    Gate {
+        inactive: None,
+        blocked: None,
+        missing_cleanup_input,
+    }
+}
+
 /// The scheduler's verdict on a ready node.
 struct Gate {
     /// Not on the active path: skipped, never a failure. The cause is
-    /// `OutsidePath` on a branch not taken, or the source that did not run.
+    /// `OutsidePath` on a branch not taken, or, under `on_error stop`, the
+    /// source that did not run.
     inactive: Option<NotRunCause>,
-    /// A dependency's result is unusable: the first such dependency.
+    /// What the node needs is not there: the first dependency whose result is
+    /// unusable (`on_error stop`), the statement whose output does not exist
+    /// or the `if` that could not decide (`continue` and the cleanup).
     blocked: Option<NotRunCause>,
     /// A cleanup step references data that does not exist: its producer.
     missing_cleanup_input: Option<String>,

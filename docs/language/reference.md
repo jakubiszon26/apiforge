@@ -66,8 +66,9 @@ component ping_shop "Ping the shop" {
 - `on_error stop` or `on_error continue` (scenarios only). With `stop`, the
   default, the first failed assertion, error or blocked step stops the main
   flow: the remaining steps are skipped and the cleanup still runs. With
-  `continue` every step that can still run does, and the run reports every
-  failure.
+  `continue` a step runs once the step before it has finished, whatever its
+  result, unless a value it reads does not exist, and the run reports every
+  failure ([When a step fails](#when-a-step-fails)).
 - The formatter writes the parts in this order: `description`, `on_error`,
   `param` lines, `input` lines, `action`, statements, `cleanup`. Write them in
   that order.
@@ -482,8 +483,9 @@ scenario "Branches" {
 - `@after(created)` runs a statement after the whole `if`: after the last
   step of the branch that was taken, here `items` when `then` is taken, or
   right after the condition when that branch holds no step, as `else` here.
-  When that last step failed with an error or was blocked, the statement
-  does not run, as after any such step. A statement inside the braces of
+  It waits for that last step to finish, whatever its result: with
+  `on_error continue` it runs also when that step failed
+  ([When a step fails](#when-a-step-fails)). A statement inside the braces of
   `created`, at any depth, cannot write `@after(created)`.
 - `@after(created.then)` orders a statement outside the braces after the
   condition, on the `then` branch; `.else` on the other. It waits for the
@@ -498,7 +500,7 @@ A scenario's `cleanup { … }` block runs after the main flow, whatever its
 outcome, and is meant to remove what the test created. Its statements may use
 values of the main flow; the main flow cannot use them. A cleanup step whose
 input never came into being (the request that would have created it did not
-run) is skipped.
+run) is skipped; the cleanup steps after it still run.
 
 ```afs
 scenario "Cleanup" {
@@ -517,6 +519,65 @@ scenario "Cleanup" {
 
 `@after` in the cleanup names only cleanup statements. A `start` in the main
 flow does not govern the cleanup: every cleanup statement runs.
+
+## When a step fails
+
+With `on_error stop`, the default, the first failed assertion, error or
+blocked step stops the main flow, and every step it did not reach is skipped.
+This section is about `on_error continue`, and about the cleanup, which runs
+whatever happened.
+
+```afs
+scenario "When a step fails" {
+  on_error continue
+  begin = start
+  @after(begin)
+  pay = POST "/orders/o-1/pay" {
+    sample 500 { error: "declined", requestId: "r-7" }
+  }
+  paid = assert pay.status == 200
+  @after(pay)
+  receipt = GET "/payments/{{pay.body.id}}" {
+    sample 200 { id: "p-1" }
+  }
+  @after(receipt)
+  trace = GET "/traces/{{pay.body.requestId}}" {
+    sample 200 { steps: [] }
+  }
+  @after(trace)
+  ship = POST "/orders/o-1/ship" {
+    sample 202 {}
+  }
+}
+```
+
+Here `paid` fails, `receipt` errors because the answer has no `id`, and
+`trace` and `ship` run. The run is failed.
+
+- A step has **finished** when it passed, failed, errored or was blocked.
+  `@after(a)` waits for `a` to finish, not for it to succeed: a step that
+  reads nothing from a failed step runs after it. A scenario that must not
+  go on uses `on_error stop` or an `if`.
+- A step that **reads a value that does not exist** is blocked and names
+  the statement that should have made it. A value exists when its statement
+  made it, whatever that statement's result: a request that got an answer
+  has its `status`, `headers` and `body`, also at 500; a request that got no
+  answer has none. Blocked passes on through values, not along the chain.
+- A **field the answer lacks**, `pay.body.id` above, is the reading step's
+  own error, *Missing value*. A check reads it as missing: `exists
+  pay.body.id` fails.
+- A **false `condition`** blocks the steps that read it; a step that only
+  follows it runs.
+- An **`if` that cannot decide**, because its condition reads a value that
+  does not exist or errors, is blocked. Every statement in its braces, at
+  any depth, is blocked by it, and the statement after the whole `if` runs.
+  A branch that was not taken is skipped, which is not a failure and blocks
+  nothing.
+- A **component call** that fails inside ends as an error. An export it
+  computed before the failure exists and can be read; the others do not.
+- In the **cleanup** a step whose input does not exist, or whose field is
+  missing, is skipped, and the cleanup steps after it run.
+- A run with a failed, errored or blocked step is failed.
 
 ## Exports
 

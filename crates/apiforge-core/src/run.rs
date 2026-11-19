@@ -43,7 +43,10 @@ impl StepStatus {
         )
     }
 
-    /// Statuses after which dependants cannot use the step's outputs.
+    /// Statuses after which dependants cannot use the step's outputs, in the
+    /// main flow under `on_error stop`. Under `continue` and in the cleanup a
+    /// step waits only for its sources to have finished and is judged by the
+    /// outputs it reads, whatever the status that made them (RUN-01, ADR 0015).
     pub fn is_unavailable(self) -> bool {
         matches!(
             self,
@@ -112,7 +115,10 @@ pub enum NotRunCause {
     /// a step on a branch that was not taken and a step that reads an output
     /// it cannot use, which name that branch or that step (RUN-04).
     Stopped { by: String },
-    /// `step`, which this step waits for, failed or did not run itself.
+    /// `step` should have made a value this step reads and did not, or is an
+    /// `if` that could not decide and whose braces hold this step. Under
+    /// `on_error stop`, `step` is any statement this step waits for that
+    /// failed or did not run itself (RUN-01, ADR 0015).
     BlockedBy { step: String },
     /// `condition`, a Data condition this step reads, is false.
     ConditionUnmet { condition: String },
