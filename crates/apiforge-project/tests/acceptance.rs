@@ -1717,7 +1717,8 @@ mod lang15 {
         let sentence = format!(
             "This project is written in language {newer}; this build reads language {LANGUAGE_VERSION}. Update API Forge."
         );
-        let opens: [(&str, fn(&Path) -> apiforge_project::Result<ProjectSession>); 5] = [
+        type Open = fn(&Path) -> apiforge_project::Result<ProjectSession>;
+        let opens: [(&str, Open); 5] = [
             ("open", |root| ProjectSession::open(root)),
             ("open_saved_read_only", |root| {
                 ProjectSession::open_saved_read_only(root)
