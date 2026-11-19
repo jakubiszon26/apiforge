@@ -1,9 +1,12 @@
 # REQ: the request-and-results sprint — findings, decisions and plan
 
 - State: **decided on first-round mock-ups** by the owner's quiz of
-  2026-11-19; not started. It follows LANG part A (0.2.0). Three tickets
-  are ready and do not depend on the language; the rest wait for the
-  design-review captures of REQ-00.
+  2026-11-19; not started. It follows LANG part A (0.2.0), which the
+  owner started on 2026-11-20. Four tickets are ready and do not depend on
+  the language (FIX-01, DIAG-02, REP-08, REP-07); the rest wait for the
+  design-review captures of REQ-00. Four proposals of the planning model
+  were accepted into scope on 2026-11-20 and are to be analysed (REQ-07 to
+  REQ-10, [section 5](#5-proposals-of-the-planning-model)).
 - Analysis model: Fable 5.2.
 - Inputs: the owner's run of build `1d11f07` on 2026-11-19 with ten
   findings; the code on `main` at `eb2dc01`; the open issues REP-07, DIAG-02,
@@ -64,9 +67,12 @@ Recommended options were put first; the owner chose them except in 8 and
 
 The mock-ups are first-round drawings, not captures of the application.
 For the three tickets that change text and rows inside views that exist
-(DIAG-02, REP-07, REP-08) the owner's choice is the approval, and the pull
-request shows a design-review capture at 960 × 540 and 1600 × 1000 for
-acceptance before merge, as in LAY's close. The tickets that add a view
+(DIAG-02, REP-07, REP-08) the owner's choice is the approval of the
+direction. Each of their pull requests is accepted before merge on the
+captures of its QA section, which [testing](../process/testing.md#2-the-functional-qa-report)
+defines: taken from the release binary of the branch, at 960 × 540, and at
+1600 × 1000 where layout matters. A headless design-review capture may
+accompany them as an aid; it is not the evidence. The tickets that add a view
 (REQ-01 to REQ-05) get their captures and numbered criteria from REQ-00
 first.
 
@@ -96,9 +102,15 @@ built before or after LANG-13 unchanged.
 | 7 | [#460](https://github.com/jakubiszon26/apiforge/issues/460) | REQ-03 headers table and Auth | M · 15 · `visible UI` | REQ-02a |
 | 8 | [#461](https://github.com/jakubiszon26/apiforge/issues/461) | REQ-04 Run to here | S · 15 · `visible UI` | REQ-02a |
 | 9 | [#462](https://github.com/jakubiszon26/apiforge/issues/462) | REQ-05 Send this request alone | M · 25 · `visible UI`, `default`, a permission control | REQ-04; five questions on the issue |
-| 10 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 the owner's own run | S · 10 | the rest |
+| 10 | [#464](https://github.com/jakubiszon26/apiforge/issues/464) | REQ-07 a request in and out as cURL; a failed check copied as a report | S–M · 15 · `visible UI` · to analyse | REP-07 (the report), REQ-02a (the paste) |
+| 10 | [#465](https://github.com/jakubiszon26/apiforge/issues/465) | REQ-08 duplicate as a new case; run the failed ones again | S and M · 30 · `visible UI` · to analyse | REQ-01 (the duplicate), REQ-04 (the subset run) |
+| 10 | [#477](https://github.com/jakubiszon26/apiforge/issues/477) | REQ-09 hints for repetition, each with a fix | S · 10 · `visible UI` · to analyse | none for the host hint; LANG-18 for the header hint |
+| 10 | [#478](https://github.com/jakubiszon26/apiforge/issues/478) | REQ-10 a live response saved as the sample; *Expect this response* | M · 20 · `visible UI` · to analyse | REP-07, REQ-02a; REQ-05 produces the response of a single send |
+| 11 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 the owner's own run | S · 10 | the rest |
 
-235 owner review minutes. Rows with the same order number touch different
+235 owner review minutes for the twelve tickets decided on 2026-11-19,
+and about 75 for REQ-07 to REQ-10, accepted into scope on 2026-11-20; their
+estimates are the proposals' own and are replaced by their analyses. Rows with the same order number touch different
 files and may run side by side: DIAG-02 is `canvas/` and
 `inspector/checks.rs`, REP-08 is `report.rs`; REP-07 follows both.
 UX-19 [#227](https://github.com/jakubiszon26/apiforge/issues/227) edits the list of REP-07 and merges beside it, not with it.
@@ -110,18 +122,21 @@ backlog; RUN-00 [#242](https://github.com/jakubiszon26/apiforge/issues/242) keep
 The findings name where time is lost in the window. Most of the time a
 scenario of this shape costs is lost earlier, in writing it: the same
 headers in fifteen requests, sixteen bodies that differ in one value, a
-name invented for every check. None of these was asked for; the owner
-decides each at the planning of the sprint it belongs to.
+name invented for every check. None of these was asked for. **The owner
+accepted all eight into scope on 2026-11-20**: each is analysed and
+planned where the last column says; no design is approved by that, and
+each analysis brings its own questions and mock-up.
 
 | Proposal | Problem it removes | Size · trade-off | Goes to |
 | --- | --- | --- | --- |
-| LANG-17 [#470](https://github.com/jakubiszon26/apiforge/issues/470) a table of cases, or a request based on another | Sixteen copies of one request; a case is added by copying, a change means sixteen edits | L, to split · `format`; must be analysed with LANG-08, and every view has to show a table and its rows | LANG planning |
-| LANG-18 [#471](https://github.com/jakubiszon26/apiforge/issues/471) headers and authorization shared by a scenario | A token repeated in every request; the one request without it is not visible as the exception | M · `format`; needs a way to leave a shared header out | LANG planning |
-| LANG-19 [#472](https://github.com/jakubiszon26/apiforge/issues/472) a check without an invented name; one check for several fields | A third of the text is one-line checks whose names nothing reads | M–L · `format`; the document, the board and MCP identify a check by its handle today | LANG planning |
-| REQ-07 [#464](https://github.com/jakubiszon26/apiforge/issues/464) a request in and out as cURL; a failed check copied as a report | Requests are retyped from elsewhere, failures are described by hand | S–M; paste must refuse what it cannot represent, copy must not leak a secret | REQ planning |
-| REQ-08 [#465](https://github.com/jakubiszon26/apiforge/issues/465) duplicate a request with its checks as a new case; run the failed ones again | Each new case is a hand copy with renames; a re-run repeats everything | S and M; the duplicate matters less once LANG-17 exists | REQ planning |
-| GEN-01 [#473](https://github.com/jakubiszon26/apiforge/issues/473) suggested negative cases of a field | Which boundaries to test is the same knowledge for every field, written by hand each time | M–L; proposes inputs only, never what the API should answer | later, after LANG-17 |
-| Hints for repetition (no issue yet) | Sixteen requests spell out the same host; the project has a base URL | S; a problem with a fix, like the far-value hint — easy to make noisy | REQ planning, if wanted |
+| LANG-17 [#470](https://github.com/jakubiszon26/apiforge/issues/470) a table of cases, or a request based on another | Sixteen copies of one request; a case is added by copying, a change means sixteen edits | L, to split · `format`; must be analysed with LANG-08, and every view has to show a table and its rows | LANG, second half, with LANG-16 and LANG-08 |
+| LANG-18 [#471](https://github.com/jakubiszon26/apiforge/issues/471) headers and authorization shared by a scenario | A token repeated in every request; the one request without it is not visible as the exception | M · `format`; needs a way to leave a shared header out | LANG, second half |
+| LANG-19 [#472](https://github.com/jakubiszon26/apiforge/issues/472) a check without an invented name; one check for several fields | A third of the text is one-line checks whose names nothing reads | M–L · `format`; the document, the board and MCP identify a check by its handle today | LANG, second half, with LANG-02 and LANG-04 |
+| REQ-07 [#464](https://github.com/jakubiszon26/apiforge/issues/464) a request in and out as cURL; a failed check copied as a report | Requests are retyped from elsewhere, failures are described by hand | S–M; paste must refuse what it cannot represent, copy must not leak a secret | REQ |
+| REQ-08 [#465](https://github.com/jakubiszon26/apiforge/issues/465) duplicate a request with its checks as a new case; run the failed ones again | Each new case is a hand copy with renames; a re-run repeats everything | S and M; the duplicate matters less once LANG-17 exists | REQ |
+| GEN-01 [#473](https://github.com/jakubiszon26/apiforge/issues/473) suggested negative cases of a field | Which boundaries to test is the same knowledge for every field, written by hand each time | M–L; proposes inputs only, never what the API should answer | no sprint yet: analysed after LANG-17 |
+| REQ-09 [#477](https://github.com/jakubiszon26/apiforge/issues/477) hints for repetition: the same host or header in every request, each with a fix | Sixteen requests spell out the same host; the project has a base URL | S; a problem with a fix, like the far-value hint — easy to make noisy; the header hint has no fix before LANG-18 | REQ |
+| REQ-10 [#478](https://github.com/jakubiszon26/apiforge/issues/478) a live response saved as the request's sample; *Expect this response* | A response is typed twice, as the sample and as checks, and a hand-typed sample drifts from the API | M; turns today's behaviour into the test unless the person picks the fields; a saved response can carry a secret into a tracked file | REQ |
 
 ## 6. Exit criteria
 

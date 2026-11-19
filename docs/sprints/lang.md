@@ -7,18 +7,21 @@
   written by the order of its lines, the manifest carries the language
   version under `formatVersion: 2`, a project in the older language runs
   only after the fix.
-- **Not started.** Paused by the owner on 2026-11-17 until LAY closed; LAY
-  closed on 2026-11-19 (#296) and the owner confirmed the same day that
-  part A, to 0.2.0, runs next and the [REQ sprint](req.md) after it. The
-  sprint starts after the LAY retrospective; until its planning no ticket
-  of this plan carries a `ready:*` label.
-- **Candidates raised on 2026-11-19, not decided** — the owner places them
-  at the sprint's planning: LANG-17 (#470) a table of cases, or a request
-  based on another, to be analysed with LANG-08; LANG-18 (#471) headers and
-  authorization shared by a scenario; LANG-19 (#472) a check without an
-  invented name and one check for several fields, with LANG-04. They come
-  from the reference scenario `labels` (FIX-01, #454), whose sixteen
-  `@after` lines are also a case for LANG-13's fix.
+- **Started by the owner on 2026-11-20.** It had been paused since
+  2026-11-17 until LAY closed; LAY closed on 2026-11-19 (#296) and the
+  owner confirmed the same day that part A, to 0.2.0, runs first and the
+  [REQ sprint](req.md) after it. The start did not wait for the LAY
+  [retrospective](../retrospectives/2026-11-20-lay.md), written the same
+  day. The first half runs in the order below; which of its tickets may be
+  taken unattended is on the issues (`ready:*`), not here.
+- **Three proposals accepted into scope on 2026-11-20**, for the second
+  half: LANG-17 (#470) a table of cases, or a request based on another;
+  LANG-18 (#471) headers and authorization shared by a scenario; LANG-19
+  (#472) a check without an invented name and one check for several
+  fields. Accepted means analysed and planned, not a design approved: each
+  is `format`, and its questions return to the owner with its analysis.
+  They come from the reference scenario `labels` (FIX-01, #454), whose
+  sixteen `@after` lines are also a case for LANG-13's fix.
 - Analysis model: Fable 5.2.
 - Inputs: [FLOW-00](../tickets/FLOW-00.md), [LANG-00](../tickets/LANG-00.md),
   [LAY section 12](lay.md#12-after-the-checkpoint-2026-11-16), every open
@@ -63,7 +66,7 @@ spelling with every other `@after`.
 
 ## First half — to 0.2.0
 
-Paused until the sprint starts.
+In progress since 2026-11-20.
 
 | Order | Ticket | Size | Needs | Files |
 | --- | --- | --- | --- | --- |
@@ -109,9 +112,10 @@ They are REL-05's release conditions:
 | --- | --- | --- |
 | 1 | LANG-16 #413 part B: the corpus of 15–20 scenarios, then blocks, loops, block results, scopes; mock-up of a block on the board | Analysis; decides the shape of everything below |
 | 2 | LANG-01 #127 with LANG-09 #353 a missing field is a failure, not an error; a value from whichever branch ran | One analysis: both ask for the same thing, a value that may be absent and a way to say what stands in for it |
-| 3 | LANG-08 #352 with LANG-07 #212 repeat for every element; repeat until a state holds | One block shape, two conditions for going round again; RUN-02 (#130, a test over a table) is read with them |
-| 4 | LANG-02 #129 with LANG-04 #132 every, some, map, filter in checks; a partial match in a collection | A partial match is "some element where…"; one analysis |
-| 5 | LANG-03 #131 text functions, comparison without case | S, additive, the pattern of LANG-10 |
+| 3 | LANG-08 #352 with LANG-07 #212 repeat for every element; repeat until a state holds; **LANG-17 #470** a table of cases, or a request based on another | One block shape, two conditions for going round again; RUN-02 (#130, a test over a table) is read with them. A table of cases may be that loop over a list of rows or a form of its own: the analysis says which, and LANG-16's corpus includes `labels` so that it can |
+| 4 | LANG-02 #129 with LANG-04 #132 every, some, map, filter in checks; a partial match in a collection; **LANG-19 #472** a check without a name, one check for several fields | A partial match is "some element where…"; one check for several fields is a partial match of a whole body; one analysis |
+| 5 | **LANG-18 #471** headers and authorization shared by a scenario | Its own analysis: where they are written, how a request leaves one out, precedence with a component (HTTP-02 #133). REQ-03 keeps headers per request until then |
+| 6 | LANG-03 #131 text functions, comparison without case | S, additive, the pattern of LANG-10 |
 | — | DIAG-05 #374 | As scheduled in LAY section 12.3 |
 
 After LANG, as the owner scheduled: EDIT-01 (#358), CLI-01 (#359), EDIT-02

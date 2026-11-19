@@ -1474,7 +1474,8 @@ first-round mock-up ([`docs/qa/2026-11-19/owner-run/`](../qa/2026-11-19/owner-ru
 Found while reproducing: LAY-46
 ([#469](https://github.com/jakubiszon26/apiforge/issues/469)). The other
 findings of the run are not the board's and are the
-[REQ sprint](req.md). The retrospective follows; LANG starts after it.
+[REQ sprint](req.md). The [retrospective](../retrospectives/2026-11-20-lay.md)
+was written on 2026-11-20, the day the owner started LANG.
 
 ## Technical appendix
 
