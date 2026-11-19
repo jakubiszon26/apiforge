@@ -11,7 +11,7 @@
   regressions and the files.
 - Issue [#126](https://github.com/jakubiszon26/apiforge/issues/126) · LANG
   sprint, first half · branch `feat/run-01-chain-after-error`
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Goal
 
