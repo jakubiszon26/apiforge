@@ -8,6 +8,7 @@ use std::{
     ops::Range,
 };
 
+#[derive(Clone)]
 pub struct LowerContext<'a> {
     pub project: &'a Project,
     allow_unresolved_environment: bool,
@@ -43,6 +44,11 @@ impl<'a> LowerContext<'a> {
             component: None,
             folder: true,
         }
+    }
+    /// The stored spelling of a published revision (LANG-13). Not
+    /// implemented yet: every folder source is read in it today.
+    pub fn stored(self) -> Self {
+        self
     }
     /// Pins the definition being edited/printed, including a historical revision.
     pub fn with_component(mut self, component: &'a Component) -> Self {

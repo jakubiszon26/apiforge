@@ -4,6 +4,7 @@ mod branches;
 pub mod complete;
 mod edit;
 mod far;
+mod fix;
 mod format;
 pub mod lexer;
 mod lower;
@@ -13,6 +14,9 @@ pub use lower::{Document, LowerContext, Lowered, lower, validate_document_model}
 pub use ast::{Diagnostic, Fix, Severity, SyntaxTree, UNATTACHED_COMMENT};
 pub use edit::{edit_folder_document, edit_in_place};
 pub use far::{FAR_READ, far_read_warnings};
+pub use fix::{
+    AFTER_REMOVED, Fixed, NOT_IN_PLACE, RUNS_NOWHERE, START_MISSING, START_NOT_FIRST, fix_source,
+};
 pub use format::{format, format_tree};
 pub use parser::parse;
 
@@ -85,4 +89,6 @@ mod reconcile;
 pub use reconcile::{Reconciled, reconcile, semantic};
 
 mod print;
-pub use print::{predicate_symbol, print_component, print_folder_document, print_scenario};
+pub use print::{
+    predicate_symbol, print_component, print_folder_document, print_revision, print_scenario,
+};

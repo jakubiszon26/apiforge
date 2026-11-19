@@ -1,0 +1,14 @@
+# LANG-13: the order of the steps of every fixture as main reads it (stored
+# spelling), recorded in the acceptance commit: main flow | cleanup, Start left out.
+fixtures/scenarios/lay/fan-out.afs: catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 
+fixtures/scenarios/lay/far-value-saved.afs: session catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 
+fixtures/scenarios/lay/far-value.afs: session catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 
+fixtures/scenarios/lay/order-flow.afs: login products cart order created receipt | removed
+fixtures/scenarios/lay/rooms/components/sign-in.afs: session | 
+fixtures/scenarios/lay/rooms/scenarios/booking-day.afs: token profile team buildings floors rooms equipment policy holidays first hold invite notice booked second calendar | released cancelled
+fixtures/scenarios/lay/rooms/scenarios/double-booking-notice.afs: token rooms policy first notice booked second calendar | cancelled
+fixtures/scenarios/lay/rooms/scenarios/double-booking.afs: token rooms first booked second calendar | cancelled
+fixtures/scenarios/lay/shop-30.afs: login catalogue product promoted cart cart_view address checkout order paid payment receipt refund logout | removed
+fixtures/scenarios/lay/shop-50.afs: login health catalogue search stock product promoted cart cart_view coupon discounted applied shipping address checkout order paid payment receipt confirmation notify cancel invoice history refund refunded_order logout logged_out | removed
+fixtures/scripts/checkout.afs: products order created receipt | removed
+fixtures/scripts/lookup.afs: response | 

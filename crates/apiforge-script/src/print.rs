@@ -29,6 +29,11 @@ pub fn print_folder_document(
 ) -> Result<String, Vec<Diagnostic>> {
     print_with(project, document, true)
 }
+/// Prints a published revision in its stored spelling (LANG-13). Not
+/// implemented yet: the folder printer writes that spelling today.
+pub fn print_revision(project: &Project, component: &Component) -> Result<String, Vec<Diagnostic>> {
+    print_folder_document(project, &Document::Component(component.clone()))
+}
 fn print_document(project: &Project, document: &Document) -> Result<String, Vec<Diagnostic>> {
     print_with(project, document, false)
 }
