@@ -307,7 +307,30 @@ findings (#167, #168 (1–3), #170 (4)); the functional gaps #125–#143 and
 #211, #212, #213); #219 (tooling, a Sonnet fix); #155 (parser); #158 (not
 reproduced); #116; #201 (docs, merge on green CI).
 
-## Sprint: LAY (in progress since 2026-11-05)
+## Sprint: LAY (2026-11-05 to 2026-11-19, closed)
+
+**Closed on 2026-11-19** by the owner ([#296](https://github.com/jakubiszon26/apiforge/issues/296), decision 13 = A). The
+owner ran the build that holds the minimal set (`1d11f07`) on a scenario
+of their own — sixteen independent negative requests to one endpoint, each
+with one to four checks — instead of the room-booking task. No line was
+lost, no data was taken for order and no connection needed several clicks,
+so the hard condition of [The close](sprints/lay.md#131-the-criterion)
+holds; what the run found about the board went to LAY-2, and what it found
+about reading results and editing a request opened the
+[REQ sprint](#next-sprint-req-not-started). The findings, their causes
+and the fifteen decisions are in [sprints/req.md](sprints/req.md). The
+boxes below are ticked, each with its evidence, by the retrospective,
+which is the next step and comes before LANG starts.
+
+LAY-2 (`sprint:lay-2`, not scheduled) holds what was deferred on
+2026-11-18 — LAY-13 [#297](https://github.com/jakubiszon26/apiforge/issues/297), LAY-17 [#301](https://github.com/jakubiszon26/apiforge/issues/301), LAY-35 [#410](https://github.com/jakubiszon26/apiforge/issues/410), LAY-36
+[#419](https://github.com/jakubiszon26/apiforge/issues/419), LAY-38 [#427](https://github.com/jakubiszon26/apiforge/issues/427), [#445](https://github.com/jakubiszon26/apiforge/issues/445) — and what this run added: LAY-43
+[#466](https://github.com/jakubiszon26/apiforge/issues/466) a check that reads two steps is drawn once, LAY-44 [#467](https://github.com/jakubiszon26/apiforge/issues/467)
+folded checks take no room, LAY-45 [#468](https://github.com/jakubiszon26/apiforge/issues/468) the ordering lines of a chain,
+LAY-46 [#469](https://github.com/jakubiszon26/apiforge/issues/469) the checks line at the Overview zoom after a run. W4 to
+W9 of the plan's 13.2 still have no issues of their own. Its geometry is
+measured again after LANG-13 ([13.6](sprints/lay.md#136-to-measure-again-after-lang-13)).
+
 
 Diagram comprehension. The owner's brief of 2026-11-03: a person opening a
 large scenario must understand, without effort or manual tidying, what runs
@@ -425,10 +448,11 @@ Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
 (#167 (3)), wire-length metrics beyond LAY-01. Mock branches `mock/lay-00-*`
 stay on origin because the issues' images point at their commits.
 
-## Next sprint: LANG (not started)
+## Sprint: LANG (current; starts after the LAY retrospective)
 
-The language sprint follows LAY: it starts after LAY closes, its acceptance
-(LAY-12, #296) and its retrospective. The owner paused its design and
+The language sprint follows LAY, which closed on 2026-11-19 (#296); it
+starts after the LAY retrospective. The owner confirmed the sequence the
+same day (decision 14 = B): part A to 0.2.0 first, the REQ sprint after it. The owner paused its design and
 implementation on 2026-11-17 until then, except what LAY needs (RUN-03
 #389, DIAG-07 #392, LANG-14 #390). The plan, the order and the decisions
 are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
@@ -439,6 +463,69 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
 - After it: LANG-16 #413 (part B of LANG-00), then LANG-01 #127 with
   LANG-09 #353, LANG-08 #352 with LANG-07 #212, LANG-02 #129 with LANG-04
   #132, LANG-03 #131.
+- Candidates for LANG planning, raised on 2026-11-19 from the shape of a
+  validation scenario and not decided (`decision-needed`): LANG-17 [#470](https://github.com/jakubiszon26/apiforge/issues/470)
+  a table of cases, or a request based on another (with LANG-08 #352);
+  LANG-18 [#471](https://github.com/jakubiszon26/apiforge/issues/471) headers and authorization shared by a scenario; LANG-19
+  [#472](https://github.com/jakubiszon26/apiforge/issues/472) a check without an invented name, one check for several fields
+  (with LANG-04 #132).
+- FIX-01 [#454](https://github.com/jakubiszon26/apiforge/issues/454), the reference scenario of that shape, can be taken
+  before LANG-13: its sixteen `@after` lines are a case for the fix.
+
+## Next sprint: REQ (not started)
+
+Request and results. The owner's run of 2026-11-19 showed that a test made
+of independent requests is read and edited in the wrong places: results
+that do not say what was checked, a body eight sections down a narrow
+panel, a response folded behind clicks, and no view whose unit is one
+request. The findings, causes, mock-ups and decisions are in
+[`docs/sprints/req.md`](sprints/req.md); the issues carry `sprint:req`.
+It follows LANG part A and is designed for the written-order chain of
+LANG-13. Three of its tickets do not depend on the language and are ready
+now (DIAG-02, REP-08, REP-07); they wait for the owner to open the sprint
+or to pull them forward.
+
+Capacity: **235** owner review minutes over 12 tickets, without the two
+candidates. Exit criteria:
+
+- [ ] A check reads the same on its card, on a folded line, in the
+      Inspector and in Run results, and says what it compares (DIAG-02).
+- [ ] After a run on `labels` the list says which request failed and which
+      check, without opening a row; a response is read without a click
+      (REP-07, REP-08).
+- [ ] A scenario is read as a numbered list of steps with their checks
+      (REQ-01).
+- [ ] A request is edited with its response beside it: the body in an
+      editor with line numbers and validity, headers in a table,
+      authorization from a list (REQ-02a, REQ-02b, REQ-03; closes DIAG-04).
+- [ ] *Run to here* and *Send this request alone* work from that view; a
+      live request is sent only under the permission an ordinary live run
+      needs (REQ-04, REQ-05).
+- [ ] The owner does the task of REQ-06 on a release build, and the
+      retrospective is written.
+
+| Issue | Ticket | Estimate · risk | State |
+| --- | --- | --- | --- |
+| [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 A reference scenario of independent negative requests (`labels`) | S · 5 | `ready:opus` |
+| [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 A check reads the same everywhere and says what it compares | M · 15 · `visible UI`, `removal` | `ready:opus` · after FIX-01 |
+| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` · after FIX-01 |
+| [#381](https://github.com/jakubiszon26/apiforge/issues/381) | REP-07 Run results: a request with its checks under it | M · 25 · `visible UI`, `default` | `ready:opus` · after DIAG-02 and REP-08 |
+| [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 The Steps view and the request beside its response: captures and decisions | S · 30 · `visible UI`, `default` | the planning model's; after LANG-13 |
+| [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01 Diagram → Steps | M · 30 · `visible UI` | waits for REQ-00's captures |
+| [#458](https://github.com/jakubiszon26/apiforge/issues/458) | REQ-02a The selected request and its response side by side | M · 30 · `visible UI` | waits for REQ-00's captures |
+| [#459](https://github.com/jakubiszon26/apiforge/issues/459) | REQ-02b The body editor; closes DIAG-04 [#365](https://github.com/jakubiszon26/apiforge/issues/365) | M · 20 · `visible UI` | waits for REQ-00's captures |
+| [#460](https://github.com/jakubiszon26/apiforge/issues/460) | REQ-03 Headers as a table; authorization from a list | M · 15 · `visible UI` | waits for REQ-00's captures |
+| [#461](https://github.com/jakubiszon26/apiforge/issues/461) | REQ-04 Run to here | S · 15 · `visible UI` | waits for REQ-00's captures |
+| [#462](https://github.com/jakubiszon26/apiforge/issues/462) | REQ-05 Send this request alone | M · 25 · `visible UI`, `default` | `decision-needed` |
+| [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the owner's own run | S · 10 | after the rest |
+
+Candidates the planning model proposed, for the owner to take or leave at
+the sprint's planning (`decision-needed`): REQ-07 [#464](https://github.com/jakubiszon26/apiforge/issues/464) a request in
+and out as cURL and a failed check copied as a report; REQ-08 [#465](https://github.com/jakubiszon26/apiforge/issues/465) a
+new case duplicated from an existing one, and running the failed ones
+again. Later, after LANG-17: GEN-01 [#473](https://github.com/jakubiszon26/apiforge/issues/473) suggested negative cases of a
+field. UX-19 [#227](https://github.com/jakubiszon26/apiforge/issues/227) edits the same list as REP-07 and merges beside it,
+not with it.
 
 ## Later
 
@@ -477,7 +564,7 @@ comprehension — what runs after what, what checks what, where data comes
 from — and asked for a sprint after UX-1. Its audit, UX model, decisions and
 proposed tickets are in [`docs/sprints/lay.md`](sprints/lay.md), decided
 by the owner's quiz of 2026-11-05 and now the
-[LAY sprint](#sprint-lay-in-progress-since-2026-11-05) above. The rows below
+[LAY sprint](#sprint-lay-2026-11-05-to-2026-11-19-closed) above. The rows below
 are the 2026-10-26 tickets it re-audited, kept as the record.
 
 Analysed 2026-10-26 ([LAY-00](tickets/LAY-00.md)): a scenario opened from

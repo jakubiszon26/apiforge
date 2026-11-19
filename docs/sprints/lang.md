@@ -7,11 +7,18 @@
   written by the order of its lines, the manifest carries the language
   version under `formatVersion: 2`, a project in the older language runs
   only after the fix.
-- **Not started, and paused by the owner on 2026-11-17.** Finishing LAY
-  comes first. The sprint starts after LAY closes, its acceptance (LAY-12,
-  #296) and its retrospective. Until then nothing of LANG is designed or
-  implemented except the rows of [Beside LAY](#beside-lay) marked *now*,
-  and no ticket of this plan carries a `ready:*` label.
+- **Not started.** Paused by the owner on 2026-11-17 until LAY closed; LAY
+  closed on 2026-11-19 (#296) and the owner confirmed the same day that
+  part A, to 0.2.0, runs next and the [REQ sprint](req.md) after it. The
+  sprint starts after the LAY retrospective; until its planning no ticket
+  of this plan carries a `ready:*` label.
+- **Candidates raised on 2026-11-19, not decided** — the owner places them
+  at the sprint's planning: LANG-17 (#470) a table of cases, or a request
+  based on another, to be analysed with LANG-08; LANG-18 (#471) headers and
+  authorization shared by a scenario; LANG-19 (#472) a check without an
+  invented name and one check for several fields, with LANG-04. They come
+  from the reference scenario `labels` (FIX-01, #454), whose sixteen
+  `@after` lines are also a case for LANG-13's fix.
 - Analysis model: Fable 5.2.
 - Inputs: [FLOW-00](../tickets/FLOW-00.md), [LANG-00](../tickets/LANG-00.md),
   [LAY section 12](lay.md#12-after-the-checkpoint-2026-11-16), every open
