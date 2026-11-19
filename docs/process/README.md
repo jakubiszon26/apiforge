@@ -33,7 +33,9 @@ Backlog → Analysis → Estimate → Owner approval → Acceptance test → Imp
 2. **Analysis.** Written for the owner, one page at most: what changes on
    screen, what disappears, what migrates, what the acceptance criteria are.
    A change that touches the interface includes a mock-up. Technical detail
-   goes to an appendix or an ADR. The analysis is the first commit of the
+   goes to an appendix or an ADR. Beyond what was asked, it carries the
+   planning model's [own proposals](planning.md#the-planning-models-own-proposals)
+   for the owner to take or leave. The analysis is the first commit of the
    ticket's draft pull request, which then carries everything below
    ([one result, one pull request](planning.md#one-acceptable-result-one-pull-request)).
    See [planning](planning.md).
@@ -117,7 +119,7 @@ links to it; the issue body is the summary, not a copy.
 
 | Stage | Model | Note |
 | --- | --- | --- |
-| Analysis that sets the bar: ticket analysis, mock-ups, estimates, decisions put to the owner, retrospectives, process changes | Fable | If Fable is unavailable, Opus may analyse and the ticket records it |
+| Analysis that sets the bar: ticket analysis, mock-ups, estimates, decisions put to the owner, its own proposals of features and simplifications, retrospectives, process changes | Fable | If Fable is unavailable, Opus may analyse and the ticket records it |
 | Everything else by default: programming, tests, refactoring, QA reports, coordination, status, ordinary conversation | Opus 5.5 or newer | The working default |
 | A ticket labelled `ready:sol`: acceptance tests, implementation, QA report, pull request | GPT 6.1 SOL (Codex) | Unattended, under [autonomy](autonomy.md); escalates instead of deciding |
 | A ticket labelled `ready:sonnet`, and mechanical edits: a typo, a one-line change, formatting | Sonnet | Changes that contain no decision and no regression potential |

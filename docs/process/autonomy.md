@@ -78,3 +78,10 @@ with the question "may this be labelled?", labels what qualifies, and writes
 the ticket file to the standard the label promises. A ticket the agent had to
 escalate for something the analysis should have said is recorded in the
 retrospective against the analysis, not against the agent.
+
+It also owes the owner more than answers: every analysis carries the
+planning model's [own proposals](planning.md#the-planning-models-own-proposals)
+— what would solve the underlying problem better than the thing asked —
+and the strongest are filed as candidates for the owner's decision. A
+sprint in which every feature came from the owner is recorded in the
+retrospective against the analysis.
