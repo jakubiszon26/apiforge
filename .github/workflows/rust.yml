@@ -28,7 +28,9 @@ jobs:
     name: Build & Test (${{ matrix.os }})
     if: github.event.action != 'labeled' || github.event.label.name == 'ci:windows'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # #450: Windows needs 31–45 minutes (the desktop unit tests alone take
+    # about 20); 60 leaves room without hiding a hung run for long.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
