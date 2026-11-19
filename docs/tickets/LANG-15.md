@@ -12,7 +12,7 @@
   nothing to a manifest that they do not name.
 - Issue [#412](https://github.com/jakubiszon26/apiforge/issues/412) · LANG
   sprint, first half · branch `feat/lang-15-language-version`
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Goal
 

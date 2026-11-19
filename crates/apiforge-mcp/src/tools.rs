@@ -201,8 +201,15 @@ pub struct ProjectOverview {
     /// journal; `run` lists them under `interrupted`.
     pub interrupted_runs: usize,
     pub server_version: String,
-    /// The version of the language reference `language_reference` serves.
+    /// The version of the language reference `language_reference` serves:
+    /// the language this server reads.
     pub reference_version: String,
+    /// The `.afs` language this server reads and writes.
+    pub language_version: u32,
+    /// The language the project's files are written in. When it is lower
+    /// than `language_version`, `check` reports it at `apiforge.project.json`
+    /// and `run` is refused until `apiforge fix` has raised it.
+    pub project_language_version: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
@@ -350,6 +357,8 @@ pub fn project_overview(folder: &Path) -> Result<ProjectOverview, ToolError> {
         interrupted_runs,
         server_version: env!("CARGO_PKG_VERSION").into(),
         reference_version: reference::version().to_owned(),
+        language_version: apiforge_project::language::LANGUAGE_VERSION,
+        project_language_version: manifest.language(),
     })
 }
 
@@ -392,6 +401,26 @@ pub fn check(folder: &Path, path: Option<&str>) -> Result<CheckResult, ToolError
         None => (open(folder)?, None),
     };
     let mut documents = Vec::new();
+    // A project in an older language: reported first, at its manifest, as
+    // the command line reports it (LANG-15).
+    if let Some(problem) = session.language_problem() {
+        documents.push(DocumentCheck {
+            path: apiforge_storage::project::MANIFEST_PATH.to_owned(),
+            source_sha256: None,
+            valid: false,
+            unavailable: None,
+            diagnostics: vec![Diagnostic {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 1,
+                severity: Severity::Error,
+                message: problem.to_string(),
+                fix: None,
+            }],
+            omitted: 0,
+        });
+    }
     for document in session
         .documents()
         .iter()

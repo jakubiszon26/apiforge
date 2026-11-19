@@ -110,6 +110,10 @@ impl ProjectSession {
     /// Unresolved fields require the same explicit older-snapshot decision as
     /// invalid source. Conflicts and held recovery never grant run permission.
     pub fn prepare_run(&mut self, document_id: &str) -> Result<PreparedRun> {
+        // A project in an older language does not run until it is fixed.
+        if let Some(problem) = self.language_problem() {
+            return Err(problem);
+        }
         self.require_current_registry()?;
         self.require_no_held_draft(document_id)?;
         self.settle(document_id)?;
