@@ -5241,6 +5241,42 @@ mod lang15 {
         }
     }
 
+    /// Criterion 4, from review: a run of an older project is refused for its
+    /// language before its source is checked, so a scenario that does not
+    /// parse in this build's language (the case before `apiforge fix`) gets
+    /// the sentence with the fix, not `invalid_text`.
+    #[test]
+    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
+    fn lang15_criterion_4_a_run_names_the_language_before_the_source() {
+        let directory = checkout();
+        let root = directory.path();
+        let older = LANGUAGE_VERSION - 1;
+        write_language(root, older);
+        fs::write(root.join(SCENARIO), "scenario \"Old\" { value = }\n").unwrap();
+        let both = format!(
+            "This project is written in language {older}; this build reads language {LANGUAGE_VERSION}."
+        );
+        for (mode, error) in [
+            (
+                "simulated",
+                simulate(root, &arguments(SCENARIO)).unwrap_err(),
+            ),
+            (
+                "live",
+                live_server(root, true, &[])
+                    .run_tool(live(SCENARIO), CancellationToken::new())
+                    .unwrap_err(),
+            ),
+        ] {
+            assert_eq!(error.code, ErrorCode::ProjectUnreadable, "{mode}: {error}");
+            assert!(error.message.starts_with(&both), "{mode}: {error}");
+            assert!(
+                error.message.contains("apiforge fix --folder"),
+                "{mode}: {error}"
+            );
+        }
+    }
+
     /// Criterion 4: an older project opens; `check` carries the problem at
     /// the manifest with both versions and the fix, `run` (simulated and
     /// live) is refused with it and sends nothing, and a write still works.

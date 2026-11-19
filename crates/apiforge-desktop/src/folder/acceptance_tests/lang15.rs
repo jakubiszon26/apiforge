@@ -103,5 +103,9 @@ fn lang15_criterion_4_the_window_opens_an_older_project_and_does_not_run_it() {
         .unwrap();
     session.settle(&id).unwrap();
     session.save(&id).unwrap();
-    assert_eq!(language_of(root), older, "a save does not raise the language");
+    assert_eq!(
+        language_of(root),
+        older,
+        "a save does not raise the language"
+    );
 }

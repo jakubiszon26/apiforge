@@ -62,12 +62,42 @@ pub(crate) fn older(manifest: &ProjectManifest, folder: &Path) -> Option<Error> 
     })
 }
 
-/// The folder as a command line argument: quoted when it has a space.
+/// The folder as a command line argument: quoted when it has a space. A
+/// quoted folder loses its trailing separators, so that a Windows shell
+/// does not read `\"` as an escaped quote (`"C:\My Project\"`).
 pub(crate) fn argument(folder: &Path) -> String {
     let folder = folder.display().to_string();
     if folder.contains(char::is_whitespace) {
-        format!("\"{folder}\"")
+        format!("\"{}\"", folder.trim_end_matches(['\\', '/']))
     } else {
         folder
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::argument;
+    use std::path::Path;
+
+    #[test]
+    fn a_folder_argument_is_quoted_only_with_a_space_and_never_ends_in_a_separator() {
+        assert_eq!(argument(Path::new("/work/shop")), "/work/shop");
+        assert_eq!(argument(Path::new("C:\\work\\shop")), "C:\\work\\shop");
+        assert_eq!(
+            argument(Path::new("/home/me/My Project")),
+            "\"/home/me/My Project\""
+        );
+        assert_eq!(
+            argument(Path::new("C:\\My Project\\")),
+            "\"C:\\My Project\""
+        );
+        assert_eq!(
+            argument(Path::new("/home/me/My Project/")),
+            "\"/home/me/My Project\""
+        );
+        assert_eq!(
+            argument(Path::new("C:\\My Project\\\\")),
+            "\"C:\\My Project\""
+        );
     }
 }

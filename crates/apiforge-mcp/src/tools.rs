@@ -1058,6 +1058,11 @@ pub(crate) fn prepare(
     mode: RunMode,
     secrets: IndexMap<String, String>,
 ) -> Result<Prepared, ToolError> {
+    // A project in an older language does not run, whatever its sources
+    // say in this build's language (LANG-15): said before their check.
+    if let Some(problem) = session.language_problem() {
+        return Err(storage_error(problem));
+    }
     let id = folder::select(session, &arguments.path)?;
     let (document, valid) = folder::check_document(session, &id)?;
     if !valid {
