@@ -772,10 +772,16 @@ mod tests {
             "five scenarios, two densities, two states, and chips at the compact density"
         );
         for board in &boards {
+            assert!(!board.cards.is_empty(), "{}", board.name);
+            // With chips the router is given none of the lines of `labels`,
+            // whose requests read no step (FIX-01).
             assert!(
-                !board.cards.is_empty() && !board.wires.is_empty(),
-                "{}",
-                board.name
+                !board.wires.is_empty() || (board.name == "labels" && board.drawn == "chips"),
+                "{} {} {} {}",
+                board.name,
+                board.density,
+                board.checks,
+                board.drawn
             );
             for wire in &board.wires {
                 let blocks = board.cards.len() + board.chips.len();
