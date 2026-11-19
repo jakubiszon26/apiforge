@@ -568,15 +568,17 @@ Here `paid` fails, `receipt` errors because the answer has no `id`, and
   pay.body.id` fails.
 - A **false `condition`** blocks the steps that read it; a step that only
   follows it runs.
-- An **`if` that cannot decide**, because its condition reads a value that
-  does not exist or errors, is blocked. Every statement in its braces, at
-  any depth, is blocked by it, and the statement after the whole `if` runs.
+- An **`if` that cannot decide** is blocked when its condition reads a
+  value that does not exist, and ends as an error when its condition
+  errors. Either way every statement in its braces, at any depth, is
+  blocked by it, and the statement after the whole `if` runs.
   A branch that was not taken is skipped, which is not a failure and blocks
   nothing.
 - A **component call** that fails inside ends as an error. An export it
   computed before the failure exists and can be read; the others do not.
 - In the **cleanup** a step whose input does not exist, or whose field is
-  missing, is skipped, and the cleanup steps after it run.
+  missing, is skipped, and the cleanup steps after it run. This holds also
+  for an input from a step on a branch that was not taken.
 - A run with a failed, errored or blocked step is failed.
 
 ## Exports

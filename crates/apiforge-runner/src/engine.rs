@@ -1411,13 +1411,19 @@ fn gate_after_finished(
         .iter()
         .filter(|edge| edge.target == node.id)
         .collect();
+    // In the main flow a statement that follows nothing and reads a step off
+    // the path is off it too. The cleanup runs whatever happened: there such a
+    // statement lacks its value and is skipped for that, so the cleanup steps
+    // after it still run (rule 8).
     let inactive = !bypass
         && (!plan.is_reachable(&node.id)
             || (!incoming.is_empty()
                 && incoming
                     .iter()
                     .all(|edge| off_path(&edge.source, edge.branch)))
-            || (incoming.is_empty() && dependencies.iter().any(|id| off_path(id, None))));
+            || (context.phase == Phase::Main
+                && incoming.is_empty()
+                && dependencies.iter().any(|id| off_path(id, None))));
     if inactive {
         return Gate {
             inactive: Some(NotRunCause::OutsidePath),

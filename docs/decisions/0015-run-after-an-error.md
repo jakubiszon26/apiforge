@@ -39,10 +39,12 @@ The nine rules of LANG-00 section 1:
    (`ConditionUnmet`): it guards the data of the steps that read it.
 5. An answer without the field read (`a.body.id` at 500) is the reading
    step's own error, *Missing value*; the step after it runs.
-6. **An `if`** that could not decide (no `passed`: blocked or errored) is
-   blocked; every statement standing in its braces, at any depth, is blocked
-   by it (the outermost such `if`); the step after the `if` runs. A branch
-   not taken is skipped, which is not a failure and blocks nothing.
+6. **An `if`** that could not decide has no `passed`: it is blocked when its
+   condition reads a value that does not exist, and ends as an error when
+   its condition errors. Either way every statement standing in its braces,
+   at any depth, is blocked by it (the outermost such `if`); the step after
+   the `if` runs. A branch not taken is skipped, which is not a failure and
+   blocks nothing.
 7. **A component call** that fails inside finishes as an error; an export it
    computed before the failure exists and can be read, in the main flow as
    in the cleanup; the others do not.
@@ -58,7 +60,8 @@ How the runner applies them:
   after it the run stops. The main flow under `continue` and every cleanup
   use one gate (`gate_after_finished`), in this order: off the path
   (unreachable from Start, or every ordering source a branch not taken or a
-  step skipped as outside the path) → skipped; inside the braces of an
+  step skipped as outside the path, or, in the main flow only, no ordering
+  source and a value read from a step off the path) → skipped; inside the braces of an
   undecided `if` → blocked by it; a source never run, or an output read that
   does not exist → blocked by its statement; a false Data condition read in
   the main flow → its own cause; in the cleanup, a path read that does not
