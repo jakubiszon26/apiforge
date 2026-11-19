@@ -657,3 +657,65 @@ async fn run01_criterion_6_cleanup_goes_on_after_a_skipped_step() {
     }
     assert_eq!(received, ["DELETE /tidy", "DELETE /tidy3"]);
 }
+
+const CLEANUP_AFTER_A_BRANCH_NOT_TAKEN: &str = r#"scenario "RUN-01 cleanup after a branch not taken" {
+  on_error continue
+  begin = start
+  @after(begin)
+  probe = GET "/probe" {
+    sample 200 { go: false }
+  }
+  decide = if probe.body.go == true {
+    made = POST "/made" {
+      sample 201 { id: "m-1" }
+    }
+  }
+  cleanup {
+    tidy = DELETE "/made/{{made.body.id}}" {
+      sample 200 { ok: true }
+    }
+    @after(tidy)
+    tidy2 = DELETE "/tidy2" {
+      sample 200 { ok: true }
+    }
+  }
+}
+"#;
+
+/// Criterion 6 and rule 8 of ADR 0015: a first cleanup step that reads a
+/// step on a branch not taken is skipped because its value does not exist,
+/// not as outside the path, and the cleanup step chained after it runs.
+#[tokio::test]
+async fn run01_criterion_6_cleanup_reading_a_branch_not_taken_goes_on() {
+    let (runs, received) = both(
+        &[],
+        CLEANUP_AFTER_A_BRANCH_NOT_TAKEN,
+        vec![
+            ("GET", "/probe", 200, json!({ "go": false })),
+            ("DELETE", "/tidy2", 200, json!({ "ok": true })),
+        ],
+    )
+    .await;
+    for (mode, run) in &runs {
+        let mode = *mode;
+        let made = step(&run.steps, "made");
+        assert_eq!(made.cause, Some(NotRunCause::OutsidePath), "{mode:?}");
+        let tidy = step(&run.steps, "tidy");
+        assert_eq!(tidy.phase, Phase::Cleanup);
+        assert_eq!(tidy.status, StepStatus::Skipped, "{mode:?}: {tidy:#?}");
+        assert_eq!(
+            tidy.message.as_deref(),
+            Some("Unavailable data or an unmet condition of an earlier step."),
+            "{mode:?}"
+        );
+        assert_eq!(
+            tidy.cause,
+            Some(NotRunCause::BlockedBy {
+                step: made.node_id.clone()
+            }),
+            "{mode:?}"
+        );
+        assert_ran(mode, run, "tidy2", StepStatus::Passed);
+    }
+    assert_eq!(received, ["GET /probe", "DELETE /tidy2"]);
+}
