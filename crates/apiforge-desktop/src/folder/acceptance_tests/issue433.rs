@@ -11,7 +11,6 @@ const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 /// `second` stands in `booked`'s `then`, checked by `refused`.
 const SOURCE: &str = r#"scenario "Double booking is refused" {
   begin = start
-  @after(begin)
   first = POST "/bookings" {
     sample 201 { id: "bk-1" }
   }
@@ -20,7 +19,6 @@ const SOURCE: &str = r#"scenario "Double booking is refused" {
       sample 409 { error: { code: "room_unavailable" } }
     }
     refused = assert second.status == 409
-    @after(refused)
     calendar = GET "/bookings" {
       sample 200 { items: [{ id: "bk-1" }] }
     }

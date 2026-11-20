@@ -19,8 +19,7 @@ fn fixture(name: &str) -> String {
 }
 
 /// `shop-30` on the board of the demo shop, in the form the window writes
-/// (its own text writes `refund` after the whole `if`, which the window
-/// writes inside the branch, and leaves out `on_error`), tidied up and saved.
+/// (its own text leaves out `on_error`), tidied up and saved.
 pub(super) fn opened(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
     let project = crate::testing::shop_project();
     fs::write(project.path().join(SCENARIO), fixture("shop-30")).unwrap();
@@ -117,8 +116,8 @@ pub(super) fn line_of(text: &str, prefix: &str) -> usize {
         .unwrap_or_else(|| panic!("`{prefix}` is written:\n{text}"))
 }
 
-/// Criteria 1, 2 and 5 through the board: the new request is written with
-/// `@after(cart)` after `cart`'s checks and before `cart_view`, the simulated
+/// Criteria 1, 2 and 5 through the board: the new request is written after
+/// `cart`'s checks and before `cart_view`, the simulated
 /// run executes it next after `cart`, and undo restores the file byte for
 /// byte.
 #[test]
@@ -172,12 +171,9 @@ fn diag07_a_request_added_from_carts_next_runs_after_cart() {
     let handle = added.handle.clone();
     let text = source_of(&harness, &id);
     let at = line_of(&text, &format!("{handle} = "));
-    assert_eq!(
-        text.lines().nth(at - 1).map(str::trim),
-        Some("@after(cart)"),
-        "{text}"
-    );
-    assert!(line_of(&text, "cart_total = ") < at - 1, "{text}");
+    // Since LANG-13 its place in the text is its place in the chain.
+    assert!(!text.contains("@after"), "{text}");
+    assert!(line_of(&text, "cart_total = ") < at, "{text}");
     assert!(at < line_of(&text, "cart_view = "), "{text}");
 
     // Criterion 1: the simulated run executes it next after cart.

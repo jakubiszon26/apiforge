@@ -330,7 +330,7 @@ fn a_created_project_registers_a_found_source_pins_its_call_and_keeps_settings()
     // naming its revision, which folder projects reject.
     fs::write(
         root.join("found.afs"),
-        format!("scenario \"Found\" {{\n  call = ({handle}())\n}}\n"),
+        format!("scenario \"Found\" {{\n  begin = start\n  call = ({handle}())\n}}\n"),
     )
     .unwrap();
     follow_disk(&mut harness);
@@ -2369,7 +2369,7 @@ mod mcp08b {
             fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
             // The shop's illustrative promotion scenario intentionally fails;
             // this fixture tests a successful HTTP run and unchanged live consent.
-            fs::write(root.join(SCENARIO), "scenario \"MCP-12 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n}\n").unwrap();
+            fs::write(root.join(SCENARIO), "scenario \"MCP-12 live\" {\n  begin = start\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n}\n").unwrap();
             let mut harness = folder_harness(root, WIDE);
             if permitted {
                 super::mcp09::set_box(&mut harness, true);
@@ -3961,7 +3961,7 @@ mod mcp09 {
     /// Criterion 3's bound: the agent sees a change this soon.
     const SEEN: Duration = Duration::from_secs(1);
     /// A scenario that passes against the demo API, with a cleanup.
-    const LIVE: &str = "scenario \"MCP-09 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const LIVE: &str = "scenario \"MCP-09 live\" {\n  begin = start\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
 
     /// Where the application keeps its preferences: the test's own
     /// configuration directory, as `XDG_CONFIG_HOME` names it.
@@ -4900,9 +4900,9 @@ mod mcp15 {
     /// after the command's end.
     const BOUND: Duration = Duration::from_secs(2);
     /// A scenario that passes against the demo API, with a cleanup.
-    const PASSES: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const PASSES: &str = "scenario \"MCP-15 live\" {\n  begin = start\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
     /// The same against a product the demo API does not have.
-    const FAILS: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const FAILS: &str = "scenario \"MCP-15 live\" {\n  begin = start\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
 
     /// `apiforge run --folder <FOLDER> --scenario <SCENARIO> --live`, as the
     /// binary runs it, with the binary's exit code.
@@ -11283,6 +11283,7 @@ mod ux30 {
   input quantity: number = 1
   input expected: number
   action product: object contract "Product"
+  begin = start
   @label("Add to cart")
   add_to_cart = add_to_cart@1(product: param.product, quantity: param.quantity)
   @label("Promotional price")
@@ -11546,11 +11547,14 @@ mod ux30 {
             .path
             .as_str()
             .to_owned();
-        assert_eq!(
-            fs::read_to_string(directory.path().join(published)).unwrap(),
-            COMPONENT,
-            "revision 1 is the file as written"
-        );
+        // The revision keeps the stored spelling (LANG-13): the file as
+        // written, with the `@after` of each step it chains.
+        let revision = fs::read_to_string(directory.path().join(published)).unwrap();
+        let without: String = revision
+            .split_inclusive('\n')
+            .filter(|line| !line.trim_start().starts_with("@after("))
+            .collect();
+        assert_eq!(without, COMPONENT, "revision 1 is the file as written");
         assert_eq!(source_of(&harness, &id), called(&before));
         assert_eq!(
             fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
@@ -12344,9 +12348,10 @@ mod ux34 {
             "the wire inside the pasted set follows the copies:\n{source}"
         );
         let document = model(&harness, &id);
+        // The demo's six blocks and the start written for it (LANG-13).
         assert_eq!(
             graph_of(&document, false).nodes.len(),
-            6,
+            7,
             "main is unchanged"
         );
         let copies = graph_of(&document, true);
@@ -13999,7 +14004,7 @@ mod ux16 {
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 
     /// A scenario whose Cleanup reads a Cleanup step and a Main step.
-    const BOTH: &str = "scenario \"UX-16\" {\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert gone.status == 200\n    @label(\"Product was read\")\n    read = assert response.status == 200\n  }\n}\n";
+    const BOTH: &str = "scenario \"UX-16\" {\n  begin = start\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert gone.status == 200\n    @label(\"Product was read\")\n    read = assert response.status == 200\n  }\n}\n";
 
     /// The demo shop, its scenario replaced by `text` when one is given,
     /// with the scenario's Cleanup board chosen through *Cleanup*: what each
@@ -14341,6 +14346,7 @@ mod lay16 {
     /// A request as *Add step* leaves one beside `cart`, whose response a
     /// check reads.
     const TRAY: &str = r#"scenario "Tray" {
+  begin = start
   cart = POST "/cart" {
     body { items: 1 }
     sample 201 { id: "c-1" }
@@ -14499,6 +14505,20 @@ mod lay16 {
         harness.step();
         harness.remove_cursor();
         settle(harness);
+    }
+
+    /// Takes *Wire directly* when the drop offered to save the value first:
+    /// since LANG-13 the next step can stand a row below its source, where a
+    /// read counts as far (LAY-26).
+    pub(super) fn wire_directly(harness: &mut FolderHarness) {
+        let offer = harness
+            .query_all_by_label_contains("Wire directly to")
+            .next()
+            .map(|node| node.rect().center());
+        if let Some(at) = offer {
+            press(harness, at);
+            release(harness, at);
+        }
     }
 
     pub(super) fn drag(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
@@ -14822,6 +14842,7 @@ mod lay16 {
         let body = centre(&harness, "Input body of probe");
         move_to(&mut harness, near, body);
         release(&mut harness, body);
+        wire_directly(&mut harness);
         match binding_of(&harness, "probe", "body") {
             Some(Binding::Reference { node_id, port, .. }) => {
                 assert_eq!(node_id, id_of(&harness, "cart"));

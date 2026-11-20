@@ -638,10 +638,11 @@ fn lay26_criterion_6_the_rule_is_the_boards() {
 #[test]
 fn lay26_criterion_7_errors_come_first() {
     let broken = fixture("far-value").replacen(
-        "  @after(cart)\n",
-        "  broken = unknown_step.value\n  @after(cart)\n",
+        "  quantity = PATCH",
+        "  broken = unknown_step.value\n  quantity = PATCH",
         1,
     );
+    assert_ne!(broken, fixture("far-value"), "the error is written");
     let (_project, harness, id) = in_code(&broken, WIDE);
     let all = diagnostics(&harness, &id);
     assert!(

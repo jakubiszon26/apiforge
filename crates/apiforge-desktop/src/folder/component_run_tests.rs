@@ -164,7 +164,7 @@ fn ktlo23_run_on_a_component_lists_its_steps_and_the_exported_value() {
     for step in &report.steps {
         assert!(has(&harness, &row(step)), "the row {:?}", row(step));
     }
-    let fetch = &report.steps[0];
+    let fetch = &report.steps[1];
     assert!(
         fetch
             .request
@@ -216,7 +216,7 @@ fn ktlo23_the_run_uses_the_unsaved_text_and_a_later_edit_makes_it_stale() {
     let report = run(&mut harness);
     assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
     assert!(
-        report.steps[0]
+        report.steps[1]
             .request
             .as_ref()
             .unwrap()
@@ -261,7 +261,7 @@ fn ktlo23_a_called_component_runs_its_pinned_revision_indented() {
             DocumentKind::Component,
             "components/outer.afs",
             &format!(
-                "component Outer \"Outer\" {{\n  call = ({handle}@1())\n  export inner: object = call.product\n}}\n"
+                "component Outer \"Outer\" {{\n  begin = start\n  call = ({handle}@1())\n  export inner: object = call.product\n}}\n"
             ),
         )
         .unwrap();
@@ -275,7 +275,7 @@ fn ktlo23_a_called_component_runs_its_pinned_revision_indented() {
     click(&mut harness, "Diagram");
     let report = run(&mut harness);
     assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
-    let children = report.steps[0]
+    let children = report.steps[1]
         .children
         .as_deref()
         .expect("the call's steps");
@@ -324,7 +324,7 @@ fn ktlo23_choosing_a_step_selects_its_block_on_the_components_board() {
         let project = shop();
         let (mut harness, id) = on(&project, PRODUCT, size, "Diagram");
         let report = run(&mut harness);
-        let fetch = &report.steps[0];
+        let fetch = &report.steps[1];
         harness.get_by_label_contains(&row(fetch)).click();
         settle(&mut harness);
         assert_eq!(
@@ -358,7 +358,7 @@ fn ktlo23_a_components_export_step_offers_no_check_or_variable() {
         );
     }
     harness
-        .get_by_label_contains(&row(&report.steps[0]))
+        .get_by_label_contains(&row(&report.steps[1]))
         .click();
     settle(&mut harness);
     assert!(
@@ -451,10 +451,14 @@ fn ktlo23_live_requests_from_a_component_are_sent_and_journalled_under_its_name(
         std::thread::sleep(Duration::from_millis(5));
     };
     harness.run_steps(5);
-    assert!(has(
-        &harness,
-        "Results will appear while the component runs."
-    ));
+    // Since LANG-13 the component's `start` has finished before its request
+    // hangs, so the report already lists it; it never speaks of a scenario.
+    assert!(
+        harness
+            .query_all_by_label_contains("begin")
+            .next()
+            .is_some()
+    );
     assert!(!has(&harness, "while the scenario runs"));
     choose(&mut harness, "Cancel run");
     finish(&mut harness);
@@ -725,25 +729,25 @@ fn review_run_inputs() {
 
 /// A component with one required and one optional input, neither with a
 /// default. `given` takes its `else` path when `note` is absent; `size`
-/// reads `note` and fails without it, as when a caller omits it. `size` runs
-/// after the whole `if`, whichever branch ran (LANG-14): a value that is ready
-/// runs before the next step (RUN-03), and its failure would stop the
-/// component before `given`. It stands outside the braces because the run
-/// with a note reads it too.
+/// reads `note` through `given`'s value and fails without it, as when a
+/// caller omits it. Reading `given` makes it run after the `if`: a value runs
+/// when what it reads exists (RUN-03, LANG-13), and reading `note` directly
+/// would make it fail, and stop the component, before `given`. It stands
+/// outside the braces because the run with a note reads it too.
 pub(super) const NOTES: &str = "components/notes.afs";
 const NOTES_SOURCE: &str = "component Notes \"Notes\" {
   @required(true)
   input item: object
   @optional
   input note: string
+  begin = start
   id = param.item.id
   given = if exists param.note {
     echoed = param.note
   } else {
     fallback = \"no note\"
   }
-  @after(given)
-  size = length(param.note)
+  size = length(given.value)
 }
 ";
 const ITEM_FIELD: &str = "item · Object";

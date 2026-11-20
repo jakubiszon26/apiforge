@@ -252,7 +252,10 @@ fn lay02_criterion_4_a_second_open_is_the_same_and_edits_stay_incremental() {
     let shop = crate::testing::shop_project();
     let (harness, id) = open_at(shop.path(), WIDE);
     let demo = apiforge_core::demos::shop_project();
-    let saved = &demo.scenarios[0].graph;
+    // As the demo is written: one chain with a start first (LANG-13).
+    let saved = &apiforge_core::chain::with_start(
+        &apiforge_core::chain::chained(&demo.scenarios[0].graph).expect("a chain"),
+    );
     let graph = main_graph(&harness, &id);
     assert_eq!(graph.nodes.len(), saved.nodes.len());
     for node in &graph.nodes {
