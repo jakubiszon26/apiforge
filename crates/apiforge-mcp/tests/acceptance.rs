@@ -402,14 +402,10 @@ fn criterion_5_a_project_with_errors_is_reported_not_refused() {
 fn criterion_5_beyond_a_thousand_diagnostics_the_rest_are_counted() {
     let directory = checkout();
     let root = directory.path();
-    // 1 101 comments that belong to no statement: 1 101 warnings.
-    edit(root, PRODUCT, |text| {
-        let mut text = text.to_owned();
-        for index in 0..1101 {
-            text.push_str(&format!("// note {index}\n"));
-        }
-        text
-    });
+    // 1 100 characters the lexer refuses after the component, and the
+    // parser's error for text after the file: 1 101 errors. A free comment,
+    // which filled the list before, gives no warning since LANG-06 (#143).
+    edit(root, PRODUCT, |text| format!("{text}{}", "$".repeat(1100)));
     let session = ProjectSession::open_saved_read_only(root).unwrap();
     let document = session
         .documents()
@@ -430,7 +426,7 @@ fn criterion_5_beyond_a_thousand_diagnostics_the_rest_are_counted() {
         product
             .diagnostics
             .iter()
-            .all(|d| d.severity == Severity::Warning)
+            .all(|d| d.severity == Severity::Error)
     );
     let source = tools::read_source(root, PRODUCT).unwrap();
     assert_eq!((source.diagnostics.len(), source.omitted), (1000, 101));
@@ -1358,50 +1354,48 @@ fn mcp03_criterion_12_resources_list_and_read() {
     assert_eq!(tree(root), before);
 }
 
+/// The limit holds with a lowering error in a full list: 1 102 errors found,
+/// 1 000 kept, the folder-pin error among them.
+fn assert_kept_within_the_limit(root: &Path, path: &str, message: &str) {
+    let session = ProjectSession::open_saved_read_only(root).unwrap();
+    let document = session
+        .documents()
+        .iter()
+        .find(|d| d.entry().path.as_str() == path)
+        .unwrap();
+    assert_eq!(document.diagnostics().len(), 1000, "{path}");
+    assert_eq!(document.omitted_diagnostics(), 102, "{path}: 1 102 found");
+    assert!(
+        document.diagnostics().iter().any(|d| d.message == message),
+        "{path}: the project-level error is kept"
+    );
+    let result = tools::check(root, Some(path)).unwrap();
+    let checked = &result.documents[0];
+    assert!(!checked.valid);
+    assert_eq!((checked.diagnostics.len(), checked.omitted), (1000, 102));
+    assert!(checked.diagnostics.iter().any(|d| d.message == message));
+}
+
 #[test]
 fn mcp03_carry_over_1_project_level_errors_are_kept_within_the_limit() {
-    let notes = (0..1101)
-        .map(|index| format!("// note {index}\n"))
-        .collect::<String>();
-
-    // The folder-pin error is found while lowering, after 1 000 warnings.
+    // A free comment, which filled the list with warnings before, gives no
+    // warning since LANG-06 (#143); the list is filled with errors (#143).
+    // Lowering drops an error of its own beyond the limit, so the
+    // folder-pin error comes first, and one statement after it writes
+    // `@label` 1 102 times: 1 101 `Duplicate block attribute` errors.
     let directory = checkout();
     let root = directory.path();
-    let scenario = fs::read_to_string(root.join(SCENARIO)).unwrap();
+    let labels = "@label(\"Filler\")\n".repeat(1102);
     edit(root, SCENARIO, |text| {
-        format!(
-            "{}{notes}",
-            text.replace("product = product@1(id: 123)", "product = product(id: 123)")
-        )
+        let text = text.replace("product = product@1(id: 123)", "product = product(id: 123)");
+        let end = text.rfind('}').unwrap();
+        format!("{}{labels}filler = 1\n{}", &text[..end], &text[end..])
     });
-    // A component file that holds a scenario: the kind check comes last.
-    fs::write(root.join(PRODUCT), format!("{scenario}{notes}")).unwrap();
-
-    let session = ProjectSession::open_saved_read_only(root).unwrap();
-    for (path, message) in [
-        (
-            SCENARIO,
-            "Folder component calls require an explicit revision",
-        ),
-        (PRODUCT, "This code describes a different kind of document"),
-    ] {
-        let document = session
-            .documents()
-            .iter()
-            .find(|d| d.entry().path.as_str() == path)
-            .unwrap();
-        assert_eq!(document.diagnostics().len(), 1000, "{path}");
-        assert_eq!(document.omitted_diagnostics(), 102, "{path}: 1 102 found");
-        assert!(
-            document.diagnostics().iter().any(|d| d.message == message),
-            "{path}: the project-level error is kept"
-        );
-        let result = tools::check(root, Some(path)).unwrap();
-        let checked = &result.documents[0];
-        assert!(!checked.valid);
-        assert_eq!((checked.diagnostics.len(), checked.omitted), (1000, 102));
-        assert!(checked.diagnostics.iter().any(|d| d.message == message));
-    }
+    assert_kept_within_the_limit(
+        root,
+        SCENARIO,
+        "Folder component calls require an explicit revision",
+    );
 }
 
 #[test]

@@ -9,24 +9,19 @@ use apiforge_script::{
 };
 use std::collections::BTreeSet;
 
-fn with_notes(body: &str, notes: usize) -> String {
-    let mut source = format!("scenario \"Notes\" {{\n{body}}}\n");
-    for index in 0..notes {
-        source.push_str(&format!("// note {index}\n"));
-    }
-    source
-}
-
 #[test]
 fn diagnostics_beyond_the_limit_are_counted_by_the_parser_and_kept_by_lowering() {
-    let source = with_notes("", 1101);
+    // 1 100 characters the lexer refuses after the file, and the parser's
+    // error for text after the file: 1 101 errors. A free comment, which
+    // filled the list before, gives no warning since LANG-06 (#143).
+    let source = format!("scenario \"Notes\" {{\n}}\n{}", "$".repeat(1100));
     let tree = parse(&source);
     assert_eq!(MAX_DIAGNOSTICS, 1000);
     assert_eq!(tree.diagnostics.len(), 1000);
     assert!(
         tree.diagnostics
             .iter()
-            .all(|d| d.severity == Severity::Warning)
+            .all(|d| d.severity == Severity::Error)
     );
     assert_eq!(tree.omitted_diagnostics, 101);
 
@@ -39,10 +34,16 @@ fn diagnostics_beyond_the_limit_are_counted_by_the_parser_and_kept_by_lowering()
 #[test]
 fn an_error_that_replaces_a_warning_at_the_limit_counts_the_warning() {
     // A full list of warnings, then an error found by lowering: the error is
-    // kept in place of the last warning, which is counted as omitted.
-    let source = with_notes("  export x: number = 1\n", 1000);
+    // kept in place of the last warning, which is counted as omitted. A free
+    // comment gives no warning since LANG-06 (#143): the warnings are 1 000
+    // operands of the wrong type, two in each of 500 values, and the error is
+    // the graph's limit of 200 blocks.
+    let body: String = (0..500)
+        .map(|index| format!("  wrong_{index} = \"a\" - \"b\"\n"))
+        .collect();
+    let source = format!("scenario \"Notes\" {{\n{body}}}\n");
     let tree = parse(&source);
-    assert_eq!(tree.diagnostics.len(), 1000);
+    assert_eq!(tree.diagnostics.len(), 0);
     assert_eq!(tree.omitted_diagnostics, 0);
 
     let project = apiforge_core::demos::shop_project();
@@ -50,6 +51,30 @@ fn an_error_that_replaces_a_warning_at_the_limit_counts_the_warning() {
     assert!(lowered.has_errors(), "{:#?}", &lowered.diagnostics[..1]);
     assert_eq!(lowered.diagnostics.len(), 1000);
     assert_eq!(lowered.omitted_diagnostics, 1);
+}
+
+/// A project-level error found after a full list of errors takes the last
+/// one's place and counts it (`push_error` with `keep`, as the session pushes
+/// the kind check). The session reaches its project-level checks only on a
+/// text without errors, which since LANG-06 (#143) cannot hold 1 000
+/// warnings, so this branch is shown here.
+#[test]
+fn a_kept_error_replaces_the_last_error_of_a_full_list() {
+    let mut diagnostics: Vec<_> = (0..MAX_DIAGNOSTICS)
+        .map(|index| apiforge_script::Diagnostic::error(index..index + 1, "Filler"))
+        .collect();
+    let mut omitted = 101;
+    let kept = apiforge_script::Diagnostic::error(0..0, "Project-level");
+    apiforge_script::push_error(&mut diagnostics, &mut omitted, kept.clone(), false);
+    assert_eq!(
+        (diagnostics.len(), omitted),
+        (1000, 102),
+        "dropped without keep"
+    );
+    assert!(!diagnostics.contains(&kept));
+    apiforge_script::push_error(&mut diagnostics, &mut omitted, kept.clone(), true);
+    assert_eq!((diagnostics.len(), omitted), (1000, 103));
+    assert_eq!(diagnostics.last(), Some(&kept));
 }
 
 // LANG-14 (#390) --------------------------------------------------------------

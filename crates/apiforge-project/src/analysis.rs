@@ -170,7 +170,10 @@ pub(crate) fn derive_counted(
         return (diagnostics, omitted, None);
     };
     if kind(&document) != target.kind {
-        // A project-level error is never the one the limit drops.
+        // A project-level error is never the one the limit drops. No text
+        // fills the list here today (LANG-06, #143): lowering errors return
+        // above, and type warnings are at most 2 per block, 200 blocks a
+        // graph; a new cheap warning brings back a session test of this.
         apiforge_script::push_error(
             &mut diagnostics,
             &mut omitted,
