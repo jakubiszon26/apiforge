@@ -1,8 +1,9 @@
 # LANG-21a: The window offers the update of a project written in the older language
 
 - Size: M · Owner review: 20 min · Risk: `visible UI`
-- State: **Approved, ready for implementation after LANG-20 (#481) has
-  merged.** The owner chose on 2026-11-20 that 0.2.0 has it (option A on
+- State: **Waits for one owner decision** (whether the window can take a
+  source the person converted by hand, on #482) **and for the review's
+  last pass**; then ready after LANG-20b (#497) has merged. The owner chose on 2026-11-20 that 0.2.0 has it (option A on
   [#482](https://github.com/jakubiszon26/apiforge/issues/482)) and
   answered the nine questions of the round-1 mock-up, each with A; the
   mock-up is approved as a whole. **Split on 2026-11-20** after an
@@ -17,6 +18,12 @@
   one dialog with two parts, then the band *being updated: n of m files*.
   Views 3a and 4a of the approved mock-up become that one dialog; the
   pull request shows it and the band's third state for acceptance.
+- **Restated again on 2026-11-20** after the independent review of the
+  shared contract: the plan, its read set, the guarded commit and what
+  happens after a save are LANG-20b's (#497) and the window only calls
+  them; the window can finish a project when nothing is left to convert;
+  a listed source with an error has its place in the dialog; *Save all*
+  is the one that exists.
 - Issue [#482](https://github.com/jakubiszon26/apiforge/issues/482) · LANG
   sprint, first half · branch `feat/lang-21-update-the-project`
 - Analysis model: Fable 5.2 · Implementation model: —
@@ -104,45 +111,66 @@ blocked.
    the button; a language-2 project shows none. At both window sizes the
    button is inside the window. Test: D `lang21_criterion_1_*`.
 2. The button writes nothing: after it, every file, the record and the
-   manifest are byte-identical. The dialog shows LANG-20's **plan made
+   manifest are byte-identical. The dialog shows LANG-20b's **plan made
    from what would be saved** — for a file with unsaved changes its text
-   in the editor, for every other the file — in two parts: the files that
-   will change with what is removed, and the files left with their
-   statements and lines; a part that is empty is not shown. With nothing
-   unsaved the two parts equal the report of `apiforge fix --folder
-   --check`. Test: D `lang21_criterion_2_*`, on the three projects, and
-   with an unsaved change that removes a blocker and one that adds one.
-3. *Update N files* commits **that plan** through LANG-20's function:
-   the files converted, the record and the manifest are those the command
-   writes for the same project. The open tabs show the new text without a
+   in the editor, for every other the file — in up to three parts, each
+   absent when empty: **will change** (the files to convert, with what is
+   removed), **left to do by hand** (blocked files with their statements
+   and the reason; files that cannot be read), and **already updated,
+   with errors** (listed files that do not pass the check, with their
+   first error and the count). With nothing unsaved it equals the report
+   of `apiforge fix --folder --check`. Test: D `lang21_criterion_2_*`,
+   on the three projects, on one whose only obstacle is a listed file
+   with an error, and with an unsaved change that removes a blocker and
+   one that adds one.
+3. The dialog's button commits the plan through LANG-20b's functions,
+   and what it reads is what the plan will do:
+   - *Update N files* when there is something to convert. Everything
+     convertible and nothing else in the way: the project is language 2
+     afterwards, there is no record, the offer is gone and a run starts.
+     Some left: the record lists the converted sources, the band reads
+     *being updated: n of m files*, a run is refused with LANG-20a's
+     sentence, and the button shows the plan for what is left.
+   - **Finish the update** when nothing is left to convert and every
+     source is updated and passes — all were listed and the last error
+     was repaired, or the last blocked file was deleted: it writes the
+     manifest, removes the record, and a run starts.
+   - No button when neither applies; the parts say why.
+   The files, the record and the manifest are those the command writes
+   for the same project. The open tabs show the new text without a
    conflict prompt; a notice gives the counts and stays until dismissed.
-   - Everything convertible: the manifest is language 2, there is no
-     record, the offer is gone and a run starts.
-   - Some left: the record lists the converted sources, the band reads
-     *being updated: n of m files*, a run is refused with LANG-20's
-     sentence, and pressing the button again shows the plan for what is
-     left.
-   - Nothing convertible: the dialog has no update button and nothing is
-     written.
-   When anything the plan was made from has changed since — a buffer, a
-   file on disk, the record, the manifest, who holds the project —
-   nothing is written and the dialog shows the new plan with one line
-   saying why. Test: D `lang21_criterion_3_*`, one per case, among them a
-   foreign write and an edit between the check and the button.
+   When anything the plan read has changed since — a buffer, any source
+   on disk, the record, the manifest, who holds the project — nothing is
+   written and the dialog shows the new plan with one line saying why
+   (LANG-20b's read set; the window adds only its buffers' versions).
+   Test: D `lang21_criterion_3_*`, one per case, among them the finish
+   after a repaired error, after a deleted file, a foreign write to a
+   file the plan does not write, and an edit between the check and the
+   button.
 4. A project partly updated elsewhere — by the command or by an agent's
    `fix` while the window observes — shows the band of criterion 1 for a
    record and the same dialog; when the agent's `fix` finishes the
    project, the window shows it updated and no offer.
    Test: D `lang21_criterion_4_*` (with the MCP harness of `mcp08b`).
-5. With unsaved work the dialog names the unsaved files first and its
-   button reads *Save all and update*; it saves them and commits the
-   plan, which was made from exactly those texts; *Cancel* saves nothing.
-   What *Save all* does not save — a source held because it does not
-   read, an unfinished field of the Inspector, a file in conflict — is
-   named in the dialog, which then offers no update: *Finish or discard
-   these first.* A save that fails for one file stops there: nothing is
-   converted, the files already saved stay saved, and the dialog says
-   which failed. Test: D `lang21_criterion_5_*`, one per case.
+5. With unsaved work the dialog names what is unsaved first — files and
+   settings — and its button reads *Save all and update* (or *Save all
+   and finish*). It runs the window's **Save all as it is today** (which
+   goes on after a file that fails) and then LANG-20b's *after a save*:
+   the plan is made again from the disk and committed only when it would
+   write exactly what the dialog showed; the settings just saved are in
+   the manifest written. *Cancel* saves nothing.
+   - What *Save all* does not save — a source held because it does not
+     read, an unfinished field of the Inspector, a file in conflict — is
+     named in the dialog, which then offers no button: *Finish or discard
+     these first.*
+   - A save that fails for a file: nothing is converted; the other files
+     are saved as *Save all* saves them; the dialog names the file that
+     failed.
+   - A foreign write during the save, or a saved buffer that changes what
+     is blocked: nothing is converted and the dialog shows the new plan.
+   Test: D `lang21_criterion_5_*`, one per case, among them unsaved
+   settings (kept after the update), a blocked file with unsaved changes,
+   and the state of the files after the one that failed.
 6. The band has no dismiss control while the project is in language 1;
    *Project ▸ Update the project…* does what the button does and is
    absent or disabled in a language-2 project.
@@ -161,6 +189,15 @@ blocked.
    two parts are distinct (#235); everything is reachable by keyboard.
    Test: `accessibility_tests`, D `lang21_criterion_9`.
 
+## Owner question (on #482)
+
+Whether the window can take a source the person converted by hand
+(`--as-written` of the command). Without it one case cannot be finished
+from the window: a request that ran nowhere in 0.1.0 and that the person
+wants to run where it is written. The criteria above hold for either
+answer; the answer adds one action to the dialog's second part or one
+sentence.
+
 ## Regression potential
 
 | What can break | Covered by |
@@ -175,8 +212,8 @@ blocked.
 ## Not in scope
 
 - What the update does to a file, `--as-written`, the report's content:
-  LANG-13 and LANG-20. A file converted by hand is passed as written from
-  the command line only.
+  LANG-13 and LANG-20b. A file converted by hand: the owner's question
+  above.
 - A project in a newer language (LANG-15's sentence, no button).
 - Undo of the update: Git.
 
@@ -185,6 +222,6 @@ blocked.
 `crates/apiforge-desktop/src/folder/` (`notices.rs`, `chrome.rs`, a new
 `update_project.rs` for the two dialogs, `runs.rs` for the refusal's
 text, `holder.rs`), the *Project* menu; `crates/apiforge-project/src/`
-(`language.rs`: the check as a call that returns the report; `analysis.rs`:
-the wording of criterion 8 where the fix is withheld). No new function
-converts anything: the window calls LANG-20's.
+(`analysis.rs`: the wording of criterion 8 where the fix is withheld).
+No function of this ticket plans, compares fingerprints or converts: the
+window calls LANG-20b's plan, commit and *after a save*.
