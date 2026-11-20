@@ -2,11 +2,13 @@
 
 - Size: M · Owner review: 20 min · Risk: `format` (a new file in a
   project; the manifest's two version fields; sources rewritten)
-- State: **Redesigned on 2026-11-20 for the owner's decision of that day;
-  waits for an independent review and for two owner questions**
-  ([#481](https://github.com/jakubiszon26/apiforge/issues/481)). Then
-  ready after LANG-13 (#386) has merged. Split from LANG-13 on
-  2026-11-20; the raised constant and the run refusal are LANG-13's.
+- State: **Decided; waits for the independent review before it is
+  labelled.** Redesigned on 2026-11-20 for the owner's decision of that
+  day (B, below), and for the answer to question 1 on
+  [#481](https://github.com/jakubiszon26/apiforge/issues/481) (A: a board
+  edit in a source not yet converted is refused). Then ready after
+  LANG-13 (#386) has merged. Split from LANG-13 on 2026-11-20; the raised
+  constant and the run refusal are LANG-13's.
 - Issue [#481](https://github.com/jakubiszon26/apiforge/issues/481) · LANG
   sprint, first half · branch `feat/lang-20-project-fix`
 - Analysis model: Fable 5.2 · Implementation model: —
@@ -94,6 +96,12 @@ already done.
   language; `project_overview` returns the two versions, `updating: true`
   and the files left. In a converted source the `@after` and `start`
   errors carry their fix again (it is a language-2 source).
+- New (the owner's answer of 2026-11-20, question 1 = A): in a project
+  of the older language, a source that is not yet converted cannot be
+  edited on the board. The board shows it; an edit there — adding,
+  wiring, moving, deleting, the Inspector's fields — is refused with
+  *Update the project first.* Its text can be edited in Code. This holds
+  with and without a record, from this ticket on.
 - Migrated or converted: only by the person's command. Published
   revisions are not touched.
 - Removed or hidden: nothing.
@@ -177,9 +185,20 @@ nothing orders.
    Test: C `lang20_criterion_9_*`.
 10. No comment is lost in any converted source.
     Test: C `lang20_criterion_10_*`.
-11. The MCP `fix` gives the same result and report as the command, also
+11. In a language-1 project, with or without a record, a board edit in a
+    source the record does not list is refused with *Update the project
+    first.* and changes neither the document nor the file: adding a block,
+    wiring, moving a card's step, deleting, and a change in the Inspector,
+    in the window and through a session's model edit; a card's position
+    may still be moved (nothing of the source is written). The same edits
+    work in a listed source and in a language-2 project, and a text edit
+    of the unlisted source in Code is saved. Tests: P
+    `lang20_criterion_11_*`,
+    `crates/apiforge-desktop/src/folder/acceptance_tests/lang20.rs`
+    `lang20_criterion_11_*` (on a language-1 copy of `labels`).
+12. The MCP `fix` gives the same result and report as the command, also
     with `check: true`; a project held by a window with unsaved work is
-    refused as `write_source` is. Test: M `lang20_criterion_11_*`.
+    refused as `write_source` is. Test: M `lang20_criterion_12_*`.
 
 ## Regression potential
 
@@ -191,6 +210,8 @@ nothing orders.
 | The record and the sources disagree after a crash | criterion 7: one commit |
 | LANG-15: `formatVersion: 2` with `languageVersion: 1` must open in this build as an older project | LANG-15's criterion 1 accepts it; criterion 6 here |
 | The command writes a person's files | criteria 2, 3, 10 |
+| An old source rewritten in the new language by an edit on the board, never judged | criterion 11 |
+| Board edits in language-2 projects and in listed sources | criterion 11's second half; the board suites unchanged |
 | Git: a branch switch or a revert brings back an old text of a listed source | "One run", 3: it shows its errors and blocks the raise; named in the report. A reverted source **without** `@after` cannot be told apart and is read as language 2 — the one case the record does not cover, said in the reference and in `docs/folder-projects.md` |
 
 ## Not in scope
@@ -207,6 +228,9 @@ nothing orders.
 - `apiforge-project/src/language.rs`: the plan and its commit; `session.rs`
   reads the record at open and when a source is created; `analysis.rs`
   gives a source its language from the record.
+- The refusal of criterion 11 is in `apiforge-project/src/session.rs`,
+  where a model edit is installed (one place for the window and for an
+  agent); the window shows the session's sentence in its banner.
 - `apiforge-cli` (`main.rs`, a new `fix.rs`), `apiforge-mcp` (`tools.rs`,
   `server.rs`): they call the two functions.
 - `docs/tickets/LANG-00.md` (the decision recorded), ADR 0010 (the file
