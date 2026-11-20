@@ -2,19 +2,21 @@
 
 - Size: M · Owner review: 15 min · Risk: `format` (the manifest's version is
   raised; every source of a project is rewritten by the fix)
-- State: **Approved rules, ready for implementation after LANG-13 (#386)
-  has merged.** Split from LANG-13 on 2026-11-20 to keep both `M`.
-  **Amended the same day** after an independent review: the conversion is
-  whole or not at all ([below](#one-conversion-whole-or-not-at-all)), and
-  the raised constant and the run refusal moved into LANG-13, so that
-  `main` never runs a language-1 project with the new meaning. Everything here is decided in [LANG-00](LANG-00.md):
-  section 2, rules 3–5 (the fix raises the number as its last write, when
-  every source passes; with an error left the number stays and the report
-  lists what the person places by hand), section 3 (the window, the
-  command line and the MCP server call the same function; a file is
-  written whole or not at all; no transaction over the project, no undo
-  beyond Git) and the LANG quiz's decision 5 on #388 (one command for a
-  whole project).
+- State: **Waits for one owner decision** (question on
+  [#481](https://github.com/jakubiszon26/apiforge/issues/481)): the
+  conversion is whole or not at all. LANG-00 says "no transaction over
+  the project" and "with an error left … the report lists what the person
+  places by hand", which read as file by file; an independent review
+  showed that a project converted in part cannot be told from an old one
+  ([below](#one-conversion-whole-or-not-at-all)). That amends LANG-00, so
+  it is the owner's, and this ticket's pull request records it in
+  `docs/tickets/LANG-00.md` (section 3 and *Confirmed at approval* 3).
+  After the decision: ready after LANG-13 (#386) has merged. Split from
+  LANG-13 on 2026-11-20; the raised constant and the run refusal are
+  LANG-13's. The rest is decided in [LANG-00](LANG-00.md) (section 2,
+  rules 3–5; section 3: the window, the command line and the MCP server
+  call the same function) and by decision 5 of the LANG quiz on #388 (one
+  command for a whole project).
 - Issue [#481](https://github.com/jakubiszon26/apiforge/issues/481) · LANG sprint, first half · branch
   `feat/lang-20-project-fix`
 - Analysis model: Fable 5.2 · Implementation model: —
@@ -60,17 +62,25 @@ some files of a language-1 project are converted and others are not:
    that runs nowhere today, or runs in another place than it is written,
    refuses the file and is named, with what to do (delete it, move it, or
    pass the file with `--as-written`).
-2. All writes and the manifest go through one commit of the project
-   store (`ProjectStore::commit`, the transaction of ADR 0011 that a new
-   project is already written with). A crash leaves the project as it was
-   or converted; the store's recovery finishes or undoes it at the next
-   open. This is the store's existing commit, not a new mechanism: LANG-00
-   cut building one, and "a file is written whole or not at all" holds
-   for all of them together.
-3. LANG-00's "with an error left the number stays and the report lists
+2. The conversion has two steps, used by the command, the MCP tool and
+   the window alike. **Plan**: read every source (for the window, the
+   text that would be saved) and return what would be written and what
+   blocks it, with the fingerprint of every file read and of the
+   manifest; nothing is written. **Commit**: write the plan's files and
+   the raised manifest in one commit of the project store, which refuses
+   when a fingerprint no longer matches (`ProjectStore::commit` with the
+   expected state of each file, as every write of the session). A plan is
+   never committed against other contents than it was made from.
+3. An interrupted commit is finished, not undone: the store's recovery
+   rolls it forward at the next writable open, as for any commit (ADR
+   0011). If a file was changed from outside in between, recovery stops
+   with its conflict, as it does today; a read-only open does not
+   recover. The manifest is part of the same commit, so a project is
+   never declared language 2 with a file left unconverted.
+4. LANG-00's "with an error left the number stays and the report lists
    what the person places by hand" holds as written: with an error left,
    nothing is written.
-4. In the window and for an agent, a language-1 project shows its errors
+5. In the window and for an agent, a language-1 project shows its errors
    without the per-line fix (LANG-13, A5): the project is converted by
    this command, by the MCP tool, or by LANG-21's button.
 
@@ -94,9 +104,14 @@ before LANG-13, kept under `crates/apiforge-cli/tests/fixtures/rooms-language-1/
    0.1.0 refuses the project and names the request; the same project
    passes when the file is given with `--as-written`, and the request then
    runs where it is written. Test: C `lang20_criterion_3_*`.
-4. A failure in the middle of the commit (the store's fault injection)
-   leaves, after the next open, either every file and the manifest as
-   before or all of them converted. Test: P `lang20_criterion_4_*`.
+4. An interruption in the middle of the commit (the store's fault
+   injection): after the next writable open, recovery has finished it and
+   every file and the manifest are the converted ones; opened read-only,
+   the project reports the unfinished commit as today and is not treated
+   as language 2 before its manifest says so; with a foreign write to one
+   of the files in between, recovery stops with its conflict. A commit
+   whose plan is stale (a source changed after the plan) writes nothing
+   and says so. Tests: P `lang20_criterion_4_*`, one per case.
 5. `--check` prints the report of criteria 1 and 2 and writes nothing;
    its exit code is the one the conversion would have.
    Test: C `lang20_criterion_5_*`.
@@ -129,8 +144,7 @@ before LANG-13, kept under `crates/apiforge-cli/tests/fixtures/rooms-language-1/
 ## Technical appendix
 
 - One function in `apiforge-project` (`language.rs`, beside LANG-15's
-  comparison): judge every source, then write them and the raised
-  manifest in one commit of the store. `apiforge-cli` (`main.rs`, a new `fix.rs`) and
+  comparison): the plan and its commit, as above. `apiforge-cli` (`main.rs`, a new `fix.rs`) and
   `apiforge-mcp` (`tools.rs`, `server.rs`) only call it.
 - The constant, the run refusal and the reference's first line are
   LANG-13's (its amendment A4); this ticket does not touch
