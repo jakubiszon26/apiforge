@@ -164,7 +164,7 @@ fn ktlo23_run_on_a_component_lists_its_steps_and_the_exported_value() {
     for step in &report.steps {
         assert!(has(&harness, &row(step)), "the row {:?}", row(step));
     }
-    let fetch = &report.steps[1];
+    let fetch = &report.steps[0];
     assert!(
         fetch
             .request
@@ -216,7 +216,7 @@ fn ktlo23_the_run_uses_the_unsaved_text_and_a_later_edit_makes_it_stale() {
     let report = run(&mut harness);
     assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
     assert!(
-        report.steps[1]
+        report.steps[0]
             .request
             .as_ref()
             .unwrap()
@@ -261,7 +261,7 @@ fn ktlo23_a_called_component_runs_its_pinned_revision_indented() {
             DocumentKind::Component,
             "components/outer.afs",
             &format!(
-                "component Outer \"Outer\" {{\n  begin = start\n  call = ({handle}@1())\n  export inner: object = call.product\n}}\n"
+                "component Outer \"Outer\" {{\n  call = ({handle}@1())\n  export inner: object = call.product\n}}\n"
             ),
         )
         .unwrap();
@@ -275,7 +275,7 @@ fn ktlo23_a_called_component_runs_its_pinned_revision_indented() {
     click(&mut harness, "Diagram");
     let report = run(&mut harness);
     assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
-    let children = report.steps[1]
+    let children = report.steps[0]
         .children
         .as_deref()
         .expect("the call's steps");
@@ -324,7 +324,7 @@ fn ktlo23_choosing_a_step_selects_its_block_on_the_components_board() {
         let project = shop();
         let (mut harness, id) = on(&project, PRODUCT, size, "Diagram");
         let report = run(&mut harness);
-        let fetch = &report.steps[1];
+        let fetch = &report.steps[0];
         harness.get_by_label_contains(&row(fetch)).click();
         settle(&mut harness);
         assert_eq!(
@@ -358,7 +358,7 @@ fn ktlo23_a_components_export_step_offers_no_check_or_variable() {
         );
     }
     harness
-        .get_by_label_contains(&row(&report.steps[1]))
+        .get_by_label_contains(&row(&report.steps[0]))
         .click();
     settle(&mut harness);
     assert!(
@@ -451,14 +451,10 @@ fn ktlo23_live_requests_from_a_component_are_sent_and_journalled_under_its_name(
         std::thread::sleep(Duration::from_millis(5));
     };
     harness.run_steps(5);
-    // Since LANG-13 the component's `start` has finished before its request
-    // hangs, so the report already lists it; it never speaks of a scenario.
-    assert!(
-        harness
-            .query_all_by_label_contains("begin")
-            .next()
-            .is_some()
-    );
+    assert!(has(
+        &harness,
+        "Results will appear while the component runs."
+    ));
     assert!(!has(&harness, "while the scenario runs"));
     choose(&mut harness, "Cancel run");
     finish(&mut harness);
@@ -740,7 +736,6 @@ const NOTES_SOURCE: &str = "component Notes \"Notes\" {
   input item: object
   @optional
   input note: string
-  begin = start
   id = param.item.id
   given = if exists param.note {
     echoed = param.note

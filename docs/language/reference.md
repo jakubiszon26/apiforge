@@ -727,8 +727,9 @@ messages you will meet most:
   offered and one more error names the statement to move by hand (**`This
   statement is not written where it runs today`**, **`This step runs nowhere
   today`**); move or delete it, then delete the `@after` lines.
-- **`` A flow with a step needs `start` ``**: the fix writes `begin = start`
-  above the first statement. **`` `start` must be the first step ``**: move
+- **`` A scenario with a step needs `start` ``**: the fix writes `begin = start`
+  (or `begin_2` when `begin` is taken) above the first statement. A
+  component needs no `start`: its body runs from its first step written. **`` `start` must be the first step ``**: move
   the steps written above it below it.
 - **`The value's type does not match this input`** (warning): a value of one
   type fills an input of another, such as text into a number input.

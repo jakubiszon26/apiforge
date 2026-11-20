@@ -170,10 +170,12 @@ fn lang13_criterion_1_a_scenario_body_runs_in_the_order_written() {
 #[test]
 fn lang13_criterion_1_a_component_body_runs_in_the_order_written() {
     let project = project();
-    let text = "component pair \"Pair\" {\n  begin = start\n  b = GET \"/b\" {\n    sample 200 { id: 1 }\n  }\n  a = GET \"/a\" {\n    sample 200 { id: 2 }\n  }\n  export id: number = a.body.id\n}\n";
+    // A component needs no `start`: its body runs from its first step.
+    let text = "component pair \"Pair\" {\n  b = GET \"/b\" {\n    sample 200 { id: 1 }\n  }\n  a = GET \"/a\" {\n    sample 200 { id: 2 }\n  }\n  export id: number = a.body.id\n}\n";
     let document = written(&project, text);
     let graph = main_graph(&document);
-    assert_eq!(steps(graph), ["begin", "b", "a"]);
+    assert_eq!(steps(graph), ["b", "a"]);
+    assert!(follows(graph, "b").is_empty());
     assert_eq!(follows(graph, "a"), set(&["b"]));
 }
 
@@ -294,6 +296,43 @@ fn lang13_criterion_3_an_after_is_an_error_whose_fix_deletes_its_line() {
     }
 }
 
+/// The fix of one `@after` applied to `text`.
+fn fixed_once(text: &str) -> String {
+    let project = project();
+    let lowered = lower(&parse(text), &LowerContext::folder(&project));
+    let after = lowered
+        .diagnostics
+        .iter()
+        .find(|d| d.message == AFTER_REMOVED)
+        .unwrap_or_else(|| panic!("an @after error: {:#?}", lowered.diagnostics));
+    let fix = after.fix.as_ref().expect("a fix");
+    let mut fixed = text.to_owned();
+    fixed.replace_range(fix.range.clone(), &fix.replacement);
+    fixed
+}
+
+#[test]
+fn lang13_criterion_3_the_fix_removes_the_attribute_not_its_neighbours() {
+    // On one line with its statement: only the attribute goes.
+    let text = "scenario \"One line\" {\n  begin = start\n  @after(begin) b = GET \"/b\" {\n    sample 200 {}\n  }\n}\n";
+    assert_eq!(
+        fixed_once(text),
+        "scenario \"One line\" {\n  begin = start\n  b = GET \"/b\" {\n    sample 200 {}\n  }\n}\n"
+    );
+    // With a comment beside it: the comment stays.
+    let text = "scenario \"Comment\" {\n  begin = start\n  @after(begin) // the first request\n  b = GET \"/b\" {\n    sample 200 {}\n  }\n}\n";
+    assert_eq!(
+        fixed_once(text),
+        "scenario \"Comment\" {\n  begin = start\n  // the first request\n  b = GET \"/b\" {\n    sample 200 {}\n  }\n}\n"
+    );
+    // Broken over two lines: both lines go, nothing else.
+    let text = "scenario \"Two lines\" {\n  begin = start\n  @after(\n    begin)\n  b = GET \"/b\" {\n    sample 200 {}\n  }\n}\n";
+    assert_eq!(
+        fixed_once(text),
+        "scenario \"Two lines\" {\n  begin = start\n  b = GET \"/b\" {\n    sample 200 {}\n  }\n}\n"
+    );
+}
+
 #[test]
 fn lang13_criterion_3_out_of_order_no_after_has_a_fix_and_the_statement_is_named() {
     let project = project();
@@ -315,31 +354,54 @@ fn lang13_criterion_3_out_of_order_no_after_has_a_fix_and_the_statement_is_named
 // Criterion 4 ----------------------------------------------------------------
 
 #[test]
-fn lang13_criterion_4_a_flow_with_a_step_needs_a_start() {
+fn lang13_criterion_4_a_scenario_with_a_step_needs_a_start() {
     let project = project();
-    for text in [
-        "scenario \"No start\" {\n  value = 1\n  // The request.\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n}\n",
-        "component ping \"Ping\" {\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n  export status: number = ping.status\n}\n",
-    ] {
-        let lowered = lower(&parse(text), &LowerContext::folder(&project));
-        let found = errors(&lowered.diagnostics);
-        assert_eq!(found.len(), 1, "{text}\n{found:#?}");
-        assert_eq!(found[0].message, START_MISSING);
-        assert!(text[found[0].range.clone()].starts_with("ping = GET"));
-        let fix = found[0].fix.as_ref().expect("a fix");
-        let mut fixed = text.to_owned();
-        fixed.replace_range(fix.range.clone(), &fix.replacement);
-        let document = written(&project, &fixed);
-        let graph = main_graph(&document);
-        assert_eq!(steps(graph), ["begin", "ping"], "{fixed}");
-        assert!(fixed.contains("  begin = start\n"), "{fixed}");
-    }
+    let text = "scenario \"No start\" {\n  value = 1\n  // The request.\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n}\n";
+    let lowered = lower(&parse(text), &LowerContext::folder(&project));
+    let found = errors(&lowered.diagnostics);
+    assert_eq!(found.len(), 1, "{text}\n{found:#?}");
+    assert_eq!(found[0].message, START_MISSING);
+    assert!(text[found[0].range.clone()].starts_with("ping = GET"));
+    let fix = found[0].fix.as_ref().expect("a fix");
+    let mut fixed = text.to_owned();
+    fixed.replace_range(fix.range.clone(), &fix.replacement);
+    let document = written(&project, &fixed);
+    assert_eq!(steps(main_graph(&document)), ["begin", "ping"], "{fixed}");
+    assert!(fixed.contains("  begin = start\n"), "{fixed}");
     // The fix writes the start as the first statement, above its comment.
     let text = "scenario \"No start\" {\n  // The request.\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n}\n";
     assert_eq!(
         fix_source(text, &LowerContext::folder(&project)).text,
         "scenario \"No start\" {\n  begin = start\n  // The request.\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n}\n"
     );
+}
+
+#[test]
+fn lang13_criterion_4_the_start_takes_the_handle_the_board_would_give_it() {
+    let project = project();
+    let text =
+        "scenario \"Taken\" {\n  begin = 1\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n}\n";
+    let fixed = fix_source(text, &LowerContext::folder(&project));
+    assert_eq!(fixed.refused, None);
+    assert_eq!(
+        fixed.text,
+        "scenario \"Taken\" {\n  begin_2 = start\n  begin = 1\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n}\n"
+    );
+    let document = written(&project, &fixed.text);
+    assert_eq!(steps(main_graph(&document)), ["begin_2", "ping"]);
+}
+
+#[test]
+fn lang13_criterion_4_a_component_needs_no_start() {
+    let project = project();
+    let text = "component ping \"Ping\" {\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n  export status: number = ping.status\n}\n";
+    let document = written(&project, text);
+    assert_eq!(steps(main_graph(&document)), ["ping"]);
+    assert_eq!(fix_source(text, &LowerContext::folder(&project)).text, text);
+    // A `start` a component has stays valid.
+    let text = "component ping \"Ping\" {\n  begin = start\n  ping = GET \"/ping\" {\n    sample 200 {}\n  }\n  export status: number = ping.status\n}\n";
+    let document = written(&project, text);
+    assert_eq!(steps(main_graph(&document)), ["begin", "ping"]);
 }
 
 #[test]
@@ -415,7 +477,7 @@ fn lang13_criterion_5_the_fix_deletes_the_after_lines_of_a_file_in_run_order() {
         ("lookup", false),
         ("booking-day", false),
         ("labels", false),
-        ("sign-in", true),
+        ("sign-in", false),
     ] {
         let text = lang1(name);
         let fixed = fix_source(&text, &context);
@@ -511,6 +573,19 @@ fn lang13_criterion_6_a_statement_ordered_into_a_branch_is_not_fixed() {
     let refused = fixed.refused.expect("refused");
     assert_eq!(refused.message, NOT_IN_PLACE);
     assert!(text[refused.range].contains("outside = GET"));
+}
+
+#[test]
+fn lang13_criterion_6_the_language_1_shop_30_is_not_fixed() {
+    // `refund` is written after the braces of `paid` and ordered into its
+    // `then`: deleting the line would make it run on the `else` path too.
+    let project = project();
+    let text = lang1("shop-30");
+    let fixed = fix_source(&text, &LowerContext::folder(&project));
+    assert_eq!(fixed.text, text);
+    let refused = fixed.refused.expect("refused");
+    assert_eq!(refused.message, NOT_IN_PLACE);
+    assert!(text[refused.range].contains("refund = POST"));
 }
 
 #[test]
@@ -642,7 +717,7 @@ fn lang13_criterion_8_a_stored_revision_reads_as_main_reads_it() {
 #[test]
 fn lang13_criterion_8_a_written_component_publishes_as_its_own_graph() {
     let project = project();
-    let text = "component pair \"Pair\" {\n  begin = start\n  b = GET \"/b\" {\n    sample 200 { id: 1 }\n  }\n  a = GET \"/a\" {\n    sample 200 { id: 2 }\n  }\n  export id: number = a.body.id\n}\n";
+    let text = "component pair \"Pair\" {\n  b = GET \"/b\" {\n    sample 200 { id: 1 }\n  }\n  a = GET \"/a\" {\n    sample 200 { id: 2 }\n  }\n  export id: number = a.body.id\n}\n";
     let Document::Component(component) = written(&project, text) else {
         panic!("a component");
     };

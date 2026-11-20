@@ -267,8 +267,7 @@ fn criterion_4_a_crlf_source_counts_the_carriage_return_as_part_of_the_break() {
             diagnostic.end_line,
             diagnostic.end_column
         ),
-        // Line 16: the component's `begin = start` comes first (LANG-13).
-        (16, 28, 16, 28 + width)
+        (15, 28, 15, 28 + width)
     );
 }
 
@@ -361,7 +360,7 @@ fn criterion_5_check_reports_the_injected_warning_with_file_line_and_column() {
             })
         })
         .collect();
-    assert_eq!(problems, [(PRODUCT, 16, 28, Severity::Warning, MISMATCH)]);
+    assert_eq!(problems, [(PRODUCT, 15, 28, Severity::Warning, MISMATCH)]);
 
     let one = tools::check(root, Some(PRODUCT)).unwrap();
     assert_eq!(one.documents.len(), 1);
@@ -993,7 +992,7 @@ fn mcp03_criterion_5_a_component_runs_alone_with_its_inputs() {
     let report = simulate(root, &arguments(PRODUCT)).unwrap();
     assert_eq!(report.status, Verdict::Passed);
     let steps = report.steps.unwrap();
-    assert_eq!(handles(&steps), ["begin", "fetch_product", "product"]);
+    assert_eq!(handles(&steps), ["fetch_product", "product"]);
     assert!(steps.iter().all(|step| step.phase == Phase::Main));
 
     for inputs in [json!({ "id": 7 }), json!({ "id": "7" })] {
@@ -4545,7 +4544,7 @@ fn lay26_criterion_5_mcp_returns_no_far_read_warning() {
 // ----- MCP-21 (#207): `used` names the published revisions the document calls -----
 
 const WRAPPER: &str = "components/wrapper.afs";
-const WRAPPER_TEXT: &str = "component wrapper \"Wrapper\" {\n  description \"A product fetched through its first revision.\"\n  @label(\"Product ID\")\n  input id: number = 123\n  begin = start\n  @label(\"Fetched\")\n  fetched = product@1(id: param.id)\n  @label(\"Product\")\n  export product: object = fetched\n}\n";
+const WRAPPER_TEXT: &str = "component wrapper \"Wrapper\" {\n  description \"A product fetched through its first revision.\"\n  @label(\"Product ID\")\n  input id: number = 123\n  @label(\"Fetched\")\n  fetched = product@1(id: param.id)\n  @label(\"Product\")\n  export product: object = fetched\n}\n";
 const WRAPPED: &str = "scenarios/wrapped.afs";
 /// Calls `wrapper@1` twice and `product@1`, which `wrapper@1` calls too.
 const WRAPPED_TEXT: &str = "scenario \"Wrapped\" {\n  begin = start\n  first = wrapper@1(id: 123)\n  second = wrapper@1(id: 124)\n  direct = product@1(id: 123)\n}\n";
@@ -4940,7 +4939,7 @@ fn mcp23_criterion_3_full_is_the_runners_report_without_the_snapshot() {
 }
 
 const ECHO: &str = "components/echo.afs";
-const ECHO_TEXT: &str = "component echo \"Echo\" {\n  description \"What the API answers, and the token.\"\n  begin = start\n  @label(\"Ask\")\n  ask = GET \"/echo?q={{env.TOKEN}}\" {\n    sample 200 { token: \"sample\" }\n  }\n  @label(\"Answer\")\n  export answer: object = ask.body\n  @label(\"Token\")\n  export token: string = env.TOKEN\n}\n";
+const ECHO_TEXT: &str = "component echo \"Echo\" {\n  description \"What the API answers, and the token.\"\n  @label(\"Ask\")\n  ask = GET \"/echo?q={{env.TOKEN}}\" {\n    sample 200 { token: \"sample\" }\n  }\n  @label(\"Answer\")\n  export answer: object = ask.body\n  @label(\"Token\")\n  export token: string = env.TOKEN\n}\n";
 
 /// A loopback API that answers every request with `body` as JSON, until
 /// the flag returned is set.

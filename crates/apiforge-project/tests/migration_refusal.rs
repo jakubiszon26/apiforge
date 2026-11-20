@@ -229,12 +229,45 @@ fn a_refused_migration_names_the_project_and_the_scenario_and_activates_nothing(
     assert!(!directory.path().join(CATALOGUE_FILE).exists());
 }
 
-/// A legacy scenario as its folder source says it since LANG-13 (#386): each
-/// graph one chain in the order it runs, with a start first.
+/// A legacy scenario as its folder source says it since LANG-13 (#386,
+/// criterion 10): not equal to the original, but equal to it with its
+/// ordering edges rebuilt as a chain (`chained`) and a start written first
+/// where it had none (rule 1); every identity and position is the
+/// original's, and its steps keep the order `graph::sequence` gave.
 fn written(scenario: &apiforge_core::format::Scenario) -> Document {
-    use apiforge_core::chain::{chained, with_start};
-    let mut scenario = scenario.clone();
-    scenario.graph = with_start(&chained(&scenario.graph).expect("a chain"));
-    scenario.cleanup = chained(&scenario.cleanup).expect("a chain");
-    Document::Scenario(scenario)
+    use apiforge_core::{
+        chain::{chained, with_start},
+        graph::sequence,
+    };
+    let mut written = scenario.clone();
+    written.graph = with_start(&chained(&scenario.graph).expect("a chain"));
+    written.cleanup = chained(&scenario.cleanup).expect("a chain");
+    let steps = |graph: &apiforge_core::format::Graph| -> Vec<String> {
+        sequence(graph)
+            .into_iter()
+            .filter(|id| {
+                graph.nodes.iter().any(|node| {
+                    node.id == *id
+                        && !node.kind.is_data()
+                        && node.kind != apiforge_core::model::NodeKind::Start
+                })
+            })
+            .map(str::to_owned)
+            .collect()
+    };
+    assert_eq!(
+        steps(&written.graph),
+        steps(&scenario.graph),
+        "the order of the steps"
+    );
+    for node in &scenario.graph.nodes {
+        let kept = written.graph.nodes.iter().find(|n| n.id == node.id);
+        assert_eq!(
+            kept.map(|n| &n.position),
+            Some(&node.position),
+            "{}",
+            node.id
+        );
+    }
+    Document::Scenario(written)
 }

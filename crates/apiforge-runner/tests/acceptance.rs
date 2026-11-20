@@ -305,12 +305,9 @@ fn lay01_criterion_5_shop_30_keeps_its_shape() {
     };
     assert!(arm("payment", Branch::True));
     assert!(read_by(&scenario, node(&scenario, "receipt")).contains("payment"));
-    // `refund` is written after the `if` and runs after the whole `if`
-    // (LANG-13, #386: the reading of `shop-30` the owner confirms).
-    assert!(!arm("refund", Branch::True));
-    assert!(
-        follows(&node(&scenario, "refund").id).contains(node(&scenario, "receipt").id.as_str())
-    );
+    // `refund` stands in the `then` braces of `paid`, where 0.1.0's
+    // `@after(paid.then)` ran it (LANG-13).
+    assert!(arm("refund", Branch::True));
     assert!(arm("not_created", Branch::False));
     // The cleanup.
     let handles: Vec<_> = scenario

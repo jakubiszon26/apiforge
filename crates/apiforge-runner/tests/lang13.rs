@@ -211,3 +211,63 @@ async fn lang13_criterion_11_fixtures_run_in_the_recorded_order() {
     }
     assert!(checked >= 10, "every fixture scenario is run: {checked}");
 }
+
+// Criterion 14 ---------------------------------------------------------------
+
+/// A scenario with a `start` whose checks and values read no step: a check
+/// of a parameter, a value of nothing and a check written above the first
+/// request.
+const STANDALONE: &str = r#"scenario "Standalone checks" {
+  param limit = 3
+  early = assert param.limit == 3
+  begin = start
+  limit_ok = assert param.limit > 0
+  constant = 42
+  first = GET "/first" {
+    sample 200 { id: 1 }
+  }
+}
+"#;
+
+#[tokio::test]
+async fn lang13_criterion_14_checks_and_values_that_read_no_step_run() {
+    let (project, scenario) = scenario_in(project(), STANDALONE);
+    let run = simulate(project, &scenario).await;
+    assert_eq!(run.status, RunStatus::Passed, "{:#?}", run.steps);
+    for handle in ["early", "limit_ok", "constant", "first"] {
+        assert_eq!(status(&run, handle), StepStatus::Passed, "{handle}");
+    }
+    let constant = run.steps.iter().find(|s| s.handle == "constant").unwrap();
+    assert_eq!(constant.outputs["value"], serde_json::json!(42));
+}
+
+/// A component whose exports read its input and the environment, with and
+/// without a `start` of its own, called by a scenario.
+fn component(start: &str) -> String {
+    format!(
+        "component echo_id \"Echo id\" {{\n  input id: number = 7\n{start}  probe = GET \"/probe\" {{\n    sample 200 {{}}\n  }}\n  export given: number = param.id\n  export base: string = env.baseUrl\n}}\n"
+    )
+}
+
+#[tokio::test]
+async fn lang13_criterion_14_a_components_exports_of_its_input_and_env_have_their_value() {
+    for start in ["", "  begin = start\n"] {
+        let mut project = project();
+        let lowered = lower(&parse(&component(start)), &LowerContext::folder(&project));
+        assert!(!lowered.has_errors(), "{:#?}", lowered.diagnostics);
+        let Some(Document::Component(mut echo)) = lowered.document else {
+            panic!("a component");
+        };
+        echo.id = "echo-id".into();
+        echo.revision = 1;
+        project.components.push(echo);
+        let caller = "scenario \"Calls\" {\n  begin = start\n  call = echo_id@1(id: 9)\n}\n";
+        let (project, scenario) = scenario_in(project, caller);
+        let base = project.environment.base_url.clone();
+        let run = simulate(project, &scenario).await;
+        assert_eq!(run.status, RunStatus::Passed, "{start:?}: {:#?}", run.steps);
+        let call = run.steps.iter().find(|s| s.handle == "call").unwrap();
+        assert_eq!(call.outputs["given"], serde_json::json!(9), "{start:?}");
+        assert_eq!(call.outputs["base"], serde_json::json!(base), "{start:?}");
+    }
+}

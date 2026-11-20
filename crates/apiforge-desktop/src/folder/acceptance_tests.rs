@@ -11265,14 +11265,14 @@ mod ux30 {
 
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
     const FILE: &str = "components/check-cart-price.afs";
-    const TITLE: &str = "Save as component";
-    const NAME: &str = "Component name";
+    pub(super) const TITLE: &str = "Save as component";
+    pub(super) const NAME: &str = "Component name";
     const FILE_NAME: &str = "Component file";
     const DESCRIPTION: &str = "Component description";
     const PUBLISH: &str = "Publish revision 1 and call it here, in place of the selected steps";
-    const ONLY_CREATE: &str = "Only create the file; the steps stay in the scenario";
+    pub(super) const ONLY_CREATE: &str = "Only create the file; the steps stay in the scenario";
     const SAVE_AND_PUBLISH: &str = "Save and publish";
-    const CREATE_FILE: &str = "Create file";
+    pub(super) const CREATE_FILE: &str = "Create file";
     const CART_DESCRIPTION: &str = "Add the product to a cart and check the cart's total.";
 
     /// The component the dialog writes for the mock-up's choices.
@@ -11283,7 +11283,6 @@ mod ux30 {
   input quantity: number = 1
   input expected: number
   action product: object contract "Product"
-  begin = start
   @label("Add to cart")
   add_to_cart = add_to_cart@1(product: param.product, quantity: param.quantity)
   @label("Promotional price")
@@ -11315,7 +11314,7 @@ mod ux30 {
         (harness, id)
     }
 
-    fn select_and_open(harness: &mut FolderHarness, id: &str) {
+    pub(super) fn select_and_open(harness: &mut FolderHarness, id: &str) {
         app(harness)
             .selections
             .insert(id.to_owned(), vec!["cart".to_owned(), "price".to_owned()]);

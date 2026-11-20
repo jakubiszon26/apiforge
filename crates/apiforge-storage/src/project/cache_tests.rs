@@ -336,7 +336,7 @@ fn component_only_authoring_and_a_working_component_calling_its_older_revision_n
     assert!(first.context().scenarios.is_empty());
     assert!(first.context().components.is_empty());
     context.components.push(published.clone());
-    let working_source = "component Helper \"Helper\" { begin = start previous = Helper@1() export result: number = previous.result }";
+    let working_source = "component Helper \"Helper\" { previous = Helper@1() export result: number = previous.result }";
     let lowered = apiforge_script::lower(
         &apiforge_script::parse(working_source),
         &LowerContext::folder(&context).with_component(&published),

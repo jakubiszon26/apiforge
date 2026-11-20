@@ -81,7 +81,7 @@ fn every_document_passes(session: &mut ProjectSession) {
 
 // Criterion 8 ----------------------------------------------------------------
 
-const PAIR: &str = "component pair \"Pair\" {\n  begin = start\n  b = GET \"/b\" {\n    sample 200 { id: 1 }\n  }\n  a = GET \"/a\" {\n    sample 200 { id: 2 }\n  }\n  export id: number = a.body.id\n}\n";
+const PAIR: &str = "component pair \"Pair\" {\n  b = GET \"/b\" {\n    sample 200 { id: 1 }\n  }\n  a = GET \"/a\" {\n    sample 200 { id: 2 }\n  }\n  export id: number = a.body.id\n}\n";
 
 #[test]
 fn lang13_criterion_8_publication_keeps_the_stored_spelling() {
@@ -119,7 +119,7 @@ fn lang13_criterion_8_publication_keeps_the_stored_spelling() {
         .find(|c| c.id == published.component_id && c.revision == published.revision)
         .expect("the revision is loaded")
         .clone();
-    assert_eq!(steps(&loaded.graph), ["begin", "b", "a"]);
+    assert_eq!(steps(&loaded.graph), ["b", "a"]);
 }
 
 // Criterion 9 ----------------------------------------------------------------

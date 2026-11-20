@@ -62,17 +62,17 @@ scenario "Shop 30" {
       sample 200 { id: "r-1", total: 172.5 }
     }
     receipt_total = assert receipt.body.total ~= cart.body.total within 0.01
+    refund = POST "/orders/{{order.body.id}}/refund" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      sample 200 { refunded: true, amount: 172.5 }
+    }
+    refund_amount = assert refund.body.amount ~= expected_total within 0.01
+    logout = POST "/logout" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      sample 204 {}
+    }
   } else {
     not_created = assert false == true
-  }
-  refund = POST "/orders/{{order.body.id}}/refund" {
-    headers { Authorization: "Bearer {{login.body.token}}" }
-    sample 200 { refunded: true, amount: 172.5 }
-  }
-  refund_amount = assert refund.body.amount ~= expected_total within 0.01
-  logout = POST "/logout" {
-    headers { Authorization: "Bearer {{login.body.token}}" }
-    sample 204 {}
   }
   cleanup {
     removed = DELETE "/cart/{{cart.body.id}}" {

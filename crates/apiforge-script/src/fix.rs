@@ -20,8 +20,7 @@ use std::{collections::HashMap, collections::HashSet, ops::Range};
 /// An `@after` in a source.
 pub const AFTER_REMOVED: &str = "`@after` is not part of the language: the steps of a block run in the order they are written; delete this line";
 /// A main flow with a step and no `start`.
-pub const START_MISSING: &str =
-    "A flow with a step needs `start` as its first step; write `begin = start` above it";
+pub const START_MISSING: &str = "A scenario with a step needs `start` as its first step; the fix writes it above the first statement";
 /// A step written above `start`.
 pub const START_NOT_FIRST: &str =
     "`start` must be the first step of the flow; move the steps written above it below it";

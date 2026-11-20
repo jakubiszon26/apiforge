@@ -105,3 +105,48 @@ fn lang13_criterion_9_a_step_from_next_is_inserted_into_the_chain() {
     assert_eq!(position(&handle), position("cart") + 1, "{order:?}\n{text}");
     assert_eq!(position("cart_view"), position(&handle) + 1, "{order:?}");
 }
+
+/// Criterion 9: *Save as component* on two steps of the demo writes a
+/// component whose steps run in the order they ran in the scenario, with no
+/// `start` and no `@after`.
+#[test]
+fn lang13_criterion_9_save_as_component() {
+    use super::project_interaction_tests::replace_text;
+    use super::ux30::{CREATE_FILE, NAME, ONLY_CREATE, TITLE};
+    let directory = crate::testing::shop_project();
+    let (mut harness, id) = super::ux31::window(
+        directory.path(),
+        WIDE,
+        "scenarios/promotion-and-cart-price.afs",
+        "Diagram",
+    );
+    app(&mut harness)
+        .selections
+        .insert(id.clone(), vec!["active".to_owned(), "cart".to_owned()]);
+    settle(&mut harness);
+    choose(&mut harness, "Selection actions");
+    choose(&mut harness, TITLE);
+    replace_text(&mut harness, NAME, "Promoted cart");
+    choose(&mut harness, ONLY_CREATE);
+    choose(&mut harness, CREATE_FILE);
+    assert!(harness.query_by_label(NAME).is_none(), "the dialog closed");
+
+    let text = fs::read_to_string(directory.path().join("components/promoted-cart.afs"))
+        .expect("the component is written");
+    assert!(!text.contains("@after"), "{text}");
+    assert!(!text.contains("= start"), "{text}");
+    let session = folder(&harness).session.as_ref().unwrap();
+    let lowered = apiforge_script::lower(
+        &apiforge_script::parse(&text),
+        &apiforge_script::LowerContext::folder(session.context()),
+    );
+    assert!(!lowered.has_errors(), "{text}\n{:#?}", lowered.diagnostics);
+    let Some(apiforge_script::Document::Component(component)) = lowered.document else {
+        panic!("a component");
+    };
+    assert_eq!(
+        steps(&component.graph),
+        ["active_promotion", "add_to_cart"],
+        "{text}"
+    );
+}

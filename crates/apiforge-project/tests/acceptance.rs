@@ -1509,8 +1509,8 @@ mod lay34 {
             statement_lines(&new)[0].starts_with(&format!("    {handle} = ")),
             "inside the braces of paid, as payment is: {new:?}"
         );
-        // `refund` stays where it is written, after the whole `if` (LANG-13).
-        assert!(after.contains("  }\n  refund = "), "{after}");
+        // `refund` stays where it is written, in the braces of `paid`.
+        assert!(after.contains("\n    refund = POST"), "{after}");
         assert!(session.undo(&id, Origin(7)).unwrap());
         assert_eq!(text(&session, &id), original);
 

@@ -174,7 +174,8 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
 
 /// A model written as a source for the first time, in the written language
 /// (LANG-13): each graph as one chain in the order its steps run today, and a
-/// `start` first where a main flow with a step has none. A step that runs
+/// `start` first where a scenario's main flow with a step has none (a
+/// component needs none). A step that runs
 /// nowhere, or an ordering that is not a chain with `if`s, cannot be written
 /// without changing what runs, and is refused as unprintable.
 pub fn as_written(document: &Document) -> Result<Document> {
@@ -191,7 +192,7 @@ pub fn as_written(document: &Document) -> Result<Document> {
         }
         Document::Component(component) => {
             let mut component = component.clone();
-            component.graph = written(&component.graph, true)?;
+            component.graph = written(&component.graph, false)?;
             Document::Component(component)
         }
     })

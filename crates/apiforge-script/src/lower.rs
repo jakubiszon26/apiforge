@@ -122,7 +122,13 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         afters: vec![],
     };
     let document = tree.file.as_ref().map(|file| lower.file(file));
-    if let Some(file) = tree.file.as_ref().filter(|_| context.written) {
+    // Rule 1 holds for a scenario: a component's body runs from its first
+    // step written, and a `start` it has stays valid (LANG-13, A3).
+    if let Some(file) = tree
+        .file
+        .as_ref()
+        .filter(|file| context.written && matches!(file.kind, FileKind::Scenario { .. }))
+    {
         lower.start_rule(&tree.source, file);
     }
     if !lower.afters.is_empty() {
