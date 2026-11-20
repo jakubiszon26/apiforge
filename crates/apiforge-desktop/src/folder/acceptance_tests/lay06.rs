@@ -757,41 +757,31 @@ fn coincident(wires: &[&[egui::Pos2]]) -> usize {
     pairs
 }
 
-/// Criterion 11: on `shop-30` Tidy up crosses no more wires per wire than
-/// 2.05 (117 crossings on 57 wires when written; LANG-13 measured 2.103 and
-/// LAY-45 brings it back), collapsed and expanded, and
-/// leaves at most 97 coincident pairs on the board a new install shows,
-/// with its checks collapsed. Expanded, the coincident pairs are not
-/// asserted (112 when written; the quality example reports them): most are
-/// wires leaving one port together, which LAY-03 separates, and the board
-/// the previous Tidy up gives at the sizes the desktop draws has more of
-/// them (123) than the 97 measured on full cards. The owner accepted this
-/// and moved the expanded cap to LAY-03 (#34).
+/// Criterion 11: on `shop-30` Tidy up crosses no more data lines than
+/// before, collapsed and expanded, and leaves at most 97 coincident pairs
+/// on the board a new install shows, with its checks collapsed. Restated by
+/// LAY-45 (#468, the owner's answer A of 2026-11-20): the chain of steps
+/// runs side to side and crosses the data lines at a right angle under
+/// their bridges, which `lay45_criterion_8_*` holds; what this criterion
+/// holds is the data lines' crossings with each other, 54 folded and 77
+/// drawn before LAY-45. (Before it, crossings per wire: 2.05, 117 on 57
+/// wires when written; LANG-13 measured 2.103.) Expanded, the coincident
+/// pairs are not asserted (112 when written; the quality example reports
+/// them): most are wires leaving one port together, which LAY-03
+/// separates. The owner accepted this and moved the expanded cap to LAY-03
+/// (#34).
 #[test]
 fn lay06_criterion_11_no_more_crossings_than_today() {
-    for checks in [Checks::Collapsed, Checks::Expanded] {
+    for (checks, most) in [(Checks::Collapsed, 54), (Checks::Expanded, 77)] {
         let (_project, harness, id) = tidied("shop-30", WIDE, checks);
+        let label = format!("shop-30, {checks:?}");
+        let (data, _, _) = super::lay45::measures(&harness, &id, &label);
         let wires = board(&harness, &id).debug_wires();
-        let crossings: usize = wires.iter().map(|wire| wire.bridges).sum();
-        let per_wire = crossings as f32 / wires.len() as f32;
         let routes: Vec<&[egui::Pos2]> = wires.iter().map(|wire| wire.points.as_slice()).collect();
         let pairs = coincident(&routes);
-        // LAY-03 put lines that lay on each other 20 px apart, where a line
-        // leaving the others crosses them (118 crossings on 57 wires with
-        // the checks drawn, limit 2.1); since LAY-28 orders the lines of a
-        // corridor the board has 105 and the limit is the first one again.
-        // LANG-13 (#386) wires shop-30's steps step to step and measured
-        // 2.103 with the checks drawn (143 crossings on 68 wires), which the
-        // owner let pass on 2026-11-20 on condition that LAY-45 (#468)
-        // brings the limit back.
-        let most = 2.05;
-        assert!(
-            per_wire <= most,
-            "{checks:?}: {crossings} crossings on {} wires",
-            wires.len()
-        );
+        assert!(data <= most, "{label}: {data} data crossings, {most} before");
         if checks == Checks::Collapsed {
-            assert!(pairs <= 97, "{checks:?}: {pairs} coincident pairs");
+            assert!(pairs <= 97, "{label}: {pairs} coincident pairs");
         }
     }
 }

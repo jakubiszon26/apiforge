@@ -613,10 +613,15 @@ pub(crate) struct DrawnWire {
     pub label: Option<String>,
     /// An ordering wire, which the board draws dashed.
     pub dashed: bool,
+    /// A line of the chain of steps (LAY-45): an ordering wire that is no
+    /// branch of an `if`.
+    pub chain: bool,
     /// The route in board coordinates, empty when it was not drawn.
     pub points: Vec<Pos2>,
     /// The crossings of wires drawn before it, where it draws a bridge.
     pub bridges: usize,
+    /// Where it draws them, on the board (LAY-45).
+    pub bridged_at: Vec<Pos2>,
     /// A wire of a chip, drawn because its chip or input is pointed at or
     /// its reader or source is selected (LAY-23).
     pub revealed: bool,
@@ -1060,6 +1065,22 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_wires(&self) -> &[DrawnWire] {
         &self.wires
+    }
+
+    /// The sockets of a card's order, on the board: where the line from the
+    /// step before comes in and where the line to the next goes out
+    /// (LAY-45).
+    #[cfg(test)]
+    pub(crate) fn debug_order_sockets(&self, id: &str) -> (Option<Pos2>, Option<Pos2>) {
+        self.cards
+            .iter()
+            .find(|card| card.id == id)
+            .map_or((None, None), |card| {
+                (
+                    card.input_anchor(ORDER_PORT, &[]),
+                    card.output_anchor(ORDER_PORT),
+                )
+            })
     }
 
     /// The wires selected on the board.
@@ -2015,7 +2036,7 @@ impl Canvas {
         // The lines at rest, which the wires brought back keep clear of.
         let mut at_rest: Vec<Vec<Pos2>> = Vec::new();
         #[cfg(test)]
-        let mut bridged: HashMap<String, usize> = HashMap::new();
+        let mut bridged: HashMap<String, Vec<Pos2>> = HashMap::new();
         {
             let request = routing::Request {
                 cards: &cards,
@@ -2049,7 +2070,10 @@ impl Canvas {
                 }
                 drawn.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
-                bridged.insert(wire.id.clone(), wire.bridges.len());
+                bridged.insert(
+                    wire.id.clone(),
+                    wire.bridges.iter().map(|(at, _)| *at).collect(),
+                );
             }
         }
         // The wires of chips brought back, over the others and apart from
@@ -2079,7 +2103,10 @@ impl Canvas {
                 );
                 drawn_revealed.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
-                bridged.insert(wire.id.clone(), wire.bridges.len());
+                bridged.insert(
+                    wire.id.clone(),
+                    wire.bridges.iter().map(|(at, _)| *at).collect(),
+                );
             }
             // A rail brought back from a folded check says the check, where
             // no other line drawn passes through the words (LAY-24).
@@ -2187,13 +2214,15 @@ impl Canvas {
                     target: cards[wire.target].id.clone(),
                     label: wire_labels.get(&wire.id).cloned(),
                     dashed: wire.control,
+                    chain: wire.control && wire.branch.is_none(),
                     points: drawn
                         .iter()
                         .chain(&drawn_revealed)
                         .find(|(id, _)| *id == wire.id)
                         .map(|(_, points)| points.clone())
                         .unwrap_or_default(),
-                    bridges: bridged.get(&wire.id).copied().unwrap_or_default(),
+                    bridges: bridged.get(&wire.id).map_or(0, Vec::len),
+                    bridged_at: bridged.get(&wire.id).cloned().unwrap_or_default(),
                     revealed: revealed.contains(&wire.id),
                     label_box: label_boxes.get(&wire.id).copied(),
                     lit: lit.contains(&wire.id),

@@ -6,7 +6,7 @@
 use super::*;
 use crate::canvas::WireMode;
 use apiforge_core::format::Graph;
-use apiforge_layout::{GAP, Point, Rect as Block, Route, crossing, groups, packed_outside_groups};
+use apiforge_layout::{Point, Rect as Block, Route, crossing};
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 const DIAGRAM: &str = ".apiforge/diagram.json";
@@ -94,41 +94,38 @@ fn crossings(routes: &[Route]) -> usize {
     count
 }
 
-/// Criterion 5: the window draws the ordered boards. `shop-30` with every
-/// wire has at most 76 crossings with its checks folded and 116 with them
-/// drawn (82 and 123 without the order; 75 and 105 before LAY-31, whose
-/// groups keep their own lines inside them; LANG-13 measured 93 and 143,
-/// and LAY-45 brings them back); with chips and the checks
-/// drawn, `shop-30` has at most 10 (17) and `fan-out` 5 (7). The bridges
-/// the board draws are those crossings, and no line is nearer than 20 px to
-/// another or to a card, but inside a group (LAY-31).
+/// Criterion 5: the window draws the ordered boards. Since LAY-45 (#468,
+/// the owner's answer A of 2026-11-20) the chain of steps runs side to side
+/// and what a board holds is three measures in place of one total: its
+/// data lines cross each other no more than before LAY-45 — `shop-30` with
+/// every wire 54 with its checks folded and 77 with them drawn, with chips
+/// and the checks drawn `shop-30` and `fan-out` none — the chain crosses a
+/// data line at a right angle under the data line's bridge, and no line is
+/// nearer than 20 px to another or to a card, but inside a group (LAY-31).
+/// (Before LAY-45 one total: 76 and 116, LANG-13 measured 93 and 143; 10
+/// and 5 with chips.) The bridges the board draws are its crossings.
 #[test]
 fn lay28_criterion_5_the_window_draws_the_ordered_boards() {
     for (name, wires, expanded, most) in [
-        // LAY-28's limits, which LANG-13 passed with the owner's leave
-        // (#386, 2026-11-20) on condition that LAY-45 (#468) brings them back.
-        ("shop-30", WireMode::All, false, 76),
-        ("shop-30", WireMode::All, true, 116),
-        ("shop-30", WireMode::Chips, true, 10),
-        ("fan-out", WireMode::Chips, true, 5),
+        ("shop-30", WireMode::All, false, 54),
+        ("shop-30", WireMode::All, true, 77),
+        ("shop-30", WireMode::Chips, true, 0),
+        ("fan-out", WireMode::Chips, true, 0),
     ] {
         let (_project, harness, id) = tidied(name, WIDE, expanded, wires);
-        let (routes, cards) = drawn(&harness, &id);
+        let (routes, _) = drawn(&harness, &id);
         let label = format!("{name}, {wires:?}, checks drawn: {expanded}");
         assert!(!routes.is_empty(), "{label}: the board draws lines");
+        let (data, _, kept) = super::lay45::measures(&harness, &id, &label);
+        assert!(data <= most, "{label}: {data} data crossings, {most} before");
         let found = crossings(&routes);
-        assert!(found <= most, "{label}: {found} crossings");
         let bridges: usize = board(&harness, &id)
             .debug_wires()
             .iter()
             .map(|wire| wire.bridges)
             .sum();
         assert_eq!(bridges, found, "{label}: a bridge at every crossing");
-        assert_eq!(
-            packed_outside_groups(&routes, &cards, &groups(&cards), GAP),
-            [],
-            "{label}: the gap holds"
-        );
+        assert!(kept, "{label}: the gap holds");
     }
 }
 
