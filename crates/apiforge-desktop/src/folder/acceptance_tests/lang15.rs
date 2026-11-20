@@ -66,7 +66,6 @@ fn lang15_criterion_3_the_window_refuses_a_newer_project() {
 /// refuses a run with the sentence that names both versions and the fix;
 /// nothing runs.
 #[test]
-#[ignore = "LANG-20: the build reads language 2 from that ticket on"]
 fn lang15_criterion_4_the_window_opens_an_older_project_and_does_not_run_it() {
     let project = shop_project();
     let root = project.path();

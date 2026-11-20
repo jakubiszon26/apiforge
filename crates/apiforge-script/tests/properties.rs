@@ -107,6 +107,39 @@ fn ten_thousand_generated_expressions_keep_their_structure_after_formatting() {
     }
 }
 
+/// LANG-06, criterion 3: the same expressions with free comments inside
+/// them and around their statement keep their structure and every comment,
+/// and format once.
+#[test]
+fn ten_thousand_generated_expressions_with_free_comments_format_once() {
+    let mut state = 0x1a06_5eed_u64;
+    for _ in 0..10_000 {
+        let expr = generate(&mut state, 3);
+        let (tokens, _) = apiforge_script::lexer::lex(&expr);
+        let mut commented = String::new();
+        let mut from = 0;
+        for (index, token) in tokens.iter().enumerate() {
+            if matches!(&expr[token.range.clone()], "[" | "{" | ",")
+                && random(&mut state).is_multiple_of(2)
+            {
+                commented.push_str(&expr[from..token.range.end]);
+                commented.push_str(&format!(" // c{index}\n"));
+                from = token.range.end;
+            }
+        }
+        commented.push_str(&expr[from..]);
+        let source = format!(
+            "// Above.\nscenario \"Generated\" {{\n  // Free.\n\n  value = {commented} // Beside.\n  // At the end.\n}}\n// Below.\n"
+        );
+        let expected = value(&source);
+        let formatted = format(&source).unwrap();
+        assert_eq!(value(&formatted), expected, "{source}\n{formatted}");
+        let count = |text: &str| text.matches("//").count();
+        assert_eq!(count(&formatted), count(&source), "{source}\n{formatted}");
+        assert_eq!(format(&formatted).unwrap(), formatted, "{source}");
+    }
+}
+
 #[test]
 fn checked_in_examples_are_already_formatted() {
     for source in [

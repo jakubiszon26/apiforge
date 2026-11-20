@@ -255,7 +255,7 @@ fn ux25_a_publication_makes_stale_only_the_runs_that_call_the_component() {
         .create_document(
             DocumentKind::Scenario,
             "uses.afs",
-            "scenario \"Uses\" {\n  outer = (Outer@1())\n}\n",
+            "scenario \"Uses\" {\n  begin = start\n  outer = (Outer@1())\n}\n",
         )
         .unwrap();
     let plain = session
@@ -336,14 +336,14 @@ fn ux25_only_the_pinned_revision_of_a_call_counts() {
         .create_document(
             DocumentKind::Scenario,
             "pinned.afs",
-            "scenario \"Pinned\" {\n  outer = (Outer@1())\n}\n",
+            "scenario \"Pinned\" {\n  begin = start\n  outer = (Outer@1())\n}\n",
         )
         .unwrap();
     let latest = session
         .create_document(
             DocumentKind::Scenario,
             "latest.afs",
-            "scenario \"Latest\" {\n  outer = (Outer@2())\n}\n",
+            "scenario \"Latest\" {\n  begin = start\n  outer = (Outer@2())\n}\n",
         )
         .unwrap();
     let first = session.prepare_run(&pinned).unwrap();

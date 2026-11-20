@@ -1,7 +1,9 @@
-//! The comment-loss decision (ADR 0012). Canonical printing keeps a comment
-//! that belongs to a statement as that statement's note, and drops a comment
-//! that belongs to none. A graphical edit and a publication both reprint, so
-//! the first reprint that would lose such comments asks first and leaves the
+//! The comment-loss decision (ADR 0012). Printing a whole file from its
+//! document keeps a comment that belongs to a statement as that statement's
+//! note, and has no place for a free comment, one that belongs to none
+//! (Format keeps those, LANG-06). A graphical edit that cannot be written
+//! into the text and a publication both print the whole file, so the first
+//! such print that would lose free comments asks first and leaves the
 //! original text alone until the caller has decided.
 
 use super::{ProjectSession, Result};
@@ -44,18 +46,16 @@ impl ProjectSession {
         })
     }
 
-    /// Diagnostics describe the text that was analysed, so a document whose
+    /// The free comments of the analysed text (LANG-06). A document whose
     /// analysis has not settled reports nothing rather than a stale set.
     fn unattached(&self, index: usize) -> Vec<String> {
         let document = &self.documents[index];
         if document.analysis != AnalysisState::Valid {
             return Vec::new();
         }
-        document
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.message == apiforge_script::UNATTACHED_COMMENT)
-            .filter_map(|diagnostic| document.text().get(diagnostic.range.clone()))
+        apiforge_script::free_comments(document.text())
+            .into_iter()
+            .filter_map(|range| document.text().get(range))
             .map(str::to_owned)
             .collect()
     }

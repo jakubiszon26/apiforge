@@ -565,3 +565,168 @@ fn an_observers_check_during_a_living_holders_commit_is_busy() {
     }
     assert!(observer.scan_tree().is_ok(), "the next check scans again");
 }
+
+/// LANG-20e: a project after `initialise` with a second source,
+/// `scenarios/other.afs`, which `save_plan` does not write; generation 2.
+fn with_a_source_only_read(writer: &ProjectStore) -> ReadSet {
+    initialise(writer);
+    writer
+        .commit(vec![write(
+            "scenarios/other.afs",
+            FileState::Missing,
+            b"scenario \"Other\" {}\n",
+        )])
+        .unwrap();
+    [
+        (
+            path("scenarios/other.afs"),
+            FileState::of(b"scenario \"Other\" {}\n"),
+        ),
+        (path(MANIFEST_PATH), writer.state(MANIFEST_PATH).unwrap()),
+    ]
+    .into_iter()
+    .collect()
+}
+
+/// LANG-20e: refused naming `named`, nothing written, no journal.
+fn assert_refused_before_activation(
+    result: Result<u64>,
+    writer: &ProjectStore,
+    root: &Path,
+    named: &str,
+) {
+    match result {
+        Err(ProjectError::Conflict { path }) => assert!(path.ends_with(named), "{path:?}"),
+        other => panic!("expected a conflict naming {named}, got {other:?}"),
+    }
+    assert!(writer.head().unwrap().active_transaction_id.is_none());
+    assert_eq!(writer.head().unwrap().generation, 2);
+    assert_eq!(
+        fs::read(root.join("scenarios/main.afs")).unwrap(),
+        b"scenario \"Main\" {}\n"
+    );
+    assert!(!root.join(".apiforge/diagram.json").exists());
+    assert_eq!(fs::read_dir(root.join(TRANSACTIONS)).unwrap().count(), 0);
+    assert_eq!(writer.recover().unwrap(), None);
+}
+
+#[test]
+fn lang20e_criterion_2_a_read_path_changed_during_staging_refuses() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    let read = with_a_source_only_read(&writer);
+    let mut staged = false;
+    let result = writer.commit_reading_with_hook(save_plan(), &read, |boundary| {
+        // Between staging and activation: the first check has passed.
+        if boundary == "descriptor" {
+            staged = true;
+            fs::write(
+                directory.path().join("scenarios/other.afs"),
+                b"scenario \"Foreign\" {}\n",
+            )
+            .unwrap();
+        }
+        Ok(())
+    });
+    assert!(staged, "the commit never reached its staging");
+    assert_refused_before_activation(result, &writer, directory.path(), "scenarios/other.afs");
+}
+
+#[test]
+fn lang20e_criterion_2_the_manifest_read_and_not_written_changed_during_staging_refuses() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    let read = with_a_source_only_read(&writer);
+    let mut renamed = crate::project::tests::manifest();
+    renamed.name = "Renamed".into();
+    let result = writer.commit_reading_with_hook(save_plan(), &read, |boundary| {
+        if boundary == "descriptor" {
+            fs::write(
+                directory.path().join(MANIFEST_PATH),
+                renamed.to_public_bytes().unwrap(),
+            )
+            .unwrap();
+        }
+        Ok(())
+    });
+    assert_refused_before_activation(result, &writer, directory.path(), MANIFEST_PATH);
+}
+
+#[test]
+fn lang20e_criterion_3() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    let mut read = with_a_source_only_read(&writer);
+    // Read as something other than the change expects: malformed.
+    read.insert(path("scenarios/main.afs"), FileState::Missing);
+    let mut checked = false;
+    let result = writer.commit_reading_with_hook(save_plan(), &read, |_| {
+        checked = true;
+        Ok(())
+    });
+    assert!(
+        matches!(result, Err(ProjectError::InvalidTransaction)),
+        "{result:?}"
+    );
+    assert!(!checked, "a malformed commit reached its preflight");
+    assert_eq!(writer.head().unwrap().generation, 2);
+    assert_eq!(
+        fs::read(directory.path().join("scenarios/main.afs")).unwrap(),
+        b"scenario \"Main\" {}\n"
+    );
+    // Read as the change expects: compared once, by that expectation.
+    read.insert(
+        path("scenarios/main.afs"),
+        FileState::of(b"scenario \"Main\" {}\n"),
+    );
+    assert_eq!(writer.commit_with_read_set(save_plan(), &read).unwrap(), 3);
+    assert_eq!(
+        fs::read(directory.path().join("scenarios/main.afs")).unwrap(),
+        b"scenario \"Saved\" {}\n"
+    );
+}
+
+#[test]
+fn lang20e_criterion_5() {
+    let directory = tempfile::tempdir().unwrap();
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    let read = with_a_source_only_read(&writer);
+    writer
+        .commit_reading_with_hook(save_plan(), &read, |boundary| {
+            if boundary == "activation" {
+                Err(interrupted())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+    // The journal holds the changes only.
+    let id = writer.head().unwrap().active_transaction_id.unwrap();
+    let descriptor = fs::read_to_string(
+        directory
+            .path()
+            .join(TRANSACTIONS)
+            .join(&id)
+            .join("transaction.json"),
+    )
+    .unwrap();
+    assert!(!descriptor.contains("other.afs"), "{descriptor}");
+    assert!(!descriptor.contains(MANIFEST_PATH), "{descriptor}");
+    // A path only read changes before recovery: the commit still finishes.
+    fs::write(
+        directory.path().join("scenarios/other.afs"),
+        b"scenario \"Foreign\" {}\n",
+    )
+    .unwrap();
+    drop(writer);
+    let writer = ProjectStore::open_exclusive(directory.path()).unwrap();
+    assert_eq!(writer.recover().unwrap(), Some(3));
+    assert_eq!(
+        fs::read(directory.path().join("scenarios/main.afs")).unwrap(),
+        b"scenario \"Saved\" {}\n"
+    );
+    assert_eq!(
+        fs::read(directory.path().join("scenarios/other.afs")).unwrap(),
+        b"scenario \"Foreign\" {}\n"
+    );
+}

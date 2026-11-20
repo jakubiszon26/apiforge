@@ -1,13 +1,11 @@
 scenario "Shop 50" {
   description "LAY-00 reference: the shop flow extended to about fifty steps, with a second product search, a coupon branch and order history."
   begin = start
-  @after(begin)
   login = POST "/login" {
     body { user: "demo", password: "demo" }
     sample 200 { token: "t-1", userId: "u-1" }
   }
   logged_in = assert login.status == 200
-  @after(logged_in)
   health = GET "/health" {
     sample 200 { status: "ok" }
   }
@@ -77,7 +75,6 @@ scenario "Shop 50" {
     body { street: "Main 1", city: "Gdansk", shipping: cheapest.id }
     sample 200 { ok: true }
   }
-  @after(address)
   checkout = POST "/checkout" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     body { cartId: valid_cart.value.id, total: applied.body.total }
@@ -117,7 +114,6 @@ scenario "Shop 50" {
       sample 200 { cancelled: true }
     }
   }
-  @after(receipt_total)
   invoice = GET "/orders/{{order.body.id}}/invoice" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     sample 200 { total: 170, currency: "EUR" }
@@ -128,24 +124,20 @@ scenario "Shop 50" {
     sample 200 { items: [{ id: "o-1" }] }
   }
   in_history = assert history.body.items contains { id: "o-1" }
-  @after(invoice_total)
   refund = POST "/orders/{{order.body.id}}/refund" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     sample 200 { refunded: true, amount: 170 }
   }
   refund_amount = assert refund.body.amount == receipt.body.total
-  @after(refund)
   refunded_order = GET "/orders/{{order.body.id}}" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     sample 200 { id: "o-1", status: "refunded" }
   }
   refunded = assert refunded_order.body.status == "refunded"
-  @after(refund_amount, refunded)
   logout = POST "/logout" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     sample 204 {}
   }
-  @after(logout)
   logged_out = GET "/me" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     sample 401 {}

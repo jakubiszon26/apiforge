@@ -17,14 +17,14 @@
 //! document, is printed whole, as before.
 use crate::{
     ast::*,
-    branches::Branches,
-    format::{head, opening, statements},
+    format::{attribute_rank, head, opening, statements},
     lexer::{Token, TokenKind},
     lower::Document,
     parse,
     print::{self, Printer, graphs, print_folder_document, printable, verify},
 };
 use apiforge_core::{
+    branches::Branches,
     format::{Graph, Node, Project},
     model::Branch,
 };
@@ -61,7 +61,7 @@ pub fn edit_in_place(
     }
     let tree = parse(source);
     edited(project, &tree, previous, document)
-        .filter(|text| verify(project, document, true, text).is_ok())
+        .filter(|text| verify(project, document, true, true, text).is_ok())
 }
 
 /// Where a statement is written: the main flow or the cleanup, or a branch
@@ -106,7 +106,7 @@ impl<'d> Side<'d> {
             nodes.insert(node.id.as_str(), (node, true));
         }
         Self {
-            printer: Printer::new(project, document),
+            printer: Printer::new(project, document, true),
             main: (main, Branches::new(main)),
             cleanup: cleanup.map(|graph| (graph, Branches::new(graph))),
             nodes,
@@ -133,10 +133,12 @@ impl<'d> Side<'d> {
         Some(statement)
     }
 
-    /// What `node` owns in `key`'s braces: its text without its note and
-    /// without the statements inside its own braces, an `if` up to its `{`.
-    fn own(&self, node: &Node, cleanup: bool, key: Key<'_>) -> Option<String> {
+    /// What `node` owns in `key`'s braces, spelled as `author` writes it:
+    /// its text without its note and without the statements inside its own
+    /// braces, an `if` up to its `{`.
+    fn own(&self, node: &Node, cleanup: bool, key: Key<'_>, author: &Statement) -> Option<String> {
         let mut statement = self.written(node, cleanup, key)?;
+        spelled(&mut statement, author);
         statement.note = None;
         let branch = if let Form::If {
             then, otherwise, ..
@@ -467,8 +469,8 @@ impl<'s, 'd> Edit<'s, 'd> {
         for (id, statement, key) in kept {
             let (old, cleanup) = self.old.nodes[id];
             let (new, _) = self.new.nodes[id];
-            let was = self.old.own(old, cleanup, key)?;
-            let is = self.new.own(new, cleanup, key)?;
+            let was = self.old.own(old, cleanup, key, statement)?;
+            let is = self.new.own(new, cleanup, key, statement)?;
             let indent = self.indent_at(statement.range.start);
             if was != is {
                 let end = match &statement.form {
@@ -480,7 +482,10 @@ impl<'s, 'd> Edit<'s, 'd> {
                     is.replace('\n', &format!("\n{indent}")),
                 );
             }
-            if old.note != new.note {
+            // A note its author wrote as `@note` is rewritten with the
+            // statement, in that attribute.
+            let attribute = statement.attributes.iter().any(|a| a.name == "note");
+            if old.note != new.note && !attribute {
                 let comments = self.new.written(new, cleanup, key)?.note;
                 let note = comments.as_ref().map_or_else(String::new, |note| {
                     note.split('\n')
@@ -668,6 +673,41 @@ impl<'s, 'd> Edit<'s, 'd> {
     }
 }
 
+/// `statement` as `author` spells it (KTLO-37): a note the author wrote as
+/// `@note` stays that attribute, and the attributes keep the author's order;
+/// one the author did not write goes before the first whose canonical place
+/// is after its own.
+fn spelled(statement: &mut Statement, author: &Statement) {
+    let written: Vec<&str> = author.attributes.iter().map(|a| a.name.as_str()).collect();
+    if written.contains(&"note")
+        && !statement.attributes.iter().any(|a| a.name == "note")
+        && let Some(note) = statement.note.take()
+    {
+        statement.attributes.push(Attribute {
+            name: "note".into(),
+            arguments: vec![Expr {
+                kind: ExprKind::Literal(note.into()),
+                range: 0..0,
+            }],
+            range: 0..0,
+        });
+    }
+    let (mut ordered, rest): (Vec<Attribute>, Vec<Attribute>) =
+        std::mem::take(&mut statement.attributes)
+            .into_iter()
+            .partition(|a| written.contains(&a.name.as_str()));
+    ordered.sort_by_key(|a| written.iter().position(|name| *name == a.name));
+    for attribute in rest {
+        let rank = attribute_rank(&attribute.name, false);
+        let at = ordered
+            .iter()
+            .position(|a| attribute_rank(&a.name, false) > rank)
+            .unwrap_or(ordered.len());
+        ordered.insert(at, attribute);
+    }
+    statement.attributes = ordered;
+}
+
 /// `text`, lines printed at depth 0, indented by `indent`.
 fn indented(text: &str, indent: &str) -> String {
     text.lines()
@@ -694,21 +734,18 @@ mod tests {
     };
     use std::collections::HashSet;
 
-    /// Not in the window's form: a request block on one line, a check
-    /// without spaces and with a comment after it, and `done` written outside
-    /// the braces whose branch alone orders it.
+    /// Not in the window's form: a request block on one line and a check
+    /// without spaces and with a comment after it.
     const SOURCE: &str = r#"scenario "Edit" {
   description "Edited on the board."
   param count = 1
   begin = start
   // Reads the list.
-  @after(begin)
   list = GET "/items" { sample 200 { items: [] } }
   seen = assert list.status==200 // a quick check
   found = if list.status == 200 {
     item = GET "/items/1"
   }
-  @after(found.then)
   done = POST "/done"
 }
 "#;
@@ -728,8 +765,15 @@ mod tests {
             panic!("a scenario")
         };
         change(scenario);
+        // As a board edit through the session: the chain is kept (LANG-13).
+        let Document::Scenario(before) = &previous else {
+            panic!("a scenario")
+        };
+        scenario.graph = apiforge_core::chain::edited(&before.graph, &scenario.graph);
+        scenario.cleanup = apiforge_core::chain::edited(&before.cleanup, &scenario.cleanup);
         let text = edited(&project, &tree, &previous, &next).expect("written into the text");
-        verify(&project, &next, true, &text).unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+        verify(&project, &next, true, true, &text)
+            .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
         text
     }
 
@@ -746,7 +790,7 @@ mod tests {
             .document
             .unwrap();
         let back = edited(&project, &tree, &previous, &original).expect("written into the text");
-        verify(&project, &original, true, &back)
+        verify(&project, &original, true, true, &back)
             .unwrap_or_else(|errors| panic!("{back}\n{errors:?}"));
         (changed, back)
     }
@@ -792,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_statement_stays_outside_the_braces_it_was_written_outside() {
+    fn a_changed_statement_after_an_if_stays_where_it_is_written() {
         let text = edit(|scenario| {
             node(scenario, "done").inputs.insert(
                 "url".into(),
@@ -821,12 +865,10 @@ mod tests {
         });
         assert_eq!(
             text,
-            SOURCE
-                .replace(
-                    "  found = if list.status == 200 {\n    item = GET \"/items/1\"\n  }\n",
-                    "  item = GET \"/items/1\"\n"
-                )
-                .replace("  @after(found.then)\n", "")
+            SOURCE.replace(
+                "  found = if list.status == 200 {\n    item = GET \"/items/1\"\n  }\n",
+                "  item = GET \"/items/1\"\n"
+            )
         );
     }
 
@@ -944,5 +986,35 @@ mod tests {
         });
         assert!(opened.contains("cleanup {"));
         assert_eq!(back, SOURCE);
+    }
+
+    /// LANG-06, criterion 6 (KTLO-37): a board edit that rewrites a
+    /// statement whose author wrote `@note` above `@label` keeps that order
+    /// and that spelling on it, and changes no other line.
+    #[test]
+    fn ktlo37_an_edit_keeps_the_authors_order() {
+        for note in ["Reads the list.", " padded"] {
+            let source = format!(
+                "scenario \"Edit\" {{\n  begin = start\n  @note({note:?})\n  @label(\"List\")\n  list = GET \"/items\"\n  done = POST \"/done\"\n}}\n"
+            );
+            let project = apiforge_core::demos::shop_project();
+            let tree = parse(&source);
+            let lowered = lower(&tree, &LowerContext::folder(&project));
+            assert!(!lowered.has_errors(), "{:?}", lowered.diagnostics);
+            let previous = lowered.document.unwrap();
+            let mut next = previous.clone();
+            let Document::Scenario(scenario) = &mut next else {
+                panic!("a scenario")
+            };
+            node(scenario, "list").label = Some("Items".into());
+            let text = edited(&project, &tree, &previous, &next).expect("written into the text");
+            verify(&project, &next, true, true, &text)
+                .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+            assert_eq!(
+                text,
+                source.replace("@label(\"List\")", "@label(\"Items\")"),
+                "{note:?}"
+            );
+        }
     }
 }

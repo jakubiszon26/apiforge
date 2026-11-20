@@ -223,3 +223,182 @@ mod lang15 {
         );
     }
 }
+
+mod lang20e {
+    //! LANG-20e (#500): a commit takes, beside its changes, the state of what
+    //! its caller read, and writes nothing when a path it only read has
+    //! changed. The checks during staging, a path both read and written, and
+    //! recovery are in `src/project/transaction_tests.rs`.
+    use apiforge_storage::project::{
+        FileState, MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath,
+        ProjectStore, ReadSet,
+    };
+    use std::{fs, path::Path};
+
+    const WRITTEN: &str = "scenarios/main.afs";
+    const READ: &str = "scenarios/other.afs";
+    const BEFORE: &[u8] = b"scenario \"Main\" {}\n";
+    const AFTER: &[u8] = b"scenario \"Saved\" {}\n";
+
+    fn path(value: &str) -> ProjectPath {
+        ProjectPath::new(value).unwrap()
+    }
+
+    fn manifest(name: &str) -> Vec<u8> {
+        ProjectManifest::new(
+            1,
+            "project-id".into(),
+            name.into(),
+            apiforge_core::format::Environment {
+                base_url: String::new(),
+                variables: Default::default(),
+                secret_names: Vec::new(),
+            },
+            Vec::new(),
+        )
+        .to_public_bytes()
+        .unwrap()
+    }
+
+    /// A project at generation 1: a manifest and two sources.
+    fn project() -> (tempfile::TempDir, ProjectStore) {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ProjectStore::open_exclusive(directory.path()).unwrap();
+        store
+            .commit(vec![
+                ProjectChange::CreateDirectory {
+                    path: path("scenarios"),
+                },
+                ProjectChange::Write {
+                    path: path(WRITTEN),
+                    expected: FileState::Missing,
+                    bytes: BEFORE.to_vec(),
+                },
+                ProjectChange::Write {
+                    path: path(READ),
+                    expected: FileState::Missing,
+                    bytes: b"scenario \"Other\" {}\n".to_vec(),
+                },
+                ProjectChange::Write {
+                    path: path(MANIFEST_PATH),
+                    expected: FileState::Missing,
+                    bytes: manifest("Read set"),
+                },
+            ])
+            .unwrap();
+        (directory, store)
+    }
+
+    fn state(root: &Path, relative: &str) -> FileState {
+        fs::read(root.join(relative)).map_or(FileState::Missing, |bytes| FileState::of(&bytes))
+    }
+
+    /// What a caller that read `paths` saw.
+    fn read_set(root: &Path, paths: &[&str]) -> ReadSet {
+        paths
+            .iter()
+            .map(|relative| (path(relative), state(root, relative)))
+            .collect()
+    }
+
+    /// The one change of these tests: `WRITTEN` saved.
+    fn save() -> Vec<ProjectChange> {
+        vec![ProjectChange::Write {
+            path: path(WRITTEN),
+            expected: FileState::of(BEFORE),
+            bytes: AFTER.to_vec(),
+        }]
+    }
+
+    /// Refused with the path named, nothing written, nothing to recover.
+    fn assert_refused(
+        result: Result<u64, ProjectError>,
+        root: &Path,
+        store: &ProjectStore,
+        named: &str,
+    ) {
+        match result {
+            Err(ProjectError::Conflict { path }) => {
+                assert!(path.ends_with(named), "{path:?} names {named}");
+                assert!(
+                    ProjectError::Conflict { path: path.clone() }
+                        .to_string()
+                        .contains(&path.display().to_string()),
+                    "the message names the path"
+                );
+            }
+            other => panic!("expected a conflict naming {named}, got {other:?}"),
+        }
+        assert_eq!(fs::read(root.join(WRITTEN)).unwrap(), BEFORE, "written");
+        assert_eq!(store.recover().unwrap(), None, "a journal was left");
+        assert_eq!(store.load().unwrap().1.generation, 1);
+        assert_eq!(
+            fs::read_dir(root.join(".apiforge/local/transactions"))
+                .unwrap()
+                .count(),
+            0,
+            "staging was kept"
+        );
+    }
+
+    /// Criterion 1: a read set holds paths the commit does not write, the
+    /// manifest among them; unchanged, the commit goes through.
+    #[test]
+    fn lang20e_criterion_1_a_read_set_holds_paths_the_commit_does_not_write() {
+        let (directory, store) = project();
+        let root = directory.path();
+        let read = read_set(root, &[READ, MANIFEST_PATH, "scenarios/absent.afs"]);
+        assert_eq!(read[&path("scenarios/absent.afs")], FileState::Missing);
+        assert_eq!(store.commit_with_read_set(save(), &read).unwrap(), 2);
+        assert_eq!(fs::read(root.join(WRITTEN)).unwrap(), AFTER);
+        assert_eq!(state(root, READ), read[&path(READ)], "only read");
+    }
+
+    /// Criterion 2: a path only read, changed before the commit takes the
+    /// lock.
+    #[test]
+    fn lang20e_criterion_2_a_read_path_changed_before_the_lock_refuses() {
+        let (directory, store) = project();
+        let root = directory.path();
+        let read = read_set(root, &[READ]);
+        fs::write(root.join(READ), b"scenario \"Foreign\" {}\n").unwrap();
+        assert_refused(
+            store.commit_with_read_set(save(), &read),
+            root,
+            &store,
+            READ,
+        );
+    }
+
+    /// Criterion 2: the manifest, read and not written, changed.
+    #[test]
+    fn lang20e_criterion_2_the_manifest_read_and_not_written_changed_refuses() {
+        let (directory, store) = project();
+        let root = directory.path();
+        let read = read_set(root, &[MANIFEST_PATH, READ]);
+        fs::write(root.join(MANIFEST_PATH), manifest("Renamed")).unwrap();
+        assert_refused(
+            store.commit_with_read_set(save(), &read),
+            root,
+            &store,
+            MANIFEST_PATH,
+        );
+    }
+
+    /// Criterion 2: a path the caller saw missing, which appeared.
+    #[test]
+    fn lang20e_criterion_2_a_path_expected_missing_that_appeared_refuses() {
+        let (directory, store) = project();
+        let root = directory.path();
+        let appeared = "scenarios/new.afs";
+        let read = read_set(root, &[appeared]);
+        assert_eq!(read[&path(appeared)], FileState::Missing);
+        fs::write(root.join(appeared), b"scenario \"New\" {}\n").unwrap();
+        assert_refused(
+            store.commit_with_read_set(save(), &read),
+            root,
+            &store,
+            appeared,
+        );
+    }
+}
