@@ -2,14 +2,12 @@
 
 - Size: M · Owner review: 20 min · Risk: `visible UI`, `removal` (the
   arrow at the badge and the mark at a row's end go)
-- State: **Approved, ready for implementation after LANG-13 (#386) has
-  merged.** Amended on 2026-11-20 after an independent review: saved
-  positions do not move; a feasibility gate comes first. Owner decisions: 2026-11-19, question 12 = A (the chain is
-  drawn side to side; to the next row one line through the row gap);
-  2026-11-20, DIAG-06 quiz on #391, question 1 = A (its own ticket, in the
-  LANG sprint, before DIAG-06) and question 2 = A (order sockets on the
-  card's sides at the title line, in both *Wires* modes; the arrow at the
-  badge and the mark at a row's end go).
+- State: **Approved, ready for implementation; LANG-13 has merged.**
+  Restated on 2026-11-20 after the feasibility gate (commits `e10b99b`
+  and `03d8230` on this branch, the table on #468) and the owner's answer
+  to it the same day, **A**: the chain stays side to side, and what is
+  measured is what the owner's rule is about — three measures in place of
+  one count (criterion 8). The work goes on from `03d8230`.
 - Issue [#468](https://github.com/jakubiszon26/apiforge/issues/468) ·
   LANG sprint, first half, before DIAG-06 (#391) · branch
   `feat/lay-45-chain-side-to-side`
@@ -94,30 +92,49 @@ unless said, on `labels`, `shop-30` and `rooms/booking-day`, after Tidy up.
 7. A card moved by hand keeps its sockets: the line is routed from the
    right socket to the left one around the cards, at 20 px.
    Test: `lay45_criterion_7_*`.
-8. Crossings: on every reference board, in both modes and both check
-   states, no more than before this ticket; and `shop-30` with every wire
-   has at most 76 crossings with its checks folded and 116 with them
-   drawn — LAY-28's limits, which LANG-13 passed with the owner's leave
-   (question 1 on #386, answer A, 2026-11-20) on condition that this
-   ticket brings them back. If the side-to-side lines alone do not reach
-   them, the ticket stops and reports the figures on #468; it does not
-   change the limit. Test: the `lay28` and `lay06` criterion 11 suites
-   with those two limits restored; the table is in the pull request.
+8. Crossings, as three measures (the owner's answer of 2026-11-20). On
+   every reference board, in both modes and both check states, after
+   Tidy up:
+   - **Data lines against data lines**: no more crossings than before
+     this ticket (`main` after LANG-13; on `shop-30` with every wire 54
+     folded and 77 drawn, measured at the gate as 52 and 77).
+   - **The chain against a data line**: only at a right angle; drawn with
+     a bridge, and the bridge is on the **data line**, so the chain reads
+     as one unbroken line; no segment of the chain runs within 20 px
+     alongside a data line. Their number is measured and recorded, not
+     limited.
+   - **`packed` is 0.**
+   The figures of the gate's table on #468 are the baseline of these
+   boards (`shop-30` with every wire 89 and 152 in all; *Chips* drawn 4;
+   `shop-50` *Chips* 11 and 20; `fan-out` drawn 82; `labels` drawn 12):
+   the tests of LAY-28 and LAY-06 criterion 11 that hold one total for a
+   board are restated to these three measures and listed in the pull
+   request with before and after. The condition "back to 76 and 116",
+   set when LANG-13 merged, is withdrawn: 52 and 77 of them are data
+   against data, which no drawing of the chain changes.
+   Tests: `lay45_criterion_8_*` (the gate's, restated), the `quality`
+   example printing the two kinds of crossing apart, `lay28` and `lay06`
+   criterion 11.
 9. The cleanup and a component's body draw their chains the same way.
    Test: `lay45_criterion_9_*`.
 10. At 960 × 540 and 1600 × 1000 a board fits as before: the fit zoom of
     every reference board is not smaller than before by more than 0.02.
     Test: `lay45_criterion_10_*`.
 
-## Feasibility first
+## What the gate found (2026-11-20)
 
-The first commit after the acceptance tests is the measurement, not the
-drawing: the reference boards routed side to side, with the `quality`
-table for crossings (criterion 8), `packed` (criterion 3) and the fit
-zoom (criterion 10). If the three cannot hold together — `shop-30` with
-every wire at 76 and 116, 20 px in the row gap, the fit within 0.02 — the
-ticket stops there and reports the table on #468; the planning model then
-splits it or returns to the owner. The size M stands on that gate.
+The first commit after the acceptance tests measured the reference
+boards routed side to side (`03d8230`). The 20 px rule and the fit hold
+on every board (criteria 3 and 10). One total of crossings cannot: a
+chain drawn through a row crosses every data line that passes down
+through that row, and the line to the next row every data line that goes
+on to a later one. Two other routings were measured and are not taken:
+the chain routed in the usual order (the row change leaves the row gap
+and fails criterion 3) and a higher price for crossing the chain (more
+crossings elsewhere). The owner chose to keep the drawing and measure
+the two kinds of crossing apart. A corridor for a value many steps read,
+where the data-against-data crossings can fall, is a later ticket of
+LAY-2 (LAY-46), not a condition of this one.
 
 ## Regression potential
 
@@ -125,7 +142,7 @@ splits it or returns to the owner. The size M stands on that gate.
 | --- | --- |
 | LAY-06 criterion 4 ("no order wire through a gap between cards") is replaced for the row gap: the row-change line is there by decision | criteria 2 and 3; the test of LAY-06 criterion 4 restated, listed in the pull request |
 | The 20 px rule (LAY-03) and lines under their own card (LAY-29) | `lay03`, `lay29` suites unchanged; criterion 3 |
-| Crossing limits of LAY-28 and LAY-06 criterion 11 | criterion 8 |
+| Crossing limits of LAY-28 and LAY-06 criterion 11 | criterion 8: restated by the owner's decision, each listed with before and after |
 | Cards grow by their sockets (#349): two new side sockets | `lay28` socket tests; criterion 10 |
 | The routing budget of ADR 0006 (150 ms) | the `bench` example, in the pull request |
 | Accessible names of what is removed | `accessibility_tests` updated to the decided state |
