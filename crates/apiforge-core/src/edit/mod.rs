@@ -21,7 +21,7 @@ mod storage;
 
 pub use clipboard::{
     Fragment, Missing, PASTE_OFFSET, PasteTarget, Pasted, Unresolved, copy_selection,
-    duplicate_selection, paste_selection,
+    copy_statements, duplicate_selection, duplicate_statements, paste_selection, paste_statements,
 };
 pub use component::{
     ComponentDraft, DraftError, DraftSection, InputRow, InputTarget, OutputRow, add_component,
@@ -123,6 +123,10 @@ pub enum EditError {
     /// and the step it stays below.
     #[error("{0}")]
     PlaceRefused(String),
+    /// A paste or a duplicate refused on the board (DIAG-06f): a statement
+    /// would read what is not there, by name.
+    #[error("{0}")]
+    PasteRefused(String),
     /// A wire from a step's *Next* to a check, value, variable or export
     /// (DIAG-06d): only steps are ordered.
     #[error("Only steps are ordered. A check runs when what it reads exists.")]

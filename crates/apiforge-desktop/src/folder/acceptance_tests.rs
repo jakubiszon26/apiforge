@@ -12226,8 +12226,8 @@ mod ux12 {
 /// UX-34 (#251): copy, paste and duplicate across graphs and tabs, the
 /// owner's decision A of 2026-11-03. Paste works on any graph of any open
 /// document; clashing handles are numbered, references inside the pasted
-/// set follow the copies, and a reference to a step the target lacks is
-/// reported as a *Missing step*. A duplicate lands clear of its original with
+/// set follow the copies, and a reference to a step the target lacks
+/// refuses the paste (DIAG-06f). A duplicate lands clear of its original with
 /// its own label.
 mod ux34 {
     use super::mcp08b::contains;
@@ -12299,13 +12299,6 @@ mod ux34 {
         choose(harness, mode);
     }
 
-    fn notice(harness: &FolderHarness) -> String {
-        folder(harness)
-            .notice()
-            .map(|notice| notice.text.clone())
-            .unwrap_or_default()
-    }
-
     /// The statements of the scenario's cleanup block.
     fn cleanup_text(source: &str) -> &str {
         let start = source.find("cleanup {").expect("a cleanup block");
@@ -12366,9 +12359,11 @@ mod ux34 {
     }
 
     /// Criterion 2: a step copied in the scenario pastes into the
-    /// `add-to-cart.afs` component. Its reference to `product`, a step the
-    /// component lacks, is reported as a *Missing step* and left unconnected;
-    /// a second paste gets a handle that does not clash with the first.
+    /// `add-to-cart.afs` component; a second paste gets a handle that does
+    /// not clash with the first. Restated by DIAG-06f (#496, answer 3 = A):
+    /// copied without `product`, the step it reads, the paste is refused and
+    /// names it; copied with it, both are pasted and the copy reads the
+    /// pasted `product`.
     #[test]
     fn ux34_criterion_2_a_step_pastes_into_another_document() {
         let directory = shop();
@@ -12381,23 +12376,39 @@ mod ux34 {
             has_label(&harness, PASTE),
             "Paste steps is offered in another document"
         );
+        let before = source_of(&harness, &cart);
         choose(&mut harness, PASTE);
+        assert_eq!(source_of(&harness, &cart), before, "the paste is refused");
+        assert!(
+            harness
+                .query_by_label(
+                    "`active_promotion` reads `product`, which is not in this component. Copy it too."
+                )
+                .is_some(),
+            "the refusal names the step the component lacks"
+        );
 
+        open(&mut harness, &scenario, "Diagram");
+        select(
+            &mut harness,
+            &scenario,
+            false,
+            &["product", "active_promotion"],
+        );
+        copy(&mut harness);
+        open(&mut harness, &cart, "Diagram");
+        choose(&mut harness, PASTE);
         let source = source_of(&harness, &cart);
         assert!(
             source.contains("active_promotion = active_promotion@1("),
             "the step is pasted into the component:\n{source}"
         );
-        let text = notice(&harness);
-        assert!(
-            text.contains("Missing step") && text.contains("product"),
-            "the reference to the step the component lacks is reported: {text:?}"
-        );
         let document = model(&harness, &cart);
-        let pasted = node(graph_of(&document, false), "active_promotion");
+        let main = graph_of(&document, false);
+        let pasted = node(main, "active_promotion");
         assert!(
-            !pasted.inputs.contains_key("product"),
-            "the missing reference is left unconnected: {:?}",
+            pasted.inputs["product"].references_node(&node(main, "product").id),
+            "it reads the pasted product: {:?}",
             pasted.inputs
         );
 
