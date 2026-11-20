@@ -1,9 +1,10 @@
 # LANG-21a: The window offers the update of a project written in the older language
 
 - Size: M · Owner review: 20 min · Risk: `visible UI`
-- State: **Waits for one owner decision** (whether the window can take a
-  source the person converted by hand, on #482) **and for the review's
-  last pass**; then ready after LANG-20b (#497) has merged. The owner chose on 2026-11-20 that 0.2.0 has it (option A on
+- State: **Decided; waits for the independent review's last pass before
+  it is labelled**; then ready after LANG-20b (#497) has merged. The
+  owner's answer of 2026-11-20 on #482: the window takes a file the
+  person rewrote by hand — *This file is ready as written* (A). The owner chose on 2026-11-20 that 0.2.0 has it (option A on
   [#482](https://github.com/jakubiszon26/apiforge/issues/482)) and
   answered the nine questions of the round-1 mock-up, each with A; the
   mock-up is approved as a whole. **Split on 2026-11-20** after an
@@ -65,6 +66,9 @@ Only the command or an agent's `fix` converts the project.
   each with *Show*: the dialog closes, the file opens with the statement
   selected, the statement is the first of the file's problems, and the
   band keeps the count, *Show the list* and the button.
+- New (the owner's answer of 2026-11-20): in the dialog a file left to
+  do by hand has *This file is ready as written*; after one confirmation
+  it is listed as updated if it passes the check.
 - New (question 6): the offer cannot be dismissed while the project is in
   language 1; *Update the project…* is also an entry of the *Project*
   menu.
@@ -171,32 +175,36 @@ blocked.
    Test: D `lang21_criterion_5_*`, one per case, among them unsaved
    settings (kept after the update), a blocked file with unsaved changes,
    and the state of the files after the one that failed.
-6. The band has no dismiss control while the project is in language 1;
+6. *This file is ready as written* (the owner's answer on #482): each
+   file of *left to do by hand* that can be read has it. It asks once —
+   *Steps that did not run in 0.1.0 will run where they are written.* —
+   and on *Yes* does what `--as-written` does through LANG-20b: the file
+   is listed as updated when it passes the language-2 check, with no byte
+   of it changed; when it does not pass, nothing is listed and the dialog
+   shows its errors. The dialog then shows the new plan. With unsaved
+   changes in that file the action is offered after they are saved (the
+   dialog's *Save all* path), never on a text that is not on disk. A file
+   that cannot be read does not have it.
+   Test: D `lang21_criterion_6_*`: the request nothing orders, accepted
+   and then running where it is written after the finish; a file that
+   fails the check; *No*; a file with unsaved changes.
+7. The band has no dismiss control while the project is in language 1;
    *Project ▸ Update the project…* does what the button does and is
    absent or disabled in a language-2 project.
-   Test: D `lang21_criterion_6_*`.
-7. Held by an agent session or by a command, and read-only: the button
+   Test: D `lang21_criterion_7_*`.
+8. Held by an agent session or by a command, and read-only: the button
    and the menu entry are disabled and the reason is beside the button
-   and in the accessibility tree. Test: D `lang21_criterion_7_*`.
-8. In a language-1 project the error on an `@after` line of a source not
+   and in the accessibility tree. Test: D `lang21_criterion_8_*`.
+9. In a language-1 project the error on an `@after` line of a source not
    yet converted ends with *Update the project.* and carries no fix; in a
    converted source and in a language-2 project it is LANG-13's text with
    its fix; the run refusal names the button first; LANG-20's refusal of
    a board edit (*Update the project first.*) is shown in the board's
    banner with the same button beside it.
-   Tests: P `lang21_criterion_8_*`, D `lang21_criterion_8_*`.
-9. Accessible names of the band in its three states and of the dialog's
+   Tests: P `lang21_criterion_9_*`, D `lang21_criterion_9_*`.
+10. Accessible names of the band in its three states and of the dialog's
    two parts are distinct (#235); everything is reachable by keyboard.
-   Test: `accessibility_tests`, D `lang21_criterion_9`.
-
-## Owner question (on #482)
-
-Whether the window can take a source the person converted by hand
-(`--as-written` of the command). Without it one case cannot be finished
-from the window: a request that ran nowhere in 0.1.0 and that the person
-wants to run where it is written. The criteria above hold for either
-answer; the answer adds one action to the dialog's second part or one
-sentence.
+   Test: `accessibility_tests`, D `lang21_criterion_10`.
 
 ## Regression potential
 
@@ -212,8 +220,7 @@ sentence.
 ## Not in scope
 
 - What the update does to a file, `--as-written`, the report's content:
-  LANG-13 and LANG-20b. A file converted by hand: the owner's question
-  above.
+  LANG-13 and LANG-20b.
 - A project in a newer language (LANG-15's sentence, no button).
 - Undo of the update: Git.
 
