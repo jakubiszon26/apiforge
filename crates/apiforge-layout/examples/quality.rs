@@ -269,7 +269,13 @@ fn boards(text: &str) -> Result<Vec<Tidied>, String> {
                     Ok(Port::new(block, side, number(words.next())?))
                 };
                 let from = port(&mut words)?;
-                board.wires.push(Wire::new(from, port(&mut words)?));
+                let wire = Wire::new(from, port(&mut words)?);
+                // A line of the chain of steps (LAY-45).
+                board.wires.push(match words.next() {
+                    Some("chain") => wire.chained(),
+                    None => wire,
+                    Some(other) => return Err(format!("not a wire's ending: {other}")),
+                });
             }
             other => return Err(format!("not a board line: {other}")),
         }

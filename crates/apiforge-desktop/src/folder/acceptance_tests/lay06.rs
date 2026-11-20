@@ -584,7 +584,8 @@ fn board_file() -> String {
         "# The reference scenarios of fixtures/scenarios/lay/ as the desktop tidies them\n\
          # (LAY-06): each card and chip at the size the board draws it, each wire as the\n\
          # ports the router is given, and the continuation marks. A card hung under a\n\
-         # step names the card above it in its stack (`under`, LAY-31). The quality example\n\
+         # step names the card above it in its stack (`under`, LAY-31); a line of the chain of\n\
+         # steps ends in `chain` (LAY-45). The quality example\n\
          # routes and measures these. Written by the desktop's acceptance test\n\
          # lay06_criterion_10_quality_on_real_card_sizes with APIFORGE_WRITE_BOARDS=1;\n\
          # do not edit by hand.\n",
@@ -664,13 +665,14 @@ fn board_file() -> String {
         }
         for wire in wires {
             text.push_str(&format!(
-                "wire {} {} {} {} {} {}\n",
+                "wire {} {} {} {} {} {}{}\n",
                 wire.from.block,
                 side(wire.from.side),
                 wire.from.offset,
                 wire.to.block,
                 side(wire.to.side),
-                wire.to.offset
+                wire.to.offset,
+                if wire.chain { " chain" } else { "" }
             ));
         }
         for mark in canvas.debug_marks() {

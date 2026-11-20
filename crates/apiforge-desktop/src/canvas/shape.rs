@@ -192,8 +192,16 @@ pub struct Mark {
     pub text: String,
 }
 
+/// Whether the board draws the marks. LAY-45 (#468, question 2 = A) draws
+/// the line to the next row instead; the feasibility measurement of its
+/// gate turns them off here.
+const DRAWN: bool = false;
+
 /// The marks of a board, one per pair of [`continuations`].
 pub fn marks(graph: &Graph, cards: &[Card]) -> Vec<Mark> {
+    if !DRAWN {
+        return Vec::new();
+    }
     let card = |id: &str| cards.iter().find(|card| card.id == id);
     continuations(graph, cards)
         .into_iter()

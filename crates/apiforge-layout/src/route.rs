@@ -115,11 +115,29 @@ const MAX_CELLS: usize = 160_000;
 pub struct Wire {
     pub from: Port,
     pub to: Port,
+    /// A line of the chain of steps (LAY-45): it is routed with the rails,
+    /// before the data lines, so that the line from the end of a row to the
+    /// start of the next takes the row gap and the data lines cross it
+    /// there, instead of it going round the board to cross none.
+    pub chain: bool,
 }
 
 impl Wire {
     pub const fn new(from: Port, to: Port) -> Self {
-        Self { from, to }
+        Self {
+            from,
+            to,
+            chain: false,
+        }
+    }
+
+    /// The same wire as a line of the chain of steps (LAY-45).
+    #[must_use]
+    pub const fn chained(self) -> Self {
+        Self {
+            chain: true,
+            ..self
+        }
     }
 }
 
@@ -1366,7 +1384,8 @@ fn routing_order(cards: &[Rect], wires: &[Wire]) -> Vec<usize> {
             .point_on(from)
             .orthogonal_distance(wire.to.point_on(to))
     };
-    let rail = |wire: &Wire| wire.from.side == Side::Top && wire.to.side == Side::Top;
+    let rail =
+        |wire: &Wire| wire.chain || (wire.from.side == Side::Top && wire.to.side == Side::Top);
     let mut order: Vec<usize> = (0..wires.len()).collect();
     order.sort_by(|left, right| {
         rail(&wires[*right])

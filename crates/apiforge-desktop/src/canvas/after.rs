@@ -58,6 +58,11 @@ pub struct Mark {
     pub name: String,
 }
 
+/// Whether the board draws these arrows. LAY-45 (#468, question 2 = A)
+/// draws the line into the next step instead; the feasibility measurement
+/// of its gate turns them off here.
+const DRAWN: bool = false;
+
 /// The marks of a board: the ordering wires among `wires` that enter the
 /// next step of the spine, by the step they enter.
 pub fn marks(
@@ -66,6 +71,9 @@ pub fn marks(
     cards: &[Card],
     wires: &[BoardWire],
 ) -> Vec<Mark> {
+    if !DRAWN {
+        return Vec::new();
+    }
     let Some(plan) = shape::plan(graph, later) else {
         return Vec::new();
     };
