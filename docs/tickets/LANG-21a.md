@@ -1,11 +1,16 @@
-# LANG-21: The window offers the update of a project written in the older language
+# LANG-21a: The window offers the update of a project written in the older language
 
-- Size: M · Owner review: 25 min · Risk: `visible UI`
+- Size: M · Owner review: 20 min · Risk: `visible UI`
 - State: **Approved, ready for implementation after LANG-20 (#481) has
   merged.** The owner chose on 2026-11-20 that 0.2.0 has it (option A on
   [#482](https://github.com/jakubiszon26/apiforge/issues/482)) and
   answered the nine questions of the round-1 mock-up, each with A; the
-  mock-up is approved as a whole.
+  mock-up is approved as a whole. **Split on 2026-11-20** after an
+  independent review found it an L: this ticket is the offer, the check
+  and the update (answers 1–4, 6–8); *Show*, *Show the list* and the
+  count that follows each save (answers 5 and 9) are LANG-21b (#495).
+  Amended by the same review: what the check reads, what *Save all*
+  cannot save, and a check that has gone stale.
 - Issue [#482](https://github.com/jakubiszon26/apiforge/issues/482) · LANG
   sprint, first half · branch `feat/lang-21-update-the-project`
 - Analysis model: Fable 5.2 · Implementation model: —
@@ -36,7 +41,7 @@ Only the command or an agent's `fix` converts the project.
 - New (question 4): after the update the open files show the new text,
   the offer is gone and a notice in the band counts what changed; it
   stays until dismissed.
-- New (question 5): the list of statements to place by hand is per file,
+- LANG-21b (question 5): the list of statements to place by hand is per file,
   each with *Show*: the dialog closes, the file opens with the statement
   selected, the statement is the first of the file's problems, and the
   band keeps the count, *Show the list* and the button.
@@ -54,7 +59,7 @@ Only the command or an agent's `fix` converts the project.
   language-2 project and leaves the language-1 case without a fix
   (its amendment A5); the text shown there is changed here, in the place
   that withholds the fix.
-- New (question 9): after an update that could not be done, every save
+- LANG-21b (question 9): after an update that could not be done, every save
   checks again (nothing is written) and the band's count follows; at none
   left the band reads as when the project opened.
 - Removed or hidden, migrated: nothing. Converted: only by the button's
@@ -80,22 +85,34 @@ orders (view 4).
    project shows none. At both window sizes the button is inside the
    window. Test: D `lang21_criterion_1_*`.
 2. The button writes nothing: after it, every file and the manifest are
-   byte-identical and the dialog lists each file with what will be
-   removed, equal to the report of `apiforge fix --folder --check` on the
-   same project. Test: D `lang21_criterion_2_*`.
-3. *Update N files* converts the project through the function the command
-   calls: the files and the manifest equal those the command writes; the
-   open tabs show the new text without a conflict prompt; the band's
-   offer is gone; the notice gives the counts and stays until dismissed;
-   a run then starts. Test: D `lang21_criterion_3_*`.
+   byte-identical. The dialog shows LANG-20's **plan made from what would
+   be saved**: for a file with unsaved changes, its text in the editor;
+   for every other, the file. With nothing unsaved it equals the report
+   of `apiforge fix --folder --check`. Test: D `lang21_criterion_2_*`,
+   among them an unsaved change that removes a blocker and one that adds
+   one.
+3. *Update N files* commits **that plan**: the files and the manifest
+   are those the plan listed; the open tabs show the new text without a
+   conflict prompt; the band's offer is gone; the notice gives the counts
+   and stays until dismissed; a run then starts. When anything the plan
+   was made from has changed since — a buffer, a file on disk, the
+   manifest, who holds the project — nothing is written and the dialog
+   shows the new plan with one line saying why.
+   Test: D `lang21_criterion_3_*`, among them a foreign write and an edit
+   between the check and the button.
 4. A project that cannot be updated: the dialog lists the statements per
-   file and offers no update; nothing is written. *Show* closes it, opens
-   the file and selects the statement, which is the first row of that
-   file's Problems; the band shows the count, *Show the list* and the
-   button. Test: D `lang21_criterion_4_*`.
+   file with their line and offers no update; nothing is written. (What
+   leads to each statement is LANG-21b.)
+   Test: D `lang21_criterion_4_*`.
 5. With unsaved work the dialog names the unsaved files first and its
-   button reads *Save all and update*; it saves them and then updates;
-   *Cancel* saves nothing. Test: D `lang21_criterion_5_*`.
+   button reads *Save all and update*; it saves them and commits the
+   plan, which was made from exactly those texts; *Cancel* saves nothing.
+   What *Save all* does not save — a source held because it does not
+   read, an unfinished field of the Inspector, a file in conflict — is
+   named in the dialog, which then offers no update: *Finish or discard
+   these first.* A save that fails for one file stops there: nothing is
+   converted, the files already saved stay saved, and the dialog says
+   which failed. Test: D `lang21_criterion_5_*`, one per case.
 6. The band has no dismiss control while the project is in language 1;
    *Project ▸ Update the project…* does what the button does and is
    absent or disabled in a language-2 project.
@@ -109,13 +126,8 @@ orders (view 4).
    *Update the project.* and carries no fix; in a language-2 project it
    is LANG-13's text with its fix; the run refusal names the button
    first. Tests: P `lang21_criterion_8_*`, D `lang21_criterion_8_*`.
-9. After a refused update each save runs the check again without writing
-   and the band's count equals the check's; when it reaches none the band
-   is that of criterion 1. The check of a project of 50 sources takes
-   under 250 ms on the reference machine, or runs off the frame.
-   Tests: P `lang21_criterion_9_*`, D `lang21_criterion_9_*`.
-10. Accessible names of the band, both dialogs and every *Show* are
-    distinct (#235); everything is reachable by keyboard.
+9. (Moved to LANG-21b.)
+10. Accessible names of the band and both dialogs are distinct (#235); everything is reachable by keyboard.
     Test: `accessibility_tests`, D `lang21_criterion_10`.
 
 ## Regression potential
@@ -125,7 +137,8 @@ orders (view 4).
 | The band under the tabs (storage, stale, recovered notices; #320) | `notices` and `tab_band_tests` unchanged; criterion 1 at 960 × 540 |
 | A rewrite of open files must not raise the foreign-write conflict | criterion 3; `conflicts` tests unchanged |
 | Hand-over and the holder rules (MCP-07, MCP-08b) | criterion 7; their suites unchanged |
-| The command and the window diverge | criteria 2 and 3 compare with the command's result |
+| The command and the window diverge | criteria 2 and 3: one plan, one commit, LANG-20's |
+| Unsaved work lost at the reload after the update | criterion 5: no update while anything stays unsaved |
 | Save all (unsaved prompts, MCP-08c) | criterion 5; their suites unchanged |
 
 ## Not in scope
