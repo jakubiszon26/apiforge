@@ -27,6 +27,9 @@ struct Generator {
     main: Vec<(String, Kind)>,
     cleanup: Vec<(String, Kind)>,
     next: usize,
+    /// The written language (LANG-13): no `@after`, `start` first, calls
+    /// with their revision.
+    chain: bool,
 }
 
 impl Generator {
@@ -125,7 +128,7 @@ impl Generator {
     /// Ordering towards earlier statements of the same braces only: acyclic,
     /// and never the `if` whose braces hold the statement, which is an error.
     fn after(&mut self, cleanup: bool, available: &[(String, Kind)]) -> String {
-        if available.is_empty() || !self.chance(35) {
+        if self.chain || available.is_empty() || !self.chance(35) {
             return String::new();
         }
         let mut orders = BTreeSet::new();
@@ -193,7 +196,11 @@ impl Generator {
             let handle = self.handle();
             let after = self.after(cleanup, &graph_handles);
             let (text, kind) = match self.pick(if depth == 0 { 9 } else { 7 }) {
-                0 if depth == 0 && !cleanup && self.main.iter().all(|(_, k)| *k != Kind::Start) => {
+                0 if !self.chain
+                    && depth == 0
+                    && !cleanup
+                    && self.main.iter().all(|(_, k)| *k != Kind::Start) =>
+                {
                     (format!("{handle} = start"), Kind::Start)
                 }
                 0..=2 => {
@@ -249,7 +256,11 @@ impl Generator {
                 _ => {
                     let call = if self.chance(50) {
                         let id = self.expr(1, cleanup);
-                        format!("produkt(id: {id})")
+                        if self.chain {
+                            format!("produkt@1(id: {id})")
+                        } else {
+                            format!("produkt(id: {id})")
+                        }
                     } else {
                         let product = self.expr(1, cleanup);
                         format!("aktywna_promocja@1(product: {product})")
@@ -273,14 +284,29 @@ impl Generator {
 }
 
 pub fn generate(seed: u64) -> String {
+    generate_with(seed, false)
+}
+
+/// A random scenario in the written language (LANG-13): one chain per block,
+/// with `if`s, written in the order it runs.
+#[allow(dead_code)]
+pub fn generate_chain(seed: u64) -> String {
+    generate_with(seed, true)
+}
+
+fn generate_with(seed: u64, chain: bool) -> String {
     let mut generator = Generator {
         state: seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1,
         main: vec![],
         cleanup: vec![],
         next: 0,
+        chain,
     };
     let count = 1 + generator.pick(25);
-    let main = generator.statements(count, false, 0);
+    let mut main = generator.statements(count, false, 0);
+    if chain {
+        main.insert(0, "beginz = start".into());
+    }
     let cleanup = if generator.chance(40) {
         let n = 1 + generator.pick(4);
         let statements = generator.statements(n, true, 0);

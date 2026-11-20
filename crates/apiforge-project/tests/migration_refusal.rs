@@ -141,7 +141,7 @@ fn the_six_project_workspace_migrates_with_ktlo_04_merged() {
                 .and_then(|document| document.model());
             assert_eq!(
                 reloaded,
-                Some(&Document::Scenario(scenario.clone())),
+                Some(&written(scenario)),
                 "{} / {}",
                 project.name,
                 scenario.name
@@ -227,4 +227,14 @@ fn a_refused_migration_names_the_project_and_the_scenario_and_activates_nothing(
     assert_eq!(again.to_string(), message);
     assert_eq!(originals(directory.path()), before);
     assert!(!directory.path().join(CATALOGUE_FILE).exists());
+}
+
+/// A legacy scenario as its folder source says it since LANG-13 (#386): each
+/// graph one chain in the order it runs, with a start first.
+fn written(scenario: &apiforge_core::format::Scenario) -> Document {
+    use apiforge_core::chain::{chained, with_start};
+    let mut scenario = scenario.clone();
+    scenario.graph = with_start(&chained(&scenario.graph).expect("a chain"));
+    scenario.cleanup = chained(&scenario.cleanup).expect("a chain");
+    Document::Scenario(scenario)
 }

@@ -267,7 +267,8 @@ fn criterion_4_a_crlf_source_counts_the_carriage_return_as_part_of_the_break() {
             diagnostic.end_line,
             diagnostic.end_column
         ),
-        (15, 28, 15, 28 + width)
+        // Line 16: the component's `begin = start` comes first (LANG-13).
+        (16, 28, 16, 28 + width)
     );
 }
 
@@ -360,7 +361,7 @@ fn criterion_5_check_reports_the_injected_warning_with_file_line_and_column() {
             })
         })
         .collect();
-    assert_eq!(problems, [(PRODUCT, 15, 28, Severity::Warning, MISMATCH)]);
+    assert_eq!(problems, [(PRODUCT, 16, 28, Severity::Warning, MISMATCH)]);
 
     let one = tools::check(root, Some(PRODUCT)).unwrap();
     assert_eq!(one.documents.len(), 1);
@@ -557,7 +558,9 @@ const MANIFEST: &str = "apiforge.project.json";
 const DEMO_BASE_URL: &str = "http://127.0.0.1:4318/demo/shop";
 
 /// Every top-level step of the demo scenario, the cleanup's last.
-const DEMO_STEPS: [&str; 8] = [
+/// The demo shop's top-level steps; `begin` is the start LANG-13 writes.
+const DEMO_STEPS: [&str; 9] = [
+    "begin",
     "expected_price",
     "product",
     "field_inna_nazwa",
@@ -886,7 +889,7 @@ fn mcp03_criterion_2_the_errors_a_registration_would_meet() {
 fn mcp03_criterion_3_unpublished_revisions_unknown_handles_and_missing_variables_are_named() {
     let directory = checkout();
     let root = directory.path();
-    let text = "scenario \"Calls\" {\n  next = product@2(id: 123)\n  other = nosuch@1(id: 1)\n  missing = GET \"/x/{{env.MISSING}}\" {\n    sample 200 {}\n  }\n}\n";
+    let text = "scenario \"Calls\" {\n  begin = start\n  next = product@2(id: 123)\n  other = nosuch@1(id: 1)\n  missing = GET \"/x/{{env.MISSING}}\" {\n    sample 200 {}\n  }\n}\n";
     for path in [SCENARIO, "scenarios/calls.afs"] {
         let result = tools::check_text(root, path, text).unwrap();
         assert!(!result.valid, "{path}");
@@ -932,12 +935,13 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
     );
     assert!(report.report.is_none(), "compact by default");
     let steps = report.steps.as_deref().unwrap();
-    assert_eq!(report.step_count, 18);
-    assert_eq!(count(steps), 18, "as `apiforge run` prints 18 lines");
+    // The demo shop's steps and the start LANG-13 writes first.
+    assert_eq!(report.step_count, 19);
+    assert_eq!(count(steps), 19, "as `apiforge run` prints 19 lines");
     assert_eq!(handles(steps), DEMO_STEPS);
-    assert_eq!(steps[1].label.as_deref(), Some("Product"));
+    assert_eq!(steps[2].label.as_deref(), Some("Product"));
     assert_eq!(
-        handles(steps[1].steps.as_deref().unwrap()),
+        handles(steps[2].steps.as_deref().unwrap()),
         ["fetch_product", "product"],
         "a component's steps nested beneath it"
     );
@@ -946,7 +950,7 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
             .iter()
             .all(|s| s.status == StepStatus::Passed)
     );
-    assert_eq!(steps[6].phase, Phase::Cleanup);
+    assert_eq!(steps[7].phase, Phase::Cleanup);
     assert_eq!(steps[0].phase, Phase::Main);
     assert_eq!(tree(root), before, "a simulation writes nothing");
     assert!(!root.join(".apiforge/local").exists());
@@ -989,7 +993,7 @@ fn mcp03_criterion_5_a_component_runs_alone_with_its_inputs() {
     let report = simulate(root, &arguments(PRODUCT)).unwrap();
     assert_eq!(report.status, Verdict::Passed);
     let steps = report.steps.unwrap();
-    assert_eq!(handles(&steps), ["fetch_product", "product"]);
+    assert_eq!(handles(&steps), ["begin", "fetch_product", "product"]);
     assert!(steps.iter().all(|step| step.phase == Phase::Main));
 
     for inputs in [json!({ "id": 7 }), json!({ "id": "7" })] {
@@ -1048,9 +1052,9 @@ fn mcp03_criterion_6_compact_by_default_and_the_full_report_on_request() {
     let report = full.report.unwrap();
     assert_eq!(report["status"], "passed");
     assert_eq!(report["mode"], "simulation");
-    assert_eq!(report["steps"].as_array().unwrap().len(), 8);
+    assert_eq!(report["steps"].as_array().unwrap().len(), 9);
     assert!(report["steps"][0]["outputs"].is_object());
-    assert_eq!(full.step_count, 18);
+    assert_eq!(full.step_count, 19);
 }
 
 #[test]
@@ -1061,7 +1065,7 @@ fn mcp03_criterion_6_a_result_over_two_mebibytes_is_refused_never_cut() {
     fs::write(
         root.join(SCENARIO),
         format!(
-            "scenario \"Big\" {{\n  big = GET \"/big\" {{\n    sample 200 [{strings}]\n  }}\n  a = big.body\n  b = big.body\n  c = big.body\n}}\n"
+            "scenario \"Big\" {{\n  begin = start\n  big = GET \"/big\" {{\n    sample 200 [{strings}]\n  }}\n  a = big.body\n  b = big.body\n  c = big.body\n}}\n"
         ),
     )
     .unwrap();
@@ -1149,7 +1153,7 @@ fn mcp03_criterion_9_the_shared_executor_returns_data_and_prints_nothing() {
     let outcome = executor::execute(request, None, CancellationToken::new(), DEADLINE).unwrap();
     assert_eq!(outcome.ended_by, EndedBy::Completed);
     assert_eq!(outcome.report.status, apiforge_core::run::RunStatus::Passed);
-    assert_eq!(outcome.report.steps.len(), 8);
+    assert_eq!(outcome.report.steps.len(), 9);
     assert!(outcome.interrupted_before.is_empty());
     assert!(!outcome.journal_unreadable);
 }
@@ -1196,7 +1200,7 @@ fn mcp03_criterion_10_cancelling_a_run_stops_it_and_runs_the_cleanup() {
         "{main:#?}"
     );
     let cleanup: Vec<_> = steps.iter().filter(|s| s.phase == Phase::Cleanup).collect();
-    assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
+    assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[7..]);
     assert!(
         cleanup.iter().all(|s| s.status != StepStatus::Cancelled),
         "the cleanup ran: {cleanup:#?}"
@@ -2010,7 +2014,7 @@ fn mcp04_criterion_4_create_document_refuses_on_any_error() {
     fs::write(root.join(DRAFT), DRAFT_TEXT).unwrap();
     let product = fs::read_to_string(root.join(PRODUCT)).unwrap();
     let renamed = product.replacen("component product", "component other_product", 1);
-    let broken = "scenario \"Broken\" {\n  x = nosuch@1(id: 1)\n}\n";
+    let broken = "scenario \"Broken\" {\n  begin = start\n  x = nosuch@1(id: 1)\n}\n";
     let before = shared(root);
     let agent = agent(root);
     let cases = [
@@ -2090,8 +2094,8 @@ fn mcp04_criterion_4_create_document_refuses_on_any_error() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["severity"] == "error" && d["line"] == 2),
-        "an error on line 2"
+            .any(|d| d["severity"] == "error" && d["line"] == 3),
+        "an error on line 3, below `begin = start`"
     );
 }
 
@@ -3059,7 +3063,7 @@ fn mcp06_criterion_6_a_cancelled_or_timed_out_live_run() {
             .collect();
         assert_eq!(marked.len(), 1, "{} steps", steps.len());
         assert_eq!(marked[0].handle, "fetch_product");
-        assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
+        assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[7..]);
         assert!(
             steps[steps.len() - 2..]
                 .iter()
@@ -4541,10 +4545,10 @@ fn lay26_criterion_5_mcp_returns_no_far_read_warning() {
 // ----- MCP-21 (#207): `used` names the published revisions the document calls -----
 
 const WRAPPER: &str = "components/wrapper.afs";
-const WRAPPER_TEXT: &str = "component wrapper \"Wrapper\" {\n  description \"A product fetched through its first revision.\"\n  @label(\"Product ID\")\n  input id: number = 123\n  @label(\"Fetched\")\n  fetched = product@1(id: param.id)\n  @label(\"Product\")\n  export product: object = fetched\n}\n";
+const WRAPPER_TEXT: &str = "component wrapper \"Wrapper\" {\n  description \"A product fetched through its first revision.\"\n  @label(\"Product ID\")\n  input id: number = 123\n  begin = start\n  @label(\"Fetched\")\n  fetched = product@1(id: param.id)\n  @label(\"Product\")\n  export product: object = fetched\n}\n";
 const WRAPPED: &str = "scenarios/wrapped.afs";
 /// Calls `wrapper@1` twice and `product@1`, which `wrapper@1` calls too.
-const WRAPPED_TEXT: &str = "scenario \"Wrapped\" {\n  first = wrapper@1(id: 123)\n  second = wrapper@1(id: 124)\n  direct = product@1(id: 123)\n}\n";
+const WRAPPED_TEXT: &str = "scenario \"Wrapped\" {\n  begin = start\n  first = wrapper@1(id: 123)\n  second = wrapper@1(id: 124)\n  direct = product@1(id: 123)\n}\n";
 
 /// `used` as (path, handle, revision, hash), in the order given.
 fn used(used: &[tools::UsedSource]) -> Vec<(String, String, u32, String)> {
@@ -4696,7 +4700,7 @@ fn mcp21_criterion_3_a_component_run_alone_does_not_use_itself() {
 fn mcp21_criterion_4_an_unresolved_call_adds_nothing() {
     let directory = checkout();
     let root = directory.path();
-    let text = "scenario \"Calls\" {\n  direct = product@1(id: 123)\n  later = product@9(id: 1)\n  other = nosuch@1(id: 1)\n}\n";
+    let text = "scenario \"Calls\" {\n  begin = start\n  direct = product@1(id: 123)\n  later = product@9(id: 1)\n  other = nosuch@1(id: 1)\n}\n";
     for path in [SCENARIO, "scenarios/calls.afs"] {
         let result = tools::check_text(root, path, text).unwrap();
         assert!(!result.valid, "{path}");
@@ -4936,7 +4940,7 @@ fn mcp23_criterion_3_full_is_the_runners_report_without_the_snapshot() {
 }
 
 const ECHO: &str = "components/echo.afs";
-const ECHO_TEXT: &str = "component echo \"Echo\" {\n  description \"What the API answers, and the token.\"\n  @label(\"Ask\")\n  ask = GET \"/echo?q={{env.TOKEN}}\" {\n    sample 200 { token: \"sample\" }\n  }\n  @label(\"Answer\")\n  export answer: object = ask.body\n  @label(\"Token\")\n  export token: string = env.TOKEN\n}\n";
+const ECHO_TEXT: &str = "component echo \"Echo\" {\n  description \"What the API answers, and the token.\"\n  begin = start\n  @label(\"Ask\")\n  ask = GET \"/echo?q={{env.TOKEN}}\" {\n    sample 200 { token: \"sample\" }\n  }\n  @label(\"Answer\")\n  export answer: object = ask.body\n  @label(\"Token\")\n  export token: string = env.TOKEN\n}\n";
 
 /// A loopback API that answers every request with `body` as JSON, until
 /// the flag returned is set.
@@ -5083,20 +5087,16 @@ fn run04_criterion_7_an_agent_reads_stopped_on_every_step_not_reached() {
         root.join(SCENARIO),
         r#"scenario "A chain stopped by a check" {
   begin = start
-  @after(begin)
   a = GET "/a" {
     sample 200 { ok: true }
   }
   broken = assert a.body.ok == false
-  @after(a)
   b = GET "/b" {
     sample 200 {}
   }
-  @after(b)
   c = GET "/c" {
     sample 200 {}
   }
-  @after(c)
   d = GET "/d" {
     sample 200 {}
   }

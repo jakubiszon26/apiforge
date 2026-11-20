@@ -238,10 +238,7 @@ fn every_project_and_draft_migrates_into_an_activated_catalogue() {
     let scenario = document(&shop, DocumentKind::Scenario, &original.id);
     assert!(scenario.is_dirty(), "the unsaved scenario draft is back");
     assert_eq!(scenario.selection().caret, 3);
-    assert_eq!(
-        scenario.model(),
-        Some(&Document::Scenario(original.clone()))
-    );
+    assert_eq!(scenario.model(), Some(&written(original)));
 
     // The older component draft became its own recovered working document.
     let recovered: Vec<_> = shop
@@ -648,4 +645,14 @@ fn a_symlink_in_a_published_folder_is_not_ignored_by_ownership_verification() {
     assert!(link.is_symlink());
     assert_eq!(fs::read_to_string(note).unwrap(), "outside project");
     assert!(!data.join(CATALOGUE_FILE).exists());
+}
+
+/// A legacy scenario as its folder source says it since LANG-13 (#386): each
+/// graph one chain in the order it runs, with a start first.
+fn written(scenario: &apiforge_core::format::Scenario) -> Document {
+    use apiforge_core::chain::{chained, with_start};
+    let mut scenario = scenario.clone();
+    scenario.graph = with_start(&chained(&scenario.graph).expect("a chain"));
+    scenario.cleanup = chained(&scenario.cleanup).expect("a chain");
+    Document::Scenario(scenario)
 }

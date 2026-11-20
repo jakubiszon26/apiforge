@@ -532,7 +532,7 @@ fn a_publication_settings_change_and_trash_restore_survive_one_restart_together(
         .create_document(
             DocumentKind::Scenario,
             "scenarios/main.afs",
-            "scenario \"Main\" {\n  call = (Helper@1())\n  two = assert call == 2\n}\n",
+            "scenario \"Main\" {\n  begin = start\n  call = (Helper@1())\n  two = assert call == 2\n}\n",
         )
         .unwrap();
     let spare = session
@@ -1117,6 +1117,14 @@ mod lay34 {
     /// errors holds the board, so no board edit can be made on it.
     const INVALID: &str = "docs/qa/2026-10-24/p1-p4-native/alpha-invalid.afs";
 
+    /// QA evidence written for 0.1.0, kept as it was recorded: a request
+    /// without `start` and `@after` lines are errors of the written language
+    /// (LANG-13), with their fix, so these hold the board too.
+    const LANGUAGE_1: [&str; 2] = [
+        "docs/qa/2026-10-24/p1-p4-native/beta.afs",
+        "docs/qa/2026-10-26/LAY/order-flow.afs",
+    ];
+
     /// Every `.afs` file of the repository, by its path from the root.
     fn repository_sources() -> Vec<(String, String)> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -1199,11 +1207,20 @@ mod lay34 {
     /// The board's edit that adds a request from the *Next* of `source`, or
     /// unconnected without one, and the new request's handle and identifier.
     fn with_request(document: &Document, source: Option<&str>) -> (Document, String, String) {
+        with_block(document, Block::Request, source)
+    }
+
+    /// The same with a block of another kind.
+    fn with_block(
+        document: &Document,
+        block: Block,
+        source: Option<&str>,
+    ) -> (Document, String, String) {
         let mut next = document.clone();
         let graph = main_graph(&mut next);
         let added = add_node(
             graph,
-            Block::Request,
+            block,
             Position { x: 40.0, y: 40.0 },
             None,
             source.map(|node_id| OutputRef {
@@ -1327,7 +1344,9 @@ mod lay34 {
             for node in &mut main_graph(&mut moved).nodes {
                 node.position.x += 40.0;
             }
-            session.apply_model_edit(&id, moved, Origin(7)).unwrap();
+            session
+                .apply_model_edit(&id, moved, Origin(7))
+                .unwrap_or_else(|error| panic!("{path}: {error:?}"));
             assert_eq!(text(&session, &id), original, "{path}: a layout change");
             let before = model(&session, &id);
 
@@ -1337,8 +1356,21 @@ mod lay34 {
                 .iter()
                 .find(|node| matches!(node.kind, NodeKind::Request | NodeKind::Component))
                 .map(|node| node.id.clone());
-            let (added, handle, new_id) = with_request(&before, step.as_deref());
-            session.apply_model_edit(&id, added, Origin(7)).unwrap();
+            // A flow without a step has no start (LANG-13): a value is added
+            // there, which needs none.
+            let has_start = main_graph(&mut before.clone())
+                .nodes
+                .iter()
+                .any(|node| node.kind == NodeKind::Start);
+            let block = if has_start {
+                Block::Request
+            } else {
+                Block::Value
+            };
+            let (added, handle, new_id) = with_block(&before, block, step.as_deref());
+            session
+                .apply_model_edit(&id, added, Origin(7))
+                .unwrap_or_else(|error| panic!("{path}: {error:?}"));
             let after = text(&session, &id);
             let lines = inserted(&original, &after);
             let starts = statement_lines(&lines);
@@ -1400,7 +1432,11 @@ mod lay34 {
                 "{path}: only the lines of {node} change; before:\n{original}\nafter:\n{after}"
             );
         }
-        assert_eq!(skipped, [INVALID], "only the file with errors has no board");
+        assert_eq!(
+            skipped,
+            [INVALID, LANGUAGE_1[0], LANGUAGE_1[1]],
+            "only the file with errors and the QA evidence of 0.1.0 have no board"
+        );
     }
 
     /// Criterion 2: a scenario without `on_error` gets none from a board
@@ -1473,7 +1509,8 @@ mod lay34 {
             statement_lines(&new)[0].starts_with(&format!("    {handle} = ")),
             "inside the braces of paid, as payment is: {new:?}"
         );
-        assert!(after.contains("  @after(paid.then)\n  refund = "));
+        // `refund` stays where it is written, after the whole `if` (LANG-13).
+        assert!(after.contains("  }\n  refund = "), "{after}");
         assert!(session.undo(&id, Origin(7)).unwrap());
         assert_eq!(text(&session, &id), original);
 
@@ -1526,7 +1563,8 @@ mod lay34 {
     /// brace prints the whole file, so the question is asked first.
     #[test]
     fn lay34_a_board_edit_that_prints_the_whole_file_still_asks_about_a_loose_comment() {
-        let original = "// a loose note\n\nscenario \"Loose\" {\n  begin = start\n  @after(begin)\n  ping = GET \"/ping\" }\n";
+        let original =
+            "// a loose note\n\nscenario \"Loose\" {\n  begin = start\n  ping = GET \"/ping\" }\n";
         let (_directory, mut session, id) = opened(original);
         assert_eq!(
             session.unattached_comments(&id).unwrap(),
