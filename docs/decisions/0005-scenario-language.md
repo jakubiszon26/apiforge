@@ -18,7 +18,10 @@ Amended 2026-11-20 by LANG-05 ([#142](https://github.com/jakubiszon26/apiforge/i
 the owner's decision A in [LANG-05](../tickets/LANG-05.md)): any Boolean
 expression is a check, and one that is a comparison or a logical operation
 (`>=`, `<=`, `&&`, `||` or `!` at its top) is written as the author wrote it,
-without `== true`; see [Checks](#checks).
+without `== true`; see [Checks](#checks). The short form is the written
+language's: a published revision and the legacy workspace keep the stored
+spelling and write every such check in full, `(a >= b) == true`, so a
+revision prints back to the bytes it was published with.
 
 Stage II amendment (implemented for explicit folder mode; P7 startup activation pending):
 [ADR 0010](0010-folder-projects.md) makes `.afs` the durable definition and requires

@@ -42,7 +42,22 @@ fn key(name: &str) -> String {
     }
 }
 
+/// How a check that is one Boolean expression is written (LANG-05).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Checks {
+    /// The written language: a compound check as the author wrote it.
+    Short,
+    /// The stored spelling of a published revision and of the legacy
+    /// workspace: every plain expression in full, `expr == true`, as 0.1.0
+    /// wrote it, so a revision prints back to its own bytes.
+    Full,
+}
+
 pub(crate) fn print_file(file: &File) -> String {
+    print_file_with(file, Checks::Short)
+}
+
+pub(crate) fn print_file_with(file: &File, checks: Checks) -> String {
     let mut out = opening(&file.kind);
     out.push('\n');
     for (_, text) in head(file) {
@@ -50,10 +65,10 @@ pub(crate) fn print_file(file: &File) -> String {
             line(&mut out, 1, text);
         }
     }
-    statements(&mut out, &file.statements, 1);
+    statements_with(&mut out, &file.statements, 1, checks);
     if let Some(cleanup) = &file.cleanup {
         line(&mut out, 1, "cleanup {");
-        statements(&mut out, cleanup, 2);
+        statements_with(&mut out, cleanup, 2, checks);
         line(&mut out, 1, "}");
     }
     out.push_str("}\n");
@@ -146,6 +161,10 @@ fn attributes(out: &mut String, attributes: &[Attribute], depth: usize) {
 }
 
 pub(crate) fn statements(out: &mut String, nodes: &[Statement], depth: usize) {
+    statements_with(out, nodes, depth, Checks::Short);
+}
+
+fn statements_with(out: &mut String, nodes: &[Statement], depth: usize, checks: Checks) {
     for node in nodes {
         if let Some(note) = &node.note {
             for note in note.split('\n') {
@@ -167,30 +186,36 @@ pub(crate) fn statements(out: &mut String, nodes: &[Statement], depth: usize) {
                 depth,
                 &format!("export {handle}: {value_type} = {}", expression(value)),
             ),
-            Form::Assert(check) => {
-                line(out, depth, &format!("{prefix}assert {}", check_text(check)))
-            }
+            Form::Assert(check) => line(
+                out,
+                depth,
+                &format!("{prefix}assert {}", check_text(check, checks)),
+            ),
             Form::If {
                 check,
                 then,
                 otherwise,
             } => {
-                line(out, depth, &format!("{prefix}if {} {{", check_text(check)));
-                statements(out, then, depth + 1);
+                line(
+                    out,
+                    depth,
+                    &format!("{prefix}if {} {{", check_text(check, checks)),
+                );
+                statements_with(out, then, depth + 1, checks);
                 if let Some(otherwise) = otherwise {
                     line(out, depth, "} else {");
-                    statements(out, otherwise, depth + 1);
+                    statements_with(out, otherwise, depth + 1, checks);
                 }
                 line(out, depth, "}");
             }
             Form::Condition {
                 mode,
-                checks,
+                checks: entries,
                 value,
             } => {
                 line(out, depth, &format!("{prefix}condition {mode} {{"));
-                for check in checks {
-                    line(out, depth + 1, &format!("{},", check_text(check)));
+                for check in entries {
+                    line(out, depth + 1, &format!("{},", check_text(check, checks)));
                 }
                 line(
                     out,
@@ -279,11 +304,13 @@ fn written_alone(check: &Check) -> Option<&Expr> {
     }
 }
 
-fn check_text(check: &Check) -> String {
+fn check_text(check: &Check, checks: Checks) -> String {
     if matches!(check.predicate.as_str(), "exists" | "nonempty") {
         return format!("{} {}", check.predicate, expression(&check.actual));
     }
-    if let Some(alone) = written_alone(check) {
+    if checks == Checks::Short
+        && let Some(alone) = written_alone(check)
+    {
         return expression(alone);
     }
     let expected = check
