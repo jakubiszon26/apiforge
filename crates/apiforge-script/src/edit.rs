@@ -1292,4 +1292,219 @@ mod tests {
 "#
         );
     }
+
+    // DIAG-06d --------------------------------------------------------------
+
+    /// `source` with `step` put at the place `at` names, as the board puts
+    /// it, written into the text and checked to read back as the moved
+    /// document.
+    fn placed_text(
+        source: &str,
+        step: &str,
+        at: impl FnOnce(&Scenario) -> apiforge_core::edit::Place<'static>,
+    ) -> String {
+        let project = apiforge_core::demos::shop_project();
+        let tree = parse(source);
+        let lowered = lower(&tree, &LowerContext::folder(&project));
+        assert!(!lowered.has_errors(), "{:?}", lowered.diagnostics);
+        let previous = lowered.document.unwrap();
+        let mut next = previous.clone();
+        let Document::Scenario(scenario) = &mut next else {
+            panic!("a scenario")
+        };
+        let place = at(scenario);
+        let step = id(scenario, step);
+        let (graph, moved) = apiforge_core::edit::place(&scenario.graph, &project, &step, place)
+            .expect("the statement moves");
+        scenario.graph = graph;
+        let text = edit_in_place_moving(&project, source, &previous, &next, &moved)
+            .expect("the move is written into the text");
+        verify(&project, &next, true, true, &text)
+            .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+        text
+    }
+
+    fn leaked(id: String) -> &'static str {
+        Box::leak(id.into_boxed_str())
+    }
+
+    fn after_handle(
+        handle: &'static str,
+    ) -> impl FnOnce(&Scenario) -> apiforge_core::edit::Place<'static> {
+        move |scenario| apiforge_core::edit::Place::After(leaked(id(scenario, handle)))
+    }
+
+    fn first_in(
+        handle: &'static str,
+        branch: Branch,
+    ) -> impl FnOnce(&Scenario) -> apiforge_core::edit::Place<'static> {
+        move |scenario| apiforge_core::edit::Place::First(leaked(id(scenario, handle)), branch)
+    }
+
+    /// `lines` with `by` before every line that is not empty.
+    fn deeper(lines: &str, by: &str) -> String {
+        lines
+            .split_inclusive('\n')
+            .map(|line| {
+                if line.trim_end_matches('\n').is_empty() {
+                    line.to_owned()
+                } else {
+                    format!("{by}{line}")
+                }
+            })
+            .collect()
+    }
+
+    /// `lines` with `by` taken from the start of every line that is not
+    /// empty.
+    fn shallower(lines: &str, by: &str) -> String {
+        lines
+            .split_inclusive('\n')
+            .map(|line| line.strip_prefix(by).unwrap_or(line).to_owned())
+            .collect()
+    }
+
+    const NESTED: &str = r#"scenario "Nested" {
+  begin = start
+  a = GET "/a"
+  // Decides.
+  x = if a.status == 200 {
+    inner = GET "/inner"
+
+    y = if inner.status == 200 {
+      // The deepest.
+      deep = GET "/deep"
+    }
+  }
+  b = GET "/b"
+}
+"#;
+
+    const Y: &str = "    y = if inner.status == 200 {\n      // The deepest.\n      deep = GET \"/deep\"\n    }\n";
+
+    /// DIAG-06d, criterion 1: an `if` with a nested `if` moves as its lines
+    /// are written; out of its braces, its lines are one level shallower.
+    #[test]
+    fn diag06d_a_nested_if_moves_with_its_lines() {
+        let x = "  // Decides.\n  x = if a.status == 200 {\n    inner = GET \"/inner\"\n\n    y = if inner.status == 200 {\n      // The deepest.\n      deep = GET \"/deep\"\n    }\n  }\n";
+        assert_eq!(
+            placed_text(NESTED, "x", after_handle("b")),
+            NESTED
+                .replace(x, "")
+                .replace("  b = GET \"/b\"\n", &format!("  b = GET \"/b\"\n{x}"))
+        );
+        assert_eq!(
+            placed_text(NESTED, "y", after_handle("b")),
+            NESTED.replace(Y, "").replace(
+                "  b = GET \"/b\"\n",
+                &format!("  b = GET \"/b\"\n{}", shallower(Y, "  "))
+            )
+        );
+    }
+
+    /// DIAG-06d, criterion 1: a free comment and a blank line inside the
+    /// braces of a moved `if` travel as they are, one level deeper.
+    #[test]
+    fn diag06d_free_comments_inside_moved_braces_travel() {
+        let source = r#"scenario "Free" {
+  begin = start
+  a = GET "/a"
+  x = if a.status == 200 {
+    inner = GET "/inner"
+
+    // Nothing else is checked here yet.
+  }
+  z = if 1 == 1 {
+    last = GET "/last"
+  }
+}
+"#;
+        let x = "  x = if a.status == 200 {\n    inner = GET \"/inner\"\n\n    // Nothing else is checked here yet.\n  }\n";
+        assert_eq!(
+            placed_text(source, "x", after_handle("last")),
+            source.replace(x, "").replace(
+                "    last = GET \"/last\"\n",
+                &format!("    last = GET \"/last\"\n{}", deeper(x, "  "))
+            )
+        );
+    }
+
+    /// DIAG-06d, criterion 1: the last statement moved out of an `else`;
+    /// the `else` then holds none and is written as the writer writes an
+    /// `if` without one.
+    #[test]
+    fn diag06d_the_last_statement_out_of_an_else() {
+        let source = r#"scenario "Else" {
+  begin = start
+  a = GET "/a"
+  x = if a.status == 200 {
+    inner = GET "/inner"
+  } else {
+    // The other way.
+    other = GET "/other"
+  }
+  b = GET "/b"
+}
+"#;
+        assert_eq!(
+            placed_text(source, "other", after_handle("b")),
+            r#"scenario "Else" {
+  begin = start
+  a = GET "/a"
+  x = if a.status == 200 {
+    inner = GET "/inner"
+  }
+  b = GET "/b"
+  // The other way.
+  other = GET "/other"
+}
+"#
+        );
+    }
+
+    /// DIAG-06d, criterion 1: a request with a body over several lines,
+    /// moved into a branch: every line one level deeper, the body the same.
+    #[test]
+    fn diag06d_a_multi_line_body_moves_one_level_deeper() {
+        let source = r#"scenario "Body" {
+  begin = start
+  a = GET "/a"
+  x = if a.status == 200 {
+    inner = GET "/inner"
+  }
+  b = POST "/b" {
+    body {
+      name: "x",
+      tags: [
+        "one",
+        "two"
+      ]
+    }
+  }
+}
+"#;
+        let b = "  b = POST \"/b\" {\n    body {\n      name: \"x\",\n      tags: [\n        \"one\",\n        \"two\"\n      ]\n    }\n  }\n";
+        assert_eq!(
+            placed_text(source, "b", after_handle("inner")),
+            source.replace(b, "").replace(
+                "    inner = GET \"/inner\"\n",
+                &format!("    inner = GET \"/inner\"\n{}", deeper(b, "  "))
+            )
+        );
+    }
+
+    /// DIAG-06d, criterion 1: a triple-quoted string moved two levels deeper
+    /// keeps its value: it loses its common indentation.
+    #[test]
+    fn diag06d_a_triple_quoted_string_moves_two_levels_deeper() {
+        let source = "scenario \"Text\" {\n  begin = start\n  a = GET \"/a\"\n  x = if a.status == 200 {\n    y = if 1 == 1 {\n      deep = GET \"/deep\"\n    }\n  }\n  note = POST \"/note\" {\n    body {\n      text: \"\"\"\n        First line\n          indented\n\n        after a blank line\n        \"\"\"\n    }\n  }\n}\n";
+        let note = "  note = POST \"/note\" {\n    body {\n      text: \"\"\"\n        First line\n          indented\n\n        after a blank line\n        \"\"\"\n    }\n  }\n";
+        assert_eq!(
+            placed_text(source, "note", first_in("y", Branch::True)),
+            source.replace(note, "").replace(
+                "    y = if 1 == 1 {\n",
+                &format!("    y = if 1 == 1 {{\n{}", deeper(note, "    "))
+            )
+        );
+    }
 }

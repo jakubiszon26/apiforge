@@ -825,45 +825,6 @@ mod tests {
         assert_eq!(steps(&first.graph), ["begin", "c", "a", "b"]);
     }
 
-    // Criterion 8 -------------------------------------------------------------
-
-    const NOT_YET: &str =
-        "Moving a condition with its steps, or a step into another branch, is not possible yet.";
-
-    #[test]
-    fn place_refuses_an_if_with_statements_in_its_braces() {
-        let (project, shop) = shop();
-        let graph = &shop.graph;
-        assert_eq!(
-            refused(graph, &project, "paid", after(graph, "login")),
-            NOT_YET
-        );
-    }
-
-    #[test]
-    fn place_refuses_a_step_of_other_braces() {
-        let (project, shop) = shop();
-        let graph = &shop.graph;
-        assert_eq!(
-            refused(graph, &project, "payment", after(graph, "cart")),
-            NOT_YET
-        );
-        assert_eq!(
-            refused(graph, &project, "address", after(graph, "payment")),
-            NOT_YET
-        );
-        let paid = id(graph, "paid");
-        assert_eq!(
-            refused(
-                graph,
-                &project,
-                "address",
-                Place::First(&paid, Branch::False)
-            ),
-            NOT_YET
-        );
-    }
-
     #[test]
     fn place_moves_an_if_with_empty_braces() {
         let (project, scenario) = small(
@@ -913,5 +874,368 @@ mod tests {
             Some("checkout")
         );
         assert_eq!(pick(&["refund", "order"]).as_deref(), Some("refund"));
+    }
+
+    // DIAG-06d ------------------------------------------------------------------
+
+    /// `a` reads nothing; `x` holds a step, a nested `if` and an `else`;
+    /// `b` and `c` follow; `x_inner_ok` reads only `inner`.
+    const BRACES: &str = r#"scenario "Braces" {
+  begin = start
+  a = GET "/a" {
+    sample 200 { id: 1 }
+  }
+  x = if a.status == 200 {
+    inner = GET "/inner" {
+      sample 200 { id: 2 }
+    }
+    y = if inner.status == 200 {
+      deep = GET "/deep" {
+        sample 200 {}
+      }
+    }
+  } else {
+    other = GET "/other" {
+      sample 200 {}
+    }
+  }
+  b = GET "/b" {
+    sample 200 {}
+  }
+  c = GET "/c" {
+    sample 200 {}
+  }
+}
+"#;
+
+    /// The braces each statement stands in, by handle: the `if` and whether
+    /// it is *Yes*.
+    fn braced(graph: &Graph, handle: &str) -> Option<(String, bool)> {
+        let written = braces(graph);
+        written.get(id(graph, handle).as_str()).map(|(x, branch)| {
+            let x = graph.nodes.iter().find(|node| node.id == *x).unwrap();
+            (x.handle.clone(), *branch == Branch::True)
+        })
+    }
+
+    fn yes(x: &str) -> Option<(String, bool)> {
+        Some((x.to_owned(), true))
+    }
+
+    fn no(x: &str) -> Option<(String, bool)> {
+        Some((x.to_owned(), false))
+    }
+
+    // Criterion 1: an `if` moves with its braces at any depth.
+    #[test]
+    fn place_moves_an_if_with_its_braces() {
+        let (project, scenario) = small(BRACES);
+        let (graph, moved_ids) = place(
+            &scenario.graph,
+            &project,
+            &id(&scenario.graph, "x"),
+            after(&scenario.graph, "b"),
+        )
+        .expect("`x` moves with its braces");
+        assert_eq!(
+            handles(&graph, &moved_ids),
+            ["x", "inner", "y", "deep", "other"]
+        );
+        assert_eq!(
+            steps(&graph),
+            ["begin", "a", "b", "x", "inner", "y", "deep", "other", "c"]
+        );
+        assert_eq!(braced(&graph, "x"), None);
+        assert_eq!(braced(&graph, "inner"), yes("x"));
+        assert_eq!(braced(&graph, "deep"), yes("y"));
+        assert_eq!(braced(&graph, "other"), no("x"));
+        let mut result = scenario.clone();
+        result.graph = graph;
+        reads_back(
+            &project,
+            apiforge_script::Document::Scenario(crossed(&result)),
+        );
+    }
+
+    // Criterion 2 ---------------------------------------------------------------
+
+    /// `step` put at `at`, with the braces `expected` it stands in after.
+    fn across(
+        step: &str,
+        at: impl Fn(&Graph) -> Place<'static>,
+        expected: Option<(String, bool)>,
+    ) -> Graph {
+        let (project, scenario) = small(BRACES);
+        let moved = moved(&project, &scenario, step, at(&scenario.graph));
+        assert_eq!(braced(&moved.graph, step), expected, "`{step}`");
+        moved.graph
+    }
+
+    fn first(graph: &Graph, x: &str, branch: Branch) -> Place<'static> {
+        Place::First(Box::leak(id(graph, x).into_boxed_str()), branch)
+    }
+
+    #[test]
+    fn place_across_braces_into_a_branch() {
+        let graph = across("c", |graph| after(graph, "inner"), yes("x"));
+        assert_eq!(
+            steps(&graph),
+            ["begin", "a", "x", "inner", "c", "y", "deep", "other", "b"]
+        );
+        let graph = across("b", |graph| first(graph, "x", Branch::False), no("x"));
+        assert_eq!(
+            steps(&graph),
+            ["begin", "a", "x", "inner", "y", "deep", "b", "other", "c"]
+        );
+    }
+
+    #[test]
+    fn place_across_braces_out_to_the_main_flow() {
+        let graph = across("other", |graph| after(graph, "b"), None);
+        assert_eq!(
+            steps(&graph),
+            ["begin", "a", "x", "inner", "y", "deep", "b", "other", "c"]
+        );
+        let graph = across("deep", |graph| after(graph, "a"), None);
+        assert_eq!(steps(&graph)[..3], ["begin", "a", "deep"]);
+    }
+
+    #[test]
+    fn place_across_braces_from_yes_to_no_and_into_a_nested_branch() {
+        across("deep", |graph| first(graph, "x", Branch::False), no("x"));
+        across("other", |graph| after(graph, "inner"), yes("x"));
+        let graph = across("c", |graph| first(graph, "y", Branch::True), yes("y"));
+        assert_eq!(
+            steps(&graph),
+            ["begin", "a", "x", "inner", "y", "c", "deep", "other", "b"]
+        );
+    }
+
+    #[test]
+    fn place_across_braces_refuses_an_if_into_its_own_braces() {
+        let (project, scenario) = small(BRACES);
+        let graph = &scenario.graph;
+        for at in [
+            after(graph, "inner"),
+            after(graph, "deep"),
+            first(graph, "y", Branch::False),
+        ] {
+            assert_eq!(
+                refused(graph, &project, "x", at),
+                "A condition cannot go into its own braces."
+            );
+        }
+    }
+
+    #[test]
+    fn place_across_braces_does_not_join_the_cleanup_and_the_main_flow() {
+        let (project, scenario) = small(CLEANUP);
+        // The main flow's place has no statement of the cleanup.
+        let made = id(&scenario.graph, "made");
+        let a = id(&scenario.cleanup, "a");
+        assert!(matches!(
+            place(&scenario.graph, &project, &a, Place::After(&made)),
+            Err(EditError::NodeNotFound)
+        ));
+        assert!(matches!(
+            place(&scenario.cleanup, &project, &a, Place::After(&made)),
+            Err(EditError::NodeNotFound)
+        ));
+    }
+
+    // Criterion 3 ---------------------------------------------------------------
+
+    #[test]
+    fn place_refuses_across_braces_a_reader_above_its_producers_if() {
+        let (project, scenario) = small(
+            r#"scenario "Reader" {
+  begin = start
+  a = GET "/a" {
+    sample 200 {}
+  }
+  x = if a.status == 200 {
+    p = GET "/p" {
+      sample 200 { id: 1 }
+    }
+  }
+  r = GET "/r/{{p.body.id}}" {
+    sample 200 {}
+  }
+}
+"#,
+        );
+        let graph = &scenario.graph;
+        assert_eq!(
+            refused(graph, &project, "r", after(graph, "begin")),
+            "`r` reads `p.body.id`; it stays below `p`."
+        );
+    }
+
+    const PRODUCER: &str = r#"scenario "Producer" {
+  begin = start
+  p = GET "/p" {
+    sample 200 { id: 1 }
+  }
+  v = p.body.id
+  q = GET "/q/{{p.body.id}}" {
+    sample 200 {}
+  }
+  w = GET "/w/{{v}}" {
+    sample 200 {}
+  }
+  ok = assert p.status == 200
+  x = if 1 == 1 {
+    inside = GET "/inside" {
+      sample 200 {}
+    }
+  }
+}
+"#;
+
+    #[test]
+    fn place_refuses_across_braces_a_producer_into_a_branch_below_its_reader() {
+        let (project, scenario) = small(PRODUCER);
+        let graph = &scenario.graph;
+        assert_eq!(
+            refused(graph, &project, "p", after(graph, "inside")),
+            "`q` reads `p.body.id`; it stays below `p`."
+        );
+    }
+
+    #[test]
+    fn place_refuses_across_braces_through_a_value() {
+        let (project, scenario) = small(&PRODUCER.replace(
+            "  q = GET \"/q/{{p.body.id}}\" {\n    sample 200 {}\n  }\n",
+            "",
+        ));
+        let graph = &scenario.graph;
+        // `v`, written directly under `p`, goes with it into the branch.
+        assert_eq!(
+            refused(graph, &project, "p", first(graph, "x", Branch::True)),
+            "`w` reads `v`; it stays below `p`."
+        );
+    }
+
+    #[test]
+    fn place_allows_a_check_written_above_after_a_move_across_braces() {
+        let (project, scenario) = small(
+            r#"scenario "Above" {
+  begin = start
+  ok = assert p.status == 200
+  x = if 1 == 1 {
+    inside = GET "/inside" {
+      sample 200 {}
+    }
+  }
+  p = GET "/p" {
+    sample 200 {}
+  }
+}
+"#,
+        );
+        let moved = moved(&project, &scenario, "p", after(&scenario.graph, "inside"));
+        assert_eq!(braced(&moved.graph, "p"), yes("x"));
+        assert_eq!(
+            braced(&moved.graph, "ok"),
+            None,
+            "the check stays where it is written"
+        );
+    }
+
+    // Criterion 5 ---------------------------------------------------------------
+
+    const DATA: &str = r#"scenario "Data" {
+  begin = start
+  a = GET "/a" {
+    sample 200 { n: 1 }
+  }
+  a_ok = assert a.status == 200
+  limit = 3
+  x = if a.body.n < limit {
+    inside = GET "/inside" {
+      sample 200 {}
+    }
+    in_ok = assert inside.status == 200
+  } else {
+    other = GET "/other" {
+      sample 200 {}
+    }
+  }
+  b = GET "/b" {
+    sample 200 {}
+  }
+}
+"#;
+
+    #[test]
+    fn place_puts_a_check_into_a_branch_from_yes_or_no_only() {
+        let (project, scenario) = small(DATA);
+        let graph = &scenario.graph;
+        let into = moved(
+            &project,
+            &scenario,
+            "a_ok",
+            first(graph, "x", Branch::False),
+        );
+        assert_eq!(braced(&into.graph, "a_ok"), no("x"));
+        let into = moved(&project, &scenario, "a_ok", first(graph, "x", Branch::True));
+        assert_eq!(braced(&into.graph, "a_ok"), yes("x"));
+        for anchor in ["a", "b", "inside"] {
+            assert_eq!(
+                refused(graph, &project, "a_ok", after(graph, anchor)),
+                "Only steps are ordered. A check runs when what it reads exists."
+            );
+        }
+    }
+
+    #[test]
+    fn place_moves_a_check_out_of_its_branch() {
+        let (project, scenario) = small(DATA);
+        let out = moved(&project, &scenario, "in_ok", after(&scenario.graph, "x"));
+        assert_eq!(braced(&out.graph, "in_ok"), None);
+        let order = written(&out.graph);
+        let at = |handle: &str| order.iter().position(|h| *h == handle).unwrap();
+        assert_eq!(
+            at("in_ok"),
+            at("other") + 1,
+            "after the `if`'s braces: {order:?}"
+        );
+        assert!(at("in_ok") < at("b"));
+    }
+
+    #[test]
+    fn place_refuses_a_value_into_a_branch_whose_condition_reads_it() {
+        let (project, scenario) = small(DATA);
+        let graph = &scenario.graph;
+        assert_eq!(
+            refused(graph, &project, "limit", first(graph, "x", Branch::True)),
+            "`x` reads `limit`; it stays outside the braces of `x`."
+        );
+    }
+
+    #[test]
+    fn place_allows_a_check_into_a_branch_above_what_it_reads() {
+        let (project, scenario) = small(
+            r#"scenario "Check" {
+  begin = start
+  x = if 1 == 1 {
+    inside = GET "/inside" {
+      sample 200 {}
+    }
+  }
+  b = GET "/b" {
+    sample 200 {}
+  }
+  b_ok = assert b.status == 200
+}
+"#,
+        );
+        let into = moved(
+            &project,
+            &scenario,
+            "b_ok",
+            first(&scenario.graph, "x", Branch::True),
+        );
+        assert_eq!(braced(&into.graph, "b_ok"), yes("x"));
     }
 }
