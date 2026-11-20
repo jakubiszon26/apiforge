@@ -417,3 +417,69 @@ fn mcp03_criterion_9_a_folder_run_prints_what_it_printed_before_the_shared_execu
     );
     assert!(output.stderr.is_empty(), "{:?}", output.stderr);
 }
+
+/// RUN-01 criterion 8 (#126): under `on_error continue` a blocked step names,
+/// through the command line, the statement whose value is missing, and the
+/// step that only follows it runs.
+#[test]
+fn run01_criterion_8_the_command_line_names_the_missing_statement() {
+    let directory = tempfile::tempdir().unwrap();
+    apiforge_project::prepare_project(directory.path(), &apiforge_core::demos::shop_project())
+        .unwrap();
+    // `a` has no sample, so the simulation gets no answer for it.
+    fs::write(
+        directory
+            .path()
+            .join("scenarios/promotion-and-cart-price.afs"),
+        r#"scenario "RUN-01 criterion 8" {
+  on_error continue
+  begin = start
+  @after(begin)
+  a = GET "/a"
+  @after(a)
+  b = GET "/b/{{a.body.id}}" {
+    sample 200 { ok: true }
+  }
+  @after(b)
+  c = GET "/c" {
+    sample 200 { ok: true }
+  }
+}
+"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_apiforge"))
+        .args(["run", "--folder"])
+        .arg(directory.path())
+        .args([
+            "--scenario",
+            "scenarios/promotion-and-cart-price.afs",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "failed");
+    let step = |handle: &str| {
+        report["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|step| step["handle"] == handle)
+            .unwrap_or_else(|| panic!("no `{handle}` in {report:#}"))
+            .clone()
+    };
+    assert_eq!(step("a")["status"], "error");
+    assert_eq!(step("b")["status"], "blocked");
+    assert_eq!(
+        step("b")["cause"],
+        serde_json::json!({ "kind": "blockedBy", "step": step("a")["nodeId"] })
+    );
+    assert_eq!(step("c")["status"], "passed", "{report:#}");
+}
