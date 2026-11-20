@@ -277,50 +277,27 @@ fn moved_first(
 }
 
 /// The file after a move differs from the file before only by lines that
-/// stand in another place, the same lines in the same order apart from
-/// their leading indentation; nothing is reformatted.
+/// stand in another place and their leading indentation; nothing else of
+/// any line changes. Where they stand is checked by reading the text back
+/// as the document.
 fn only_moved(before: &str, after: &str, name: &str) {
-    let trimmed = |text: &str| -> Vec<String> {
-        text.lines()
+    let lines = |text: &str| -> Vec<String> {
+        // An `else` a move opens or empties is written as the writer
+        // writes it.
+        let mut lines: Vec<String> = text
+            .lines()
             .map(|line| line.trim_start().to_owned())
-            .collect()
+            .filter(|line| line != "} else {")
+            .collect();
+        lines.sort();
+        lines
     };
-    let (a, b) = (trimmed(before), trimmed(after));
-    let mut sorted_a = a.clone();
-    let mut sorted_b = b.clone();
-    sorted_a.sort();
-    sorted_b.sort();
+    assert_ne!(before, after, "{name}: the move changes the file");
     assert_eq!(
-        sorted_a, sorted_b,
-        "{name}: no line changes but its indentation\n--- before\n{before}\n--- after\n{after}"
+        lines(before),
+        lines(after),
+        "{name}: no line changes but its place and its indentation\n--- before\n{before}\n--- after\n{after}"
     );
-    let mut table = vec![vec![0usize; b.len() + 1]; a.len() + 1];
-    for i in (0..a.len()).rev() {
-        for j in (0..b.len()).rev() {
-            table[i][j] = if a[i] == b[j] {
-                table[i + 1][j + 1] + 1
-            } else {
-                table[i + 1][j].max(table[i][j + 1])
-            };
-        }
-    }
-    let (mut i, mut j) = (0, 0);
-    let (mut removed, mut added) = (vec![], vec![]);
-    while i < a.len() && j < b.len() {
-        if a[i] == b[j] {
-            i += 1;
-            j += 1;
-        } else if table[i + 1][j] >= table[i][j + 1] {
-            removed.push(a[i].as_str());
-            i += 1;
-        } else {
-            added.push(b[j].as_str());
-            j += 1;
-        }
-    }
-    removed.extend(a[i..].iter().map(String::as_str));
-    added.extend(b[j..].iter().map(String::as_str));
-    assert_eq!(removed, added, "{name}: only whole lines move");
 }
 
 /// One Undo after an edit gives `before` back byte for byte, one Redo
@@ -360,7 +337,10 @@ enum Move {
 
 /// Moves across braces, of an `if` with its braces and of checks, on the
 /// three files, with the braces the statement stands in after.
-fn move_cases() -> Vec<(fn() -> Opened, Move, Option<(&'static str, Branch)>)> {
+/// A file, a move on it, and the braces the statement stands in after.
+type Case = (fn() -> Opened, Move, Option<(&'static str, Branch)>);
+
+fn move_cases() -> Vec<Case> {
     vec![
         (shop, Move::After("logout", "order"), None),
         (

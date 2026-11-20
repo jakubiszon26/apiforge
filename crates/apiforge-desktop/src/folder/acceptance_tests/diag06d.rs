@@ -14,8 +14,16 @@ const OWN_BRACES: &str = "A condition cannot go into its own braces.";
 const ONLY_STEPS: &str = "Only steps are ordered. A check runs when what it reads exists.";
 const MOVE_OUT: &str = "Move out of the branch";
 
+/// `booking-day` on the board with its checks drawn as cards, so a wire
+/// can be dropped on one and its menu opened.
 fn booking_day() -> (tempfile::TempDir, FolderHarness, String) {
-    rooms("scenarios/booking-day.afs", |_| {})
+    let (project, mut harness, id) = rooms("scenarios/booking-day.afs", |_| {});
+    app(&mut harness).debug_draw_checks();
+    settle(&mut harness);
+    choose(&mut harness, "Tidy up");
+    settle(&mut harness);
+    harness.step();
+    (project, harness, id)
 }
 
 /// The line on which `handle` is written, with its indentation.

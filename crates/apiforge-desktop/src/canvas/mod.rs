@@ -104,6 +104,9 @@ pub enum Command {
         position: Position,
         source: Option<(String, String)>,
     },
+    /// *Move out of the branch* on a check, value, variable or export in
+    /// the braces of an `if` (DIAG-06d): it is written after the `if`.
+    MoveOutOfBranch(String),
     /// A block from *Add step* on the board's bar: a step goes after the
     /// selection, in its braces; with nothing selected, and for any other
     /// block, last (DIAG-06a). The legacy window adds it last.
@@ -334,6 +337,11 @@ pub struct Input<'a> {
     /// The values of the document worth a variable, as
     /// `edit::shared_values` lists them (LAY-25).
     pub shared: &'a [SharedValue],
+    /// The board moves statements across braces (DIAG-06d): the menu of a
+    /// check, value, variable or export in a branch offers *Move out of the
+    /// branch*. The folder window's boards; the legacy window has no such
+    /// move.
+    pub moves: bool,
 }
 
 /// Where a run of the board's document has got to while it is on (LAY-07):
@@ -2232,11 +2240,15 @@ impl Canvas {
             }
             if response.secondary_clicked() && !input.read_only {
                 let source = menu::default_source(input.graph, input.project, &card.id);
-                self.menu = Some(ActionMenu::new(
+                let mut menu = ActionMenu::new(
                     pointer.unwrap_or(rect.center()),
                     camera.to_world(pointer.unwrap_or(rect.center())),
                     source,
-                ));
+                );
+                if input.moves && menu::in_a_branch(input.graph, &card.id) {
+                    menu.out_of_branch = Some(card.id.clone());
+                }
+                self.menu = Some(menu);
             }
             if response.drag_started_by(PointerButton::Primary) && !input.read_only {
                 let ids = if selection.contains(card.id.as_str()) {
@@ -5176,6 +5188,7 @@ mod tests {
                                 arrangement: "",
                                 scenario: None,
                                 shared: &[],
+                                moves: false,
                             },
                         );
                     });
@@ -5233,6 +5246,7 @@ mod tests {
                                 arrangement: "",
                                 scenario: None,
                                 shared: &[],
+                                moves: false,
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =
@@ -5318,6 +5332,7 @@ mod tests {
                             arrangement: "",
                             scenario: None,
                             shared: &[],
+                            moves: false,
                         };
                         let room = canvas.header_room(ui, &input);
                         input.header_leading = Some(vec2(200.0, theme::CONTROL_HEIGHT));

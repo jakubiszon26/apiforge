@@ -2402,6 +2402,7 @@ impl App {
                 arrangement: "",
                 scenario: None,
                 shared: &[],
+                moves: false,
             };
             self.canvas.show(ui, &input)
         };
@@ -2471,6 +2472,8 @@ impl App {
                     self.with_board(|board| board.add_node(block, component, position, source));
                 self.apply_edit(result);
             }
+            // The legacy window has no moves across braces (DIAG-06d).
+            Command::MoveOutOfBranch(_) => {}
             // The legacy window keeps adding last (DIAG-06a, criterion 9).
             Command::AddStep {
                 block,

@@ -2,9 +2,9 @@
 //! dropped on a step of the same braces moves that step to directly after
 //! it, with the checks that read only it; a move with a cycle is refused in
 //! the board's banner; *Add step* on the bar puts the new step after the
-//! selection; *Delete* on an ordering line is refused; and a wire dropped on
-//! an `if` with statements, or on a step of other braces, is refused until
-//! DIAG-06d. On `shop-30` in the demo shop and on the room project, through
+//! selection; and *Delete* on an ordering line is refused. Moves across
+//! braces and of an `if` with its braces are DIAG-06d's (`diag06d.rs`). On
+//! `shop-30` in the demo shop and on the room project, through
 //! the gestures a person makes: a wire carried from a socket found by its
 //! name to the step's order socket.
 use super::diag07::{board, empty_point};

@@ -5,15 +5,18 @@
 //! braces and the checks and values written under it, in the braces `a`
 //! stands in — or first in the braces of a branch of an `if`. The step goes
 //! there with the checks, values and variables written directly under it
-//! that read it and no other step; its old neighbours join. The result is a
-//! graph whose nodes are in the new written order and whose ordering edges
-//! are one chain per braces ([`crate::chain::chain`]).
+//! that read it and no other step, and an `if` with every statement of its
+//! braces at any depth (DIAG-06d); its old neighbours join. A place in
+//! other braces puts the step in those braces: into a branch, out of one,
+//! from *Yes* to *No*. A check, value, variable or export is put into a
+//! branch only from *Yes* or *No*, and moved out of its branch to after the
+//! `if`. The result is a graph whose nodes are in the new written order and
+//! whose ordering edges are one chain per braces ([`crate::chain::chain`]).
 //!
 //! A move is refused, naming the reader, what it reads and the step it stays
 //! below, exactly when the result has a cycle through ordering and values.
 //! Where a check or a value is written is no reason: data statements stand
-//! anywhere in their block. Until DIAG-06d a step moves only inside its own
-//! braces, and an `if` with statements in its braces does not move.
+//! anywhere in their block. An `if` does not go into its own braces.
 use super::{
     EditError,
     delete::{follows_what_it_reads, reads, taken_along},
@@ -32,17 +35,18 @@ use std::collections::{HashMap, HashSet};
 pub enum Place<'a> {
     /// Directly after the step `a`, its braces and the checks and values
     /// written under it, in the braces `a` stands in: what a wire from
-    /// `a`'s *Next* says.
+    /// `a`'s *Next* says. For a check, value, variable or export, `a` is the
+    /// `if` whose braces hold it: *Move out of the branch*.
     After(&'a str),
     /// First in the braces of the branch of an `if`: what a wire from its
     /// *Yes* or *No* says.
     First(&'a str, Branch),
 }
 
-/// `graph` with the step `step` put at `at`, with the statements that move
-/// with it, or the refusal the board shows. The node identifiers of what
-/// moved, the step first, are returned beside the graph, so that the text
-/// moves those statements' lines and no others.
+/// `graph` with the statement `step` put at `at`, with the statements that
+/// move with it, or the refusal the board shows. The node identifiers of
+/// what moved, the statement first, are returned beside the graph, so that
+/// the text moves those statements' lines and no others.
 pub fn place(
     graph: &Graph,
     project: &Project,
@@ -53,9 +57,6 @@ pub fn place(
     let node = find(step).ok_or(EditError::NodeNotFound)?;
     if node.kind == NodeKind::Start {
         return Err(EditError::StartHasPredecessor);
-    }
-    if !is_step(node.kind) {
-        return Err(EditError::NodeNotFound);
     }
     let anchor = match at {
         Place::After(anchor) | Place::First(anchor, _) => anchor,
@@ -69,42 +70,54 @@ pub fn place(
     }
     let written = braces(graph);
     let own = written.get(step).copied();
+    // A check, value, variable or export is not ordered: it goes into a
+    // branch from *Yes* or *No*, or out of its branch to after the `if`.
+    if !is_step(node.kind) {
+        let out_of_its_branch =
+            matches!(at, Place::After(x) if own.is_some_and(|(parent, _)| parent == x));
+        if !out_of_its_branch && !matches!(at, Place::First(..)) {
+            return Err(EditError::OnlyStepsOrdered);
+        }
+    }
+    if inside(&written, anchor, step) {
+        return Err(EditError::IntoOwnBraces);
+    }
     let target = match at {
         Place::After(anchor) => written.get(anchor).copied(),
         Place::First(x, branch) => Some((x, branch)),
     };
-    // Until DIAG-06d: an `if` moves only with empty braces, and a step only
-    // inside the braces it stands in.
-    if node.kind == NodeKind::If
-        && graph
-            .nodes
-            .iter()
-            .any(|other| inside(&written, &other.id, step))
-        || own != target
-    {
-        return Err(EditError::NotMovableYet);
-    }
 
-    // What goes with the step: the checks, values and variables written
-    // directly under it that read it and no other step.
-    let index = graph
+    // What goes with it: an `if`'s braces at any depth, and the checks,
+    // values and variables written directly under it that read it and no
+    // other step.
+    let mut with: HashMap<&str, Vec<&str>> = graph
         .nodes
         .iter()
-        .position(|node| node.id == step)
-        .expect("the step is in the graph");
-    let under: HashSet<&str> = graph.nodes[index + 1..]
-        .iter()
-        .take_while(|node| node.kind.is_data() && written.get(node.id.as_str()).copied() == own)
-        .filter(|node| follows_what_it_reads(node.kind))
-        .map(|node| node.id.as_str())
+        .filter(|node| node.id == step || inside(&written, &node.id, step))
+        .map(|node| (node.id.as_str(), vec![]))
         .collect();
-    let mut with: HashMap<&str, Vec<&str>> = HashMap::from([(step, vec![])]);
-    taken_along(
-        graph,
-        &mut with,
-        |node| under.contains(node.id.as_str()),
-        &constants(graph),
-    );
+    if is_step(node.kind) {
+        let end = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| with.contains_key(node.id.as_str()))
+            .map(|(index, _)| index)
+            .max()
+            .expect("the step is in the graph");
+        let under: HashSet<&str> = graph.nodes[end + 1..]
+            .iter()
+            .take_while(|node| node.kind.is_data() && written.get(node.id.as_str()).copied() == own)
+            .filter(|node| follows_what_it_reads(node.kind))
+            .map(|node| node.id.as_str())
+            .collect();
+        taken_along(
+            graph,
+            &mut with,
+            |node| under.contains(node.id.as_str()),
+            &constants(graph),
+        );
+    }
     let moving: Vec<&Node> = graph
         .nodes
         .iter()
@@ -115,6 +128,24 @@ pub fn place(
         .iter()
         .filter(|node| !with.contains_key(node.id.as_str()))
         .collect();
+    // The braces after the move: the statement and what is written under
+    // it stand in the place's braces; what stands in an `if`'s braces stays
+    // in them.
+    let mut placed = written.clone();
+    for node in &moving {
+        let id = node.id.as_str();
+        if inside(&written, id, step) {
+            continue;
+        }
+        match target {
+            Some(braces) => {
+                placed.insert(id, braces);
+            }
+            None => {
+                placed.remove(id);
+            }
+        }
+    }
 
     // Where it goes among the rest.
     let at_index = match at {
@@ -134,7 +165,7 @@ pub fn place(
             let mut end = last_inside + 1;
             while end < rest.len()
                 && rest[end].kind.is_data()
-                && written.get(rest[end].id.as_str()).copied() == own
+                && written.get(rest[end].id.as_str()).copied() == target
             {
                 end += 1;
             }
@@ -172,7 +203,7 @@ pub fn place(
         .chain(&rest[at_index..])
         .map(|node| (*node).clone())
         .collect();
-    let result = chain(&ordered, &written);
+    let result = chain(&ordered, &placed);
     if has_cycle(&result) {
         return Err(EditError::PlaceRefused(cycle(&result, project)));
     }
@@ -235,9 +266,11 @@ fn constants(graph: &Graph) -> HashSet<&str> {
 /// step, in written order, that reads something which depends on it, what
 /// it reads, and the step that something comes from. A check or a value is
 /// named only when no step is: it may stand anywhere in its block, so its
-/// place is never the reason.
+/// place is never the reason. What an `if` reads cannot stand in its own
+/// braces (DIAG-06d).
 fn cycle(graph: &Graph, project: &Project) -> String {
     let index = dependency_index(graph);
+    let written = braces(graph);
     let handles: HashMap<&str, &Node> = graph
         .nodes
         .iter()
@@ -298,6 +331,12 @@ fn cycle(graph: &Graph, project: &Project) -> String {
                     project,
                     &ValueRef::new(reference.node_id, reference.port, reference.path),
                 );
+                if inside(&written, &read.id, &reader.id) {
+                    return format!(
+                        "`{}` reads `{value}`; it stays outside the braces of `{}`.",
+                        reader.handle, reader.handle
+                    );
+                }
                 if let Some(below) = below {
                     return format!(
                         "`{}` reads `{value}`; it stays below `{below}`.",

@@ -219,13 +219,28 @@ struct Edit<'s, 'd> {
     ids: HashMap<&'d str, &'d str>,
     /// Statements left where they are written, by identifier.
     kept: HashMap<&'d str, (&'s Statement, Key<'d>)>,
-    /// Statements whose place among the statements of their braces changed,
-    /// by identifier, with their lines as the author wrote them.
-    moved: HashMap<&'d str, (&'s Statement, Key<'d>, String)>,
+    /// Statements whose place changed, by identifier: among the statements
+    /// of their braces, or into other braces (DIAG-06d).
+    moved: HashMap<&'d str, Moved<'s, 'd>>,
+    /// The blocks a move moved, by identifier.
+    hint: HashSet<String>,
     blocks: HashMap<Key<'d>, Block>,
     missing: HashMap<Key<'d>, Missing>,
     /// Replacements, as `(range, order, text)`; an insertion has an empty range.
     edits: Vec<(Range<usize>, usize, String)>,
+}
+
+/// A statement whose place changed: its lines as the author wrote them,
+/// written again in its new braces.
+struct Moved<'s, 'd> {
+    statement: &'s Statement,
+    /// The braces it was written in and the braces it is written in now.
+    from: Key<'d>,
+    to: Key<'d>,
+    lines: String,
+    /// The indentation of its first line, which the braces it enters
+    /// replace.
+    indent: String,
 }
 
 /// `hint` names the blocks a move moved: where the order of the statements
@@ -255,6 +270,7 @@ fn edited(
         ids,
         kept: HashMap::new(),
         moved: HashMap::new(),
+        hint: hint.iter().map(|id| (*id).to_owned()).collect(),
         blocks: HashMap::new(),
         missing: HashMap::new(),
         edits: vec![],
@@ -329,14 +345,25 @@ impl<'s, 'd> Edit<'s, 'd> {
     fn classify(&mut self, statements: &'s [Statement], key: Key<'d>, cleanup: bool) -> Option<()> {
         for statement in statements {
             let id = self.ids.get(statement.handle.as_str()).copied();
-            let Some(id) = id.filter(|&id| self.stays(id, key, cleanup)) else {
-                // An `if` goes with the statements of its braces; those the
-                // document still has are written again as new ones.
-                let range = self.lines(statement.extent.clone());
-                self.replace(range, String::new());
-                continue;
-            };
-            self.kept.insert(id, (statement, key));
+            match id {
+                Some(id) if self.stays(id, key, cleanup) => {
+                    self.kept.insert(id, (statement, key));
+                }
+                // Moved into other braces (DIAG-06d): its lines, and those
+                // of its own braces, are written there as they are.
+                Some(id) if self.hint.contains(id) && self.moves_across(id, cleanup) => {
+                    let to = self.new_key(id, cleanup)?;
+                    self.cut(id, statement, key, to)?;
+                }
+                _ => {
+                    // An `if` goes with the statements of its braces; those
+                    // the document still has are written again as new ones.
+                    let range = self.lines(statement.extent.clone());
+                    self.replace(range, String::new());
+                    continue;
+                }
+            }
+            let id = id?;
             let Form::If {
                 check,
                 then,
@@ -399,9 +426,60 @@ impl<'s, 'd> Edit<'s, 'd> {
         Some(())
     }
 
+    /// Whether the block `id` is moved into other braces of the same graph
+    /// by the edit, as the same kind of block.
+    fn moves_across(&self, id: &str, cleanup: bool) -> bool {
+        let (Some((old, _)), Some((new, in_cleanup))) =
+            (self.old.nodes.get(id), self.new.nodes.get(id))
+        else {
+            return false;
+        };
+        old.kind == new.kind && *in_cleanup == cleanup
+    }
+
+    /// The braces the edited document writes the block `id` in.
+    fn new_key(&self, id: &str, cleanup: bool) -> Option<Key<'d>> {
+        let (_, branches) = self.new.graph(cleanup)?;
+        Some(match branches.parent(id) {
+            None => Key::Top { cleanup },
+            Some((x, branch)) => Key::branch(x, branch),
+        })
+    }
+
+    /// Cuts the lines of a moved statement, which must stand on lines of its
+    /// own, and records them to be written in `to`.
+    fn cut(
+        &mut self,
+        id: &'d str,
+        statement: &'s Statement,
+        from: Key<'d>,
+        to: Key<'d>,
+    ) -> Option<()> {
+        let range = self.lines(statement.extent.clone());
+        let whole = range.start == self.line_start(statement.extent.start)
+            && (range.end == self.text.len() || self.text[..range.end].ends_with('\n'));
+        if !whole {
+            return None;
+        }
+        self.moved.insert(
+            id,
+            Moved {
+                statement,
+                from,
+                to,
+                lines: self.text[range.clone()].to_owned(),
+                indent: self.indent_at(statement.extent.start),
+            },
+        );
+        self.replace(range, String::new());
+        Some(())
+    }
+
     /// Whether the block `id`, written in `key`'s braces, stays there: the
     /// edited document has it, of the same kind, in the same graph, and
-    /// still in those braces.
+    /// still in those braces, as [`Branches`] reads them: an edge from the
+    /// empty branch of an `if` written before a step is not the edge of its
+    /// braces (DIAG-06d).
     fn stays(&self, id: &str, key: Key<'_>, cleanup: bool) -> bool {
         let (Some((old, _)), Some((new, in_cleanup))) =
             (self.old.nodes.get(id), self.new.nodes.get(id))
@@ -410,13 +488,10 @@ impl<'s, 'd> Edit<'s, 'd> {
         };
         old.kind == new.kind
             && *in_cleanup == cleanup
-            && key.braces().is_none_or(|(x, branch)| {
-                self.new.graph(cleanup).is_some_and(|(graph, _)| {
-                    graph.edges.iter().any(|edge| {
-                        edge.source == x && edge.target == id && edge.branch == Some(branch)
-                    })
-                })
-            })
+            && self
+                .new
+                .graph(cleanup)
+                .is_some_and(|(_, branches)| branches.parent(id) == key.braces())
     }
 
     /// The braces of the main flow and of the cleanup.
@@ -542,16 +617,8 @@ impl<'s, 'd> Edit<'s, 'd> {
                 if staying.contains(id) {
                     continue;
                 }
-                let range = self.lines(statement.extent.clone());
-                let whole = range.start == self.line_start(range.start)
-                    && (range.end == self.text.len() || self.text[..range.end].ends_with('\n'));
-                if !whole || range.start != self.line_start(statement.extent.start) {
-                    return None;
-                }
                 self.kept.remove(id);
-                self.moved
-                    .insert(id, (statement, key, self.text[range.clone()].to_owned()));
-                self.replace(range, String::new());
+                self.cut(id, statement, key, key)?;
             }
         }
         Some(())
@@ -606,8 +673,9 @@ impl<'s, 'd> Edit<'s, 'd> {
         enum Step<'d> {
             Kept(Key<'d>, Option<usize>),
             New(Key<'d>, String),
-            /// A moved statement's lines, as the author wrote them.
-            Moved(Key<'d>, String),
+            /// A moved statement's lines, as the author wrote them, and the
+            /// indentation of their first line.
+            Moved(Key<'d>, String, String),
         }
         let mut steps = vec![];
         if let Some((graph, branches)) = self.new.graph(cleanup) {
@@ -616,17 +684,21 @@ impl<'s, 'd> Edit<'s, 'd> {
                     steps.push(Step::Kept(key, self.line_after(statement.extent.end)));
                     continue;
                 }
-                if let Some((statement, key, lines)) = self.moved.get(node.id.as_str()) {
+                if let Some(moved) = self.moved.get(node.id.as_str()) {
                     // Its lines move as they are only when the edit changes
                     // nothing else of it.
                     let (old, _) = self.old.nodes.get(node.id.as_str())?;
                     let unchanged = old.note == node.note
-                        && self.old.own(old, cleanup, *key, statement)?
-                            == self.new.own(node, cleanup, *key, statement)?;
+                        && self.old.own(old, cleanup, moved.from, moved.statement)?
+                            == self.new.own(node, cleanup, moved.to, moved.statement)?;
                     if !unchanged {
                         return None;
                     }
-                    steps.push(Step::Moved(*key, lines.clone()));
+                    steps.push(Step::Moved(
+                        moved.to,
+                        moved.lines.clone(),
+                        moved.indent.clone(),
+                    ));
                     continue;
                 }
                 let key = match branches.parent(&node.id) {
@@ -664,9 +736,17 @@ impl<'s, 'd> Edit<'s, 'd> {
                     self.insert_at(at, text);
                     after.insert(key, Some(at));
                 }
-                Step::Moved(key, lines) => {
+                Step::Moved(key, lines, from) => {
+                    // Only the leading indentation changes, by the depth of
+                    // the braces it enters (DIAG-06d).
+                    if let Some(missing) = self.missing.get_mut(&key) {
+                        let lines = reindented(&lines, &from, &missing.indent)?;
+                        missing.statements.push_str(&lines);
+                        continue;
+                    }
                     let block = self.blocks.get_mut(&key)?;
                     block.filled = true;
+                    let lines = reindented(&lines, &from, &block.indent)?;
                     let at = after.get(&key).copied().unwrap_or(block.open)?;
                     self.insert_at(at, lines);
                     after.insert(key, Some(at));
@@ -792,6 +872,46 @@ impl<'s, 'd> Edit<'s, 'd> {
             _ => range,
         }
     }
+}
+
+/// `lines`, written with their first line indented by `from`, indented by
+/// `to` instead: every line that is not empty gains or loses the one
+/// difference; nothing else of any line changes. `None` when a line does not
+/// start with the indentation it would lose, or the two differ otherwise.
+fn reindented(lines: &str, from: &str, to: &str) -> Option<String> {
+    if from == to {
+        return Some(lines.to_owned());
+    }
+    let empty = |line: &str| line.trim_end_matches(['\n', '\r']).is_empty();
+    if let Some(extra) = to.strip_prefix(from) {
+        return Some(
+            lines
+                .split_inclusive('\n')
+                .map(|line| {
+                    if empty(line) {
+                        line.to_owned()
+                    } else {
+                        format!("{extra}{line}")
+                    }
+                })
+                .collect(),
+        );
+    }
+    let less = from.strip_prefix(to)?;
+    lines
+        .split_inclusive('\n')
+        .map(|line| {
+            if empty(line) {
+                Some(line.to_owned())
+            } else if let Some(rest) = line.strip_prefix(less) {
+                Some(rest.to_owned())
+            } else if line.trim().is_empty() {
+                Some(line.to_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// The statements of `old` that keep their order in `new`, the heaviest such

@@ -248,6 +248,7 @@ impl FolderApp {
                     },
                     scenario: Some(scenario_of(&model)),
                     shared: &shared,
+                    moves: true,
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
@@ -571,6 +572,11 @@ impl FolderApp {
                 position,
                 source,
             } => Some(board.add_node(block, component, position, source)),
+            Command::MoveOutOfBranch(id) => {
+                let placed = board.move_out_of_branch(&id);
+                self.apply_move(document_id, model, cleanup, placed);
+                None
+            }
             // After the selection, in its braces (DIAG-06a).
             Command::AddStep {
                 block,
@@ -651,8 +657,9 @@ impl FolderApp {
                 }
             }
             Command::AddProxy { source, position } => Some(board.add_proxy(source, position)),
-            // A wire of the order between two steps of the board moves the
-            // step it is dropped on (DIAG-06a).
+            // A wire of the order from a step dropped on a statement of the
+            // board moves it (DIAG-06a): into other braces too, and a check
+            // only from *Yes* or *No* (DIAG-06d).
             Command::Connect {
                 source,
                 source_port,
@@ -661,12 +668,11 @@ impl FolderApp {
                 ..
             } if target_input == ORDER_PORT
                 && [ORDER_PORT, TRUE_PORT, FALSE_PORT].contains(&source_port.as_str())
-                && [&source, &target].iter().all(|id| {
-                    graph
-                        .nodes
-                        .iter()
-                        .any(|node| &&node.id == id && apiforge_core::chain::is_step(node.kind))
-                }) =>
+                && graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == source && apiforge_core::chain::is_step(node.kind))
+                && graph.nodes.iter().any(|node| node.id == target) =>
             {
                 let placed = board.place(&source, &source_port, &target);
                 self.apply_move(document_id, model, cleanup, placed);
