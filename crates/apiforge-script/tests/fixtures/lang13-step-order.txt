@@ -3,6 +3,7 @@
 fixtures/scenarios/lay/fan-out.afs: catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 
 fixtures/scenarios/lay/far-value-saved.afs: session catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 
 fixtures/scenarios/lay/far-value.afs: session catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 
+fixtures/scenarios/lay/labels.afs: no_token weight_31 weight_0 no_parcel postcode_symbols postcode_one_digit postcode_short postcode_spaces postcode_empty postcode_null postcode_missing service_unknown service_digits service_foreign service_empty service_null | 
 fixtures/scenarios/lay/order-flow.afs: login products cart order created receipt | removed
 fixtures/scenarios/lay/rooms/components/sign-in.afs: session | 
 fixtures/scenarios/lay/rooms/scenarios/booking-day.afs: token profile team buildings floors rooms equipment policy holidays first hold invite notice booked second calendar | released cancelled

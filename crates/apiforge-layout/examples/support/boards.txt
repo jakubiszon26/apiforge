@@ -221,12 +221,12 @@ card 400 912 280 124 valid_cart under 9
 card 900 698 280 142 address
 card 1280 698 280 214 checkout
 card 1660 698 280 190 order
-card 0 1500 280 94 paid
-card 400 1500 280 166 payment
-card 900 1500 280 166 receipt
-card 0 1618 280 96 not_created under 14
-card 1280 1500 280 166 refund
-card 1660 1500 280 118 logout
+card 0 1520 280 94 paid
+card 400 1520 280 166 payment
+card 900 1520 280 166 receipt
+card 1280 1520 280 166 refund
+card 1660 1520 280 118 logout
+card 0 1638 280 96 not_created under 14
 wire 0 top 140 1 top 140
 wire 1 top 140 2 top 140
 wire 2 top 140 5 top 140
@@ -240,10 +240,11 @@ wire 13 top 140 14 top 140
 wire 14 top 70 15 top 140
 wire 14 top 70 16 top 140
 wire 15 top 140 16 top 140
-wire 14 bottom 210 17 top 140
-wire 16 top 140 18 top 140
-wire 14 top 210 18 top 140
-wire 18 top 140 19 top 140
+wire 14 top 70 17 top 140
+wire 16 top 140 17 top 140
+wire 14 top 70 18 top 140
+wire 17 top 140 18 top 140
+wire 14 bottom 210 19 top 140
 wire 1 right 98 2 left 74
 wire 2 right 122 3 left 52
 wire 2 right 122 4 left 52
@@ -275,9 +276,9 @@ wire 13 right 122 15 left 98
 wire 13 right 122 16 left 51
 wire 15 right 122 16 left 51
 wire 1 right 98 16 left 74
-wire 13 right 122 18 left 51
+wire 13 right 122 17 left 51
+wire 1 right 98 17 left 74
 wire 1 right 98 18 left 74
-wire 1 right 98 19 left 74
 mark 1948 20 72 24
 mark 1948 718 72 24
 end
@@ -304,14 +305,14 @@ card 1380 956 280 104 checkout_total under 17
 card 1380 1084 280 96 checkout_status under 18
 card 1380 1204 280 96 checkout_created under 19
 card 1780 718 280 190 order
-card 0 1520 280 94 paid
-card 440 1520 280 166 payment
-card 980 1520 280 166 receipt
-card 980 1710 280 104 receipt_total under 24
-card 0 1638 280 96 not_created under 22
-card 1380 1520 280 166 refund
-card 1380 1710 280 104 refund_amount under 27
-card 1780 1520 280 118 logout
+card 0 1560 280 94 paid
+card 440 1560 280 166 payment
+card 980 1560 280 166 receipt
+card 980 1750 280 104 receipt_total under 24
+card 1380 1560 280 166 refund
+card 1380 1750 280 104 refund_amount under 26
+card 1780 1560 280 118 logout
+card 0 1678 280 96 not_created under 22
 wire 0 top 140 1 top 140
 wire 1 top 140 4 top 140
 wire 4 top 140 8 top 140
@@ -326,10 +327,12 @@ wire 22 top 70 23 top 140
 wire 22 top 70 24 top 140
 wire 23 top 140 24 top 140
 wire 22 top 70 25 top 140
-wire 22 bottom 210 26 top 140
-wire 24 top 140 27 top 140
-wire 22 top 210 27 top 140
-wire 27 top 140 29 top 140
+wire 22 top 70 26 top 140
+wire 24 top 140 26 top 140
+wire 22 top 70 27 top 140
+wire 22 top 70 28 top 140
+wire 26 top 140 28 top 140
+wire 22 bottom 210 29 top 140
 wire 1 right 122 2 left 52
 wire 1 right 98 3 left 52
 wire 1 right 98 4 left 74
@@ -373,11 +376,11 @@ wire 23 right 122 24 left 51
 wire 1 right 98 24 left 74
 wire 24 right 98 25 left 46
 wire 11 right 122 25 left 66
-wire 21 right 122 27 left 51
-wire 1 right 98 27 left 74
-wire 27 right 98 28 left 46
-wire 10 right 56 28 left 66
-wire 1 right 98 29 left 74
+wire 21 right 122 26 left 51
+wire 1 right 98 26 left 74
+wire 26 right 98 27 left 46
+wire 10 right 56 27 left 66
+wire 1 right 98 28 left 74
 mark 2068 20 72 24
 mark 2068 738 72 24
 end
@@ -396,12 +399,12 @@ card 400 1932 280 472 valid_cart under 9
 card 900 1484 280 424 address
 card 1280 1484 280 424 checkout
 card 1660 1484 280 476 order
-card 0 3148 280 316 paid
-card 400 3148 280 424 payment
-card 900 3148 280 424 receipt
-card 0 3488 280 316 not_created under 14
-card 1280 3148 280 424 refund
-card 1660 3148 280 424 logout
+card 0 3168 280 316 paid
+card 400 3168 280 424 payment
+card 900 3168 280 424 receipt
+card 1280 3168 280 424 refund
+card 1660 3168 280 424 logout
+card 0 3508 280 316 not_created under 14
 wire 0 top 140 1 top 140
 wire 1 top 140 2 top 140
 wire 2 top 140 5 top 140
@@ -415,10 +418,11 @@ wire 13 top 140 14 top 140
 wire 14 top 70 15 top 140
 wire 14 top 70 16 top 140
 wire 15 top 140 16 top 140
-wire 14 bottom 210 17 top 140
-wire 16 top 140 18 top 140
-wire 14 top 210 18 top 140
-wire 18 top 140 19 top 140
+wire 14 top 70 17 top 140
+wire 16 top 140 17 top 140
+wire 14 top 70 18 top 140
+wire 17 top 140 18 top 140
+wire 14 bottom 210 19 top 140
 wire 1 right 208 2 left 170
 wire 2 right 312 3 left 118
 wire 2 right 312 4 left 118
@@ -450,9 +454,9 @@ wire 13 right 312 15 left 222
 wire 13 right 312 16 left 118
 wire 15 right 260 16 left 118
 wire 1 right 208 16 left 170
-wire 13 right 312 18 left 118
+wire 13 right 312 17 left 118
+wire 1 right 208 17 left 170
 wire 1 right 208 18 left 170
-wire 1 right 208 19 left 170
 mark 1948 20 72 24
 mark 1948 1504 72 24
 end
@@ -479,14 +483,14 @@ card 1380 1952 280 316 checkout_total under 17
 card 1380 2292 280 316 checkout_status under 18
 card 1380 2632 280 316 checkout_created under 19
 card 1780 1504 280 476 order
-card 0 3168 280 316 paid
-card 440 3168 280 424 payment
-card 960 3168 280 424 receipt
-card 960 3616 280 316 receipt_total under 24
-card 0 3508 280 316 not_created under 22
-card 1380 3168 280 424 refund
-card 1380 3616 280 316 refund_amount under 27
-card 1780 3168 280 424 logout
+card 0 3208 280 316 paid
+card 440 3208 280 424 payment
+card 960 3208 280 424 receipt
+card 960 3656 280 316 receipt_total under 24
+card 1380 3208 280 424 refund
+card 1380 3656 280 316 refund_amount under 26
+card 1780 3208 280 424 logout
+card 0 3548 280 316 not_created under 22
 wire 0 top 140 1 top 140
 wire 1 top 140 4 top 140
 wire 4 top 140 8 top 140
@@ -501,10 +505,12 @@ wire 22 top 70 23 top 140
 wire 22 top 70 24 top 140
 wire 23 top 140 24 top 140
 wire 22 top 70 25 top 140
-wire 22 bottom 210 26 top 140
-wire 24 top 140 27 top 140
-wire 22 top 210 27 top 140
-wire 27 top 140 29 top 140
+wire 22 top 70 26 top 140
+wire 24 top 140 26 top 140
+wire 22 top 70 27 top 140
+wire 22 top 70 28 top 140
+wire 26 top 140 28 top 140
+wire 22 bottom 210 29 top 140
 wire 1 right 236 2 left 118
 wire 1 right 208 3 left 118
 wire 1 right 208 4 left 170
@@ -548,11 +554,11 @@ wire 23 right 260 24 left 118
 wire 1 right 208 24 left 170
 wire 24 right 260 25 left 118
 wire 11 right 260 25 left 170
-wire 21 right 312 27 left 118
-wire 1 right 208 27 left 170
-wire 27 right 260 28 left 118
-wire 10 right 208 28 left 170
-wire 1 right 208 29 left 170
+wire 21 right 312 26 left 118
+wire 1 right 208 26 left 170
+wire 26 right 260 27 left 118
+wire 10 right 208 27 left 170
+wire 1 right 208 28 left 170
 mark 2068 20 72 24
 mark 2068 1524 72 24
 end
@@ -571,16 +577,17 @@ card 380 792 280 124 valid_cart under 9
 card 880 578 280 142 address
 card 1300 578 280 214 checkout
 card 1840 578 280 190 order
-card 0 1240 280 94 paid
-card 380 1240 280 166 payment
-card 880 1240 280 166 receipt
-card 0 1358 280 96 not_created under 14
-card 1300 1240 280 166 refund
-card 1840 1240 280 118 logout
+card 0 1260 280 94 paid
+card 380 1260 280 166 payment
+card 880 1260 280 166 receipt
+card 1300 1260 280 166 refund
+card 1840 1260 280 118 logout
+card 0 1378 280 96 not_created under 14
 wire 14 top 70 15 top 140
 wire 14 top 70 16 top 140
-wire 14 bottom 210 17 top 140
-wire 14 top 210 18 top 140
+wire 14 top 70 17 top 140
+wire 14 top 70 18 top 140
+wire 14 bottom 210 19 top 140
 wire 5 right 98 6 left 74
 wire 10 right 66 12 left 98
 wire 10 right 66 13 left 98
@@ -611,19 +618,21 @@ card 1380 816 280 104 checkout_total under 17
 card 1380 944 280 96 checkout_status under 18
 card 1380 1064 280 96 checkout_created under 19
 card 1920 578 280 190 order
-card 0 1260 280 94 paid
-card 380 1260 280 166 payment
-card 880 1260 280 166 receipt
-card 880 1450 280 104 receipt_total under 24
-card 0 1378 280 96 not_created under 22
-card 1380 1260 280 166 refund
-card 1380 1450 280 104 refund_amount under 27
-card 1920 1260 280 118 logout
+card 0 1300 280 94 paid
+card 380 1300 280 166 payment
+card 880 1300 280 166 receipt
+card 880 1490 280 104 receipt_total under 24
+card 1380 1300 280 166 refund
+card 1380 1490 280 104 refund_amount under 26
+card 1920 1300 280 118 logout
+card 0 1418 280 96 not_created under 22
 wire 22 top 70 23 top 140
 wire 22 top 70 24 top 140
 wire 22 top 70 25 top 140
-wire 22 bottom 210 26 top 140
-wire 22 top 210 27 top 140
+wire 22 top 70 26 top 140
+wire 22 top 70 27 top 140
+wire 22 top 70 28 top 140
+wire 22 bottom 210 29 top 140
 wire 8 right 98 9 left 74
 wire 15 right 66 17 left 98
 wire 15 right 66 21 left 98
