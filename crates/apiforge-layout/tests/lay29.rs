@@ -27,6 +27,16 @@ fn wire(from: (usize, Side, f32), to: (usize, Side, f32)) -> Wire {
     )
 }
 
+/// A wire line of the board file that ends in `chain` is a line of the
+/// chain of steps (LAY-45).
+fn chained(wire: Wire, words: &[&str]) -> Wire {
+    if words.get(7) == Some(&"chain") {
+        wire.chained()
+    } else {
+        wire
+    }
+}
+
 /// A board of `examples/support/boards.txt`: its name, its cards and chips,
 /// and its wires.
 struct Board {
@@ -59,9 +69,12 @@ fn reference() -> Vec<Board> {
                 number(3),
                 number(4),
             )),
-            Some("wire") => boards.last_mut().expect("a board").wires.push(wire(
-                (number(1) as usize, side(words[2]), number(3)),
-                (number(4) as usize, side(words[5]), number(6)),
+            Some("wire") => boards.last_mut().expect("a board").wires.push(chained(
+                wire(
+                    (number(1) as usize, side(words[2]), number(3)),
+                    (number(4) as usize, side(words[5]), number(6)),
+                ),
+                &words,
             )),
             _ => {}
         }

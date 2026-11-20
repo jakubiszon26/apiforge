@@ -29,6 +29,16 @@ fn wire(from: (usize, Side, f32), to: (usize, Side, f32)) -> Wire {
     )
 }
 
+/// A wire line of the board file that ends in `chain` is a line of the
+/// chain of steps (LAY-45).
+fn chained(wire: Wire, words: &[&str]) -> Wire {
+    if words.get(7) == Some(&"chain") {
+        wire.chained()
+    } else {
+        wire
+    }
+}
+
 fn unordered() -> Routing {
     Routing {
         ordered: false,
@@ -49,6 +59,32 @@ fn crossings(routes: &[Route]) -> usize {
         }
     }
     count
+}
+
+/// The crossings of two data lines, and of a line of the chain of steps
+/// with a data line (LAY-45). A branch of an `if`, which leaves its card
+/// from the top or the bottom edge, is neither.
+fn kinds(routes: &[Route], wires: &[Wire]) -> (usize, usize) {
+    let data = |wire: &Wire| !wire.chain && !matches!(wire.from.side, Side::Top | Side::Bottom);
+    let (mut both, mut chained) = (0, 0);
+    for (index, a) in routes.iter().enumerate() {
+        for (offset, b) in routes[index + 1..].iter().enumerate() {
+            let (first, second) = (&wires[index], &wires[index + 1 + offset]);
+            let kind = if data(first) && data(second) {
+                &mut both
+            } else if (first.chain && data(second)) || (data(first) && second.chain) {
+                &mut chained
+            } else {
+                continue;
+            };
+            for (a1, a2) in a.segments() {
+                for (b1, b2) in b.segments() {
+                    *kind += usize::from(crossing(a1, a2, b1, b2).is_some());
+                }
+            }
+        }
+    }
+    (both, chained)
 }
 
 /// Pairs of parallel segments of two lines that run within `near` px of each
@@ -112,9 +148,12 @@ fn reference() -> Vec<Board> {
                 number(3),
                 number(4),
             )),
-            Some("wire") => boards.last_mut().expect("a board").wires.push(wire(
-                (number(1) as usize, side(words[2]), number(3)),
-                (number(4) as usize, side(words[5]), number(6)),
+            Some("wire") => boards.last_mut().expect("a board").wires.push(chained(
+                wire(
+                    (number(1) as usize, side(words[2]), number(3)),
+                    (number(4) as usize, side(words[5]), number(6)),
+                ),
+                &words,
             )),
             _ => {}
         }
@@ -257,11 +296,15 @@ fn lay28_criterion_2_the_order_keeps_what_the_router_promised() {
 
 /// Criterion 3: the reference boards cross less. The board the window shows
 /// for `shop-30` with every wire drawn, with and without its checks; the
-/// boards with chips and the checks drawn; and all 24 together.
+/// boards with chips and the checks drawn; and all 24 together. Since
+/// LAY-45 the chain of steps runs side to side and what one board holds is
+/// its data lines' crossings with each other, no more than before LAY-45
+/// (the owner's answer A on #468, 2026-11-20); the crossings of the chain
+/// with a data line are counted by `quality`, not limited.
 #[test]
 fn lay28_criterion_3_the_reference_boards_cross_less() {
     let boards = reference();
-    let measured: Vec<(String, usize, usize, usize)> = boards
+    let measured: Vec<(String, usize, usize, usize, usize)> = boards
         .iter()
         .map(|board| {
             let routes = route_grouped(
@@ -289,39 +332,36 @@ fn lay28_criterion_3_the_reference_boards_cross_less() {
                 crossings(&routes),
                 crossings(&before),
                 board.wires.len(),
+                kinds(&routes, &board.wires).0,
             )
         })
         .collect();
-    let of = |name: &str| -> usize {
+    let data = |name: &str| -> usize {
         measured
             .iter()
             .find(|(board, ..)| board.starts_with(name))
             .unwrap_or_else(|| panic!("a board {name}"))
-            .1
+            .4
     };
-    // What `quality` printed before this ticket, with the inputs of #349:
-    // 82, 123, 17, 7, 38 and 130. Since LAY-31 a step and the cards hung
-    // under it are one group: with every wire drawn the group's own lines
-    // run inside it, 24 px apart, where they cross each other and the lines
-    // into the cards under them (75, 105 and 90 before), and the boards
-    // with chips have no line inside a group at all.
-    // LANG-13 (#386) writes shop-30's ordering wires step to step, never from
-    // a check, and puts `refund` and `logout` in `paid`'s braces: with every
-    // wire drawn its baseline is 93 and 143 (owner, 2026-11-20). LAY-45
-    // (#468) carries the criterion to get back to 76 and 116.
+    // The data lines' crossings with each other before LAY-45, on `main`
+    // after LANG-13 (#386). Before LAY-45 one total was held: 76 and 116 on
+    // `shop-30` with every wire (93 and 143 after LANG-13), 10, 5 and 26 on
+    // the boards with chips, 105 on `fan-out` with every wire. `fan-out`
+    // with every wire and its checks drawn is held on #468: its data lines
+    // crossed 37 times while the rails above the rows steered them and 46
+    // without (LAY-45 `lay45_criterion_8_*`).
     for (name, most) in [
-        ("shop-30 compact collapsed 30 all", 93),
-        ("shop-30 compact expanded 30 all", 143),
-        ("shop-30 compact expanded 30 chips", 10),
-        ("fan-out compact expanded 26 chips", 5),
-        ("shop-50 compact expanded 56 chips", 26),
-        ("fan-out compact expanded 26 all", 105),
+        ("shop-30 compact collapsed 30 all", 54),
+        ("shop-30 compact expanded 30 all", 77),
+        ("shop-30 compact expanded 30 chips", 0),
+        ("fan-out compact expanded 26 chips", 0),
+        ("shop-50 compact expanded 56 chips", 0),
     ] {
-        assert!(of(name) <= most, "{name}: {} crossings", of(name));
+        assert!(data(name) <= most, "{name}: {} data crossings", data(name));
     }
     let (is, was): (usize, usize) = measured
         .iter()
-        .fold((0, 0), |sum, (_, is, was, _)| (sum.0 + is, sum.1 + was));
+        .fold((0, 0), |sum, (_, is, was, ..)| (sum.0 + is, sum.1 + was));
     assert!(
         is * 100 <= was * 85,
         "all 24 boards: {is} crossings, {was} without the order"

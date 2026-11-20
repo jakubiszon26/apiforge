@@ -4,7 +4,6 @@
 //! them through the editor, which validates every change. Positions being dragged,
 //! wires being drawn and the camera are view state only.
 
-mod after;
 mod collapse;
 mod edge;
 mod layout;
@@ -389,8 +388,9 @@ pub struct HeaderRoom {
 struct Shapes<'a> {
     cards: &'a [Card],
     chips: &'a [Chip],
-    /// The continuation marks beside the rows (LAY-06).
-    marks: &'a [Rect],
+    /// What else Fit shows whole: the chips and the counts at the cards
+    /// (LAY-23).
+    extents: &'a [Rect],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -520,9 +520,6 @@ pub struct Canvas {
     /// The port whose count was clicked: every wire of it is drawn until Esc
     /// or a click on the board (LAY-23).
     shown_port: Option<(String, String)>,
-    /// The hover areas of the last frame's arrows at the badges, on screen,
-    /// by the step they point into (LAY-24).
-    arrow_hits: Vec<(String, Rect)>,
     /// How wires are drawn, from the user's settings.
     pub wire_style: WireStyle,
     /// Whether a crossing is drawn as a bridge, from the user's settings.
@@ -573,9 +570,6 @@ pub struct Canvas {
     tags: Vec<DrawnTag>,
     #[cfg(test)]
     counts: Vec<DrawnCount>,
-    /// The arrows the last frame drew at the badges (LAY-24).
-    #[cfg(test)]
-    arrows: Vec<DrawnArrow>,
     /// The `+ var` marks and the choice at a drop the last frame drew
     /// (LAY-25).
     #[cfg(test)]
@@ -584,9 +578,6 @@ pub struct Canvas {
     offer_rect: Option<Rect>,
     #[cfg(test)]
     statement: Option<String>,
-    /// The continuation marks the last frame drew (LAY-06).
-    #[cfg(test)]
-    marks: Vec<shape::Mark>,
     /// What the last frame gave the router: rectangles and wires.
     #[cfg(test)]
     geometry: (Vec<apiforge_layout::Rect>, Vec<apiforge_layout::Wire>),
@@ -613,10 +604,15 @@ pub(crate) struct DrawnWire {
     pub label: Option<String>,
     /// An ordering wire, which the board draws dashed.
     pub dashed: bool,
+    /// A line of the chain of steps (LAY-45): an ordering wire that is no
+    /// branch of an `if`.
+    pub chain: bool,
     /// The route in board coordinates, empty when it was not drawn.
     pub points: Vec<Pos2>,
     /// The crossings of wires drawn before it, where it draws a bridge.
     pub bridges: usize,
+    /// Where it draws them, on the board (LAY-45).
+    pub bridged_at: Vec<Pos2>,
     /// A wire of a chip, drawn because its chip or input is pointed at or
     /// its reader or source is selected (LAY-23).
     pub revealed: bool,
@@ -626,24 +622,6 @@ pub(crate) struct DrawnWire {
     pub lit: bool,
     /// Drawn at a quarter of its strength while a step is selected.
     pub dimmed: bool,
-}
-
-/// The arrow at a step's badge as the last frame drew it (LAY-24).
-#[cfg(test)]
-#[derive(Clone, Debug)]
-pub(crate) struct DrawnArrow {
-    /// The step it points into.
-    pub target: String,
-    /// The rails it stands for.
-    pub wires: Vec<String>,
-    /// What pointing at it shows: `after quantity_ok`.
-    pub text: String,
-    /// Its box and its hover area, on screen.
-    pub rect: Rect,
-    pub hit: Rect,
-    /// Its rail is drawn.
-    pub lit: bool,
-    pub color: Color32,
 }
 
 /// A chip at a reader as the last frame drew it (LAY-23).
@@ -725,7 +703,6 @@ impl Default for Canvas {
             revealed_router: routing::Router::default(),
             wire_mode: WireMode::All,
             shown_port: None,
-            arrow_hits: Vec::new(),
             wire_style: WireStyle::default(),
             bridges: true,
             density: CardDensity::default(),
@@ -764,7 +741,6 @@ impl Default for Canvas {
             #[cfg(test)]
             counts: Vec::new(),
             #[cfg(test)]
-            arrows: Vec::new(),
             #[cfg(test)]
             var_marks: Vec::new(),
             #[cfg(test)]
@@ -772,7 +748,6 @@ impl Default for Canvas {
             #[cfg(test)]
             statement: None,
             #[cfg(test)]
-            marks: Vec::new(),
             #[cfg(test)]
             geometry: (Vec::new(), Vec::new()),
             #[cfg(test)]
@@ -1010,6 +985,16 @@ impl Canvas {
         self.fit_pending = false;
     }
 
+    /// Zooms to `zoom` about the middle of the board's view, as the zoom
+    /// buttons do.
+    #[cfg(test)]
+    pub(crate) fn debug_zoom_to(&mut self, zoom: f32) {
+        let viewport = self.last_viewport;
+        let center = self.last_focus.unwrap_or(viewport).center();
+        self.zoom_at(viewport, center, zoom / self.camera.zoom);
+        self.fit_pending = false;
+    }
+
     /// Moves the camera by `offset`, as a person drags the board.
     #[cfg(test)]
     pub(crate) fn debug_pan(&mut self, offset: Vec2) {
@@ -1062,6 +1047,22 @@ impl Canvas {
         &self.wires
     }
 
+    /// The sockets of a card's order, on the board: where the line from the
+    /// step before comes in and where the line to the next goes out
+    /// (LAY-45).
+    #[cfg(test)]
+    pub(crate) fn debug_order_sockets(&self, id: &str) -> (Option<Pos2>, Option<Pos2>) {
+        self.cards
+            .iter()
+            .find(|card| card.id == id)
+            .map_or((None, None), |card| {
+                (
+                    card.input_anchor(ORDER_PORT, &[]),
+                    card.output_anchor(ORDER_PORT),
+                )
+            })
+    }
+
     /// The wires selected on the board.
     #[cfg(test)]
     pub(crate) fn debug_selected_wires(&self) -> &[String] {
@@ -1078,12 +1079,6 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_counts(&self) -> &[DrawnCount] {
         &self.counts
-    }
-
-    /// The arrows the last frame drew at the badges (LAY-24).
-    #[cfg(test)]
-    pub(crate) fn debug_arrows(&self) -> &[DrawnArrow] {
-        &self.arrows
     }
 
     /// The `+ var` marks the last frame drew (LAY-25).
@@ -1111,12 +1106,6 @@ impl Canvas {
             .iter()
             .find(|card| card.id == id)
             .and_then(Card::input_tray)
-    }
-
-    /// The continuation marks the last frame drew (LAY-06).
-    #[cfg(test)]
-    pub(crate) fn debug_marks(&self) -> &[shape::Mark] {
-        &self.marks
     }
 
     /// What the last frame gave the router: the rectangles of the cards
@@ -1600,13 +1589,6 @@ impl Canvas {
                 .collect();
         }
 
-        // The row ends of a board in shape D name the next step (LAY-06).
-        let marks = shape::marks(input.graph, &cards);
-        let mark_rects: Vec<Rect> = marks.iter().map(|mark| mark.rect).collect();
-        #[cfg(test)]
-        {
-            self.marks = marks.clone();
-        }
         // An `@after` of a folded check, or of one a step shows under it, is
         // drawn from that step (LAY-11, LAY-30).
         let redrawn: HashMap<String, (String, String)> = folded
@@ -1627,22 +1609,13 @@ impl Canvas {
         };
         let rest_plan = (!chipped.is_empty())
             .then(|| readers::plan(input.graph, input.project, &cards, &rest_wires, &chipped));
-        // An `@after` into the next step is an arrow at the step's badge, in
-        // the same mode as the chips (LAY-24).
-        let after_marks = after::marks(input.graph, input.later, &cards, &rest_wires);
-        // Fit shows the chips, the counts and the arrows whole, the first
-        // column's too.
-        let mut extents = mark_rects.clone();
+        // Fit shows the chips and the counts whole, the first column's too.
+        // The chain of steps is a line between the cards, drawn in both
+        // modes (LAY-45): no arrow at a badge and no mark at a row's end.
+        let mut extents: Vec<Rect> = Vec::new();
         if let Some((tags, counts)) = &rest_plan {
             extents.extend(readers::bounds(tags, counts));
         }
-        // The arrows keep their size on screen: they reach as far as the zoom
-        // Fit would give without them asks, a little smaller for the room
-        // they take.
-        let fit_zoom = shapes(&cards, &chips, &extents)
-            .bounds()
-            .map_or(1.0, |bounds| fit_zoom(overlays.focus, bounds));
-        extents.extend(after::bounds(&after_marks, &cards, fit_zoom * 0.9));
 
         let pasted = std::mem::take(&mut self.pasted_pending);
         if let Some(group) = cards
@@ -1734,12 +1707,6 @@ impl Canvas {
                 *chip = chip.translated(*offset);
             }
         }
-        // A mark goes with the card it is beside while that card is dragged.
-        let marks = if self.drag.is_some() {
-            shape::marks(input.graph, &cards)
-        } else {
-            marks
-        };
 
         let board_painter = painter.with_clip_rect(overlays.board);
         paint::grid(&board_painter, overlays.board, camera);
@@ -1820,9 +1787,8 @@ impl Canvas {
                     && cards[count.card].output_tray().is_some())
             })
             .collect();
-        let mark_screens: Vec<Rect> = marks.iter().map(|mark| camera.rect(mark.rect)).collect();
-        // The chips and the counts keep clear of the cards, their badges, the
-        // marks and the lines drawn at rest (LAY-37). Those lines are routed here, before
+        // The chips and the counts keep clear of the cards, their badges and
+        // the lines drawn at rest (LAY-37). Those lines are routed here, before
         // they are drawn below with the same request, which the router keeps;
         // while a card is dragged they are not waited for.
         let dragging = matches!(self.drag, Some(Drag::Nodes { .. }));
@@ -1830,10 +1796,7 @@ impl Canvas {
             if !dragging && !(shown_tags.is_empty() && shown_counts.is_empty()) {
                 let at_rest: Vec<routing::BoardWire> = board_wires
                     .iter()
-                    .filter(|wire| {
-                        !tagged.contains(wire.id.as_str())
-                            && !after_marks.iter().any(|mark| mark.wires.contains(&wire.id))
-                    })
+                    .filter(|wire| !tagged.contains(wire.id.as_str()))
                     .cloned()
                     .collect();
                 self.router
@@ -1857,9 +1820,8 @@ impl Canvas {
             .iter()
             .flat_map(|card| {
                 let rect = camera.rect(card.rect());
-                [rect, after::corner(rect, camera.zoom)]
+                [rect, paint::badge_corner(rect, camera.zoom)]
             })
-            .chain(mark_screens.iter().copied())
             .collect();
         let clear = readers::Clear {
             boxes: &keep,
@@ -1930,7 +1892,7 @@ impl Canvas {
                 .as_ref()
                 .and_then(|(_, at)| Some((traced.pointed_statement()?, trace::at_pointer(*at)))),
         };
-        let mut revealed: HashSet<String> = tags
+        let revealed: HashSet<String> = tags
             .iter()
             .filter(|tag| {
                 selection.contains(tag.reader.as_str())
@@ -1950,45 +1912,11 @@ impl Canvas {
             })
             .flat_map(|tag| tag.wires.iter().cloned())
             .collect();
-        let (mut revealed_wires, board_wires): (Vec<routing::BoardWire>, Vec<routing::BoardWire>) =
+        let (revealed_wires, board_wires): (Vec<routing::BoardWire>, Vec<routing::BoardWire>) =
             board_wires
                 .into_iter()
                 .filter(|wire| !tagged.contains(wire.id.as_str()) || revealed.contains(&wire.id))
                 .partition(|wire| tagged.contains(wire.id.as_str()));
-        // A rail into the next step comes back while its arrow is pointed at,
-        // while a card at either end is selected and while it is selected
-        // itself; it is routed apart, as a chip's wire is (LAY-24). The
-        // arrows are laid out after the cards, from their badges: the hover
-        // areas are the last frame's.
-        let pointed_arrow = hover.and_then(|pointer| {
-            self.arrow_hits
-                .iter()
-                .find(|(_, hit)| hit.contains(pointer))
-                .map(|(target, _)| target.clone())
-        });
-        let (rails, board_wires): (Vec<routing::BoardWire>, Vec<routing::BoardWire>) = board_wires
-            .into_iter()
-            .partition(|wire| after_marks.iter().any(|mark| mark.wires.contains(&wire.id)));
-        for wire in rails {
-            let shown = after_marks.iter().any(|mark| {
-                let target = cards[mark.target].id.as_str();
-                mark.wires
-                    .iter()
-                    .zip(&mark.sources)
-                    .any(|(id, (drawn_from, named))| {
-                        *id == wire.id
-                            && (selection.contains(target)
-                                || selection.contains(drawn_from.as_str())
-                                || selection.contains(named.as_str())
-                                || pointed_arrow.as_deref() == Some(target)
-                                || self.selected_wires.contains(id))
-                    })
-            });
-            if shown {
-                revealed.insert(wire.id.clone());
-                revealed_wires.push(wire);
-            }
-        }
         let (mut related_blocks, related_wires) = highlights(input.graph, &chips, &selection);
         // The input selected in the strip has no shape on the board: the
         // steps that read it are ringed (UX-31).
@@ -2006,16 +1934,11 @@ impl Canvas {
             _ => HashSet::new(),
         };
         let selected_wires: HashSet<String> = self.selected_wires.iter().cloned().collect();
-        // A continuation mark is drawn under the wires: a wire that passes
-        // it stays whole, and the mark is no obstacle to route around.
-        for mark in &marks {
-            paint::continuation_mark(&board_painter, mark, camera);
-        }
         let mut drawn: Vec<(String, Vec<Pos2>)> = Vec::with_capacity(board_wires.len());
         // The lines at rest, which the wires brought back keep clear of.
         let mut at_rest: Vec<Vec<Pos2>> = Vec::new();
         #[cfg(test)]
-        let mut bridged: HashMap<String, usize> = HashMap::new();
+        let mut bridged: HashMap<String, Vec<Pos2>> = HashMap::new();
         {
             let request = routing::Request {
                 cards: &cards,
@@ -2049,7 +1972,10 @@ impl Canvas {
                 }
                 drawn.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
-                bridged.insert(wire.id.clone(), wire.bridges.len());
+                bridged.insert(
+                    wire.id.clone(),
+                    wire.bridges.iter().map(|(at, _)| *at).collect(),
+                );
             }
         }
         // The wires of chips brought back, over the others and apart from
@@ -2079,7 +2005,10 @@ impl Canvas {
                 );
                 drawn_revealed.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
-                bridged.insert(wire.id.clone(), wire.bridges.len());
+                bridged.insert(
+                    wire.id.clone(),
+                    wire.bridges.iter().map(|(at, _)| *at).collect(),
+                );
             }
             // A rail brought back from a folded check says the check, where
             // no other line drawn passes through the words (LAY-24).
@@ -2187,13 +2116,15 @@ impl Canvas {
                     target: cards[wire.target].id.clone(),
                     label: wire_labels.get(&wire.id).cloned(),
                     dashed: wire.control,
+                    chain: wire.control && wire.branch.is_none(),
                     points: drawn
                         .iter()
                         .chain(&drawn_revealed)
                         .find(|(id, _)| *id == wire.id)
                         .map(|(_, points)| points.clone())
                         .unwrap_or_default(),
-                    bridges: bridged.get(&wire.id).copied().unwrap_or_default(),
+                    bridges: bridged.get(&wire.id).map_or(0, Vec::len),
+                    bridged_at: bridged.get(&wire.id).cloned().unwrap_or_default(),
                     revealed: revealed.contains(&wire.id),
                     label_box: label_boxes.get(&wire.id).copied(),
                     lit: lit.contains(&wire.id),
@@ -2214,8 +2145,6 @@ impl Canvas {
         );
         board_ui.set_clip_rect(overlays.board);
 
-        // Each drawn step's badge, on screen: the arrows point into them.
-        let mut badges: Vec<(String, Rect)> = Vec::new();
         // The switch of a step's own checks, on screen: whether it shows
         // them, and whether it is pointed at (LAY-30).
         let mut switches: Vec<(Rect, bool, bool)> = Vec::new();
@@ -2494,12 +2423,12 @@ impl Canvas {
                     aggregate,
                 )
             };
-            if let Some(badge) = &drawn_card.badge {
-                badges.push((card.id.clone(), badge.rect));
-            }
             for (switch, folds, hovered) in switches.drain(..) {
                 paint::checks_switch(&board_painter, switch, folds, hovered, camera.zoom);
             }
+            // What a card drew is kept for tests only.
+            #[cfg(not(test))]
+            let _ = drawn_card;
             #[cfg(test)]
             {
                 if card.compact.is_some() {
@@ -2526,22 +2455,6 @@ impl Canvas {
                 .map(|(id, at, _)| (id.clone(), *at))
                 .collect();
         }
-
-        self.show_arrows(
-            &mut board_ui,
-            &board_painter,
-            &cards,
-            &after_marks,
-            &badges,
-            camera,
-            ArrowObstacles {
-                boxes: &chip_boxes,
-                marks: &mark_screens,
-                drawn: &drawn,
-            },
-            &revealed,
-            pointed_arrow.as_deref(),
-        );
 
         for chip in &chips {
             let rect = camera.rect(chip.rect());
@@ -2970,87 +2883,6 @@ impl Canvas {
             }
         }
         commands
-    }
-
-    /// Lays out, draws and names the arrows at the badges (LAY-24), lit
-    /// while their rail is drawn, and keeps their hover areas for the next
-    /// frame; a pointer that now meets another arrow asks for that frame.
-    #[allow(clippy::too_many_arguments)]
-    fn show_arrows(
-        &mut self,
-        ui: &mut egui::Ui,
-        painter: &egui::Painter,
-        cards: &[Card],
-        marks: &[after::Mark],
-        badges: &[(String, Rect)],
-        camera: Camera,
-        obstacles: ArrowObstacles<'_>,
-        revealed: &HashSet<String>,
-        pointed: Option<&str>,
-    ) {
-        let mut boxes: Vec<Rect> = cards.iter().map(|card| camera.rect(card.rect())).collect();
-        boxes.extend(badges.iter().map(|(_, badge)| *badge));
-        boxes.extend(obstacles.boxes);
-        boxes.extend(obstacles.marks);
-        let lines: Vec<Vec<Pos2>> = obstacles
-            .drawn
-            .iter()
-            .map(|(_, points)| points.iter().map(|at| camera.to_screen(*at)).collect())
-            .collect();
-        let clip = ui.clip_rect();
-        let hover = ui
-            .input(|state| state.pointer.hover_pos())
-            .filter(|pointer| clip.contains(*pointer));
-        #[cfg(test)]
-        self.arrows.clear();
-        self.arrow_hits.clear();
-        for mark in marks {
-            let card = &cards[mark.target];
-            let Some((_, badge)) = badges.iter().find(|(id, _)| *id == card.id) else {
-                continue;
-            };
-            let laid = after::lay(
-                camera.rect(card.rect()),
-                Some(*badge),
-                camera.zoom,
-                &boxes,
-                &lines,
-            );
-            let lit = mark.wires.iter().any(|wire| revealed.contains(wire));
-            after::paint(painter, &laid, lit);
-            if laid.hit.intersects(clip) {
-                let name = mark.name.clone();
-                ui.interact(
-                    laid.hit.intersect(clip),
-                    ui.id().with(("after-arrow", &card.id)),
-                    Sense::hover(),
-                )
-                .on_hover_text(&mark.text)
-                .widget_info(move || {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &name)
-                });
-            }
-            self.arrow_hits.push((card.id.clone(), laid.hit));
-            #[cfg(test)]
-            self.arrows.push(DrawnArrow {
-                target: card.id.clone(),
-                wires: mark.wires.clone(),
-                text: mark.text.clone(),
-                rect: laid.rect,
-                hit: laid.hit,
-                lit,
-                color: after::color(lit),
-            });
-        }
-        let now = hover.and_then(|pointer| {
-            self.arrow_hits
-                .iter()
-                .find(|(_, hit)| hit.contains(pointer))
-                .map(|(target, _)| target.as_str())
-        });
-        if now != pointed {
-            ui.ctx().request_repaint();
-        }
     }
 
     /// Where the toolbar's size is kept as last drawn in one shape.
@@ -4597,15 +4429,6 @@ fn fit_zoom(focus: Rect, bounds: Rect) -> f32 {
         .clamp(MIN_ZOOM, 1.0)
 }
 
-/// What an arrow at a badge keeps clear of besides the cards and the
-/// badges (LAY-24): the chips and counts and the continuation marks on
-/// screen, and the wires drawn at rest on the board.
-struct ArrowObstacles<'a> {
-    boxes: &'a [Rect],
-    marks: &'a [Rect],
-    drawn: &'a [(String, Vec<Pos2>)],
-}
-
 impl Shapes<'_> {
     /// Everything the board draws, as one rectangle.
     fn bounds(self) -> Option<Rect> {
@@ -4613,16 +4436,16 @@ impl Shapes<'_> {
             .iter()
             .map(Card::rect)
             .chain(self.chips.iter().map(Chip::rect))
-            .chain(self.marks.iter().copied())
+            .chain(self.extents.iter().copied())
             .reduce(Rect::union)
     }
 }
 
-fn shapes<'a>(cards: &'a [Card], chips: &'a [Chip], marks: &'a [Rect]) -> Shapes<'a> {
+fn shapes<'a>(cards: &'a [Card], chips: &'a [Chip], extents: &'a [Rect]) -> Shapes<'a> {
     Shapes {
         cards,
         chips,
-        marks,
+        extents,
     }
 }
 

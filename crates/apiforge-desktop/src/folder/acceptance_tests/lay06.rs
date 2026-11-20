@@ -162,8 +162,9 @@ const SHOP_30_SATELLITES: [(&str, &str); 15] = [
 
 /// Criterion 1: on `shop-30` the spine runs in the engine's order left to
 /// right in rows of five 280 px columns, every satellite stands in the
-/// column of its latest subject below it, and the board, marks included,
-/// is at most 1920 px wide where its lines need no more: since LAY-03 the
+/// column of its latest subject below it, and the board is at most 1920 px
+/// wide where its lines need no more (with LAY-06's marks, 1936; LAY-45
+/// draws the line to the next row instead): since LAY-03 the
 /// gap between two columns is 100 px, wider in steps of 20 px where the
 /// lines drawn need the room, and the same in every row.
 #[test]
@@ -245,20 +246,15 @@ fn lay06_criterion_1_the_spine_and_the_satellites() {
             }
         }
     }
-    let marks = board(&harness, &id).debug_marks();
-    let bounds = cards
-        .values()
-        .copied()
-        .chain(marks.iter().map(|mark| mark.rect))
-        .reduce(egui::Rect::union)
-        .unwrap();
-    // Five columns 100 px apart and the widest mark are 1936 px; the room
-    // the lines of this board need between its columns comes on top (LAY-03).
+    let bounds = cards.values().copied().reduce(egui::Rect::union).unwrap();
+    // Five columns 100 px apart are 1800 px, 1936 with the widest mark
+    // LAY-06 drew; the room the lines of this board need between its
+    // columns comes on top (LAY-03).
     let widened: f32 = (1..5)
         .map(|column| rect(&spine[column]).left() - rect(&spine[column - 1]).right() - 100.0)
         .sum();
     assert!(
-        bounds.width() - widened <= 1936.0,
+        bounds.width() - widened <= 1800.0,
         "the board is {} px wide, {widened} px of it room for lines",
         bounds.width()
     );
@@ -354,13 +350,14 @@ fn rows_of(graph: &Graph, cards: &BTreeMap<String, egui::Rect>) -> HashMap<Strin
     rows
 }
 
-/// Criterion 4: no ordering wire runs through the gap between two cards of
-/// a row, where the data wires run: an `@after` or an `if`'s branch between
-/// two spine steps of a row rises from the top of its source to the rail
-/// above the row and drops into the top of its target, every point of it
-/// at or above the row's top. Every ordering wire is dashed, and one that
-/// reaches a spine card arrives from above its row. Only a wire into a card
-/// hung right under its source drops straight into it.
+/// Criterion 4, restated by LAY-45 (#468): every ordering wire is dashed.
+/// An `if`'s branch rises from the top of the `if` to the rail above its
+/// row, as LAY-06 drew it; only a branch into a card hung right under the
+/// `if` drops straight into it. The chain of steps runs from the right of a
+/// step to the left of the next at the title line instead, and the line to
+/// the next row through the row gap (LAY-45 criteria 1 to 3): that is the
+/// one ordering line between the rows by decision. Criterion 5, the mark at
+/// a row's end, was retired by LAY-45: the line says what it said.
 #[test]
 fn lay06_criterion_4_order_wires_on_the_rail() {
     for name in ["order-flow", "shop-30"] {
@@ -369,19 +366,19 @@ fn lay06_criterion_4_order_wires_on_the_rail() {
             let graph = main_graph(&harness, &id);
             let cards = world(&harness, &id);
             let rows = rows_of(&graph, &cards);
-            let edges: Vec<&str> = graph.edges.iter().map(|edge| edge.id.as_str()).collect();
             let mut railed = 0;
             for wire in board(&harness, &id).debug_wires() {
-                let ordering = edges.contains(&wire.id.as_str());
+                let edge = graph.edges.iter().find(|edge| edge.id == wire.id);
                 assert_eq!(
-                    wire.dashed, ordering,
+                    wire.dashed,
+                    edge.is_some(),
                     "{name} {checks:?}: {} is dashed exactly when it orders",
                     wire.id
                 );
-                if !ordering {
+                let Some(edge) = edge.filter(|edge| edge.branch.is_some()) else {
                     continue;
-                }
-                let source = handle_of(&graph, wire.source.as_deref().unwrap());
+                };
+                let source = handle_of(&graph, &edge.source);
                 let target = handle_of(&graph, &wire.target);
                 let (from, to) = (cards[&source], cards[&target]);
                 assert!(wire.points.len() >= 2, "{source} -> {target} is routed");
@@ -390,69 +387,18 @@ fn lay06_criterion_4_order_wires_on_the_rail() {
                     continue;
                 }
                 let context = format!("{name} {checks:?}: {source} -> {target} {:?}", wire.points);
-                if let Some(&(top, _)) = rows.get(&target) {
-                    // The last bend before the target is on the rail.
-                    let rail = wire.points[wire.points.len() - 2];
-                    assert!(rail.y < top, "{context} arrives from the rail above");
-                }
-                if let (Some(&(top, _)), Some(&(other, _))) = (rows.get(&source), rows.get(&target))
-                    && top == other
-                {
-                    railed += 1;
-                    assert!(
-                        wire.points.iter().all(|point| point.y <= top + 0.5),
-                        "{context} stays above its row"
-                    );
-                    assert!(
-                        wire.points.iter().any(|point| point.y < top - 0.5),
-                        "{context} runs on the rail"
-                    );
-                }
-            }
-            assert!(railed > 0, "{name} {checks:?} has ordering wires on a rail");
-        }
-    }
-}
-
-/// Criterion 5: the last card of each row but the last carries a mark
-/// that names the first card of the next row, the next step in order.
-#[test]
-fn lay06_criterion_5_the_continuation_mark() {
-    for name in ["order-flow", "shop-30", "shop-50"] {
-        for checks in [Checks::Collapsed, Checks::Expanded] {
-            let (_project, harness, id) = tidied(name, WIDE, checks);
-            let graph = main_graph(&harness, &id);
-            let cards = world(&harness, &id);
-            let spine = spine(&graph);
-            let expected: Vec<(String, String)> = spine
-                .chunks(5)
-                .zip(spine.chunks(5).skip(1))
-                .map(|(row, next)| (row[row.len() - 1].clone(), next[0].clone()))
-                .collect();
-            let marks = board(&harness, &id).debug_marks();
-            let pairs: Vec<(String, String)> = marks
-                .iter()
-                .map(|mark| (handle_of(&graph, &mark.last), handle_of(&graph, &mark.next)))
-                .collect();
-            assert_eq!(pairs, expected, "{name} {checks:?}");
-            for (mark, (last, next)) in marks.iter().zip(&expected) {
-                let card = cards[last];
+                let &(top, _) = rows.get(&source).expect("an `if` is on the spine");
+                railed += 1;
                 assert!(
-                    mark.rect.left() > card.right() && mark.rect.top() >= card.top(),
-                    "{name}: the mark of {last} at {:?} is beside it at {card:?}",
-                    mark.rect
+                    (wire.points[0].y - top).abs() < 0.5,
+                    "{context} leaves the top of the `if`"
                 );
                 assert!(
-                    mark.rect.bottom() <= card.bottom(),
-                    "{name}: the mark of {last} is level with it"
-                );
-                let name_of_next = node(&graph, next).display_name().to_owned();
-                assert!(
-                    mark.text.contains(&name_of_next),
-                    "{name}: the mark of {last} reads {:?}, not {name_of_next}",
-                    mark.text
+                    wire.points[1].y < top - 0.5,
+                    "{context} rises to the rail above the row"
                 );
             }
+            assert!(railed > 0, "{name} {checks:?} has branches on a rail");
         }
     }
 }
@@ -583,8 +529,9 @@ fn board_file() -> String {
     let mut text = String::from(
         "# The reference scenarios of fixtures/scenarios/lay/ as the desktop tidies them\n\
          # (LAY-06): each card and chip at the size the board draws it, each wire as the\n\
-         # ports the router is given, and the continuation marks. A card hung under a\n\
-         # step names the card above it in its stack (`under`, LAY-31). The quality example\n\
+         # ports the router is given. A card hung under a\n\
+         # step names the card above it in its stack (`under`, LAY-31); a line of the chain of\n\
+         # steps ends in `chain` (LAY-45). The quality example\n\
          # routes and measures these. Written by the desktop's acceptance test\n\
          # lay06_criterion_10_quality_on_real_card_sizes with APIFORGE_WRITE_BOARDS=1;\n\
          # do not edit by hand.\n",
@@ -664,22 +611,14 @@ fn board_file() -> String {
         }
         for wire in wires {
             text.push_str(&format!(
-                "wire {} {} {} {} {} {}\n",
+                "wire {} {} {} {} {} {}{}\n",
                 wire.from.block,
                 side(wire.from.side),
                 wire.from.offset,
                 wire.to.block,
                 side(wire.to.side),
-                wire.to.offset
-            ));
-        }
-        for mark in canvas.debug_marks() {
-            text.push_str(&format!(
-                "mark {} {} {} {}\n",
-                mark.rect.min.x,
-                mark.rect.min.y,
-                mark.rect.width(),
-                mark.rect.height()
+                wire.to.offset,
+                if wire.chain { " chain" } else { "" }
             ));
         }
         text.push_str("end\n");
@@ -755,41 +694,34 @@ fn coincident(wires: &[&[egui::Pos2]]) -> usize {
     pairs
 }
 
-/// Criterion 11: on `shop-30` Tidy up crosses no more wires per wire than
-/// 2.103, LANG-13's baseline (2.05 before it, 117 crossings on 57 wires),
-/// collapsed and expanded, and
-/// leaves at most 97 coincident pairs on the board a new install shows,
-/// with its checks collapsed. Expanded, the coincident pairs are not
-/// asserted (112 when written; the quality example reports them): most are
-/// wires leaving one port together, which LAY-03 separates, and the board
-/// the previous Tidy up gives at the sizes the desktop draws has more of
-/// them (123) than the 97 measured on full cards. The owner accepted this
-/// and moved the expanded cap to LAY-03 (#34).
+/// Criterion 11: on `shop-30` Tidy up crosses no more data lines than
+/// before, collapsed and expanded, and leaves at most 97 coincident pairs
+/// on the board a new install shows, with its checks collapsed. Restated by
+/// LAY-45 (#468, the owner's answer A of 2026-11-20): the chain of steps
+/// runs side to side and crosses the data lines at a right angle under
+/// their bridges, which `lay45_criterion_8_*` holds; what this criterion
+/// holds is the data lines' crossings with each other, 54 folded and 77
+/// drawn before LAY-45. (Before it, crossings per wire: 2.05, 117 on 57
+/// wires when written; LANG-13 measured 2.103.) Expanded, the coincident
+/// pairs are not asserted (112 when written; the quality example reports
+/// them): most are wires leaving one port together, which LAY-03
+/// separates. The owner accepted this and moved the expanded cap to LAY-03
+/// (#34).
 #[test]
 fn lay06_criterion_11_no_more_crossings_than_today() {
-    for checks in [Checks::Collapsed, Checks::Expanded] {
+    for (checks, most) in [(Checks::Collapsed, 54), (Checks::Expanded, 77)] {
         let (_project, harness, id) = tidied("shop-30", WIDE, checks);
+        let label = format!("shop-30, {checks:?}");
+        let (data, _, _) = super::lay45::measures(&harness, &id, &label);
         let wires = board(&harness, &id).debug_wires();
-        let crossings: usize = wires.iter().map(|wire| wire.bridges).sum();
-        let per_wire = crossings as f32 / wires.len() as f32;
         let routes: Vec<&[egui::Pos2]> = wires.iter().map(|wire| wire.points.as_slice()).collect();
         let pairs = coincident(&routes);
-        // LAY-03 put lines that lay on each other 20 px apart, where a line
-        // leaving the others crosses them (118 crossings on 57 wires with
-        // the checks drawn, limit 2.1); since LAY-28 orders the lines of a
-        // corridor the board has 105 and the limit is the first one again.
-        // LANG-13 (#386) wires shop-30's steps step to step: its baseline
-        // with the checks drawn is 2.103 (143 crossings on 68 wires; owner,
-        // 2026-11-20). LAY-45 (#468) carries the criterion to get back to
-        // 2.05.
-        let most = 2.103;
         assert!(
-            per_wire <= most,
-            "{checks:?}: {crossings} crossings on {} wires",
-            wires.len()
+            data <= most,
+            "{label}: {data} data crossings, {most} before"
         );
         if checks == Checks::Collapsed {
-            assert!(pairs <= 97, "{checks:?}: {pairs} coincident pairs");
+            assert!(pairs <= 97, "{label}: {pairs} coincident pairs");
         }
     }
 }

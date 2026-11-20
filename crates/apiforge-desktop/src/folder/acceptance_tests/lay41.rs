@@ -315,8 +315,20 @@ fn lay41_criterion_3_the_line_in_its_place() {
             simulate(&mut harness);
             fit(&mut harness);
         }
+        // Without the marks and arrows LAY-45 took away, Fit shows this
+        // board with the library folded at 47 %, above the Overview zooms:
+        // it is read at 44 %, the Overview zoom nearest it.
+        if !overview(zoom(&harness, &id)) {
+            app(&mut harness)
+                .canvases
+                .get_mut(&id)
+                .expect("the board is drawn")
+                .debug_zoom_to(0.44);
+            harness.step();
+            harness.step();
+        }
         let zoom = zoom(&harness, &id);
-        assert!(overview(zoom), "Fit is an Overview zoom, here {zoom}");
+        assert!(overview(zoom), "an Overview zoom, here {zoom}");
         assert!(
             line_in_place(&harness, &id) >= 6,
             "the lines of criterion 1"
@@ -366,8 +378,8 @@ fn lay41_criterion_3_the_line_in_its_place() {
             );
         }
         if !library && !edit {
-            // Folded, the board fits at 45 % on the label and stays
-            // Overview: `slot` now holds its value.
+            // Folded, the board is read at 44 %, an Overview zoom: `slot`
+            // now holds its value.
             let line = line_of(&harness, &id, "slot").expect("slot's line with the library folded");
             assert!(line.text.starts_with("{ start: "), "{:?}", line.text);
         }
