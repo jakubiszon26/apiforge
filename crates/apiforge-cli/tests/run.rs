@@ -434,13 +434,10 @@ fn run01_criterion_8_the_command_line_names_the_missing_statement() {
         r#"scenario "RUN-01 criterion 8" {
   on_error continue
   begin = start
-  @after(begin)
   a = GET "/a"
-  @after(a)
   b = GET "/b/{{a.body.id}}" {
     sample 200 { ok: true }
   }
-  @after(b)
   c = GET "/c" {
     sample 200 { ok: true }
   }

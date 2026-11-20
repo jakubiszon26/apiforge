@@ -90,7 +90,7 @@ fn pinned_project() -> tempfile::TempDir {
         .create_document(
             DocumentKind::Scenario,
             SCENARIO,
-            "scenario \"Main\" {\n  call = (Helper@1())\n  two = assert call == 2\n}\n",
+            "scenario \"Main\" {\n  begin = start\n  call = (Helper@1())\n  two = assert call == 2\n}\n",
         )
         .unwrap();
     drop(session);

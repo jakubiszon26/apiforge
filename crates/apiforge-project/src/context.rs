@@ -52,6 +52,8 @@ pub(crate) fn resolve(
                 kind: DocumentKind::Component,
                 entity_id: entry.component_id.clone(),
                 revision: entry.revision,
+                stored: true,
+                older: false,
             };
             let key = DocumentKey::Revision {
                 component_id: entry.component_id.clone(),

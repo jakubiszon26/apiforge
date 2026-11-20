@@ -34,11 +34,9 @@ fn cart_then_payment(policy: &str, expected: u16) -> String {
         r#"scenario "Checks before the next step" {{
   on_error {policy}
   begin = start
-  @after(begin)
   cart = POST "/carts" {{
     sample 201 {{ id: "c-1", total: 0 }}
   }}
-  @after(cart)
   paid = POST "/payments" {{
     sample 201 {{ id: "p-1" }}
   }}
@@ -52,7 +50,6 @@ fn cart_then_payment(policy: &str, expected: u16) -> String {
 /// The same flow in the cleanup.
 const CLEANUP: &str = r#"scenario "Checks before the next cleanup step" {
   begin = start
-  @after(begin)
   cart = POST "/carts" {
     sample 201 { id: "c-1", total: 0 }
   }
@@ -60,7 +57,6 @@ const CLEANUP: &str = r#"scenario "Checks before the next cleanup step" {
     removed = DELETE "/carts/{{cart.body.id}}" {
       sample 204 {}
     }
-    @after(removed)
     again = GET "/carts/{{cart.body.id}}" {
       sample 404 {}
     }
@@ -74,11 +70,9 @@ fn cart_component(expected: u16) -> String {
     format!(
         r#"component cart_flow "Cart flow" {{
   begin = start
-  @after(begin)
   cart = POST "/carts" {{
     sample 201 {{ id: "c-1", total: 0 }}
   }}
-  @after(cart)
   paid = POST "/payments" {{
     sample 201 {{ id: "p-1" }}
   }}
@@ -92,7 +86,6 @@ fn cart_component(expected: u16) -> String {
 const CALLER: &str = r#"scenario "Calls the cart flow" {
   on_error stop
   begin = start
-  @after(begin)
   flow = cart_flow@1()
 }
 "#;
@@ -330,13 +323,21 @@ async fn run03_criterion_4_a_failed_check_stops_a_component_before_the_next_requ
     assert_eq!(api.received(), ["POST /carts"], "the payment is never sent");
 }
 
-/// Criterion 5: `@after(check)` is still accepted and still orders.
+/// Criterion 5: `@after(check)` is still accepted and still orders. Since
+/// LANG-13 (#386) only a published revision is read in that spelling.
 #[tokio::test]
 async fn run03_criterion_5_after_a_check_is_still_accepted() {
     let text = cart_then_payment("continue", 201)
-        .replace("  @after(cart)\n  paid", "  @after(created)\n  paid");
+        .replace("  cart = POST", "  @after(begin)\n  cart = POST")
+        .replace("  paid = POST", "  @after(created)\n  paid = POST");
     assert!(text.contains("@after(created)"));
-    let (project, scenario) = scenario(&text);
+    let mut project = shop_project();
+    let result = lower(&parse(&text), &LowerContext::folder(&project).stored());
+    assert!(!result.has_errors(), "{:#?}", result.diagnostics);
+    let Some(Document::Scenario(scenario)) = result.document else {
+        panic!("not a scenario");
+    };
+    project.scenarios.push(scenario.clone());
     let run = run(project, &scenario, RunMode::Simulation).await;
     assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
     assert_eq!(
