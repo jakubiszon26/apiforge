@@ -466,6 +466,11 @@ impl FolderApp {
     /// the band under the app header is left out when it would carry neither
     /// a tab nor a notice (KTLO-24).
     pub(super) fn has_notices(&self) -> bool {
+        // MOCK (LANG-21): the offer is a notice.
+        #[cfg(test)]
+        if lang21::has_offer() {
+            return true;
+        }
         if self.storage_indicator().is_some() {
             return true;
         }
@@ -547,6 +552,9 @@ impl FolderApp {
             });
         }
         self.registry_notice(ui);
+        // MOCK (LANG-21): the offer stands above the tab's own notice.
+        #[cfg(test)]
+        lang21::offer(ui);
         let mut dismiss = false;
         if let Some(notice) = self.notice() {
             ui.horizontal_wrapped(|ui| {
@@ -627,6 +635,9 @@ impl FolderApp {
     }
 
     pub(super) fn prompts(&mut self, context: &egui::Context) {
+        // MOCK (LANG-21): the dialog of a view.
+        #[cfg(test)]
+        lang21::dialog(context);
         let Some(prompt) = self.prompt.take() else {
             return;
         };

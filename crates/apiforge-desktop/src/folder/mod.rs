@@ -25,6 +25,8 @@ mod handover;
 mod handover_prompt;
 mod holder;
 mod inputs;
+#[cfg(test)]
+pub(crate) mod lang21;
 mod navigation;
 mod notices;
 mod opening;
@@ -912,12 +914,23 @@ impl FolderApp {
             .any(|(_, draft)| draft.document_id == document_id);
         let paused = self.observing();
         let busy = self.persistence.closing || self.storage.blocks_edits();
+        #[allow(unused_mut)]
+        let (mut diagnostics, mut analysis) =
+            (document.diagnostics().to_vec(), document.analysis());
+        // MOCK (LANG-21): a scene says what the problems are.
+        #[cfg(test)]
+        lang21::problems(
+            document.entry().path.as_str(),
+            document.text(),
+            &mut diagnostics,
+            &mut analysis,
+        );
         Some(Snapshot {
             path: document.entry().path.as_str().to_owned(),
             kind: document.entry().kind,
             text: document.text().to_owned(),
-            diagnostics: document.diagnostics().to_vec(),
-            analysis: document.analysis(),
+            diagnostics,
+            analysis,
             model: document.shared_model().cloned(),
             model_state: document.model_state(),
             unavailable: document.unavailable(),
