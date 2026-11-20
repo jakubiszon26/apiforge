@@ -176,20 +176,17 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
 /// nowhere, or an ordering that is not a chain with `if`s, cannot be written
 /// without changing what runs, and is refused as unprintable.
 pub fn as_written(document: &Document) -> Result<Document> {
-    let written = |graph: &Graph, main: bool| -> Result<Graph> {
-        let chain = chained(graph).map_err(|_| Error::Unprintable)?;
-        Ok(if main { with_start(&chain) } else { chain })
-    };
+    let written = |graph: &Graph| chained(graph).map_err(|_| Error::Unprintable);
     Ok(match document {
         Document::Scenario(scenario) => {
             let mut scenario = scenario.clone();
-            scenario.graph = written(&scenario.graph, true)?;
-            scenario.cleanup = written(&scenario.cleanup, false)?;
+            scenario.cleanup = written(&scenario.cleanup)?;
+            scenario.graph = with_start(&written(&scenario.graph)?, &[&scenario.cleanup]);
             Document::Scenario(scenario)
         }
         Document::Component(component) => {
             let mut component = component.clone();
-            component.graph = written(&component.graph, false)?;
+            component.graph = written(&component.graph)?;
             Document::Component(component)
         }
     })

@@ -1434,8 +1434,8 @@ fn kept_chain(previous: &Document, mut model: Document) -> Document {
     use apiforge_core::chain::{edited, with_start};
     match (previous, &mut model) {
         (Document::Scenario(before), Document::Scenario(after)) => {
-            after.graph = with_start(&edited(&before.graph, &after.graph));
             after.cleanup = edited(&before.cleanup, &after.cleanup);
+            after.graph = with_start(&edited(&before.graph, &after.graph), &[&after.cleanup]);
         }
         (Document::Component(before), Document::Component(after)) => {
             after.graph = edited(&before.graph, &after.graph);

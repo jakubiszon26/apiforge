@@ -260,9 +260,11 @@ pub fn chained(graph: &Graph) -> Result<Graph, Unchained> {
 
 /// `graph` with a *Start* written first and chained before its first step,
 /// when it holds a step and no *Start*: rule 1 of the written language. The
-/// new block's identifier and handle are the first free ones, so the same
-/// graph always gets the same *Start*.
-pub fn with_start(graph: &Graph) -> Graph {
+/// new block's identifier and handle are the first free ones in `graph` and
+/// the graphs `beside` it in the same document (a scenario's cleanup):
+/// handles and identifiers are unique across them. The same graphs always
+/// get the same *Start*.
+pub fn with_start(graph: &Graph, beside: &[&Graph]) -> Graph {
     if graph.nodes.iter().any(|node| node.kind == NodeKind::Start)
         || !graph.nodes.iter().any(|node| is_step(node.kind))
     {
@@ -287,7 +289,13 @@ pub fn with_start(graph: &Graph) -> Graph {
         },
         None,
     );
-    let taken: HashSet<&str> = graph.nodes.iter().map(|node| node.id.as_str()).collect();
+    let all = || {
+        graph
+            .nodes
+            .iter()
+            .chain(beside.iter().flat_map(|other| &other.nodes))
+    };
+    let taken: HashSet<&str> = all().map(|node| node.id.as_str()).collect();
     start.id = (1..)
         .map(|number| {
             if number == 1 {
@@ -299,7 +307,7 @@ pub fn with_start(graph: &Graph) -> Graph {
         .find(|id| !taken.contains(id.as_str()))
         .expect("a free identifier");
     start.handle = unique_handle(NodeKind::Start.handle_base(), |handle| {
-        graph.nodes.iter().any(|node| node.handle == handle)
+        all().any(|node| node.handle == handle)
     });
     let mut result = graph.clone();
     result.nodes.insert(0, start);

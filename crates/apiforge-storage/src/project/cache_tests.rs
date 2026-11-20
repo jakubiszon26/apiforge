@@ -580,8 +580,11 @@ pub(in crate::project) fn written(
 ) -> apiforge_core::format::Scenario {
     use apiforge_core::chain::{chained, with_start};
     let mut scenario = scenario.clone();
-    scenario.graph = with_start(&chained(&scenario.graph).expect("a chain"));
     scenario.cleanup = chained(&scenario.cleanup).expect("a chain");
+    scenario.graph = with_start(
+        &chained(&scenario.graph).expect("a chain"),
+        &[&scenario.cleanup],
+    );
     scenario
 }
 

@@ -72,6 +72,12 @@ pub fn fix_source(text: &str, context: &LowerContext<'_>) -> Fixed {
     {
         return unchanged(Some(refused.clone()));
     }
+    // Lowering offers a fix only when the stored reading of the same text,
+    // written as a chain, is the written reading (`run_order`). A text with
+    // nothing to fix is returned as it is: whether it is a language-1 text
+    // that would run otherwise (a request nothing ordered after `start`) is
+    // known only from its project's manifest, which `apiforge fix --folder`
+    // (LANG-20) reads.
     let mut fixes = vec![];
     for diagnostic in &lowered.diagnostics {
         if !matches!(diagnostic.message.as_str(), AFTER_REMOVED | START_MISSING) {
@@ -85,13 +91,82 @@ pub fn fix_source(text: &str, context: &LowerContext<'_>) -> Fixed {
     // From the end, so earlier ranges stay valid; a deletion before an
     // insertion at the same place.
     fixes.sort_by_key(|fix| std::cmp::Reverse((fix.range.start, fix.range.end)));
+    let applied = fixes.len();
     let mut fixed = text.to_owned();
     for fix in fixes {
         fixed.replace_range(fix.range, &fix.replacement);
     }
+    // What the fix writes has no error the text did not have.
+    let errors = |diagnostics: &[Diagnostic]| {
+        diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count()
+    };
+    let after = lower(&parse(&fixed), &context);
+    if errors(&after.diagnostics) + applied > errors(&lowered.diagnostics) {
+        let new = after
+            .diagnostics
+            .iter()
+            .find(|d| d.severity == Severity::Error)
+            .cloned();
+        return unchanged(new);
+    }
     Fixed {
         text: fixed,
         refused: None,
+    }
+}
+
+/// The fix that removes the attribute at `range` and nothing else: the
+/// comments written inside it stay, each on a line of its own where the
+/// attribute stood (review of #488).
+pub(crate) fn remove_attribute(tree: &SyntaxTree, range: Range<usize>) -> Fix {
+    let source = &tree.source;
+    let comments: Vec<&str> = tree
+        .tokens
+        .iter()
+        .filter(|token| {
+            token.kind == crate::lexer::TokenKind::Comment
+                && range.start <= token.range.start
+                && token.range.start < range.end
+        })
+        .map(|token| source[token.range.clone()].trim_end())
+        .collect();
+    let removed = line_of(source, range.clone());
+    if comments.is_empty() {
+        return Fix {
+            range: removed,
+            replacement: String::new(),
+        };
+    }
+    let line = source[..range.start].rfind('\n').map_or(0, |at| at + 1);
+    let indent: String = source[line..range.start]
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
+    let newline = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let alone = removed.start == line;
+    let replacement = if alone {
+        comments
+            .iter()
+            .map(|comment| format!("{indent}{comment}{newline}"))
+            .collect()
+    } else {
+        // The attribute shares its last line with its statement: the comments
+        // go on their own lines before it.
+        comments
+            .iter()
+            .map(|comment| format!("{comment}{newline}{indent}"))
+            .collect()
+    };
+    Fix {
+        range: removed,
+        replacement,
     }
 }
 

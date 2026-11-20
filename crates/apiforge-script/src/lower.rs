@@ -120,6 +120,7 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         written: context.written,
         braces: HashMap::new(),
         afters: vec![],
+        start_missing: None,
     };
     let document = tree.file.as_ref().map(|file| lower.file(file));
     // Rule 1 holds for a scenario: a component's body runs from its first
@@ -131,12 +132,16 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
     {
         lower.start_rule(&tree.source, file);
     }
-    if !lower.afters.is_empty() {
+    // A fix is offered only when it changes nothing in what runs: the
+    // stored reading of the same text, written as a chain, is the written
+    // reading. That is checked for a missing `start` too, since writing one
+    // orders the steps written after it (review of #488).
+    if !lower.afters.is_empty() || lower.start_missing.is_some() {
         let fixable = match &document {
             Some(document) => fix::run_order(tree, context, document),
             None => Err(None),
         };
-        lower.report_afters(&tree.source, fixable);
+        lower.report_fixes(tree, fixable);
     }
     if let Some(document) = &document {
         lower.type_warnings(document);
@@ -246,6 +251,8 @@ struct Lower<'a> {
     /// Where each `@after` is written (written only): an error, reported
     /// once the whole file is lowered and it is known whether a fix applies.
     afters: Vec<Range<usize>>,
+    /// The error of a scenario without `start`, reported the same way.
+    start_missing: Option<Diagnostic>,
 }
 
 /// `@config` replaces the whole configuration, so it must not silently override
@@ -344,7 +351,7 @@ impl Lower<'_> {
                     file.statements[0].extent.start,
                     &format!("{handle} = start"),
                 );
-                self.push_error(Diagnostic {
+                self.start_missing = Some(Diagnostic {
                     range: statement.range.clone(),
                     severity: Severity::Error,
                     message: fix::START_MISSING.into(),
@@ -356,16 +363,21 @@ impl Lower<'_> {
     /// The `@after` errors, each with the fix that deletes its line when the
     /// file is written in the order it runs today; otherwise none has a fix
     /// and the first statement out of place is named.
-    fn report_afters(
+    fn report_fixes(
         &mut self,
-        source: &str,
+        tree: &SyntaxTree,
         fixable: Result<(), Option<(Range<usize>, &'static str)>>,
     ) {
+        if let Some(mut start) = self.start_missing.take() {
+            if fixable.is_err() {
+                start.fix = None;
+            }
+            self.push_error(start);
+        }
         for range in std::mem::take(&mut self.afters) {
-            let fix = fixable.is_ok().then(|| Fix {
-                range: fix::line_of(source, range.clone()),
-                replacement: String::new(),
-            });
+            let fix = fixable
+                .is_ok()
+                .then(|| fix::remove_attribute(tree, range.clone()));
             self.push_error(Diagnostic {
                 range,
                 severity: Severity::Error,

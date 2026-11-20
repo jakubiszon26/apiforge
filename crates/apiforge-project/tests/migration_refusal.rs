@@ -240,8 +240,11 @@ fn written(scenario: &apiforge_core::format::Scenario) -> Document {
         graph::sequence,
     };
     let mut written = scenario.clone();
-    written.graph = with_start(&chained(&scenario.graph).expect("a chain"));
     written.cleanup = chained(&scenario.cleanup).expect("a chain");
+    written.graph = with_start(
+        &chained(&scenario.graph).expect("a chain"),
+        &[&written.cleanup],
+    );
     let steps = |graph: &apiforge_core::format::Graph| -> Vec<String> {
         sequence(graph)
             .into_iter()

@@ -951,12 +951,20 @@ fn lang13_review_a_file_without_after_that_would_run_otherwise_is_not_fixed() {
     assert_eq!(refused.message, NOT_IN_PLACE);
     assert!(forward[refused.range].starts_with("a = GET"));
 
-    let nowhere = "scenario \"X\" {\n  begin = start\n  loose = GET \"/loose\"\n}\n";
+    // A request nothing ordered after `start` in a file with an `@after` to
+    // fix: the request that ran nowhere is named and nothing is written.
+    let nowhere = "scenario \"X\" {\n  begin = start\n  @after(begin)\n  first = GET \"/first\"\n  loose = GET \"/loose\"\n}\n";
     let fixed = fix_source(nowhere, &context);
     assert_eq!(fixed.text, nowhere);
     let refused = fixed.refused.expect("refused");
     assert_eq!(refused.message, RUNS_NOWHERE);
     assert!(nowhere[refused.range].starts_with("loose = GET"));
+    // With nothing to fix in its text, a file is returned as it is: whether
+    // it is a language-1 file whose `loose` ran nowhere or a language-2 file
+    // is known only from its project's manifest (LANG-20, A5).
+    let plain = "scenario \"X\" {\n  begin = start\n  loose = GET \"/loose\"\n}\n";
+    let fixed = fix_source(plain, &context);
+    assert_eq!((fixed.text.as_str(), fixed.refused), (plain, None));
 }
 
 /// What the fix writes passes the check.
