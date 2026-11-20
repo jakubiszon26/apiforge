@@ -46,22 +46,28 @@ Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lang21b.rs`
 two projects with blocked files (some convertible; none).
 
 1. *Show* on a row closes the dialog, opens that file in Code (or Split,
-   as the window is) and selects the statement **in the text as it is
-   now**: it is found by its handle in the current buffer, not by the
-   line the plan saw, and no unsaved edit is lost; when the handle is no
-   longer there the file opens and a line says the statement was not
-   found. The row's problem is the first of that file's Problems, with
-   the plan's sentence. A problem's fix is applied by what the problem
-   is — its source version and range — never by its place in the list.
+   as the window is) and selects the statement. The dialog's plan was
+   made when the dialog opened, from the buffers (LANG-21a, *Which plan
+   the window shows*), so its lines are those of the text on screen,
+   unsaved changes included, and no unsaved edit is lost. The row's
+   problem is the first of that file's Problems, with the plan's
+   sentence; from then on it follows the statement by its handle while
+   the person types, and when the handle is gone the problem goes. A
+   problem's fix is applied by what the problem is — its source version
+   and range — never by its place in the list.
    Tests: D `lang21b_criterion_1_*`, among them ten unsaved lines typed
-   above the statement before *Show*, and a file with two problems that
-   carry different fixes where the second is shown first and its fix
-   changes only its own range.
-2. While the plan lists statements to place by hand, the band shows
-   *k statements to place by hand* and *Show the list*, which opens
-   LANG-21a's dialog with the current plan, beside LANG-21a's line and
-   button — in a project with a record and in one where nothing could be
-   converted yet. Test: D `lang21b_criterion_2_*`.
+   above the statement before *Show the list* is opened, ten typed after
+   *Show*, and a file with two problems that carry different fixes where
+   the second is shown first and its fix changes only its own range.
+2. The band shows *k statements to place by hand* and *Show the list*
+   beside LANG-21a's line and button whenever the **count of the saved
+   files** is not none — in a project with a record and in one where
+   nothing could be converted yet. *Show the list* opens LANG-21a's
+   dialog, which makes its own plan from the buffers; when that differs
+   from the band's count the dialog says so in one line (LANG-21a).
+   Test: D `lang21b_criterion_2_*`, among them an unsaved buffer that
+   repairs a blocker: the band still counts it, the dialog shows it
+   convertible and says the file is not saved yet.
 3. The count is of the last plan, and a plan is made from the saved
    sources: after a save **has completed** the plan is made again,
    nothing is written (no source, no record, no manifest), and the band's
@@ -74,20 +80,18 @@ two projects with blocked files (some convertible; none).
    project without a record, no plan is made at a save.
    Tests: P `lang21b_criterion_3_*`, D `lang21b_criterion_3_*`, one per
    case.
-4. The plan at a save is made off the window's thread: frames keep
-   coming while it runs (the test holds the plan and steps the window),
-   whatever it takes. A plan is used only while it is for what the window
-   shows — the same session and project, the same source versions
-   **saved or not**, the same record (the identity
-   `apiforge-project/src/analysis.rs` gives an analysis, with the
-   record's fingerprint). That is checked twice: when the plan arrives,
-   and again at each *Show* and *Show the list*. A plan that no longer
-   holds — after a later save, an unsaved edit, a reload, a rename or a
-   delete of a source, a change of the record alone, another project, a
-   finished update — is dropped; the band then shows the count as *being
-   checked* until the next plan, never an old number as current.
-   Test: P `lang21b_criterion_4_*`, one per case; D for the unsaved edit
-   (twenty lines typed while the plan runs, then *Show*).
+4. The plan for the band is made off the window's thread: frames keep
+   coming while it runs (the test holds the plan and steps the window).
+   It is of the saved files, so typing does not make it wrong; it is
+   used only while it is for the disk the window shows — the same
+   session and project, the same saved versions of the sources, the same
+   record and manifest. That is checked when the plan arrives; one that
+   no longer holds — a later save, a reload, a foreign write, a rename or
+   a delete of a source, a change of the record alone, another project,
+   a finished update — is dropped, a new one is started at once for the
+   new state, and until it arrives the band shows the count as *being
+   checked*, never an old number as current.
+   Test: P `lang21b_criterion_4_*`, one per case.
 5. The problem *Show* puts first belongs to the plan: it is listed once,
    never beside the same statement's ordinary problem as a second row;
    it goes when a later plan no longer has it (the statement was placed
