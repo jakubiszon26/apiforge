@@ -45,7 +45,7 @@ pub use recovery::{
     FieldRecovery, RecoveryDocument, RecoveryRead, RecoveryText, SourceRecovery, TextSelection,
 };
 pub use schema::{DocumentEntry, DocumentKind, MANIFEST_PATH, ProjectManifest, RevisionEntry};
-pub use transaction::{FileState, ProjectChange, ProjectSnapshot, ProjectStore};
+pub use transaction::{FileState, ProjectChange, ProjectSnapshot, ProjectStore, ReadSet};
 pub use trash::{
     RestoreDestination, TrashCommit, TrashEntry, TrashFile, TrashIndex, TrashPreview,
     TrashRestorePreview,
