@@ -1609,3 +1609,364 @@ wire 23 right 52 25 left 86
 mark 2348 20 120 24
 mark 2348 454 72 24
 end
+board labels compact collapsed 50 all
+card 0 0 280 132 begin
+card 380 0 280 214 no_token
+card 760 0 280 214 weight_31
+card 1140 0 280 214 weight_0
+card 1520 0 280 214 no_parcel
+card 0 774 280 214 postcode_symbols
+card 380 774 280 214 postcode_one_digit
+card 760 774 280 190 postcode_short
+card 1140 774 280 190 postcode_spaces
+card 1520 774 280 190 postcode_empty
+card 0 1316 280 190 postcode_null
+card 380 1316 280 190 postcode_missing
+card 760 1316 280 214 service_unknown
+card 1140 1316 280 214 service_digits
+card 1520 1316 280 214 service_foreign
+card 0 1858 280 214 service_empty
+card 380 1858 280 214 service_null
+wire 0 top 140 1 top 140
+wire 1 top 140 2 top 140
+wire 2 top 140 3 top 140
+wire 3 top 140 4 top 140
+wire 4 top 140 5 top 140
+wire 5 top 140 6 top 140
+wire 6 top 140 7 top 140
+wire 7 top 140 8 top 140
+wire 8 top 140 9 top 140
+wire 9 top 140 10 top 140
+wire 10 top 140 11 top 140
+wire 11 top 140 12 top 140
+wire 12 top 140 13 top 140
+wire 13 top 140 14 top 140
+wire 14 top 140 15 top 140
+wire 15 top 140 16 top 140
+mark 1808 20 120 24
+mark 1808 794 120 24
+mark 1808 1336 120 24
+end
+board labels compact expanded 50 all
+card 0 0 280 132 begin
+card 380 0 280 214 no_token
+card 380 238 280 96 no_token_status under 1
+card 380 358 280 96 no_token_code under 2
+card 380 478 280 96 no_token_text under 3
+card 760 0 280 214 weight_31
+card 760 238 280 96 weight_31_status under 5
+card 760 358 280 96 weight_31_code under 6
+card 760 478 280 96 weight_31_field under 7
+card 760 598 280 96 weight_31_text under 8
+card 1160 0 280 214 weight_0
+card 1160 238 280 96 weight_0_status under 10
+card 1160 358 280 96 weight_0_code under 11
+card 1160 478 280 96 weight_0_field under 12
+card 1160 598 280 96 weight_0_text under 13
+card 1560 0 280 214 no_parcel
+card 1560 238 280 96 no_parcel_status under 15
+card 1560 358 280 96 no_parcel_code under 16
+card 1560 478 280 96 no_parcel_text under 17
+card 0 774 280 214 postcode_symbols
+card 0 1012 280 96 postcode_symbols_status under 19
+card 0 1132 280 104 postcode_symbols_text under 20
+card 380 774 280 214 postcode_one_digit
+card 380 1012 280 96 postcode_one_digit_status under 22
+card 380 1132 280 104 postcode_one_digit_text under 23
+card 760 774 280 190 postcode_short
+card 760 988 280 96 postcode_short_status under 25
+card 1160 774 280 190 postcode_spaces
+card 1160 988 280 96 postcode_spaces_status under 27
+card 1560 774 280 190 postcode_empty
+card 1560 988 280 96 postcode_empty_status under 29
+card 0 1316 280 190 postcode_null
+card 0 1530 280 96 postcode_null_status under 31
+card 380 1316 280 190 postcode_missing
+card 380 1530 280 96 postcode_missing_status under 33
+card 760 1316 280 214 service_unknown
+card 760 1554 280 96 service_unknown_status under 35
+card 760 1674 280 104 service_unknown_text under 36
+card 1160 1316 280 214 service_digits
+card 1160 1554 280 96 service_digits_status under 38
+card 1160 1674 280 104 service_digits_text under 39
+card 1560 1316 280 214 service_foreign
+card 1560 1554 280 96 service_foreign_status under 41
+card 1560 1674 280 104 service_foreign_text under 42
+card 0 1858 280 214 service_empty
+card 0 2096 280 96 service_empty_status under 44
+card 0 2216 280 96 service_empty_text under 45
+card 380 1858 280 214 service_null
+card 380 2096 280 96 service_null_status under 47
+card 380 2216 280 96 service_null_text under 48
+wire 0 top 140 1 top 140
+wire 1 top 140 5 top 140
+wire 5 top 140 10 top 140
+wire 10 top 140 15 top 140
+wire 15 top 140 19 top 140
+wire 19 top 140 22 top 140
+wire 22 top 140 25 top 140
+wire 25 top 140 27 top 140
+wire 27 top 140 29 top 140
+wire 29 top 140 31 top 140
+wire 31 top 140 33 top 140
+wire 33 top 140 35 top 140
+wire 35 top 140 38 top 140
+wire 38 top 140 41 top 140
+wire 41 top 140 44 top 140
+wire 44 top 140 47 top 140
+wire 1 right 146 2 left 52
+wire 1 right 122 3 left 52
+wire 1 right 122 4 left 52
+wire 5 right 146 6 left 52
+wire 5 right 122 7 left 52
+wire 5 right 122 8 left 52
+wire 5 right 122 9 left 52
+wire 10 right 146 11 left 52
+wire 10 right 122 12 left 52
+wire 10 right 122 13 left 52
+wire 10 right 122 14 left 52
+wire 15 right 146 16 left 52
+wire 15 right 122 17 left 52
+wire 15 right 122 18 left 52
+wire 19 right 146 20 left 52
+wire 19 right 122 21 left 46
+wire 22 right 146 23 left 52
+wire 22 right 122 24 left 46
+wire 25 right 122 26 left 52
+wire 27 right 122 28 left 52
+wire 29 right 122 30 left 52
+wire 31 right 122 32 left 52
+wire 33 right 122 34 left 52
+wire 35 right 146 36 left 52
+wire 35 right 122 37 left 46
+wire 38 right 146 39 left 52
+wire 38 right 122 40 left 46
+wire 41 right 146 42 left 52
+wire 41 right 122 43 left 46
+wire 44 right 146 45 left 52
+wire 44 right 122 46 left 52
+wire 47 right 146 48 left 52
+wire 47 right 122 49 left 52
+mark 1848 20 120 24
+mark 1848 794 120 24
+mark 1848 1336 120 24
+end
+board labels full collapsed 50 all
+card 0 0 280 132 begin
+card 380 0 280 424 no_token
+card 760 0 280 424 weight_31
+card 1140 0 280 424 weight_0
+card 1520 0 280 424 no_parcel
+card 0 1864 280 424 postcode_symbols
+card 380 1864 280 424 postcode_one_digit
+card 760 1864 280 424 postcode_short
+card 1140 1864 280 424 postcode_spaces
+card 1520 1864 280 424 postcode_empty
+card 0 3048 280 424 postcode_null
+card 380 3048 280 424 postcode_missing
+card 760 3048 280 424 service_unknown
+card 1140 3048 280 424 service_digits
+card 1520 3048 280 424 service_foreign
+card 0 4232 280 424 service_empty
+card 380 4232 280 424 service_null
+wire 0 top 140 1 top 140
+wire 1 top 140 2 top 140
+wire 2 top 140 3 top 140
+wire 3 top 140 4 top 140
+wire 4 top 140 5 top 140
+wire 5 top 140 6 top 140
+wire 6 top 140 7 top 140
+wire 7 top 140 8 top 140
+wire 8 top 140 9 top 140
+wire 9 top 140 10 top 140
+wire 10 top 140 11 top 140
+wire 11 top 140 12 top 140
+wire 12 top 140 13 top 140
+wire 13 top 140 14 top 140
+wire 14 top 140 15 top 140
+wire 15 top 140 16 top 140
+mark 1808 20 120 24
+mark 1808 1884 120 24
+mark 1808 3068 120 24
+end
+board labels full expanded 50 all
+card 0 0 280 132 begin
+card 380 0 280 424 no_token
+card 380 448 280 316 no_token_status under 1
+card 380 788 280 316 no_token_code under 2
+card 380 1128 280 316 no_token_text under 3
+card 760 0 280 424 weight_31
+card 760 448 280 316 weight_31_status under 5
+card 760 788 280 316 weight_31_code under 6
+card 760 1128 280 316 weight_31_field under 7
+card 760 1468 280 316 weight_31_text under 8
+card 1160 0 280 424 weight_0
+card 1160 448 280 316 weight_0_status under 10
+card 1160 788 280 316 weight_0_code under 11
+card 1160 1128 280 316 weight_0_field under 12
+card 1160 1468 280 316 weight_0_text under 13
+card 1560 0 280 424 no_parcel
+card 1560 448 280 316 no_parcel_status under 15
+card 1560 788 280 316 no_parcel_code under 16
+card 1560 1128 280 316 no_parcel_text under 17
+card 0 1864 280 424 postcode_symbols
+card 0 2312 280 316 postcode_symbols_status under 19
+card 0 2652 280 316 postcode_symbols_text under 20
+card 380 1864 280 424 postcode_one_digit
+card 380 2312 280 316 postcode_one_digit_status under 22
+card 380 2652 280 316 postcode_one_digit_text under 23
+card 760 1864 280 424 postcode_short
+card 760 2312 280 316 postcode_short_status under 25
+card 1160 1864 280 424 postcode_spaces
+card 1160 2312 280 316 postcode_spaces_status under 27
+card 1560 1864 280 424 postcode_empty
+card 1560 2312 280 316 postcode_empty_status under 29
+card 0 3048 280 424 postcode_null
+card 0 3496 280 316 postcode_null_status under 31
+card 380 3048 280 424 postcode_missing
+card 380 3496 280 316 postcode_missing_status under 33
+card 760 3048 280 424 service_unknown
+card 760 3496 280 316 service_unknown_status under 35
+card 760 3836 280 316 service_unknown_text under 36
+card 1160 3048 280 424 service_digits
+card 1160 3496 280 316 service_digits_status under 38
+card 1160 3836 280 316 service_digits_text under 39
+card 1560 3048 280 424 service_foreign
+card 1560 3496 280 316 service_foreign_status under 41
+card 1560 3836 280 316 service_foreign_text under 42
+card 0 4232 280 424 service_empty
+card 0 4680 280 316 service_empty_status under 44
+card 0 5020 280 316 service_empty_text under 45
+card 380 4232 280 424 service_null
+card 380 4680 280 316 service_null_status under 47
+card 380 5020 280 316 service_null_text under 48
+wire 0 top 140 1 top 140
+wire 1 top 140 5 top 140
+wire 5 top 140 10 top 140
+wire 10 top 140 15 top 140
+wire 15 top 140 19 top 140
+wire 19 top 140 22 top 140
+wire 22 top 140 25 top 140
+wire 25 top 140 27 top 140
+wire 27 top 140 29 top 140
+wire 29 top 140 31 top 140
+wire 31 top 140 33 top 140
+wire 33 top 140 35 top 140
+wire 35 top 140 38 top 140
+wire 38 top 140 41 top 140
+wire 41 top 140 44 top 140
+wire 44 top 140 47 top 140
+wire 1 right 288 2 left 118
+wire 1 right 260 3 left 118
+wire 1 right 260 4 left 118
+wire 5 right 288 6 left 118
+wire 5 right 260 7 left 118
+wire 5 right 260 8 left 118
+wire 5 right 260 9 left 118
+wire 10 right 288 11 left 118
+wire 10 right 260 12 left 118
+wire 10 right 260 13 left 118
+wire 10 right 260 14 left 118
+wire 15 right 288 16 left 118
+wire 15 right 260 17 left 118
+wire 15 right 260 18 left 118
+wire 19 right 288 20 left 118
+wire 19 right 260 21 left 118
+wire 22 right 288 23 left 118
+wire 22 right 260 24 left 118
+wire 25 right 288 26 left 118
+wire 27 right 288 28 left 118
+wire 29 right 288 30 left 118
+wire 31 right 288 32 left 118
+wire 33 right 288 34 left 118
+wire 35 right 288 36 left 118
+wire 35 right 260 37 left 118
+wire 38 right 288 39 left 118
+wire 38 right 260 40 left 118
+wire 41 right 288 42 left 118
+wire 41 right 260 43 left 118
+wire 44 right 288 45 left 118
+wire 44 right 260 46 left 118
+wire 47 right 288 48 left 118
+wire 47 right 260 49 left 118
+mark 1848 20 120 24
+mark 1848 1884 120 24
+mark 1848 3068 120 24
+end
+board labels compact collapsed 50 chips
+card 0 0 280 132 begin
+card 380 0 280 214 no_token
+card 760 0 280 214 weight_31
+card 1140 0 280 214 weight_0
+card 1520 0 280 214 no_parcel
+card 0 774 280 214 postcode_symbols
+card 380 774 280 214 postcode_one_digit
+card 760 774 280 190 postcode_short
+card 1140 774 280 190 postcode_spaces
+card 1520 774 280 190 postcode_empty
+card 0 1316 280 190 postcode_null
+card 380 1316 280 190 postcode_missing
+card 760 1316 280 214 service_unknown
+card 1140 1316 280 214 service_digits
+card 1520 1316 280 214 service_foreign
+card 0 1858 280 214 service_empty
+card 380 1858 280 214 service_null
+mark 1808 20 120 24
+mark 1808 794 120 24
+mark 1808 1336 120 24
+end
+board labels compact expanded 50 chips
+card 0 0 280 132 begin
+card 380 0 280 214 no_token
+card 380 238 280 96 no_token_status under 1
+card 380 358 280 96 no_token_code under 2
+card 380 478 280 96 no_token_text under 3
+card 760 0 280 214 weight_31
+card 760 238 280 96 weight_31_status under 5
+card 760 358 280 96 weight_31_code under 6
+card 760 478 280 96 weight_31_field under 7
+card 760 598 280 96 weight_31_text under 8
+card 1140 0 280 214 weight_0
+card 1140 238 280 96 weight_0_status under 10
+card 1140 358 280 96 weight_0_code under 11
+card 1140 478 280 96 weight_0_field under 12
+card 1140 598 280 96 weight_0_text under 13
+card 1520 0 280 214 no_parcel
+card 1520 238 280 96 no_parcel_status under 15
+card 1520 358 280 96 no_parcel_code under 16
+card 1520 478 280 96 no_parcel_text under 17
+card 0 774 280 214 postcode_symbols
+card 0 1012 280 96 postcode_symbols_status under 19
+card 0 1132 280 104 postcode_symbols_text under 20
+card 380 774 280 214 postcode_one_digit
+card 380 1012 280 96 postcode_one_digit_status under 22
+card 380 1132 280 104 postcode_one_digit_text under 23
+card 760 774 280 190 postcode_short
+card 760 988 280 96 postcode_short_status under 25
+card 1140 774 280 190 postcode_spaces
+card 1140 988 280 96 postcode_spaces_status under 27
+card 1520 774 280 190 postcode_empty
+card 1520 988 280 96 postcode_empty_status under 29
+card 0 1316 280 190 postcode_null
+card 0 1530 280 96 postcode_null_status under 31
+card 380 1316 280 190 postcode_missing
+card 380 1530 280 96 postcode_missing_status under 33
+card 760 1316 280 214 service_unknown
+card 760 1554 280 96 service_unknown_status under 35
+card 760 1674 280 104 service_unknown_text under 36
+card 1140 1316 280 214 service_digits
+card 1140 1554 280 96 service_digits_status under 38
+card 1140 1674 280 104 service_digits_text under 39
+card 1520 1316 280 214 service_foreign
+card 1520 1554 280 96 service_foreign_status under 41
+card 1520 1674 280 104 service_foreign_text under 42
+card 0 1858 280 214 service_empty
+card 0 2096 280 96 service_empty_status under 44
+card 0 2216 280 96 service_empty_text under 45
+card 380 1858 280 214 service_null
+card 380 2096 280 96 service_null_status under 47
+card 380 2216 280 96 service_null_text under 48
+mark 1808 20 120 24
+mark 1808 794 120 24
+mark 1808 1336 120 24
+end
