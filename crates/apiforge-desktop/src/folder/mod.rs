@@ -183,6 +183,14 @@ enum Prompt {
         paths: Vec<String>,
         error: Option<String>,
     },
+    /// Deleting an `if` with statements in its braces asks once (DIAG-06e).
+    DeleteStatements {
+        document_id: String,
+        cleanup: bool,
+        ids: Vec<String>,
+        wires: Vec<String>,
+        question: String,
+    },
     Import {
         rows: Vec<ImportRow>,
         error: Option<String>,
@@ -371,6 +379,9 @@ pub struct FolderApp {
     tabs_offset: f32,
     tabs_width: f32,
     prompt: Option<Prompt>,
+    /// The blocks whose delete the person has just confirmed, for the one
+    /// delete that follows (DIAG-06e).
+    confirmed_delete: Option<Vec<String>>,
     close_error: Option<String>,
     /// Set by a decision in the close dialog; the window closes next frame.
     close_requested: bool,
@@ -581,6 +592,7 @@ impl FolderApp {
             tabs_offset: 0.0,
             tabs_width: 0.0,
             prompt: None,
+            confirmed_delete: None,
             close_error: None,
             close_requested: false,
             preferences: Preferences::default(),

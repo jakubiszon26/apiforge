@@ -595,16 +595,33 @@ impl FolderApp {
                 .set_input(&node, &input, &path, binding)
                 .transpose()
                 .map(|result| result.map(Into::into)),
+            // One preview drives the refusal, the question and the delete
+            // (DIAG-06e).
             Command::Delete { ids, wires } => {
-                let next = board.delete(&ids, &wires);
-                let kept = selection
-                    .into_iter()
-                    .filter(|id| !ids.contains(id))
-                    .collect();
-                Some(Ok(Edit {
-                    graph: next,
-                    selection: Some(kept),
-                }))
+                let needs_start = matches!(model, Document::Scenario(_)) && !cleanup;
+                let deletion = board.deletion(&ids, needs_start);
+                let confirmed = self.confirmed_delete.take().as_ref() == Some(&ids);
+                if let Some(refusal) = deletion.refusal() {
+                    Some(Err(refusal))
+                } else if let Some(question) = deletion.question().filter(|_| !confirmed) {
+                    self.prompt = Some(Prompt::DeleteStatements {
+                        document_id: document_id.to_owned(),
+                        cleanup,
+                        ids,
+                        wires,
+                        question,
+                    });
+                    None
+                } else {
+                    let kept = selection
+                        .into_iter()
+                        .filter(|id| !ids.contains(id) && !deletion.gone.contains(id))
+                        .collect();
+                    Some(Ok(Edit {
+                        graph: board.delete_checked(&deletion, &ids, &wires),
+                        selection: Some(kept),
+                    }))
+                }
             }
             Command::AddProxy { source, position } => Some(board.add_proxy(source, position)),
             Command::Connect {
@@ -711,6 +728,55 @@ impl FolderApp {
         if let Some(result) = result {
             self.apply_edit(document_id, model, cleanup, result);
         }
+    }
+
+    /// The one question a delete asks: an `if` with statements in its braces
+    /// (DIAG-06e). *Delete* runs the delete again on the document as it is
+    /// then, so a refusal that has appeared meanwhile still refuses.
+    pub(super) fn delete_statements_prompt(
+        &mut self,
+        context: &egui::Context,
+        document_id: String,
+        cleanup: bool,
+        ids: Vec<String>,
+        wires: Vec<String>,
+        question: String,
+    ) -> Option<Prompt> {
+        let (mut confirm, mut cancel) = (false, false);
+        let response =
+            dialogs::centered_modal(egui::Id::new("board-delete"), context).show(context, |ui| {
+                ui.set_width(420.0);
+                ui.heading(&question);
+                ui.add_space(theme::SPACE_MD);
+                ui.horizontal(|ui| {
+                    confirm = ui.add(widgets::primary_button("Delete")).clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if response.should_close() || cancel {
+            return None;
+        }
+        if confirm {
+            let snapshot = self.snapshot(&document_id)?;
+            let model = snapshot.model?;
+            self.confirmed_delete = Some(ids.clone());
+            self.board_command(
+                &document_id,
+                &model,
+                cleanup,
+                snapshot.editable,
+                Command::Delete { ids, wires },
+            );
+            self.confirmed_delete = None;
+            return self.prompt.take();
+        }
+        Some(Prompt::DeleteStatements {
+            document_id,
+            cleanup,
+            ids,
+            wires,
+            question,
+        })
     }
 
     /// Applies a paste or a duplicate as one model edit, so one undo removes

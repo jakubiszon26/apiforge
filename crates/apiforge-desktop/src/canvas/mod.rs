@@ -4576,8 +4576,22 @@ impl Canvas {
                     .corner_radius(8)
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.colored_label(theme::DANGER, &message);
+                        // A long message, such as a refused delete naming its
+                        // readers (DIAG-06e), wraps within the board.
+                        let width = (overlays.board.width() - 80.0).clamp(160.0, 520.0);
+                        ui.horizontal_top(|ui| {
+                            ui.allocate_ui_with_layout(
+                                vec2(width, 0.0),
+                                egui::Layout::top_down(egui::Align::LEFT),
+                                |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&message).color(theme::DANGER),
+                                        )
+                                        .wrap(),
+                                    );
+                                },
+                            );
                             if ui
                                 .add(widgets::icon_button(Icon::Close, "Dismiss").compact())
                                 .clicked()

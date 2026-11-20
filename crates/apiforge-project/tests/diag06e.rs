@@ -318,9 +318,12 @@ fn handles(document: &Document) -> Vec<String> {
 
 // Criterion 4 ----------------------------------------------------------------
 
+/// The selections deleted one after another, each by handle.
+type Deletes = &'static [&'static [&'static str]];
+
 #[test]
 fn diag06e_criterion_4_surviving_inputs_are_untouched() {
-    let cases: [(fn() -> Opened, &[&[&str]]); 3] = [
+    let cases: [(fn() -> Opened, Deletes); 3] = [
         (labels, &[&["no_token"], &["weight_31", "weight_0"]]),
         (
             shop,

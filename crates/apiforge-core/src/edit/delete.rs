@@ -16,8 +16,13 @@
 //! done changes no input of a statement that stays. The legacy window keeps
 //! [`crate::graph::delete_nodes`], which drops such inputs instead.
 use super::EditError;
-use crate::format::Graph;
-use std::collections::HashSet;
+use crate::{
+    branches::Branches,
+    chain::is_step,
+    format::{Graph, Node, ProxySource},
+    model::NodeKind,
+};
+use std::collections::{HashMap, HashSet};
 
 /// What deleting a selection would do.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -67,46 +72,315 @@ impl Deletion {
     /// Why the delete is refused, as the board says it; `None` when it may
     /// be done.
     pub fn refusal(&self) -> Option<String> {
-        todo!("DIAG-06e")
+        if self.start {
+            return Some("A scenario starts at Start. Delete its steps first.".into());
+        }
+        if self.readers.is_empty() {
+            return None;
+        }
+        let readers: Vec<&str> = self.readers.iter().map(|r| r.handle.as_str()).collect();
+        let mut read: Vec<&Read> = vec![];
+        for reader in &self.readers {
+            for item in &reader.reads {
+                if !read.iter().any(|known| known.handle == item.handle) {
+                    read.push(item);
+                }
+            }
+        }
+        let names: Vec<&str> = read.iter().map(|item| item.handle.as_str()).collect();
+        let (verb, them) = if readers.len() == 1 {
+            ("reads", "it")
+        } else {
+            ("read", "them")
+        };
+        let mut message = format!(
+            "{} {verb} {}. Change or delete {them} first.",
+            listed(&readers),
+            listed(&names)
+        );
+        // What goes with the selection without being selected, grouped by
+        // what it goes with.
+        let mut groups: Vec<(&[String], Vec<&str>)> = vec![];
+        for item in read.iter().filter(|item| !item.with.is_empty()) {
+            match groups
+                .iter_mut()
+                .find(|(with, _)| *with == item.with.as_slice())
+            {
+                Some((_, handles)) => handles.push(&item.handle),
+                None => groups.push((&item.with, vec![&item.handle])),
+            }
+        }
+        for (with, handles) in groups {
+            let with: Vec<&str> = with.iter().map(String::as_str).collect();
+            message.push_str(&format!(
+                " {} would go with {}.",
+                listed(&handles),
+                listed(&with)
+            ));
+        }
+        Some(message)
     }
 
     /// The one question a delete asks before it is done: when a selected
     /// `if` has statements in its braces. `None` when there is nothing to
     /// ask.
     pub fn question(&self) -> Option<String> {
-        todo!("DIAG-06e")
+        if self.braces.is_empty() {
+            return None;
+        }
+        let ifs: Vec<&str> = self.braces.iter().map(|b| b.handle.as_str()).collect();
+        let steps: usize = self.braces.iter().map(|b| b.steps).sum();
+        let statements: usize = self.braces.iter().map(|b| b.statements).sum();
+        let inside = match (steps, statements) {
+            (1, _) => "the step".to_owned(),
+            (0, 1) => "the statement".to_owned(),
+            (0, count) => format!("the {count} statements"),
+            (count, _) => format!("the {count} steps"),
+        };
+        let it = if ifs.len() == 1 { "it" } else { "them" };
+        Some(format!("Delete {} and {inside} inside {it}?", listed(&ifs)))
     }
+}
+
+/// `a`, `` `a` and `b` ``, `` `a`, `b` and `c` ``.
+fn listed(handles: &[&str]) -> String {
+    let quoted: Vec<String> = handles.iter().map(|handle| format!("`{handle}`")).collect();
+    match quoted.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The statements a node reads, by identifier, each once.
+fn reads(node: &Node) -> Vec<&str> {
+    let mut result: Vec<&str> = vec![];
+    for binding in node.inputs.values() {
+        for reference in binding.references() {
+            if !result.contains(&reference.node_id) {
+                result.push(reference.node_id);
+            }
+        }
+    }
+    result
+}
+
+/// A check, a value or a variable: what goes with what it reads.
+fn follows_what_it_reads(kind: NodeKind) -> bool {
+    matches!(
+        kind,
+        NodeKind::Assert | NodeKind::Condition | NodeKind::Value
+    )
 }
 
 /// What deleting `selection` from `graph` would do. `beside` are the graphs
 /// whose statements may read `graph`'s (a scenario's cleanup, which sees the
 /// main flow); their statements stay and are never taken with the delete.
 /// `needs_start` is true for the main flow of a scenario, which starts at
-/// *Start* while it has a step.
+/// *Start* while it has a step. Identifiers of the selection that name no
+/// statement of `graph` (a proxy, a wire) are left out.
 pub fn delete_preview(
-    _graph: &Graph,
-    _beside: &[&Graph],
-    _selection: &HashSet<&str>,
-    _needs_start: bool,
+    graph: &Graph,
+    beside: &[&Graph],
+    selection: &HashSet<&str>,
+    needs_start: bool,
 ) -> Deletion {
-    todo!("DIAG-06e")
+    let branches = Branches::new(graph);
+    let selected: HashSet<&str> = graph
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .filter(|id| selection.contains(id))
+        .collect();
+    let handles: HashMap<&str, &str> = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node.handle.as_str()))
+        .collect();
+
+    // The outermost selected `if` whose braces hold a statement.
+    let enclosing = |id: &str| -> Option<&str> {
+        let mut found = None;
+        let mut current = id;
+        for _ in 0..=graph.nodes.len() {
+            match branches.parent(current) {
+                Some((x, _)) => {
+                    if selected.contains(x) {
+                        found = Some(x);
+                    }
+                    current = x;
+                }
+                None => break,
+            }
+        }
+        found
+    };
+    // What each statement that goes goes with: nothing for a selected one.
+    let mut with: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut braces: Vec<Braced> = vec![];
+    let mut counted: HashMap<&str, (usize, usize)> = HashMap::new();
+    for node in &graph.nodes {
+        let id = node.id.as_str();
+        if selected.contains(id) && enclosing(id).is_none() {
+            with.insert(id, vec![]);
+        } else if let Some(x) = enclosing(id) {
+            with.insert(id, vec![x]);
+            let count = counted.entry(x).or_default();
+            count.1 += 1;
+            if is_step(node.kind) {
+                count.0 += 1;
+            }
+        }
+    }
+    for node in &graph.nodes {
+        if let Some(&(steps, statements)) = counted.get(node.id.as_str()) {
+            braces.push(Braced {
+                handle: node.handle.clone(),
+                steps,
+                statements,
+            });
+        }
+    }
+    // A check, value or variable that reads only what goes goes with it.
+    loop {
+        let mut added = false;
+        for node in &graph.nodes {
+            let id = node.id.as_str();
+            if with.contains_key(id) || !follows_what_it_reads(node.kind) {
+                continue;
+            }
+            let read = reads(node);
+            if !read.is_empty() && read.iter().all(|source| with.contains_key(source)) {
+                let mut owners: Vec<&str> = vec![];
+                for source in read {
+                    let own = &with[source];
+                    let sources = if own.is_empty() {
+                        std::slice::from_ref(&source)
+                    } else {
+                        own.as_slice()
+                    };
+                    for owner in sources {
+                        if !owners.contains(owner) {
+                            owners.push(owner);
+                        }
+                    }
+                }
+                with.insert(id, owners);
+                added = true;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+
+    let gone: Vec<String> = graph
+        .nodes
+        .iter()
+        .filter(|node| with.contains_key(node.id.as_str()))
+        .map(|node| node.id.clone())
+        .collect();
+    let order: HashMap<&str, usize> = graph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.id.as_str(), index))
+        .collect();
+    let readers = std::iter::once(graph)
+        .chain(beside.iter().copied())
+        .flat_map(|graph| &graph.nodes)
+        .filter(|node| !with.contains_key(node.id.as_str()))
+        .filter_map(|node| {
+            let mut read: Vec<&str> = reads(node)
+                .into_iter()
+                .filter(|source| with.contains_key(source))
+                .collect();
+            if read.is_empty() {
+                return None;
+            }
+            read.sort_by_key(|source| order[source]);
+            Some(Reader {
+                id: node.id.clone(),
+                handle: node.handle.clone(),
+                reads: read
+                    .into_iter()
+                    .map(|source| Read {
+                        handle: handles[source].to_owned(),
+                        with: with[source]
+                            .iter()
+                            .map(|owner| handles[owner].to_owned())
+                            .collect(),
+                    })
+                    .collect(),
+            })
+        })
+        .collect();
+    let start = needs_start
+        && graph
+            .nodes
+            .iter()
+            .any(|node| node.kind == NodeKind::Start && with.contains_key(node.id.as_str()))
+        && graph.nodes.iter().any(|node| {
+            is_step(node.kind)
+                && node.kind != NodeKind::Start
+                && !with.contains_key(node.id.as_str())
+        });
+    Deletion {
+        gone,
+        readers,
+        start,
+        braces,
+    }
 }
 
-/// `graph` without what `deletion` takes. No input of a statement that
-/// stays is changed.
-pub fn apply_deletion(_graph: &Graph, _deletion: &Deletion) -> Graph {
-    todo!("DIAG-06e")
+/// `graph` without what `deletion` takes: its statements, the ordering
+/// edges that touch them and the proxies of its variables. No input of a
+/// statement that stays is changed; the chain of the written language joins
+/// the neighbours when the model is written ([`crate::chain::edited`]).
+/// Call it only for a deletion without a [`Deletion::refusal`].
+pub fn apply_deletion(graph: &Graph, deletion: &Deletion) -> Graph {
+    let gone: HashSet<&str> = deletion.gone.iter().map(String::as_str).collect();
+    Graph {
+        nodes: graph
+            .nodes
+            .iter()
+            .filter(|node| !gone.contains(node.id.as_str()))
+            .cloned()
+            .collect(),
+        edges: graph
+            .edges
+            .iter()
+            .filter(|edge| {
+                !gone.contains(edge.source.as_str()) && !gone.contains(edge.target.as_str())
+            })
+            .cloned()
+            .collect(),
+        proxies: graph
+            .proxies
+            .iter()
+            .filter(|proxy| match &proxy.source {
+                ProxySource::Variable { node_id } => !gone.contains(node_id.as_str()),
+                ProxySource::Environment { .. } | ProxySource::Parameter { .. } => true,
+            })
+            .cloned()
+            .collect(),
+    }
 }
 
 /// Deletes `selection` from `graph` by [`delete_preview`]'s answer, or
-/// refuses with the board's sentence.
+/// refuses with the board's sentence. The confirmation an `if` asks for is
+/// the caller's.
 pub fn delete_statements(
-    _graph: &Graph,
-    _beside: &[&Graph],
-    _selection: &HashSet<&str>,
-    _needs_start: bool,
+    graph: &Graph,
+    beside: &[&Graph],
+    selection: &HashSet<&str>,
+    needs_start: bool,
 ) -> Result<Graph, EditError> {
-    todo!("DIAG-06e")
+    let deletion = delete_preview(graph, beside, selection, needs_start);
+    match deletion.refusal() {
+        Some(refusal) => Err(EditError::DeleteRefused(refusal)),
+        None => Ok(apply_deletion(graph, &deletion)),
+    }
 }
 
 #[cfg(test)]

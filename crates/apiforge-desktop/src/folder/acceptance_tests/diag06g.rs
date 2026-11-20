@@ -66,6 +66,8 @@ fn diag06g_criterion_1_deleting_an_if_in_the_window() {
     settle(&mut harness);
     harness.step();
     press(&mut harness, egui::Modifiers::NONE, egui::Key::Delete);
+    // Deleting an `if` with steps in its braces asks once (DIAG-06e).
+    choose(&mut harness, "Delete");
     // A whole-file print asks before dropping the free comment.
     if harness.query_by_label("Continue").is_some() {
         choose(&mut harness, "Continue");
