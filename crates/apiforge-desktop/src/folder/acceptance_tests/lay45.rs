@@ -794,26 +794,86 @@ fn lay45_criterion_8_three_measures_of_crossings() {
 /// `main` the rails above the rows, routed first, steered them (`fan-out`
 /// with every wire and its checks drawn: 37, and 46 on the same board with
 /// no ordering line at all; `shop-50` with every wire, checks folded: 136,
-/// and 142). No drawing of the chain brings them back; held on #468.
+/// and 142). The owner's answer A on #468 (2026-11-20): their data lines
+/// are held to the same board without ordering lines, as every board's
+/// are (`lay45_criterion_8_data_lines_against_the_board_without_order`).
 const HELD: [(&str, WireMode, bool); 2] = [
     ("fan-out", WireMode::All, true),
     ("shop-50", WireMode::All, false),
 ];
 
-/// Criterion 8, its first measure on the two boards of [`HELD`]: their
-/// data lines cross each other no more than before.
+/// The crossings of the data lines with each other on the board as the
+/// router is given it, with every ordering line taken out: the lines of the
+/// chain and the branches, which leave their `if` from the top or bottom.
+fn without_order(harness: &FolderHarness, id: &str) -> usize {
+    let (rectangles, wires) = board(harness, id).debug_geometry().clone();
+    let data: Vec<apiforge_layout::Wire> = wires
+        .into_iter()
+        .filter(|wire| {
+            !wire.chain
+                && !matches!(
+                    wire.from.side,
+                    apiforge_layout::Side::Top | apiforge_layout::Side::Bottom
+                )
+        })
+        .collect();
+    let routes = apiforge_layout::route_grouped(
+        &rectangles,
+        &groups(&rectangles),
+        &data,
+        &apiforge_layout::Routing::default(),
+        &[],
+    );
+    let mut count = 0;
+    for (index, a) in routes.iter().enumerate() {
+        for b in &routes[index + 1..] {
+            for (a1, a2) in a.segments() {
+                for (b1, b2) in b.segments() {
+                    count += usize::from(crossing(a1, a2, b1, b2).is_some());
+                }
+            }
+        }
+    }
+    count
+}
+
+/// Criterion 8, its first measure as the owner answered it on #468 (A,
+/// 2026-11-20): the data lines cross each other no more than on the same
+/// board routed without its ordering lines. On the two boards of [`HELD`]
+/// that is their limit (`shop-50` with every wire, checks folded: 140
+/// against 142; `fan-out` with every wire, checks drawn: 46 against 46);
+/// every other board keeps to it or to its figure before this ticket,
+/// which `lay45_criterion_8_three_measures_of_crossings` holds (`order-flow`
+/// with chips, checks folded: 1, 0 without ordering lines, 2 before: the
+/// chain takes the row gap the two lines out of `order` ran in, and below
+/// the row they cannot pass each other).
 #[test]
-#[ignore = "LAY-45 (#468): decision-needed — fan-out (46, 37 before) and shop-50 (140, 136 before) with every wire"]
-fn lay45_criterion_8_data_lines_on_the_held_boards() {
-    for (name, wires, expanded) in HELD {
-        let (_project, harness, id) = tidied(name, WIDE, expanded, wires);
-        let label = format!("{name}, {wires:?}, checks drawn: {expanded}");
-        let (data, _, _) = measures(&harness, &id, &label);
-        let (most, _, _) = before(name, wires, expanded);
-        assert!(
-            data <= most,
-            "{label}: {data} data crossings, {most} before"
-        );
+fn lay45_criterion_8_data_lines_against_the_board_without_order() {
+    for name in REFERENCE {
+        for wires in MODES {
+            for expanded in [false, true] {
+                let (_project, harness, id) = tidied(name, WIDE, expanded, wires);
+                let label = format!("{name}, {wires:?}, checks drawn: {expanded}");
+                let (data, _, _) = measures(&harness, &id, &label);
+                let alone = without_order(&harness, &id);
+                let (was, _, _) = before(name, wires, expanded);
+                eprintln!(
+                    "LAY-45 {label}: data×data {data}, without ordering lines {alone}, before {was}"
+                );
+                if HELD.contains(&(name, wires, expanded)) {
+                    assert!(
+                        data <= alone,
+                        "{label}: {data} data crossings, {alone} without ordering lines"
+                    );
+                } else {
+                    assert!(
+                        data <= alone || data <= was,
+                        "{label}: {data} data crossings, {alone} without ordering lines, \
+                         {was} before"
+                    );
+                }
+            }
+        }
     }
 }
 
