@@ -71,11 +71,14 @@ board edit of that statement or the first *Format*.
 
 Tests in `crates/apiforge-script/tests/lang05.rs`.
 
-1. `fmt` and `print` write a check whose expression is a comparison
-   (`==`, `!=`, `<`, `>`, `<=`, `>=`, `~=`, `contains`, `is`) or a logical
-   operation (`&&`, `||`, `!`) without `== true`, in `assert`, `if` and
-   each check of a `condition`; a bare name, field, literal or call keeps
-   `== true`, and so does a parenthesised one.
+1. `fmt` and `print` write a check without `== true` when its
+   expression is a comparison or a logical operation that, written alone,
+   reads back as the same check: `>=`, `<=`, `&&`, `||`, `!` at its top —
+   in `assert`, `if` and each check of a `condition`. A bare name, field,
+   literal or call keeps `== true`. An expression that written alone is a
+   predicate of its own (`a == b`, `a > b`, `a contains b`) is already
+   written as typed; `(a == b) == true`, which is another check in the
+   document, stays as it is.
    Test: `lang05_criterion_1_*`, one per statement kind.
 2. Text → document → text is unchanged for both spellings' canonical
    outcome, and the two spellings lower to equal documents.
