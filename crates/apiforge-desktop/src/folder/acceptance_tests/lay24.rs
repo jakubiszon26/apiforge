@@ -344,15 +344,18 @@ fn lay24_criterion_1_fan_out_draws_arrows_not_rails() {
 fn lay24_criterion_2_shop_30_keeps_the_rails_further_away() {
     let arrowed: BTreeSet<String> = SHOP_30_MARKED.map(str::to_owned).into_iter().collect();
     for checks in [Checks::Collapsed, Checks::Expanded] {
-        // Drawn as a card, `receipt_total` shows the edge of its braces too.
+        // Every statement in `paid`'s braces shows the edge of its braces;
+        // drawn as cards, the checks there do too.
         let inside: &[&str] = match checks {
-            Checks::Collapsed => &["not_created", "payment", "receipt", "refund"],
+            Checks::Collapsed => &["logout", "not_created", "payment", "receipt", "refund"],
             Checks::Expanded => &[
+                "logout",
                 "not_created",
                 "payment",
                 "receipt",
                 "receipt_total",
                 "refund",
+                "refund_amount",
             ],
         };
         let branches: BTreeSet<(String, String)> = inside
