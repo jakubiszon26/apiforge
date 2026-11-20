@@ -9,7 +9,8 @@
 //! the window and publication write it) agree.
 use apiforge_core::format::Project;
 use apiforge_script::{
-    Document, LowerContext, Severity, ast::Form, format, lower, parse, print_folder_document,
+    Document, LowerContext, Severity, ast::Form, edit_folder_document, edit_in_place, format,
+    lower, parse, print_folder_document, print_revision, print_stored,
 };
 use std::path::{Path, PathBuf};
 
@@ -269,4 +270,169 @@ fn lang05_criterion_4_every_fixture_check_is_canonical() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+// Review ---------------------------------------------------------------------
+
+/// A component published by 0.1.0, in its stored spelling: compound checks in
+/// full, as every revision on disk was written.
+const STORED_COMPONENT: &str = r#"component pair "Pair" {
+  a = GET "/a" {
+    sample 200 { n: 1, m: 2, flag: true }
+  }
+  @after(a)
+  b = GET "/b" {
+    sample 200 {}
+  }
+  ok = assert (a.body.n >= a.body.m) == true
+  both = condition all {
+    (a.body.n == 1 && a.body.flag) == true,
+    !a.body.flag == true,
+  }
+  export n: number = a.body.n
+}
+"#;
+
+const STORED_SCENARIO: &str = r#"scenario "Stored" {
+  on_error stop
+  a = GET "/a" {
+    sample 200 { n: 1, m: 2, flag: true }
+  }
+  ok = assert (a.body.n >= a.body.m) == true
+  @after(a)
+  x = if (a.body.n <= 1 || a.body.flag) == true {
+    b = GET "/b" {
+      sample 200 {}
+    }
+  }
+}
+"#;
+
+fn stored(project: &Project, text: &str) -> Document {
+    let lowered = lower(&parse(text), &LowerContext::folder(project).stored());
+    let errors: Vec<_> = lowered
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "{text}\n{errors:#?}");
+    lowered.document.expect("a document")
+}
+
+/// A published revision and the stored spelling are written as 0.1.0 wrote
+/// them, so a revision on disk prints back to the same bytes (and the same
+/// hash `unchanged_revision` compares). The short form is the written
+/// language's.
+#[test]
+fn lang05_review_the_stored_spelling_keeps_the_long_form() {
+    let project = project();
+    let Document::Component(component) = stored(&project, STORED_COMPONENT) else {
+        panic!("a component");
+    };
+    assert_eq!(
+        print_revision(&project, &component).unwrap(),
+        STORED_COMPONENT
+    );
+    let scenario = stored(&project, STORED_SCENARIO);
+    assert_eq!(print_stored(&project, &scenario).unwrap(), STORED_SCENARIO);
+}
+
+/// A board edit writes the statement it changes in the short form.
+#[test]
+fn lang05_review_a_board_edit_writes_the_short_form() {
+    let project = project();
+    let source = assert_statement("(a.body.n >= a.body.m) == true");
+    let previous = lowered(&project, &source);
+    let next = lowered(&project, &assert_statement("a.body.n >= 2"));
+    let edited = edit_in_place(&project, &source, &previous, &next).expect("edited in place");
+    assert_eq!(edited, assert_statement("a.body.n >= 2"));
+    assert_eq!(
+        edit_folder_document(&project, &source, &previous, &next).unwrap(),
+        assert_statement("a.body.n >= 2")
+    );
+    // A new check is written short too.
+    let added = lowered(
+        &project,
+        &scenario(
+            "  ok = assert (a.body.n >= a.body.m) == true\n  more = assert a.body.n == 1 && a.body.flag\n",
+        ),
+    );
+    let edited = edit_folder_document(&project, &source, &previous, &added).unwrap();
+    assert_eq!(
+        edited,
+        scenario(
+            "  ok = assert (a.body.n >= a.body.m) == true\n  more = assert a.body.n == 1 && a.body.flag\n"
+        ),
+        "the statement the edit does not change stays as written"
+    );
+}
+
+/// Nested parentheses, `!` over a parenthesised predicate, text that looks
+/// like a check and a statement's comments.
+#[test]
+fn lang05_review_parentheses_strings_and_comments() {
+    let project = project();
+    // The check as typed, as `fmt` writes it (the author's parentheses
+    // around a predicate stay) and as `print` writes it (the document keeps
+    // no parentheses).
+    for (typed, fmt, print) in [
+        (
+            "((a.body.n >= a.body.m)) == true",
+            "a.body.n >= a.body.m",
+            "a.body.n >= a.body.m",
+        ),
+        (
+            "(((a.body.n == 1 || a.body.flag))) == true",
+            "a.body.n == 1 || a.body.flag",
+            "a.body.n == 1 || a.body.flag",
+        ),
+        (
+            "!(a.body.n == 1) == true",
+            "!(a.body.n == 1)",
+            "!(a.body.n == 1)",
+        ),
+        (
+            "(!(a.body.n == 1)) == true",
+            "!(a.body.n == 1)",
+            "!(a.body.n == 1)",
+        ),
+        (
+            "((a.body.n == 1)) == true",
+            "((a.body.n == 1)) == true",
+            "(a.body.n == 1) == true",
+        ),
+        (
+            "(a.body.s == \"(x >= y) == true\" || a.body.flag) == true",
+            "a.body.s == \"(x >= y) == true\" || a.body.flag",
+            "a.body.s == \"(x >= y) == true\" || a.body.flag",
+        ),
+        (
+            "a.body.s == \"a && b\" && a.body.flag",
+            "a.body.s == \"a && b\" && a.body.flag",
+            "a.body.s == \"a && b\" && a.body.flag",
+        ),
+    ] {
+        for statement in [assert_statement, if_statement, condition_statement] {
+            let text = statement(typed);
+            assert_eq!(formatted(&text), statement(fmt), "fmt of `{typed}`");
+            assert_eq!(
+                printed(&project, &text),
+                statement(print),
+                "print of `{typed}`"
+            );
+        }
+    }
+    // A statement's comments stay with it.
+    let text = scenario(
+        "  // at least as many as asked\n  ok = assert (a.body.n >= a.body.m) == true // checked\n",
+    );
+    let written = formatted(&text);
+    assert!(
+        written.contains("  ok = assert a.body.n >= a.body.m\n"),
+        "{written}"
+    );
+    assert!(written.contains("at least as many as asked"), "{written}");
+    assert!(written.contains("checked"), "{written}");
+    assert_eq!(formatted(&written), written);
+    assert_eq!(printed(&project, &written), written);
 }
