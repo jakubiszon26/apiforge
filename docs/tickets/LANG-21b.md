@@ -20,8 +20,11 @@ without pressing the button to find out.
 - New (answer 5, view 4a): each row of the list has *Show*: the dialog
   closes, the file opens with the statement selected, and that statement
   is the first of the file's problems.
-- New (view 4b): after a refused update the band shows the count of
-  statements left, *Show the list* and *Update the project*.
+- New (view 4b): while files are left to place by hand — after an
+  update that converted only some, or none — the band adds the count of
+  statements left and *Show the list* to LANG-21a's line (*being
+  updated: n of m files*, or the first offer when nothing is converted
+  yet).
 - New (answer 9): every save checks the project again, writing nothing;
   the count follows, and at none left the band reads as when the project
   opened.
@@ -36,18 +39,22 @@ captures in the pull request.
 
 Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/lang21b.rs`
 (D) and `crates/apiforge-project/tests/lang21b.rs` (P), on LANG-21a's
-project that cannot be updated.
+two projects with blocked files (some convertible; none).
 
 1. *Show* on a row closes the dialog, opens that file in Code (or Split,
    as the window is) and selects the statement's lines; the row's problem
    is the first of that file's Problems, with the plan's sentence.
    Test: D `lang21b_criterion_1_*`.
-2. After a refused update the band shows *n statements to place by
-   hand*, *Show the list*, which opens the dialog again with the current
-   plan, and the button. Test: D `lang21b_criterion_2_*`.
-3. After each save the plan is made again, nothing is written, and the
-   band's count equals the plan's; when it is none, the band is LANG-21a's
-   offer. Before any refused update no check runs at a save.
+2. While the plan lists statements to place by hand, the band shows
+   *k statements to place by hand* and *Show the list*, which opens
+   LANG-21a's dialog with the current plan, beside LANG-21a's line and
+   button — in a project with a record and in one where nothing could be
+   converted yet. Test: D `lang21b_criterion_2_*`.
+3. After each save the plan is made again, nothing is written (no
+   source, no record, no manifest), and the band's count equals the
+   plan's; when it is none, the band is LANG-21a's alone. Before the
+   button was first pressed in this session, and in a project without a
+   record, no plan is made at a save.
    Tests: P `lang21b_criterion_3_*`, D `lang21b_criterion_3_*`.
 4. The check at a save does not hold the window: for a project of 50
    sources it takes under 250 ms on the reference machine or runs off the
