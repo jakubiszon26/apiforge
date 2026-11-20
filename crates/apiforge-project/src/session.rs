@@ -1400,16 +1400,18 @@ pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChang
 }
 
 /// A board edit keeps the chain of the written language (LANG-13): each
-/// graph of the edited model is rebuilt by [`apiforge_core::chain::edited`].
+/// graph of the edited model is rebuilt by [`apiforge_core::chain::edited`],
+/// and the first step placed in a main flow without a *Start* gets one
+/// written above it, as rule 1 and the fix of a file require.
 fn kept_chain(previous: &Document, mut model: Document) -> Document {
-    use apiforge_core::chain::edited;
+    use apiforge_core::chain::{edited, with_start};
     match (previous, &mut model) {
         (Document::Scenario(before), Document::Scenario(after)) => {
-            after.graph = edited(&before.graph, &after.graph);
+            after.graph = with_start(&edited(&before.graph, &after.graph));
             after.cleanup = edited(&before.cleanup, &after.cleanup);
         }
         (Document::Component(before), Document::Component(after)) => {
-            after.graph = edited(&before.graph, &after.graph);
+            after.graph = with_start(&edited(&before.graph, &after.graph));
         }
         _ => {}
     }

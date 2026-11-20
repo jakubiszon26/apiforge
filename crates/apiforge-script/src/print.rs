@@ -38,12 +38,12 @@ pub fn print_folder_document(
 /// the folder policy with `@after`, so a revision is written and read exactly
 /// as before and runs as it was published (LANG-13).
 pub fn print_revision(project: &Project, component: &Component) -> Result<String, Vec<Diagnostic>> {
-    print_with(
-        project,
-        &Document::Component(component.clone()),
-        true,
-        false,
-    )
+    print_stored(project, &Document::Component(component.clone()))
+}
+/// A folder definition in the stored spelling of 0.1.0, `@after` included:
+/// a published revision, or the text a legacy draft was based on.
+pub fn print_stored(project: &Project, document: &Document) -> Result<String, Vec<Diagnostic>> {
+    print_with(project, document, true, false)
 }
 fn print_document(project: &Project, document: &Document) -> Result<String, Vec<Diagnostic>> {
     print_with(project, document, false, false)

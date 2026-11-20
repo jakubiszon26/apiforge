@@ -496,7 +496,7 @@ fn prepare(folder: &Path, project: &Project, drafts: &[CodeDraft]) -> Result<Vec
             kind: entry.kind,
             base_revision: entry.base_revision,
             path: entry.path.clone(),
-            base_hash: Some(draft.base_hash.clone()),
+            base_hash: Some(written_base(&context, &entry, project, &draft.base_hash)?),
             source_version: 1,
             text: draft.text.clone(),
             selection: TextSelection {
@@ -814,7 +814,14 @@ fn definition_source(
     entry: &DocumentEntry,
     project: &Project,
 ) -> Result<String> {
-    let document = match entry.kind {
+    let document = definition(context, entry, project)?;
+    apiforge_script::print_folder_document(context, &as_written(&document)?)
+        .map_err(|_| Error::Unprintable)
+}
+
+/// The definition a registered document names in the legacy project.
+fn definition(context: &Project, entry: &DocumentEntry, project: &Project) -> Result<Document> {
+    match entry.kind {
         DocumentKind::Scenario => project
             .scenarios
             .iter()
@@ -828,9 +835,28 @@ fn definition_source(
             })
             .map(|component| Document::Component(component.clone())),
     }
-    .ok_or(Error::UnknownDocument)?;
-    apiforge_script::print_folder_document(context, &as_written(&document)?)
-        .map_err(|_| Error::Unprintable)
+    .ok_or(Error::UnknownDocument)
+}
+
+/// The base a code draft restores on. A draft was written over the text the
+/// legacy window printed, in the stored spelling; the folder source of the
+/// same definition is written in the written language (LANG-13), so a draft
+/// based on that stored text is based on its written source. The draft's
+/// own text is kept as it was: its `@after` lines show their fix.
+fn written_base(
+    context: &Project,
+    entry: &DocumentEntry,
+    project: &Project,
+    base_hash: &str,
+) -> Result<String> {
+    let document = definition(context, entry, project)?;
+    let stored = apiforge_script::print_stored(context, &document).ok();
+    if stored.is_some_and(|text| sha256(text.as_bytes()).as_deref() == Some(base_hash))
+        && let Some(hash) = sha256(definition_source(context, entry, project)?.as_bytes())
+    {
+        return Ok(hash);
+    }
+    Ok(base_hash.to_owned())
 }
 
 /// A working copy of `component`, as the written language says it.

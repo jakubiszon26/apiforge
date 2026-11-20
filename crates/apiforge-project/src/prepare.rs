@@ -177,7 +177,7 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
 /// `start` first where a main flow with a step has none. A step that runs
 /// nowhere, or an ordering that is not a chain with `if`s, cannot be written
 /// without changing what runs, and is refused as unprintable.
-pub(crate) fn as_written(document: &Document) -> Result<Document> {
+pub fn as_written(document: &Document) -> Result<Document> {
     let written = |graph: &Graph, main: bool| -> Result<Graph> {
         let chain = chained(graph).map_err(|_| Error::Unprintable)?;
         Ok(if main { with_start(&chain) } else { chain })
