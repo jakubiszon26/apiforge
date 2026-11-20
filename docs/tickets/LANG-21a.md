@@ -2,7 +2,7 @@
 
 - Size: M · Owner review: 20 min · Risk: `visible UI`
 - State: **Decided; waits for the independent review's last pass before
-  it is labelled**; then ready after LANG-20b (#497) has merged. The
+  it is labelled**; then ready after LANG-20f (#501) has merged. The
   owner's answer of 2026-11-20 on #482: the window takes a file the
   person rewrote by hand — *This file is ready as written* (A). The owner chose on 2026-11-20 that 0.2.0 has it (option A on
   [#482](https://github.com/jakubiszon26/apiforge/issues/482)) and
@@ -51,8 +51,9 @@ Only the command or an agent's `fix` converts the project.
   nothing. It makes LANG-20's plan and opens one dialog with two parts:
   **what will change**, per file, and **what is left to place by hand**,
   per file with its statements; either part is absent when it is empty.
-  Its button reads *Update N files* and converts those; with nothing to
-  convert there is no button.
+  Its button reads *Update N files* and converts those; *Finish the
+  update* when nothing is left to convert and every file is updated; no
+  button when neither applies.
 - New: after an update that left files, the band reads *This project is
   being updated: n of m files are in the new language* with *Update the
   project*; the same band shows when the project was partly updated by
@@ -159,7 +160,8 @@ blocked.
 5. With unsaved work the dialog names what is unsaved first — files and
    settings — and its button reads *Save all and update* (or *Save all
    and finish*). It runs the window's **Save all as it is today** (which
-   goes on after a file that fails) and then LANG-20b's *after a save*:
+   goes on after a file that fails) and then LANG-20f's update after a
+   save, to which it hands what the save wrote:
    the plan is made again from the disk and committed only when it would
    write exactly what the dialog showed; the settings just saved are in
    the manifest written. *Cancel* saves nothing.
@@ -206,6 +208,17 @@ blocked.
    two parts are distinct (#235); everything is reachable by keyboard.
    Test: `accessibility_tests`, D `lang21_criterion_10`.
 
+## Which plan the window shows
+
+One rule with LANG-21b. The **dialog** always shows a plan made when it
+opens, from what would be saved (buffers where a file has unsaved
+changes): by the band's button, by the *Project* menu and by *Show the
+list*. It is modal, so nothing can change under it except from outside,
+which criterion 3 covers. The **band's count** (LANG-21b) is of the
+saved files, as of the last save. So the dialog can show a file as
+convertible that the band still counts as left, until the person saves:
+the dialog says so in one line when the two differ.
+
 ## Regression potential
 
 | What can break | Covered by |
@@ -231,4 +244,5 @@ blocked.
 text, `holder.rs`), the *Project* menu; `crates/apiforge-project/src/`
 (`analysis.rs`: the wording of criterion 8 where the fix is withheld).
 No function of this ticket plans, compares fingerprints or converts: the
-window calls LANG-20b's plan, commit and *after a save*.
+window calls LANG-20b's plan and run and LANG-20f's update after a
+save.
