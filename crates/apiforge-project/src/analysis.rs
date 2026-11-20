@@ -31,10 +31,11 @@ pub(crate) struct Target {
     /// so that it runs as it was published; a working source is read in the
     /// written language (LANG-13).
     pub stored: bool,
-    /// The project is still in an older language (LANG-13, A5): the
-    /// `@after` and `start` errors are shown without their fix, because the
-    /// unit of conversion is the project (`apiforge fix`, LANG-20).
-    pub older: bool,
+    /// The folder of a project still in an older language (LANG-13, A5):
+    /// the `@after` and `start` errors are shown without their fix, because
+    /// the unit of conversion is the project, and the `@after` one names
+    /// `apiforge fix --folder` with this folder (LANG-20).
+    pub older: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone)]
@@ -152,13 +153,15 @@ pub(crate) fn derive_counted(
     };
     let lowered = apiforge_script::lower(&tree, &lower_context);
     let mut diagnostics = lowered.diagnostics.clone();
-    if target.older {
+    if let Some(folder) = &target.older {
         for diagnostic in &mut diagnostics {
-            if matches!(
-                diagnostic.message.as_str(),
-                apiforge_script::AFTER_REMOVED | apiforge_script::START_MISSING
-            ) {
-                diagnostic.fix = None;
+            match diagnostic.message.as_str() {
+                apiforge_script::AFTER_REMOVED => {
+                    diagnostic.message = crate::language::after_in_older(folder);
+                    diagnostic.fix = None;
+                }
+                apiforge_script::START_MISSING => diagnostic.fix = None,
+                _ => {}
             }
         }
     }
