@@ -389,3 +389,51 @@ fn diag06e_criterion_7() {
         "Redo gives the edited file back byte for byte"
     );
 }
+
+/// The confirmation is bound to what the question named: when a statement
+/// enters the braces between the question and *Delete*, the question is
+/// asked again with the new count and nothing is deleted.
+#[test]
+fn diag06e_criterion_5_a_changed_if_is_asked_about_again() {
+    let (_project, mut harness, id) = opened();
+    delete(&mut harness, &id, &["paid"]);
+    assert!(
+        harness.query_by_label(QUESTION).is_some(),
+        "the question is asked"
+    );
+    // Meanwhile a step is written in the braces of `paid`.
+    let grown = marked(
+        &source_of(&harness, &id),
+        "    logout = POST \"/logout\" {\n",
+        "    audit = GET \"/audit\" {\n      sample 200 {}\n    }\n    logout = POST \"/logout\" {\n",
+    );
+    app(&mut harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &grown, CODE)
+        .unwrap();
+    settle(&mut harness);
+    assert_eq!(source_of(&harness, &id), grown);
+    choose(&mut harness, "Delete");
+    harness.step();
+    assert_eq!(
+        source_of(&harness, &id),
+        grown,
+        "nothing is deleted without asking again"
+    );
+    assert!(
+        harness
+            .query_by_label("Delete `paid` and the 5 steps inside it?")
+            .is_some(),
+        "the question is asked again with the new count"
+    );
+    choose(&mut harness, "Delete");
+    harness.step();
+    passes(&harness, &id);
+    let after = source_of(&harness, &id);
+    assert!(
+        !after.contains("paid = if") && !after.contains("audit"),
+        "{after}"
+    );
+}
