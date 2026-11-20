@@ -3797,8 +3797,18 @@ impl Canvas {
             let painter = ui.painter();
             let galley =
                 painter.layout_no_wrap(text.clone(), egui::FontId::proportional(12.0), theme::TEXT);
-            let rect = Rect::from_min_size(pointer + vec2(16.0, 16.0), galley.size())
-                .expand2(vec2(8.0, 5.0));
+            // Below and right of the pointer, inside the board: above it or
+            // left of it where the board ends (DIAG-06c).
+            let within = ui.max_rect();
+            let size = galley.size() + vec2(16.0, 10.0);
+            let mut at = pointer + vec2(16.0, 16.0);
+            if at.x + size.x > within.right() {
+                at.x = (pointer.x - 16.0 - size.x).max(within.left());
+            }
+            if at.y + size.y > within.bottom() {
+                at.y = (pointer.y - 16.0 - size.y).max(within.top());
+            }
+            let rect = Rect::from_min_size(at, size);
             painter.rect(
                 rect,
                 6.0,
