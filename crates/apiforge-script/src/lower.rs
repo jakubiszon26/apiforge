@@ -1,7 +1,9 @@
 //! Syntax to document semantics. Temporary node identities are handles; only
 //! reconciliation allocates persistent identities and positions.
-use crate::{ast::*, branches::Branches};
-use apiforge_core::{format::*, graph, model::*, operator::Operator, path::JsonPath};
+use crate::{ast::*, fix};
+use apiforge_core::{
+    branches::Branches, format::*, graph, model::*, operator::Operator, path::JsonPath,
+};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
@@ -14,15 +16,18 @@ pub struct LowerContext<'a> {
     allow_unresolved_environment: bool,
     component: Option<&'a Component>,
     folder: bool,
+    written: bool,
 }
 impl<'a> LowerContext<'a> {
-    /// Workspace-aware checking: unknown environment names are errors.
+    /// Workspace-aware checking: unknown environment names are errors. The
+    /// legacy workspace keeps the stored spelling, `@after` included.
     pub fn new(project: &'a Project) -> Self {
         Self {
             project,
             allow_unresolved_environment: false,
             component: None,
             folder: false,
+            written: false,
         }
     }
     /// Editing/printing an existing document may retain intentionally unset
@@ -33,27 +38,42 @@ impl<'a> LowerContext<'a> {
             allow_unresolved_environment: true,
             component: None,
             folder: false,
+            written: false,
         }
     }
     /// Folder definitions allow component-only authoring and require explicit
     /// published revisions. Legacy JSON contexts keep their existing policy.
+    /// A folder source is read in the written language (LANG-13): the steps
+    /// of a block run in the order they are written and `@after` is an error.
     pub fn folder(project: &'a Project) -> Self {
         Self {
             project,
             allow_unresolved_environment: false,
             component: None,
             folder: true,
+            written: true,
         }
     }
-    /// The stored spelling of a published revision (LANG-13). Not
-    /// implemented yet: every folder source is read in it today.
-    pub fn stored(self) -> Self {
+    /// The stored spelling of a published revision: read exactly as 0.1.0
+    /// wrote it, `@after` included, so what is published runs as before.
+    pub fn stored(mut self) -> Self {
+        self.written = false;
+        self
+    }
+    /// The written language whatever the policy: the steps of a block run in
+    /// the order they are written and `@after` is an error.
+    pub fn written(mut self) -> Self {
+        self.written = true;
         self
     }
     /// Pins the definition being edited/printed, including a historical revision.
     pub fn with_component(mut self, component: &'a Component) -> Self {
         self.component = Some(component);
         self
+    }
+    /// Whether sources are read in the written language.
+    pub fn is_written(&self) -> bool {
+        self.written
     }
 }
 
@@ -97,8 +117,21 @@ pub fn lower(tree: &SyntaxTree, context: &LowerContext<'_>) -> Lowered {
         ranges: HashMap::new(),
         slot_ranges: HashMap::new(),
         handle: String::new(),
+        written: context.written,
+        braces: HashMap::new(),
+        afters: vec![],
     };
     let document = tree.file.as_ref().map(|file| lower.file(file));
+    if let Some(file) = tree.file.as_ref().filter(|_| context.written) {
+        lower.start_rule(&tree.source, file);
+    }
+    if !lower.afters.is_empty() {
+        let fixable = match &document {
+            Some(document) => fix::run_order(tree, context, document),
+            None => Err(None),
+        };
+        lower.report_afters(&tree.source, fixable);
+    }
     if let Some(document) = &document {
         lower.type_warnings(document);
     }
@@ -200,6 +233,13 @@ struct Lower<'a> {
     slot_ranges: HashMap<(String, String, Vec<String>), Range<usize>>,
     /// Handle of the statement being lowered.
     handle: String,
+    /// Whether the source is read in the written language (LANG-13).
+    written: bool,
+    /// The braces each statement is written in, by handle (written only).
+    braces: HashMap<String, (String, Branch)>,
+    /// Where each `@after` is written (written only): an error, reported
+    /// once the whole file is lowered and it is known whether a fix applies.
+    afters: Vec<Range<usize>>,
 }
 
 /// `@config` replaces the whole configuration, so it must not silently override
@@ -266,6 +306,71 @@ fn located(
     ranges.get(id).cloned()
 }
 impl Lower<'_> {
+    /// Rule 1 of the written language: a main flow with a step has a `start`,
+    /// and it is the first step written. A cleanup and a branch need none:
+    /// their braces place the first step.
+    fn start_rule(&mut self, source: &str, file: &File) {
+        let is_step = |statement: &Statement| {
+            self.nodes
+                .get(&statement.handle)
+                .is_some_and(|node| apiforge_core::chain::is_step(node.kind))
+        };
+        let Some(first) = file.statements.iter().position(is_step) else {
+            return;
+        };
+        match file
+            .statements
+            .iter()
+            .position(|statement| matches!(statement.form, Form::Start))
+        {
+            Some(start) if start > first => {
+                self.error(file.statements[start].range.clone(), fix::START_NOT_FIRST);
+            }
+            Some(_) => {}
+            None => {
+                let statement = &file.statements[first];
+                let handle =
+                    apiforge_core::handle::unique_handle(NodeKind::Start.handle_base(), |handle| {
+                        self.nodes.contains_key(handle)
+                    });
+                let insertion = fix::insert_before(
+                    source,
+                    file.statements[0].extent.start,
+                    &format!("{handle} = start"),
+                );
+                self.push_error(Diagnostic {
+                    range: statement.range.clone(),
+                    severity: Severity::Error,
+                    message: fix::START_MISSING.into(),
+                    fix: Some(insertion),
+                });
+            }
+        }
+    }
+    /// The `@after` errors, each with the fix that deletes its line when the
+    /// file is written in the order it runs today; otherwise none has a fix
+    /// and the first statement out of place is named.
+    fn report_afters(
+        &mut self,
+        source: &str,
+        fixable: Result<(), Option<(Range<usize>, &'static str)>>,
+    ) {
+        for range in std::mem::take(&mut self.afters) {
+            let fix = fixable.is_ok().then(|| Fix {
+                range: fix::line_of(source, range.clone()),
+                replacement: String::new(),
+            });
+            self.push_error(Diagnostic {
+                range,
+                severity: Severity::Error,
+                message: fix::AFTER_REMOVED.into(),
+                fix,
+            });
+        }
+        if let Err(Some((range, message))) = fixable {
+            self.error(range, message);
+        }
+    }
     fn error(&mut self, range: Range<usize>, message: &'static str) {
         self.push_error(Diagnostic::error(range, message));
     }
@@ -450,6 +555,14 @@ impl Lower<'_> {
         // the document's proxies back, as it does positions.
         let mut result = Graph::default();
         self.walk(statements, cleanup, component, None, &mut result);
+        if self.written {
+            let braces = self
+                .braces
+                .iter()
+                .map(|(id, (x, branch))| (id.as_str(), (x.as_str(), *branch)))
+                .collect();
+            return apiforge_core::chain::chain(&result, &braces);
+        }
         after_whole_ifs(&mut result);
         result
     }
@@ -605,6 +718,10 @@ impl Lower<'_> {
             let edge_start = graph.edges.len();
             if let Some((source, branch)) = parent {
                 add_edge(graph, source, &node.id, Some(branch));
+                if self.written {
+                    self.braces
+                        .insert(node.id.clone(), (source.to_owned(), branch));
+                }
             }
             let mut seen = HashSet::new();
             for attribute in &statement.attributes {
@@ -619,6 +736,9 @@ impl Lower<'_> {
                             node.config.contract_id = self.contract(&name, attribute.range.clone());
                         }
                     }
+                    // Not part of the written language: an error with a fix
+                    // that deletes the line, reported with the whole file.
+                    "after" if self.written => self.afters.push(attribute.range.clone()),
                     "after" => {
                         if attribute.arguments.is_empty() {
                             self.error(attribute.range.clone(), "after needs an ordering source");

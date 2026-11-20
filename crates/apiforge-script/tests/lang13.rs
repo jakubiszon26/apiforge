@@ -15,7 +15,8 @@ use apiforge_script::{
     AFTER_REMOVED, Diagnostic, Document, LowerContext, NOT_IN_PLACE, RUNS_NOWHERE, START_MISSING,
     START_NOT_FIRST, Severity,
     complete::{Mode, Request, Scope, complete},
-    fix_source, lower, parse, print_folder_document, print_revision, semantic,
+    edit_folder_document, fix_source, lower, parse, print_folder_document, print_revision,
+    semantic,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -447,9 +448,15 @@ fn lang13_criterion_5_the_fix_deletes_the_after_lines_of_a_file_in_run_order() {
         // It lowers, in the order of steps the 0.1.0 reading gave.
         let before = stored(&project, &text);
         let after = written(&project, &fixed.text);
+        let doing = |graph: &Graph| {
+            steps(graph)
+                .into_iter()
+                .filter(|handle| handle != "begin")
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            steps(main_graph(&after)),
-            steps(main_graph(&before)),
+            doing(main_graph(&after)),
+            doing(main_graph(&before)),
             "{name}"
         );
         if let (Document::Scenario(before), Document::Scenario(after)) = (&before, &after) {
@@ -578,7 +585,10 @@ fn lang13_criterion_7_the_window_writes_a_chain_without_after() {
             semantic(&document, &project),
             "{path}"
         );
-        assert_eq!(printed, text, "{path}: text -> document -> text");
+        // The window writes an unchanged document back as the text it read.
+        let back = edit_folder_document(&project, &text, &document, &document)
+            .unwrap_or_else(|errors| panic!("{path}: {errors:#?}"));
+        assert_eq!(back, text, "{path}: text -> document -> text");
     }
 }
 
@@ -786,7 +796,7 @@ fn check_start(code: &str) -> bool {
 
 #[test]
 fn lang13_criterion_12_completion_has_no_after() {
-    let text = "scenario \"Complete\" {\n  begin = start\n  \n}\n";
+    let text = "scenario \"Complete\" {\n  \n}\n";
     let at = text.find("  \n}").unwrap() + 2;
     let found = complete(&Request {
         source: text,
@@ -799,7 +809,11 @@ fn lang13_criterion_12_completion_has_no_after() {
         "{:#?}",
         found.iter().map(|item| &item.label).collect::<Vec<_>>()
     );
-    assert!(found.iter().any(|item| item.label == "@label"));
+    assert!(
+        found.iter().any(|item| item.label == "cleanup"),
+        "{:?}",
+        found.iter().map(|item| &item.label).collect::<Vec<_>>()
+    );
 }
 
 #[test]

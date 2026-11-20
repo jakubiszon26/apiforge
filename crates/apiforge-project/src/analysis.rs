@@ -27,6 +27,10 @@ pub(crate) struct Target {
     pub kind: DocumentKind,
     pub entity_id: String,
     pub revision: u32,
+    /// A published revision, read in its stored spelling (`@after` included)
+    /// so that it runs as it was published; a working source is read in the
+    /// written language (LANG-13).
+    pub stored: bool,
 }
 
 #[derive(Clone)]
@@ -133,7 +137,11 @@ pub(crate) fn derive_counted(
         Document::Component(component) => Some(component),
         Document::Scenario(_) => None,
     };
-    let lower_context = LowerContext::folder(context);
+    let lower_context = if target.stored {
+        LowerContext::folder(context).stored()
+    } else {
+        LowerContext::folder(context)
+    };
     let lower_context = match pinned {
         Some(component) => lower_context.with_component(component),
         None => lower_context,

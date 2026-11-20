@@ -820,6 +820,7 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
+        let model = kept_chain(&previous, model);
         if *previous == model {
             return Ok(());
         }
@@ -1232,6 +1233,7 @@ impl ProjectSession {
             kind: entry.kind,
             entity_id: entry.entity_id.clone(),
             revision: working_revision(&self.manifest, entry),
+            stored: false,
         }
     }
 
@@ -1395,4 +1397,21 @@ pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChang
         expected: FileState::of(&bytes),
         bytes: next,
     }])
+}
+
+/// A board edit keeps the chain of the written language (LANG-13): each
+/// graph of the edited model is rebuilt by [`apiforge_core::chain::edited`].
+fn kept_chain(previous: &Document, mut model: Document) -> Document {
+    use apiforge_core::chain::edited;
+    match (previous, &mut model) {
+        (Document::Scenario(before), Document::Scenario(after)) => {
+            after.graph = edited(&before.graph, &after.graph);
+            after.cleanup = edited(&before.cleanup, &after.cleanup);
+        }
+        (Document::Component(before), Document::Component(after)) => {
+            after.graph = edited(&before.graph, &after.graph);
+        }
+        _ => {}
+    }
+    model
 }

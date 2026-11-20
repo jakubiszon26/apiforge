@@ -84,13 +84,13 @@ impl ProjectSession {
             .iter()
             .filter(|revision| revision.component_id == document.entry.entity_id)
             .max_by_key(|revision| revision.revision)?;
-        let model @ Document::Component(component) = document.model()? else {
+        let Document::Component(component) = document.model()? else {
             return None;
         };
         if component.handle != latest.handle {
             return None;
         }
-        let source = apiforge_script::print_folder_document(&self.context, model).ok()?;
+        let source = apiforge_script::print_revision(&self.context, component).ok()?;
         (hash(&source) == latest.source_hash).then_some(latest.revision)
     }
 
@@ -156,8 +156,10 @@ impl ProjectSession {
             });
         }
 
+        // A revision keeps the stored spelling (LANG-13): it is read back
+        // exactly as it is written, so it runs as it was published.
         let document = Document::Component(component.clone());
-        let source = apiforge_script::print_folder_document(&self.context, &document)
+        let source = apiforge_script::print_revision(&self.context, &component)
             .map_err(|_| Error::Unprintable)?;
         // The loader derives every revision from its own source, so a revision
         // that would not lower there must not be written at all.
@@ -165,6 +167,7 @@ impl ProjectSession {
             kind: DocumentKind::Component,
             entity_id: component.id.clone(),
             revision,
+            stored: true,
         };
         let derived = analysis::derive(
             &target,
