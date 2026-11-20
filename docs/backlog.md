@@ -473,33 +473,30 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
 - Merged on 2026-11-20: FIX-01 #454 (#485), RUN-01 #126 (#487), LANG-15
   #412 (#486), and beside the sprint #474, #476 (plans and process) and
   #484 (CI).
-- To the 0.2.0 release. After four independent reviews of the ticket
-  files on 2026-11-20 the tickets around the project update, the
-  board's edits and the window's offer were split so that each is `S` or
-  `M` and each shared rule has one owner; the table is in
-  [sprints/lang.md](sprints/lang.md#after-the-reviews-of-2026-11-20-the-tickets-as-split).
-  In merge order: LANG-13 #386 (pull request #488; it also makes the
-  build read language 2); then side by side LANG-06 #143 with KTLO-37
-  #211, LANG-05 #142, LAY-45 [#468](https://github.com/jakubiszon26/apiforge/issues/468), LANG-20a [#481](https://github.com/jakubiszon26/apiforge/issues/481) (the record of
-  converted sources), LANG-20e [#500](https://github.com/jakubiszon26/apiforge/issues/500) (the store's read set) and
-  DIAG-06g [#502](https://github.com/jakubiszon26/apiforge/issues/502) (Undo restores the file); then DIAG-06e [#494](https://github.com/jakubiszon26/apiforge/issues/494)
-  (delete), LANG-20d [#499](https://github.com/jakubiszon26/apiforge/issues/499) (sources come and go) and LANG-20b
-  [#497](https://github.com/jakubiszon26/apiforge/issues/497) (`apiforge fix`); then LANG-20f [#501](https://github.com/jakubiszon26/apiforge/issues/501), LANG-20c [#498](https://github.com/jakubiszon26/apiforge/issues/498)
-  and DIAG-06a #391; then LANG-21a [#482](https://github.com/jakubiszon26/apiforge/issues/482) (the window offers *Update
-  the project*) and DIAG-06d [#493](https://github.com/jakubiszon26/apiforge/issues/493); then DIAG-06c [#490](https://github.com/jakubiszon26/apiforge/issues/490) and
-  DIAG-06f [#496](https://github.com/jakubiszon26/apiforge/issues/496); then REL-05 #414. Not conditions of the release:
-  DIAG-06b [#491](https://github.com/jakubiszon26/apiforge/issues/491) and LANG-21b [#495](https://github.com/jakubiszon26/apiforge/issues/495). About 330 owner minutes
-  ahead; the owner kept the whole scope on 2026-11-20. LANG-12 #385 is
-  closed as replaced by LANG-13; LAY-13 #297 (bands) comes after 0.2.0.
+- Merged since: LANG-13 #386 (#488), LANG-20e [#500](https://github.com/jakubiszon26/apiforge/issues/500) (#504), LANG-05
+  #142 (#505), DIAG-06g [#502](https://github.com/jakubiszon26/apiforge/issues/502) (#507), LANG-06 #143 with KTLO-37 #211
+  (#508), LAY-45 [#468](https://github.com/jakubiszon26/apiforge/issues/468) (#509), DIAG-06e [#494](https://github.com/jakubiszon26/apiforge/issues/494) (#510).
+- To the 0.2.0 release, in merge order: LANG-20 [#481](https://github.com/jakubiszon26/apiforge/issues/481) (`apiforge fix
+  --folder`: a whole project in one commit, or nothing) beside DIAG-06a
+  #391 (a step moves inside its braces); then DIAG-06d [#493](https://github.com/jakubiszon26/apiforge/issues/493) (with an
+  `if`'s braces and across them); then DIAG-06c [#490](https://github.com/jakubiszon26/apiforge/issues/490) (the board
+  shows and takes the chain) and DIAG-06f [#496](https://github.com/jakubiszon26/apiforge/issues/496) (paste and
+  duplicate); then REL-05 #414. Not a condition of the release: DIAG-06b
+  [#491](https://github.com/jakubiszon26/apiforge/issues/491). About 120 owner minutes ahead. The table is in
+  [sprints/lang.md](sprints/lang.md#after-the-reviews-and-the-cut-of-2026-11-20).
+- **Cut from 0.2.0 by the owner on 2026-11-20** — nobody uses the
+  application yet, so the update of a project is one command — and in
+  the backlog, to be taken only if users appear: LANG-20b [#497](https://github.com/jakubiszon26/apiforge/issues/497),
+  LANG-20c [#498](https://github.com/jakubiszon26/apiforge/issues/498), LANG-20d [#499](https://github.com/jakubiszon26/apiforge/issues/499), LANG-20f [#501](https://github.com/jakubiszon26/apiforge/issues/501), LANG-21a
+  [#482](https://github.com/jakubiszon26/apiforge/issues/482), LANG-21b [#495](https://github.com/jakubiszon26/apiforge/issues/495). They carry no sprint label; their ticket
+  files stay on their branches.
 - Decided by the owner on 2026-11-20 and recorded on the issues: the two
-  questions of LANG-13 (#386), LANG-05 (#142), LANG-21 (#482: in 0.2.0,
-  its mock-up, the window converts what it can and takes a file that is
-  ready as written), the sixteen questions of DIAG-06 (#391), the keys
-  of DIAG-06b (#491), delete, paste and duplicate (#494, #496), and the
-  project update (#481: file by file, with a record; a board edit in a
-  source not yet converted is refused; #499: a restore converts when it
-  can). Nothing of the first half waits for a decision; the split
-  tickets are labelled as the independent review rules on each.
+  questions of LANG-13 (#386), LANG-05 (#142), the sixteen questions of
+  DIAG-06 (#391), the keys of DIAG-06b (#491), delete, paste and
+  duplicate (#494, #496), the chain side to side and how its crossings
+  are measured (#468), and the project update (#481: whole, by one
+  command, or not at all). Nothing of the first half waits for a
+  decision.
 - Beside the sprint: [#489](https://github.com/jakubiszon26/apiforge/issues/489), a Windows timing failure of one `mcp08b`
   test, rerun once and noted there until its cause is read.
 - After it: LANG-16 #413 (part B of LANG-00), then LANG-01 #127 with
@@ -581,6 +578,12 @@ not with it.
 
 Feature work resumes after KTLO exits. Candidates, unestimated:
 
+- The update of a project beyond one command — converting in parts with
+  a record, an MCP tool, the window's *Update the project*: LANG-20b
+  [#497](https://github.com/jakubiszon26/apiforge/issues/497), LANG-20c [#498](https://github.com/jakubiszon26/apiforge/issues/498), LANG-20d [#499](https://github.com/jakubiszon26/apiforge/issues/499), LANG-20f [#501](https://github.com/jakubiszon26/apiforge/issues/501),
+  LANG-21a [#482](https://github.com/jakubiszon26/apiforge/issues/482), LANG-21b [#495](https://github.com/jakubiszon26/apiforge/issues/495). Cut from 0.2.0 on 2026-11-20;
+  analysed and reviewed, each with its ticket file on its branch; taken
+  only if users with 0.1.0 projects appear.
 - Panel widths carry over between projects opened in the same window: egui
   caches panel sizes under fixed IDs, so a restored per-project width loses
   to the cached one (project files, split code, diagnostics and, after
