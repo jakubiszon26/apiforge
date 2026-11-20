@@ -1,6 +1,6 @@
 # LANG-06 with KTLO-37: Format keeps free comments; one attribute order
 
-- Size: S · Owner review: 15 min · Risk: `format` (what *Format* writes)
+- Size: M · Owner review: 15 min · Risk: `format` (what *Format* writes)
 - State: **Approved rules, ready for implementation after LANG-13 (#386)
   has merged** (the same writer). Decided in
   [LANG-00, section 3](LANG-00.md#3-edit-fix-format-three-operations-on-a-files-text)
@@ -11,6 +11,10 @@
 - Issues [#143](https://github.com/jakubiszon26/apiforge/issues/143) and
   [#211](https://github.com/jakubiszon26/apiforge/issues/211), one pull
   request · branch `feat/lang-06-format-keeps-comments`
+- Amended on 2026-11-20 after an independent review: every place a
+  comment can stand is named (criterion 1), and criterion 5 asks for the
+  same order, not the same text. It shares `apiforge-script/src/edit.rs`
+  with DIAG-06 (#391) and merges before it. Size raised to M.
 - Analysis model: Fable 5.2 · Implementation model: —
 
 ## Goal
@@ -57,10 +61,20 @@ Not applicable: no interface change.
 
 Tests in `crates/apiforge-script/tests/lang06.rs` unless said.
 
-1. A free comment at the top of a block, between two statements, at the
-   end of a block, in a branch, in the cleanup and between the lines above
-   the first statement is in the formatted text at the same place.
-   Test: `lang06_criterion_1_*`, one per place.
+1. **No comment is lost, wherever it stands**: the comments of the
+   formatted text are those of the source, in the same order.
+   - On a line of its own between statements, at the top or the end of a
+     block, in a branch, in the cleanup, between the lines of the head
+     (`description`, `param`, `input`), between the lines of a request's
+     block, before the file's first line and after its last brace: kept at
+     that place, on its own line.
+   - Inside an expression or an object that Format writes on one line (a
+     body, headers, a condition), or beside one of its fields: moved to its
+     own line directly above the line that holds it, in the order met.
+   Measured on `main`: all eight such comments of a test file are deleted
+   today. Tests: `lang06_criterion_1_*`, one per place, and
+   `lang06_criterion_1_every_comment_survives` counting comment tokens
+   before and after over generated sources.
 2. Formatting changes no note: the formatted text parses to the same note
    on every statement, and to the same free comments in the same order.
    Test: `lang06_criterion_2_notes_stay_notes` over every `.afs` under
@@ -71,11 +85,15 @@ Tests in `crates/apiforge-script/tests/lang06.rs` unless said.
 4. `fmt` no longer reports the warning; `check` reports no warning for a
    free comment. Test: `lang06_criterion_4_no_warning`;
    `crates/apiforge-cli/tests/fmt.rs` updated to the decided behaviour.
-5. For a statement with `@label`, `@note` and `@contract` written in any
-   order, `fmt` writes the canonical order, and it is the text `print`
-   writes for the lowered document; the same for the attributes of an
-   `input` line (`@label`, `@contract`, `@optional`, `@hidden`). Test: `ktlo37_fmt_and_print_agree` over
-   every permutation, and over every `.afs` under `fixtures/`.
+5. For a statement with several attributes written in any order, `fmt`
+   writes them in the canonical order, the same order `print` uses for the
+   attributes it writes; the same for the attributes of an `input` line.
+   Format does not change a spelling: an `@note("…")` the author wrote
+   stays an attribute, although `print` writes an ordinary note as a
+   comment. What `print` writes is already canonical: `fmt(print(d)) ==
+   print(d)`. Tests: `ktlo37_one_attribute_order` over every permutation,
+   `ktlo37_print_is_canonical` over every working `.afs` under
+   `fixtures/`.
 6. A board edit that rewrites a statement whose author wrote `@note` above
    `@label` keeps that order on that statement and changes no other line.
    Test: `ktlo37_an_edit_keeps_the_authors_order` beside the LAY-34 tests
@@ -108,7 +126,8 @@ Tests in `crates/apiforge-script/tests/lang06.rs` unless said.
 ones in the tree with the statement they stand before, or the block's
 end), `ast.rs` (their place in `File` and `Statement`; the warning's
 constant goes), `format.rs` (`statements`), `print.rs` (one function gives
-the attribute order to both), `edit.rs` (criterion 6);
+the attribute order to both), `edit.rs` (criterion 6; DIAG-06 moves
+statements in the same file afterwards);
 `crates/apiforge-project/src/comments.rs` (the question stays, the warning
 goes); `docs/language/reference.md` (*Comments and labels* only);
 `crates/apiforge-cli/tests/fmt.rs`. Starts from `main` with LANG-13 in it:
