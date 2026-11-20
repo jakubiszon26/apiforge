@@ -281,7 +281,8 @@ pub fn with_start(graph: &Graph) -> Graph {
     let mut start: Node = create_node(
         NodeKind::Start,
         Position {
-            x: left - 200.0,
+            // Clear of the widest card the board draws (280) and its gap.
+            x: left - 400.0,
             y: first.y,
         },
         None,

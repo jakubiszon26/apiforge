@@ -91,7 +91,25 @@ impl ProjectSession {
             return None;
         }
         let source = apiforge_script::print_revision(&self.context, component).ok()?;
-        (hash(&source) == latest.source_hash).then_some(latest.revision)
+        if hash(&source) == latest.source_hash {
+            return Some(latest.revision);
+        }
+        // A revision published before LANG-13 is written in its working copy
+        // as a chain with a start; that copy says the same thing.
+        let published = self
+            .context
+            .components
+            .iter()
+            .find(|c| c.id == latest.component_id && c.revision == latest.revision)?;
+        let Ok(Document::Component(mut written)) =
+            crate::prepare::as_written(&Document::Component(published.clone()))
+        else {
+            return None;
+        };
+        written.revision = component.revision;
+        (apiforge_script::semantic(&Document::Component(written), &self.context)
+            == apiforge_script::semantic(&Document::Component(component.clone()), &self.context))
+        .then_some(latest.revision)
     }
 
     /// Publishes the working component as its next revision. Settles pending
