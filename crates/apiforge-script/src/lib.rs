@@ -19,6 +19,17 @@ pub use fix::{
 pub use format::{format, format_tree};
 pub use parser::parse;
 
+/// The comments of `source` that are no statement's note (LANG-06), in
+/// source order. Stub for the acceptance tests: today's unattached comments.
+pub fn free_comments(source: &str) -> Vec<std::ops::Range<usize>> {
+    parse(source)
+        .diagnostics
+        .into_iter()
+        .filter(|diagnostic| diagnostic.message == UNATTACHED_COMMENT)
+        .map(|diagnostic| diagnostic.range)
+        .collect()
+}
+
 /// The `.afs` language this build reads and writes (LANG-00, section 2). It
 /// is raised only when a file that was valid means something else or becomes
 /// invalid; a project's manifest names the version its files are written in.

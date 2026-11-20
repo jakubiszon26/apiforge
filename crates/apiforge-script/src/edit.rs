@@ -947,4 +947,34 @@ mod tests {
         assert!(opened.contains("cleanup {"));
         assert_eq!(back, SOURCE);
     }
+
+    /// LANG-06, criterion 6 (KTLO-37): a board edit that rewrites a
+    /// statement whose author wrote `@note` above `@label` keeps that order
+    /// and that spelling on it, and changes no other line.
+    #[test]
+    fn ktlo37_an_edit_keeps_the_authors_order() {
+        for note in ["Reads the list.", " padded"] {
+            let source = format!(
+                "scenario \"Edit\" {{\n  begin = start\n  @note({note:?})\n  @label(\"List\")\n  list = GET \"/items\"\n  done = POST \"/done\"\n}}\n"
+            );
+            let project = apiforge_core::demos::shop_project();
+            let tree = parse(&source);
+            let lowered = lower(&tree, &LowerContext::folder(&project));
+            assert!(!lowered.has_errors(), "{:?}", lowered.diagnostics);
+            let previous = lowered.document.unwrap();
+            let mut next = previous.clone();
+            let Document::Scenario(scenario) = &mut next else {
+                panic!("a scenario")
+            };
+            node(scenario, "list").label = Some("Items".into());
+            let text = edited(&project, &tree, &previous, &next).expect("written into the text");
+            verify(&project, &next, true, true, &text)
+                .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+            assert_eq!(
+                text,
+                source.replace("@label(\"List\")", "@label(\"Items\")"),
+                "{note:?}"
+            );
+        }
+    }
 }

@@ -467,6 +467,39 @@ fn lang13_after_appears_only_in_the_diagnostics() {
     assert!(diagnostics.contains("`@after` is not part of the language"));
 }
 
+/// LANG-06 (#143), criterion 8: *Comments and labels* says what Format
+/// keeps and names the attribute order; its example is in that order, and no
+/// part of the reference says that formatting drops a comment.
+#[test]
+fn lang06_criterion_8_comments_and_labels_says_what_format_keeps() {
+    let section = REFERENCE
+        .split("\n## Comments and labels")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("a section on comments");
+    for words in [
+        "Format keeps every comment",
+        "free comment",
+        "`@label`, `@note`, `@config`, `@inputs`",
+        "`@label`, `@contract`, `@required` or `@optional`, `@exposed` or `@hidden`",
+    ] {
+        assert!(section.contains(words), "the section says {words:?}");
+    }
+    let example = the_block("Comments and labels");
+    let label = example.find("@label").expect("the example has a label");
+    let note = example
+        .find("@note")
+        .expect("the example has a note attribute");
+    assert!(label < note, "the example writes @label before @note");
+    assert_eq!(
+        apiforge_script::free_comments(&example).len(),
+        1,
+        "the example shows a free comment"
+    );
+    assert!(!REFERENCE.contains("dropped by formatting"));
+    assert!(!REFERENCE.contains("comments survive only as"));
+}
+
 #[test]
 fn the_reference_explains_what_the_server_answers() {
     let diagnostics = REFERENCE
