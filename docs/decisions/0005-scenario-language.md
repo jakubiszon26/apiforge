@@ -14,6 +14,12 @@ language. A published revision and the legacy workspace keep the *stored
 spelling* described below; see [Ordering](#statements) and
 [The written language](#the-written-language).
 
+Amended 2026-11-20 by LANG-05 ([#142](https://github.com/jakubiszon26/apiforge/issues/142);
+the owner's decision A in [LANG-05](../tickets/LANG-05.md)): any Boolean
+expression is a check, and one that is a comparison or a logical operation
+(`>=`, `<=`, `&&`, `||` or `!` at its top) is written as the author wrote it,
+without `== true`; see [Checks](#checks).
+
 Stage II amendment (implemented for explicit folder mode; P7 startup activation pending):
 [ADR 0010](0010-folder-projects.md) makes `.afs` the durable definition and requires
 explicit component-call revisions in folder projects. This decision's language,
@@ -245,10 +251,15 @@ output port, the following segments are the path into it, so `first.price` reads
 NotEquals, `>` Greater, `<` Less, `~= … within t` Approximately with tolerance,
 `contains`, `is` Type, `exists`, `nonempty`. `condition … with expr` sets the data
 the condition passes on (its `value` input). A check that is a bare expression
-means `expr == true`. The printer writes it in that full form, so `assert a >= b`
-prints as `assert (a >= b) == true`. Inside a check, an operand that is itself a
-comparison is parenthesised. Condition entry *n* lowers to inputs `actual<n>` and
-`expected<n>`.
+means `expr == true`. The printer writes it short when the expression is a
+comparison or a logical operation that, written alone, reads back as the same
+check (`>=`, `<=`, `&&`, `||` or `!` at its top): `assert a >= b` and
+`if x == 1 && y != 2 {` print as written, and `assert (a >= b) == true` prints
+as `assert a >= b`. A bare value keeps the full form, `assert flag == true`,
+because `assert flag` alone does not say what is expected. Inside a check, an
+operand that is itself a comparison is parenthesised, so `(a == b) == true`, a
+check of its own, prints as it is. Condition entry *n* lowers to inputs
+`actual<n>` and `expected<n>`.
 
 ### Requests
 

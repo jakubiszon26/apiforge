@@ -35,7 +35,7 @@ scenario "Room booking day" {
     headers { Authorization: "Bearer {{token}}" }
     sample 200 { maxHours: 4 }
   }
-  short_enough = assert (policy.body.maxHours >= 1) == true
+  short_enough = assert policy.body.maxHours >= 1
   holidays = GET "/calendar/holidays" {
     headers { Authorization: "Bearer {{token}}" }
     query { year: 2026 }

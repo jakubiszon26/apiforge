@@ -249,9 +249,42 @@ fn check_operand(value: &Expr) -> String {
     }
 }
 
+/// The expression of `check` when it may be written alone (LANG-05): the check
+/// is `expr == true` and `expr` is a comparison or a logical operation that,
+/// written without `== true`, reads back as this same check. Those are `>=`,
+/// `<=`, `&&`, `||` and `!` at its top. A bare value keeps `== true`, and so
+/// does an expression whose own operator is a predicate (`(a == b) == true`).
+fn written_alone(check: &Check) -> Option<&Expr> {
+    if check.predicate != "=="
+        || check.tolerance.is_some()
+        || !check
+            .expected
+            .as_ref()
+            .is_some_and(|e| matches!(e.kind, ExprKind::Literal(serde_json::Value::Bool(true))))
+    {
+        return None;
+    }
+    let mut actual = &check.actual;
+    while let ExprKind::Group(inner) = &actual.kind {
+        actual = inner;
+    }
+    match &actual.kind {
+        ExprKind::Not(_) => Some(actual),
+        ExprKind::Binary { operator, .. }
+            if matches!(operator.as_str(), ">=" | "<=" | "&&" | "||") =>
+        {
+            Some(actual)
+        }
+        _ => None,
+    }
+}
+
 fn check_text(check: &Check) -> String {
     if matches!(check.predicate.as_str(), "exists" | "nonempty") {
         return format!("{} {}", check.predicate, expression(&check.actual));
+    }
+    if let Some(alone) = written_alone(check) {
+        return expression(alone);
     }
     let expected = check
         .expected

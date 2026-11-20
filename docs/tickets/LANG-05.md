@@ -10,7 +10,7 @@
   merge merges `main` first.
 - Issue [#142](https://github.com/jakubiszon26/apiforge/issues/142) ·
   branch `fix/lang-05-condition-as-written`
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Goal
 
