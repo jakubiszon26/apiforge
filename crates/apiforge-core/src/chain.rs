@@ -353,8 +353,9 @@ pub fn active(graph: &Graph) -> Option<HashSet<&str>> {
 /// existed before, or takes away while both remain, is undone first: the
 /// order of the steps is the order they are written in, which a move on the
 /// board changes ([`crate::edit::place`], DIAG-06a), never an edge, so a
-/// statement never leaves its braces by one. Paste and duplicate rely on
-/// this rebuild until DIAG-06f.
+/// statement never leaves its braces by one. Paste and duplicate in the
+/// folder window write their chain themselves (DIAG-06f,
+/// [`crate::edit::paste_statements`]).
 pub fn edited(before: &Graph, after: &Graph) -> Graph {
     let existed: HashSet<&str> = before.nodes.iter().map(|node| node.id.as_str()).collect();
     let remains: HashSet<&str> = after.nodes.iter().map(|node| node.id.as_str()).collect();

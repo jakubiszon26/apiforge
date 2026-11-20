@@ -1599,9 +1599,6 @@ pub fn card(
                 RowValue::Source(text) => (text.clone(), theme::LINK, false),
                 RowValue::Summary(text) => (text.clone(), theme::TEXT, false),
                 RowValue::Missing => ("Value missing".into(), theme::DANGER, false),
-                RowValue::MissingStep(step) => {
-                    (format!("Missing step “{step}”"), theme::DANGER, false)
-                }
                 RowValue::Optional => ("Optional".into(), theme::MUTED, false),
             };
             clipped.rect_filled(field, 5.0 * z, theme::FIELD);
@@ -2025,9 +2022,9 @@ pub fn compact_card(
                 Cow::Borrowed(text.as_str()),
                 FontId::proportional(small),
                 match card.inputs[index].value {
-                    // A slot of the input reads a missing step (UX-39).
+                    // A required input without a value.
                     _ if row.missing => theme::DANGER,
-                    RowValue::Missing | RowValue::MissingStep(_) => theme::DANGER,
+                    RowValue::Missing => theme::DANGER,
                     RowValue::Source(_) => theme::LINK,
                     _ => theme::TEXT,
                 },

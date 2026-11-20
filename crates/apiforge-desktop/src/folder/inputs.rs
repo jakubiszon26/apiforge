@@ -212,6 +212,7 @@ impl FolderApp {
                 selection: None,
                 check: None,
                 moved: Vec::new(),
+                placed: false,
             },
         );
     }
