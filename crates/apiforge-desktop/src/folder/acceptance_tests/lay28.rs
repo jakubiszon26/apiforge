@@ -95,19 +95,20 @@ fn crossings(routes: &[Route]) -> usize {
 }
 
 /// Criterion 5: the window draws the ordered boards. `shop-30` with every
-/// wire has at most 93 crossings with its checks folded and 143 with them
-/// drawn since LANG-13 (76 and 116 before it; 82 and 123 without the order; 75 and 105 before LAY-31, whose
-/// groups keep their own lines inside them); with chips and the checks
+/// wire has at most 76 crossings with its checks folded and 116 with them
+/// drawn (82 and 123 without the order; 75 and 105 before LAY-31, whose
+/// groups keep their own lines inside them; LANG-13 measured 93 and 143,
+/// and LAY-45 brings them back); with chips and the checks
 /// drawn, `shop-30` has at most 10 (17) and `fan-out` 5 (7). The bridges
 /// the board draws are those crossings, and no line is nearer than 20 px to
 /// another or to a card, but inside a group (LAY-31).
 #[test]
 fn lay28_criterion_5_the_window_draws_the_ordered_boards() {
     for (name, wires, expanded, most) in [
-        // LANG-13's baseline (#386, owner 2026-11-20); LAY-45 (#468) carries
-        // the criterion to get back to 76 and 116.
-        ("shop-30", WireMode::All, false, 93),
-        ("shop-30", WireMode::All, true, 143),
+        // LAY-28's limits, which LANG-13 passed with the owner's leave
+        // (#386, 2026-11-20) on condition that LAY-45 (#468) brings them back.
+        ("shop-30", WireMode::All, false, 76),
+        ("shop-30", WireMode::All, true, 116),
         ("shop-30", WireMode::Chips, true, 10),
         ("fan-out", WireMode::Chips, true, 5),
     ] {

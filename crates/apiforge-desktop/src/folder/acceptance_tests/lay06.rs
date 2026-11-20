@@ -756,8 +756,8 @@ fn coincident(wires: &[&[egui::Pos2]]) -> usize {
 }
 
 /// Criterion 11: on `shop-30` Tidy up crosses no more wires per wire than
-/// 2.103, LANG-13's baseline (2.05 before it, 117 crossings on 57 wires),
-/// collapsed and expanded, and
+/// 2.05 (117 crossings on 57 wires when written; LANG-13 measured 2.103 and
+/// LAY-45 brings it back), collapsed and expanded, and
 /// leaves at most 97 coincident pairs on the board a new install shows,
 /// with its checks collapsed. Expanded, the coincident pairs are not
 /// asserted (112 when written; the quality example reports them): most are
@@ -778,11 +778,11 @@ fn lay06_criterion_11_no_more_crossings_than_today() {
         // leaving the others crosses them (118 crossings on 57 wires with
         // the checks drawn, limit 2.1); since LAY-28 orders the lines of a
         // corridor the board has 105 and the limit is the first one again.
-        // LANG-13 (#386) wires shop-30's steps step to step: its baseline
-        // with the checks drawn is 2.103 (143 crossings on 68 wires; owner,
-        // 2026-11-20). LAY-45 (#468) carries the criterion to get back to
-        // 2.05.
-        let most = 2.103;
+        // LANG-13 (#386) wires shop-30's steps step to step and measured
+        // 2.103 with the checks drawn (143 crossings on 68 wires), which the
+        // owner let pass on 2026-11-20 on condition that LAY-45 (#468)
+        // brings the limit back.
+        let most = 2.05;
         assert!(
             per_wire <= most,
             "{checks:?}: {crossings} crossings on {} wires",
