@@ -45,9 +45,22 @@ fn key(name: &str) -> String {
     }
 }
 
-/// `file` in the canonical layout, as `print` writes it.
-pub(crate) fn print_file(file: &File) -> String {
+/// How a check that is one Boolean expression is written (LANG-05).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Checks {
+    /// The written language: a compound check as the author wrote it.
+    Short,
+    /// The stored spelling of a published revision and of the legacy
+    /// workspace: every plain expression in full, `expr == true`, as 0.1.0
+    /// wrote it, so a revision prints back to its own bytes.
+    Full,
+}
+
+/// `file` in the canonical layout, as `print` writes it, with checks
+/// written as `checks` says.
+pub(crate) fn print_file_with(file: &File, checks: Checks) -> String {
     let mut writer = Writer::new("", &[], true);
+    writer.checks = checks;
     writer.file(file);
     writer.out
 }
@@ -188,6 +201,8 @@ struct Writer<'a> {
     next: usize,
     /// Whether attributes are written in the canonical order.
     canonical: bool,
+    /// How a check that is one Boolean expression is written (LANG-05).
+    checks: Checks,
 }
 
 impl<'a> Writer<'a> {
@@ -204,6 +219,7 @@ impl<'a> Writer<'a> {
             last,
             next: 0,
             canonical,
+            checks: Checks::Short,
         }
     }
 
@@ -306,7 +322,7 @@ impl<'a> Writer<'a> {
                 Form::Assert(check) => line(
                     &mut self.out,
                     depth,
-                    &format!("{prefix}assert {}", check_text(check)),
+                    &format!("{prefix}assert {}", check_text(check, self.checks)),
                 ),
                 Form::If {
                     check,
@@ -316,7 +332,7 @@ impl<'a> Writer<'a> {
                     line(
                         &mut self.out,
                         depth,
-                        &format!("{prefix}if {} {{", check_text(check)),
+                        &format!("{prefix}if {} {{", check_text(check, self.checks)),
                     );
                     self.statements(then, depth + 1);
                     self.comments(Place::End(Braces::Then(start)), depth + 1);
@@ -345,7 +361,11 @@ impl<'a> Writer<'a> {
                             },
                             depth + 1,
                         );
-                        line(&mut self.out, depth + 1, &format!("{},", check_text(check)));
+                        line(
+                            &mut self.out,
+                            depth + 1,
+                            &format!("{},", check_text(check, self.checks)),
+                        );
                     }
                     self.comments(Place::End(Braces::Lines(start)), depth + 1);
                     line(
@@ -417,9 +437,44 @@ fn check_operand(value: &Expr) -> String {
     }
 }
 
-fn check_text(check: &Check) -> String {
+/// The expression of `check` when it may be written alone (LANG-05): the check
+/// is `expr == true` and `expr` is a comparison or a logical operation that,
+/// written without `== true`, reads back as this same check. Those are `>=`,
+/// `<=`, `&&`, `||` and `!` at its top. A bare value keeps `== true`, and so
+/// does an expression whose own operator is a predicate (`(a == b) == true`).
+fn written_alone(check: &Check) -> Option<&Expr> {
+    if check.predicate != "=="
+        || check.tolerance.is_some()
+        || !check
+            .expected
+            .as_ref()
+            .is_some_and(|e| matches!(e.kind, ExprKind::Literal(serde_json::Value::Bool(true))))
+    {
+        return None;
+    }
+    let mut actual = &check.actual;
+    while let ExprKind::Group(inner) = &actual.kind {
+        actual = inner;
+    }
+    match &actual.kind {
+        ExprKind::Not(_) => Some(actual),
+        ExprKind::Binary { operator, .. }
+            if matches!(operator.as_str(), ">=" | "<=" | "&&" | "||") =>
+        {
+            Some(actual)
+        }
+        _ => None,
+    }
+}
+
+fn check_text(check: &Check, checks: Checks) -> String {
     if matches!(check.predicate.as_str(), "exists" | "nonempty") {
         return format!("{} {}", check.predicate, expression(&check.actual));
+    }
+    if checks == Checks::Short
+        && let Some(alone) = written_alone(check)
+    {
+        return expression(alone);
     }
     let expected = check
         .expected

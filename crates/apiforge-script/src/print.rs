@@ -2,7 +2,7 @@
 //! presence is semantic but whose normal spelling intentionally uses defaults.
 use crate::{
     ast::*,
-    format::print_file,
+    format::{Checks, print_file_with},
     lower::{Document, LowerContext, lower, validate_document_model},
     parse,
     reconcile::semantic,
@@ -60,7 +60,13 @@ fn print_with(
             "Cannot print an invalid document",
         )]);
     }
-    let source = print_file(&Printer::new(project, document, written).file(document));
+    // The short form of a compound check is the written language's; the
+    // stored spelling writes it in full, as 0.1.0 did (LANG-05).
+    let checks = if written { Checks::Short } else { Checks::Full };
+    let source = print_file_with(
+        &Printer::new(project, document, written).file(document),
+        checks,
+    );
     verify(project, document, folder, written, &source)?;
     Ok(source)
 }

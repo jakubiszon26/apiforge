@@ -5,7 +5,7 @@ use super::{ProjectSession, Result};
 use crate::{
     Error,
     analysis::{self, document_of, identity_base},
-    document::{AnalysisState, Unavailable},
+    document::{AnalysisState, Step, Unavailable},
 };
 use apiforge_storage::project::{
     CacheNotice, DiagramRecord, DocumentKey, FieldRecovery, FileState, LastValidSnapshot,
@@ -88,10 +88,15 @@ impl ProjectSession {
             document.set_text(draft.text);
             document.source_version += 1;
         }
+        let layout = candidate.is_some();
         if let Some(candidate) = candidate {
             document.layout_dirty = true;
-            if let Some(previous) = document.model.replace(Arc::new(candidate)) {
-                document.history.record(previous);
+            // The saved text and its model are the step before the draft,
+            // which the history now stands at (DIAG-06g).
+            let previous = document.model.replace(Arc::new(candidate));
+            let saved = document.history.present.replace(document.text().to_owned());
+            if let (Some(text), Some(model)) = (saved, previous) {
+                document.history.record(Step { text, model });
             }
         }
         document.analysis = AnalysisState::Pending;
@@ -104,7 +109,14 @@ impl ProjectSession {
                 source_version: version,
             },
         );
-        self.analyse_now(index)
+        self.analyse_now(index)?;
+        // A draft that does not read as valid is no step to come back to:
+        // the step back from its fix is the saved text.
+        let document = &mut self.documents[index];
+        if layout && document.analysis != AnalysisState::Valid {
+            document.history.present = None;
+        }
+        Ok(())
     }
 
     /// Own trash operations rewrite recovery under the writer lock. Adopt the
@@ -438,6 +450,7 @@ impl ProjectSession {
             let source = snapshot.source().to_owned();
             let document = &mut self.documents[index];
             document.model = Some(Arc::new(model));
+            document.history.present = Some(source.clone());
             document.model_source = Some(source);
             document.valid_snapshot = Some(snapshot.clone());
         }

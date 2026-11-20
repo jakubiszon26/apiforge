@@ -11,7 +11,7 @@ scenario "Double booking with a notice in between" {
     headers { Authorization: "Bearer {{token}}" }
     sample 200 { maxHours: 4, opensAt: "08:00", closesAt: "20:00" }
   }
-  short_enough = assert (policy.body.maxHours >= 1) == true
+  short_enough = assert policy.body.maxHours >= 1
   slot = { start: "2026-12-01T10:00:00Z", end: "2026-12-01T11:00:00Z" }
   first = POST "/bookings" {
     headers { Authorization: "Bearer {{token}}" }
