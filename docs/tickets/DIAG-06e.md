@@ -1,89 +1,152 @@
-# DIAG-06e: Deleting a step that is read, and pasting or duplicating steps, keep the chain and the check
+# DIAG-06e: A delete keeps the check: it is refused when something read would go, an `if` asks once, and Undo restores the file
 
-- Size: M · Owner review: 15 min · Risk: `default`, `visible UI`
-- State: **Decided; waits for the independent review before it is
-  labelled.** The owner answered the three questions on
-  [#494](https://github.com/jakubiszon26/apiforge/issues/494) on
-  2026-11-20: 1 = A (a delete of a step that is read is refused, naming
-  the readers), 2 = A (*Duplicate* directly after its original; *Paste*
-  after the selected step, else at the end), 3 = A (a reference that
-  still finds its step is kept; otherwise the paste is refused). Split
-  from DIAG-06a on 2026-11-20. After DIAG-06a (#391). A condition of
-  0.2.0 (REL-05, condition 5).
-- Branch `feat/diag-06e-delete-and-paste`
+- Size: M · Owner review: 20 min · Risk: `default` (a delete that worked
+  is refused), `visible UI` (one confirmation, refusal sentences)
+- State: **Approved, ready for implementation after LANG-13 (#386) has
+  merged.** Owner's answers of 2026-11-20: question 1 on
+  [#494](https://github.com/jakubiszon26/apiforge/issues/494) = A (a
+  delete of a step that is read is refused, naming the readers) and
+  question 7 on #391 = A (deleting an `if` with steps asks once).
+  Restated the same day after an independent review: paste and duplicate
+  are DIAG-06f (#496); the deletion of an `if` came here from DIAG-06d,
+  so that no ticket deletes without the rule below; Undo restores the
+  source. It needs none of the moves and can be built beside LANG-06 and
+  LAY-45, **before** DIAG-06a.
+- A condition of 0.2.0 (REL-05, condition 5) · branch
+  `feat/diag-06e-delete-and-paste`
 - Analysis model: Fable 5.2 · Implementation model: —
 
 ## Goal
 
-The two edits that can still write a file which does not pass the check
-stop doing so, and a copy lands where the person expects it.
+Deleting on the board never leaves a step without something it reads,
+never takes a condition's steps away without asking, and can always be
+taken back exactly.
 
 ## What happens today
 
 Read from `main`: deleting a block removes every input that refers to it
-(`apiforge-core/src/graph.rs`, `delete_nodes`), so deleting a request
-whose value another request's URL reads leaves that request without its
-URL, which the check refuses (`validation.rs`). A paste removes the
-references it cannot resolve (`edit/clipboard.rs`), with the same result.
-*Start* can be deleted while the flow has steps, which language 2
-refuses. Pasted and duplicated steps are written last (LANG-13).
+(`apiforge-core/src/graph.rs`, `delete_nodes`). A request whose URL read
+it is left without a URL, which the check refuses (`validation.rs`); a
+request whose optional body read it stays valid and silently sends
+something else. An `if` is deleted alone and its steps stay behind.
+*Start* can be deleted while the flow has steps. Undo keeps the previous
+document, not the previous text (`apiforge-project/src/session.rs`,
+history): the text is written again from the model, so a free comment or
+a blank line that stood in what was deleted does not come back.
 
-## Decisions
+## What the owner will see
 
-The owner's, 2026-11-20 (#494): the three answers above.
+- Changed (question 1 = A): deleting a step, value or variable that a
+  statement outside the selection reads is refused: *`pay` and `receipt`
+  read `cart`. Change or delete them first.* Selected together, all are
+  deleted.
+- Changed: what is deleted with a step is said before, not found after:
+  its own checks and values — those that read only it, and what reads
+  only those — go with it, as they move with it (question 16).
+- Changed (question 7 = A): deleting an `if` that has statements in its
+  braces asks once — *Delete `paid` and the 3 steps inside it?* — and
+  then deletes all of it. An `if` with empty braces is deleted without a
+  question.
+- New: *Start* is not deleted while its flow has a step: *A scenario
+  starts at Start. Delete its steps first.* (Rule 1 of language 2.)
+- Changed: Undo after any edit on the board gives back the file byte for
+  byte, with its comments and blank lines.
+- Removed or hidden, migrated: nothing.
 
-Ruled by the planning model, following from rules already decided:
+## Mock-up
 
-- A step's own checks and values — those that read only it — are deleted
-  with it (question 16's group).
-- *Start* cannot be deleted while its flow has a step: *A scenario starts
-  at Start. Delete its steps first.* (Rule 1 of language 2.)
-- Several selected blocks are judged together: a reader that is deleted
-  in the same gesture is no reader.
+Not applicable beyond the confirmation, which uses the existing
+confirmation dialog; the pull request shows it at both sizes. View 4b of
+#391 is what a delete in the middle leaves.
+
+## The deletion, in one place
+
+One function answers "what would this delete do", and the confirmation,
+the refusal and the delete itself all use its answer:
+
+1. **What goes**: the selected blocks; for an `if`, every statement in
+   its braces at any depth; for each of them, the checks, values and
+   variables that read nothing outside what goes (applied until nothing
+   more is added).
+2. **Who is left reading**: every statement that stays — in the main
+   flow **and in the cleanup**, which sees the main flow — with a
+   reference, anywhere in any of its inputs, required or optional, to
+   something that goes.
+3. If 2 is not empty the delete is refused and names them. Otherwise it
+   is done, and **no input of a statement that stays is changed**.
+4. The legacy window keeps `delete_nodes` as it is (DIAG-06a, contract
+   1); the folder window calls this.
 
 ## Acceptance criteria
 
-Tests named `diag06e`, in the files of DIAG-06a;
-every test of an edit ends by asserting the check.
+Tests: `crates/apiforge-core/src/edit/` unit tests (K),
+`crates/apiforge-project/tests/diag06e.rs` (P),
+`crates/apiforge-desktop/src/folder/acceptance_tests/diag06e.rs` (D), on
+`labels`, `shop-30` and `rooms/booking-day`. Every test of an edit ends
+by asserting that the text passes the check and reads back as the
+document.
 
-1. Deleting a step that another step, outside the selection, reads is
-   refused and names the readers; with the readers selected too, all are
-   deleted and the neighbours join. Tests: K, D `diag06e_criterion_1_*`.
-2. A step's own checks and values go with it; a check that also reads
-   another step stays and — if it then reads nothing that exists — the
-   delete is refused as in 1. Tests: K, D `diag06e_criterion_2_*`.
-3. *Start* with steps after it is not deleted; alone, it is.
-   Test: D `diag06e_criterion_3`.
-4. *Duplicate* writes the copy directly after its original, with its own
-   checks; several duplicated steps keep their order after the last of
-   them. Test: D `diag06e_criterion_4_*`; the UX-34 tests restated where
-   they assert the place, listed in the pull request.
-5. *Paste* writes the steps after the selected step (DIAG-06a's rule for
-   *Add step*), else last in the main flow, in their copied order.
-   Test: D `diag06e_criterion_5_*`.
-6. A pasted reference whose step stands above the place of the paste is
-   kept; a paste that would leave a step reading what is not there is
-   refused and names it; nothing is pasted in part.
-   Tests: K, D `diag06e_criterion_6_*`, also from another scenario.
-7. The property test of DIAG-06a's criterion 10 also deletes, duplicates
-   and pastes. Test: P `diag06e_criterion_7`. REL-05's condition 5 names
-   this test.
-8. Each edit is one step of Undo and Redo. Test: P.
+1. Deleting a step that a statement outside the selection reads is
+   refused, names every reader and changes nothing; with the readers
+   selected too, all are deleted and the neighbours join. Also when the
+   reader is in the cleanup, and when the reader's input is optional (a
+   body): refused, the body is not dropped.
+   Tests: K `delete_preview_*`, D `diag06e_criterion_1_*`.
+2. A statement that stays and reads **anything** that goes refuses the
+   delete, also when it reads something else that stays: with `both =
+   assert a.status == b.status`, deleting `a` is refused and names
+   `both`. Test: K, D `diag06e_criterion_2`.
+3. What goes is closed over a step's own statements: `a`, a value `v`
+   that reads only `a`, a request `b` whose body reads `v` — deleting `a`
+   is refused and names `b` (through `v`); with `b` selected too, `a`,
+   `v` and `b` go. Test: K `delete_preview_expands`, D
+   `diag06e_criterion_3`.
+4. After a delete that is done, every input of every statement that
+   stays is equal to what it was. Test: K, P
+   `diag06e_criterion_4_surviving_inputs_are_untouched` (compared
+   binding by binding, not by the check passing).
+5. Deleting an `if` with statements in its braces asks once, naming the
+   `if` and the count of steps that go; *Cancel* changes nothing;
+   *Delete* removes all of it and joins its neighbours. A statement
+   outside that reads something inside refuses the delete before any
+   question, by criterion 1. An `if` with empty braces is deleted without
+   a question. Tests: D `diag06e_criterion_5_*`.
+6. *Start* with steps after it is not deleted; alone, it is.
+   Test: D `diag06e_criterion_6`.
+7. **Undo restores the source.** After a delete of a step with its
+   checks, and of an `if` whose braces hold a free comment, blank lines
+   and attributes in the author's order, one Undo makes the file
+   byte-identical to before, and Redo to after. The same for every edit
+   the board can make today (add, wire, move of a card's step by
+   LANG-13's rule, an Inspector change). Tests: P
+   `diag06e_criterion_7_undo_is_byte_exact_*`, D `diag06e_criterion_7`.
+8. A property test deletes random selections on generated chains with
+   `if`s and checks: either a refusal with nothing changed, or criterion
+   4 and the check; then Undo, and the bytes are those before.
+   Test: P `diag06e_criterion_8`. REL-05's condition 5 names it.
+9. The legacy window's delete tests pass unchanged
+   (`app_regressions.rs`). Test: those suites.
 
 ## Regression potential
 
-Copy and paste (UX-34), *Save as component* (which copies a selection),
-the legacy window (its functions keep their behaviour, DIAG-06a's
-criterion 9), deleting a component call or a variable that is read (the
-same rule as a step).
+| What can break | Covered by |
+| --- | --- |
+| Deleting what nothing reads, the common case | criteria 4 and 8; the board suites' deletes unchanged |
+| Undo and Redo of every board edit (the history now keeps the text) | criterion 7; the session's history tests unchanged in what they assert |
+| Undo after a foreign write or a reload (the kept text no longer fits) | the history is cleared where it is cleared today; P test |
+| *Save as component* and *Extract*, which remove what they move out | their suites unchanged; they keep their own rule |
+| The legacy window | criterion 9 |
 
 ## Not in scope
 
-Moving (DIAG-06a, DIAG-06d). Deleting an `if` with its braces asks first
-(DIAG-06d); this ticket's rule 1 then applies to what is inside it.
+Moving (DIAG-06a, DIAG-06d). Paste and duplicate (DIAG-06f). The notice
+after a delete (DIAG-06b).
 
 ## Technical appendix
 
-`apiforge-core/src/edit/place.rs`, `clipboard.rs`; `graph.rs`
-(`delete_nodes` unchanged for the legacy caller; the folder path asks
-first); `apiforge-desktop/src/board_edit.rs`.
+`apiforge-core/src/edit/` (a new `delete.rs`: the preview and the delete;
+`graph.rs` `delete_nodes` untouched), `apiforge-project/src/session.rs`
+(history entries keep the source text beside the document; Undo installs
+both), `apiforge-desktop/src/board_edit.rs`, the existing confirmation
+dialog, the banner. `apiforge-script/src/edit.rs` is not changed: removing
+a statement's lines is what it does today.
