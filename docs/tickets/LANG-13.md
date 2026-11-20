@@ -14,8 +14,11 @@
   the sentence it comes from.
 - Issue [#386](https://github.com/jakubiszon26/apiforge/issues/386) · LANG
   sprint, first half · branch `feat/lang-13-order-written`
-- Split on 2026-11-20: `apiforge fix` for a whole project and the raised
-  language version are **LANG-20** (#481); the board's gestures are DIAG-06 (#391).
+- Split on 2026-11-20: `apiforge fix` for a whole project is **LANG-20**
+  (#481); the board's gestures are DIAG-06 (#391).
+- **Amended on 2026-11-20** after the first implementation (two
+  escalations on #386) and an independent review: see
+  [Amendments](#amendments-of-2026-11-20), which a line above it yields to.
 - Analysis model: Fable 5.2 · Implementation model: —
 
 ## Goal
@@ -30,13 +33,13 @@ fix that deletes the `@after` lines and changes nothing else.
 - Changed: a scenario, a component, a branch of an `if` and the cleanup run
   their steps in the order written. Checks and values stand anywhere and
   run when what they read exists (RUN-03).
-- New: `@after` in a source is an error at its line, with a fix. A main
-  flow or a component with a step and no `start`, or with a step written
-  above its `start`, is an error.
+- New: `@after` in a source is an error at its line, with a fix. A scenario
+  whose main flow has a step and no `start`, or a step written above its
+  `start`, is an error; a component needs no `start`.
 - New: the fix of a file — a click on the error in the editor (the fix a
   diagnostic already carries) — deletes the `@after` lines of a file that
   is written in the order it runs today, and writes `begin = start` where
-  the flow has none. Comments and layout stay. A file it cannot fix
+  a scenario's main flow has none. Comments and layout stay. A file it cannot fix
   without changing what runs is left untouched and says which statement
   the person places.
 - Changed: the window writes a chain without `@after`; the board's
@@ -55,13 +58,15 @@ fix that deletes the `@after` lines and changes nothing else.
 Readings of the approved text, each the planning model's recommendation
 and the owner's to veto. None changes the work by more than a few lines.
 
-1. **A component needs its `start` too, and the fix writes a missing
-   `start`.** Rule 1 says "a flow with a step has a `start`" and FLOW-00's
-   decision 4 excepts only the cleanup and a branch; decision 5 gives every
-   new error a fix "that writes the chain in the order the file runs
-   today". `rooms/components/sign-in.afs` is such a file. The LANG quiz's
-   "the fix rewrites only the `@after` lines" is kept in its sense: nothing
-   is reformatted.
+1. **A scenario's main flow needs its `start`, and the fix writes a
+   missing one; a component needs none.** *Withdrawn in part on
+   2026-11-20:* the first reading asked a `start` of a component too. The
+   board does not offer *Start* on a component (UX-21, UX-40: "*Start*
+   only a scenario runs"), and FLOW-00's criterion speaks of "a main flow
+   with a step and no `start`". A component's body runs from its first
+   step written; a `start` it already has stays valid. For a scenario,
+   decision 5 gives the error a fix "that writes the chain in the order
+   the file runs today"; nothing is reformatted.
 2. **A published revision keeps the spelling of 0.1.0, also one published
    by 0.2.0.** LANG-00 keeps `@after` readable in a stored revision so that
    what is published runs as before. Reading old revisions with the new
@@ -109,29 +114,40 @@ New test files: `crates/apiforge-script/tests/lang13.rs` (S),
    their sources fixed and their assertions unchanged.
 3. `@after` in a source is an error at the attribute. When the file is
    written in the order it runs today, every such error carries a fix that
-   deletes its line; otherwise none does, and the first statement out of
-   place is named. Tests: S `lang13_criterion_3_*`.
-4. A scenario or a component with a step and no `start` is an error with a
-   fix that writes `begin = start` (the handle the board gives a new
-   *Start*) as the first step; a step written above `start` is an error.
-   A cleanup and a branch need none. Tests: S `lang13_criterion_4_*`.
+   removes **the attribute** — its line when it stands alone on it,
+   otherwise only its own text — and no comment; otherwise none does, and
+   the first statement out of place is named. Tests: S
+   `lang13_criterion_3_*`, among them `@after(a) b = GET "/b"` on one
+   line, a comment beside the attribute, and an attribute broken over two
+   lines.
+4. A scenario whose main flow has a step and no `start` is an error with
+   a fix that writes a `start` as the first step, under the handle the
+   board would give it (`begin`, or `begin_2` when a statement is already
+   called `begin`); a step written above `start` is an error. A
+   component, a cleanup and a branch need none, and a component's `start`
+   that is there stays. Tests: S `lang13_criterion_4_*`, among them the
+   taken handle and a component without `start` that passes.
 5. `fix_source` on a file written in run order returns the text without
    its `@after` lines, with the `start` of criterion 4 where needed, every
    other byte unchanged and every comment kept; the fixed text lowers with
    no error; the order of its steps is the order the 0.1.0 reading gave;
-   applied again it changes nothing. Tests: S `lang13_criterion_5_*` over
+   a text with nothing to fix is returned as it is, so applying the fix
+   to its own result changes nothing. Tests: S `lang13_criterion_5_*` over
    the language-1 texts kept under
    `crates/apiforge-script/tests/fixtures/lang1/` — `checkout`, `lookup`,
-   `shop-30`, `booking-day`, `sign-in` as they are on `main`, and `labels`
-   as written on #454.
+   `booking-day`, `sign-in` and `labels` as they were on `main` before
+   this ticket. (`shop-30` is a case of criterion 6.)
 6. `fix_source` changes nothing and reports the statement when: a request
    or call runs nowhere today; the steps are not written in the order they
    run; a statement outside braces is ordered into a branch
    (`@after(x.then)`) or after branches of two `if`s. Tests: S
    `lang13_criterion_6_*`, one per case, each asserting the text is
-   returned unchanged.
+   returned unchanged; the language-1 `shop-30`, whose `refund` is written
+   after the braces of `paid` and ordered into its `then`, is the third
+   case and names `refund`.
 7. The window writes a chain without `@after`, steps in chain order: text
-   → document → text is unchanged for every `.afs` under `fixtures/`; the
+   → document → text is unchanged for every `.afs` under `fixtures/`
+   (stored revisions and the kept language-1 texts apart); the
    generated-graph round trip (`tests/topology.rs`) passes for generated
    chains with `if`s. Tests: S `lang13_criterion_7_*`, `topology.rs`.
 8. A published revision is written and read in the stored spelling: the
@@ -169,6 +185,97 @@ New test files: `crates/apiforge-script/tests/lang13.rs` (S),
 13. ADR 0003 and ADR 0005 are amended (a flow with a step has a start and
     no step stands outside it; order is the order written; the stored
     spelling). QA step: read in the pull request.
+
+## Amendments of 2026-11-20
+
+After the first implementation (draft pull request #488, two escalations
+and a report of limits on #386) and an independent review of this file.
+Where a line above disagrees, this section holds.
+
+**Rulings of the planning model**
+
+- **A1 — `shop-30` (criteria 5 and 6).** The fix is right to refuse it
+  and criterion 5 was wrong to list it. A file the fix refuses is
+  converted by hand **so that what runs stays the same**: `refund`,
+  `refund_amount` and `logout` are written inside the `then` braces of
+  `paid`, where the 0.1.0 reading already ran them. The boards are
+  measured again after that edit.
+- **A2 — a check or value that reads no step.** Rule 5 of language 2
+  ("checks and values stand anywhere and run when what they read exists")
+  is the approved rule, and the runner did not follow it for a flow with
+  a `start`: it reached only what follows or feeds a reached step. A data
+  statement whose every source is reached, or that reads no statement, is
+  on the path; no request or call is enabled by that. The change in
+  `apiforge-runner/src/plan.rs` (`reachable_from`) belongs to this ticket.
+  Consequence 5 below is what it means for something already published.
+- **A3 — no `start` for a component** (consequence 1 as rewritten above).
+  What the branch added for it — the fix writing a `start` into a
+  component, a `start` in `sign-in.afs` and in component test sources —
+  is taken out.
+- **A4 — the language version moves here.** A build must not run a
+  language-1 project with the new meaning, not even on `main` between two
+  merges (LANG-00 section 2, rule 3). So this ticket, after LANG-15
+  (#412) has merged, sets `LANGUAGE_VERSION = 2`, removes the `#[ignore]`
+  of LANG-15's older-project tests, raises the manifest of
+  `fixtures/scenarios/lay/rooms` and sets the number in the reference's
+  first line. LANG-20 keeps the command only; until it merges, the
+  refusal names a command that is not there yet, which is safe.
+- **A5 — in a project still in language 1 the errors carry no fix.** The
+  unit of conversion is the project (LANG-20): a file fixed alone under a
+  language-1 manifest could no longer be told from a language-1 file
+  whose steps run nowhere. In such a project the `@after` and `start`
+  errors are shown without their fix and the project's problem names the
+  command; in a language-2 project (a pasted line, an agent's old habit)
+  the fix is offered as criteria 3 and 4 say.
+- **A6 — crossings on `shop-30` with every wire drawn, and the header at
+  960 px**: not ruled here; questions 2 and 3 to the owner on #386. The
+  tests stay failing and the pull request a draft until they are
+  answered.
+
+**Consequence 5, to confirm at acceptance.** With A2, a published
+revision that has a `start` and a check or value that neither follows nor
+feeds a step now runs it; 0.1.0 skipped it without a word. No request is
+sent that was not sent before. The board never offered *Start* on a
+component, so only a hand-written component can be such a revision.
+
+**Criteria added or restated**
+
+- 9, also: *Save as component* on a selection of steps writes a component
+  whose steps run in the order they ran in the scenario, with no `start`
+  and no `@after`. Test: D `lang13_criterion_9_save_as_component`.
+- 10, restated: after a migration or a new project, every scenario read
+  back equals the original **with its ordering edges rebuilt as a chain**
+  (`chained`), identities and positions unchanged, and its steps in the
+  order `graph::sequence` gave before; every published revision is equal
+  to the original exactly; a working component equals its published base
+  in the same chained sense. `tests/migration.rs` asserts that instead of
+  plain equality, and says so.
+- 11, restated: "every `.afs`" is the working sources — `fixtures/scripts`,
+  `fixtures/scenarios` — without `.apiforge/revisions/`, without the
+  language-1 texts kept as test data and without `docs/qa/`.
+- 14 (new): in a scenario with a `start`, a check that reads only a
+  parameter, a value that reads nothing and a check written above the
+  first request all run; in a component, an export of an input and of
+  `env` has its value. Tests: R `lang13_criterion_14_*`.
+- 15 (new, A4 and A5): `LANGUAGE_VERSION` is 2; a project with a
+  language-1 manifest opens, shows its errors without a fix, and is
+  refused a run with LANG-15's sentence; LANG-15's ignored tests run.
+  Tests: those tests; P `lang13_criterion_15_no_fix_in_an_older_project`.
+
+**Files, also:** `crates/apiforge-runner/src/plan.rs`;
+`crates/apiforge-script/src/lib.rs` (the constant);
+`crates/apiforge-desktop/src/folder/save_component.rs`;
+`fixtures/scenarios/lay/rooms/apiforge.project.json`;
+`docs/language/reference.md` line 1 (the number and the date).
+
+**Before the pull request leaves draft**
+
+1. A1, A3, the restated criteria 3 and 4 and the new 14 and 15 are in.
+2. `main` is merged (FIX-01, RUN-01, then LANG-15) and the sources they
+   added are converted: `labels.afs`, `run01.rs`.
+3. The boards are measured again after A1 and the table on #386 is
+   updated.
+4. The owner has answered questions 2 and 3 on #386.
 
 ## Regression potential
 
