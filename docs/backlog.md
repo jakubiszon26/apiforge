@@ -512,9 +512,10 @@ panel, a response folded behind clicks, and no view whose unit is one
 request. The findings, causes, mock-ups and decisions are in
 [`docs/sprints/req.md`](sprints/req.md); the issues carry `sprint:req`.
 It follows LANG part A and is designed for the written-order chain of
-LANG-13. Four of its tickets do not depend on the language and are ready
-now (FIX-01, then DIAG-02 and REP-08, then REP-07); they wait for the
-owner to open the sprint or to pull them forward.
+LANG-13. FIX-01 merged on 2026-11-20 (#485), ahead of the sprint, as a
+case for LANG-13's fix. Three more of its tickets do not depend on the
+language and are ready now (DIAG-02 and REP-08, then REP-07); they wait
+for the owner to open the sprint or to pull them forward.
 
 Capacity: **235** owner review minutes over the 12 tickets decided on
 2026-11-19, and about **75** more for the four proposals the owner
@@ -540,9 +541,9 @@ criteria:
 
 | Issue | Ticket | Estimate · risk | State |
 | --- | --- | --- | --- |
-| [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 A reference scenario of independent negative requests (`labels`) | S · 5 | `ready:opus` |
-| [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 A check reads the same everywhere and says what it compares | M · 15 · `visible UI`, `removal` | `ready:opus` · after FIX-01 |
-| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` · after FIX-01 |
+| [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 A reference scenario of independent negative requests (`labels`) | S · 5 | merged in #485 (2026-11-20) |
+| [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 A check reads the same everywhere and says what it compares | M · 15 · `visible UI`, `removal` | `ready:opus`; not open together with LAY-45, DIAG-06a or DIAG-06c (`canvas/`) |
+| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` |
 | [#381](https://github.com/jakubiszon26/apiforge/issues/381) | REP-07 Run results: a request with its checks under it | M · 25 · `visible UI`, `default` | `ready:opus` · after DIAG-02 and REP-08 |
 | [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 The Steps view and the request beside its response: captures and decisions | S · 30 · `visible UI`, `default` | the planning model's; after LANG-13 |
 | [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01 Diagram → Steps | M · 30 · `visible UI` | waits for REQ-00's captures |
