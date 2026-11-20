@@ -122,14 +122,15 @@ before LANG-13, kept under `crates/apiforge-cli/tests/fixtures/rooms-language-1/
 
 - A button or notice in the window that starts the fix: LANG-21 (#482).
 - Anything the fix of a file does or refuses: LANG-13.
-- Rollback, a transaction over the project, reading language 1 for
-  running (cut by the owner, 2026-11-16 and 2026-11-17).
+- Undoing a finished conversion (Git does that), a new transaction
+  mechanism, reading language 1 for running (cut by the owner,
+  2026-11-16 and 2026-11-17).
 
 ## Technical appendix
 
 - One function in `apiforge-project` (`language.rs`, beside LANG-15's
-  comparison): fix every source through the session's store, then raise
-  the manifest. `apiforge-cli` (`main.rs`, a new `fix.rs`) and
+  comparison): judge every source, then write them and the raised
+  manifest in one commit of the store. `apiforge-cli` (`main.rs`, a new `fix.rs`) and
   `apiforge-mcp` (`tools.rs`, `server.rs`) only call it.
 - The constant, the run refusal and the reference's first line are
   LANG-13's (its amendment A4); this ticket does not touch
