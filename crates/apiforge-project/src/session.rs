@@ -1317,10 +1317,11 @@ impl ProjectSession {
             entity_id: entry.entity_id.clone(),
             revision: working_revision(&self.manifest, entry),
             stored: false,
-            older: crate::language::support(
+            older: (crate::language::support(
                 self.manifest.language(),
                 crate::language::LANGUAGE_VERSION,
-            ) == crate::language::Support::Older,
+            ) == crate::language::Support::Older)
+                .then(|| self.store.root().to_owned()),
         }
     }
 

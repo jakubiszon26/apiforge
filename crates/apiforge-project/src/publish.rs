@@ -186,7 +186,7 @@ impl ProjectSession {
             entity_id: component.id.clone(),
             revision,
             stored: true,
-            older: false,
+            older: None,
         };
         let derived = analysis::derive(
             &target,

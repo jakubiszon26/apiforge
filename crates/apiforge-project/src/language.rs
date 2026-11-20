@@ -2,9 +2,13 @@
 //! section 2). A build reads one language, its own: a project in a newer
 //! one is not opened, and a project in an older one opens for reading and
 //! editing but does not run until `apiforge fix` has raised it.
-use crate::{Error, Result};
+use crate::{Error, FixedPlacer, Result};
 use apiforge_core::format::{Contract, Environment};
-use apiforge_storage::project::ProjectManifest;
+use apiforge_script::{Blocked, Judged, LowerContext};
+use apiforge_storage::project::{
+    FileState, Holder, MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath,
+    ProjectStore, ReadSet,
+};
 use std::path::Path;
 
 pub use apiforge_script::LANGUAGE_VERSION;
@@ -158,7 +162,12 @@ pub enum Planned {
 
 /// The judgement of every source, the commit it makes and what it read.
 pub struct FixPlan {
+    store: ProjectStore,
     report: FixReport,
+    /// The converted sources and the raised manifest.
+    changes: Vec<ProjectChange>,
+    /// Every document of the manifest and the manifest, as they were read.
+    read: ReadSet,
 }
 
 impl FixPlan {
@@ -166,24 +175,269 @@ impl FixPlan {
         &self.report
     }
 
-    /// Writes every converted source and the raised manifest in one commit,
-    /// or nothing.
+    /// Writes every converted source and the raised manifest in one commit
+    /// of the project store, or nothing: a source that does not convert, a
+    /// file read that changed since, or the store's limits refuse it.
     pub fn commit(self) -> Result<FixReport> {
-        Err(Error::NotConvertible)
+        if !self.report.convertible() {
+            return Err(Error::NotConvertible);
+        }
+        self.store
+            .commit_with_read_set(self.changes, &self.read)
+            .map_err(|error| commit_refusal(error, self.store.root()))?;
+        Ok(self.report)
     }
 }
 
-/// Reads the project at `folder` and judges every source of its manifest.
-/// With `check` the project is opened read-only; otherwise as its writer.
+/// Reads the project at `folder` and judges every source of its manifest by
+/// its 0.1.0 reading (LANG-20). The manifest is read first without a lock: a
+/// project of a newer language is refused, one of this build's language is
+/// `Current`. With `check` the project stays read-only and nothing is ever
+/// written, `.apiforge/local/` included; otherwise it is opened as its
+/// writer, as `apply` opens it, and a project held by someone else is
+/// refused.
 pub fn plan_fix(folder: &Path, check: bool) -> Result<Planned> {
-    let _ = (folder, check);
-    Err(Error::NotConvertible)
+    let probe = ProjectStore::open_read_only(folder)?;
+    let Some(manifest) = read_manifest(&probe)? else {
+        return Err(Error::NotAProject);
+    };
+    refuse_newer(&manifest.0)?;
+    if support(manifest.0.language(), LANGUAGE_VERSION) == Support::Same {
+        return Ok(Planned::Current);
+    }
+    let store = if check {
+        probe
+    } else {
+        drop(probe);
+        ProjectStore::open_exclusive_as(folder, &Holder::command("fix"))?
+    };
+    // The manifest and the published revisions in one stable read, under
+    // the lock when there is one: what the sources are judged against.
+    let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
+    let Some((manifest, _)) = read_manifest(&store)? else {
+        return Err(Error::NotAProject);
+    };
+    let mut paths = vec![manifest_path.clone()];
+    paths.extend(manifest.revisions.iter().map(|entry| entry.path.clone()));
+    let snapshot = store.read(&paths)?;
+    let manifest_bytes = snapshot.files[&manifest_path]
+        .clone()
+        .ok_or(Error::NotAProject)?;
+    let manifest = ProjectManifest::from_bytes(&manifest_bytes)?;
+    refuse_newer(&manifest)?;
+    if support(manifest.language(), LANGUAGE_VERSION) == Support::Same {
+        return Ok(Planned::Current);
+    }
+    for entry in &manifest.revisions {
+        let state = snapshot.state(&entry.path);
+        if !matches!(state, Some(FileState::File { sha256, .. }) if sha256 == entry.source_hash) {
+            return Err(ProjectError::InvalidMetadata.into());
+        }
+    }
+    let context = crate::context::resolve(&manifest, &snapshot, None, &FixedPlacer)?;
+    let lower_context = LowerContext::folder(&context);
+    let mut read = ReadSet::new();
+    read.insert(manifest_path.clone(), FileState::of(&manifest_bytes));
+    let mut changes = vec![];
+    let mut sources = vec![];
+    for entry in &manifest.documents {
+        // Each source on its own: one that cannot be read is named.
+        let bytes = match store.read(std::slice::from_ref(&entry.path)) {
+            Ok(mut snapshot) => snapshot.files.remove(&entry.path).flatten(),
+            Err(ProjectError::Limit) => {
+                sources.push(SourceReport {
+                    path: entry.path.as_str().to_owned(),
+                    outcome: SourceOutcome::Unreadable(whole_file(TOO_LARGE)),
+                });
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
+        read.insert(
+            entry.path.clone(),
+            bytes.as_deref().map_or(FileState::Missing, FileState::of),
+        );
+        let outcome = match bytes.as_deref().map(std::str::from_utf8) {
+            None => SourceOutcome::Unreadable(whole_file(MISSING)),
+            Some(Err(_)) => SourceOutcome::Unreadable(whole_file(NOT_TEXT)),
+            Some(Ok(text)) => {
+                let (outcome, converted) = judge(text, &lower_context);
+                if let Some(converted) = converted {
+                    changes.push(ProjectChange::Write {
+                        path: entry.path.clone(),
+                        expected: FileState::of(text.as_bytes()),
+                        bytes: converted.into_bytes(),
+                    });
+                }
+                outcome
+            }
+        };
+        sources.push(SourceReport {
+            path: entry.path.as_str().to_owned(),
+            outcome,
+        });
+    }
+    let mut raised = manifest.clone();
+    (raised.format_version, raised.language_version) = (2, Some(LANGUAGE_VERSION));
+    changes.push(ProjectChange::Write {
+        path: manifest_path,
+        expected: FileState::of(&manifest_bytes),
+        bytes: raised.to_public_bytes()?,
+    });
+    Ok(Planned::Plan(FixPlan {
+        store,
+        report: FixReport { sources },
+        changes,
+        read,
+    }))
 }
 
-/// The store's refusal of the conversion's commit, as the command says it.
-pub fn commit_refusal(error: apiforge_storage::project::ProjectError, root: &Path) -> Error {
-    let _ = root;
-    Error::Storage(error)
+/// The manifest of `store` and its bytes, or `None` without one.
+fn read_manifest(store: &ProjectStore) -> Result<Option<(ProjectManifest, Vec<u8>)>> {
+    let path = ProjectPath::new(MANIFEST_PATH)?;
+    let Some(bytes) = store
+        .read(std::slice::from_ref(&path))?
+        .files
+        .remove(&path)
+        .flatten()
+    else {
+        return Ok(None);
+    };
+    Ok(Some((ProjectManifest::from_bytes(&bytes)?, bytes)))
+}
+
+const MISSING: &str = "The file is missing.";
+const NOT_TEXT: &str = "The file is not UTF-8 text.";
+const TOO_LARGE: &str = "The file is over the 1 MiB limit of a source.";
+const REPAIR: &str = "Repair it, or restore it from Git.";
+
+fn whole_file(reason: &str) -> Problem {
+    Problem {
+        line: 0,
+        column: 0,
+        statement: String::new(),
+        reason: reason.to_owned(),
+        todo: REPAIR.to_owned(),
+    }
+}
+
+/// A message as a sentence of the report: one final full stop.
+fn sentence(message: &str) -> String {
+    format!("{}.", message.trim_end_matches('.'))
+}
+
+/// The judgement of one source, and its converted text when it changes.
+fn judge(text: &str, context: &LowerContext<'_>) -> (SourceOutcome, Option<String>) {
+    let position = |offset: usize| apiforge_script::line_column(text, offset);
+    match apiforge_script::judge_language_1(text, context) {
+        Judged::Convertible {
+            text: converted, ..
+        } if converted == text => (SourceOutcome::Unchanged, None),
+        Judged::Convertible {
+            text: converted,
+            edits,
+        } => {
+            let changes = edits
+                .iter()
+                .map(|edit| Change {
+                    line: position(edit.range.start).0,
+                    removed: text[edit.range.clone()].trim().to_owned(),
+                    written: edit.replacement.trim().to_owned(),
+                })
+                .collect();
+            (SourceOutcome::Converted(changes), Some(converted))
+        }
+        Judged::Unparsable(error) => {
+            let (line, column) = position(error.range.start);
+            (
+                SourceOutcome::Unreadable(Problem {
+                    line,
+                    column,
+                    statement: String::new(),
+                    reason: format!("The file does not parse: {}", sentence(&error.message)),
+                    todo: REPAIR.to_owned(),
+                }),
+                None,
+            )
+        }
+        Judged::Blocked(blockers) => {
+            let problems = blockers
+                .into_iter()
+                .map(|blocker| {
+                    let (line, column) = position(blocker.range.start);
+                    let statement = if blocker.handle.is_empty() {
+                        String::new()
+                    } else {
+                        text[blocker.range.clone()]
+                            .lines()
+                            .next()
+                            .unwrap_or_default()
+                            .trim()
+                            .to_owned()
+                    };
+                    let (reason, todo) = match blocker.reason {
+                        Blocked::RunsNowhere { above } => (
+                            "This step runs nowhere today: nothing orders it after `start`."
+                                .to_owned(),
+                            format!(
+                                "Delete it, or write `@after({})` on it; apiforge fix then removes that line.",
+                                above.as_deref().unwrap_or("<the step it follows>")
+                            ),
+                        ),
+                        Blocked::NotInPlace { after } => (
+                            if after.is_empty() {
+                                "This statement is not written where it runs today: it runs first."
+                                    .to_owned()
+                            } else {
+                                format!(
+                                    "This statement is not written where it runs today: it runs after {}.",
+                                    after
+                                        .iter()
+                                        .map(|handle| format!("`{handle}`"))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )
+                            },
+                            "Move its lines there.".to_owned(),
+                        ),
+                        Blocked::Invalid(error) => {
+                            (sentence(&error.message), "Repair it.".to_owned())
+                        }
+                    };
+                    Problem {
+                        line,
+                        column,
+                        statement,
+                        reason,
+                        todo,
+                    }
+                })
+                .collect();
+            (SourceOutcome::Blocked(problems), None)
+        }
+    }
+}
+
+/// The store's refusal of the conversion's commit, as the command says it:
+/// its limits are the project's size; a file that changed since it was read
+/// is named by its path in the project.
+pub fn commit_refusal(error: ProjectError, root: &Path) -> Error {
+    match error {
+        ProjectError::Limit => Error::TooLargeToConvert,
+        ProjectError::Conflict { path } => Error::ChangedWhileConverting {
+            path: path.strip_prefix(root).map_or_else(
+                |_| path.display().to_string(),
+                |relative| {
+                    relative
+                        .components()
+                        .map(|part| part.as_os_str().to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join("/")
+                },
+            ),
+        },
+        error => Error::Storage(error),
+    }
 }
 
 #[cfg(test)]
