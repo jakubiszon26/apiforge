@@ -3,12 +3,17 @@
 - Size: M · Owner review: 20 min · Risk: `format` (the record and the
   manifest are written; a trash entry gains a field), `default` (a board
   edit in an old source is refused)
-- State: **Waits for one owner decision** (a restore after the update,
-  on [#499](https://github.com/jakubiszon26/apiforge/issues/499)) and for
-  the independent review. Split from LANG-20a on 2026-11-20. Builds the
+- State: **Decided; waits for the independent review before it is
+  labelled.** The owner's answer of 2026-11-20 on
+  [#499](https://github.com/jakubiszon26/apiforge/issues/499): A — a
+  file deleted in the old language and restored after the update is
+  converted by the restore when it can be, and otherwise the restore is
+  refused and the file stays in the trash. Split from LANG-20a on 2026-11-20. Builds the
   owner's decisions on #481: file by file, with a record (question 4 =
   B); a board edit in a source not yet converted is refused (question 1 =
-  A). After LANG-20a (#481).
+  A). After LANG-20a (#481); rule 4's conversion
+  uses LANG-20b's judgement and is enabled when LANG-20b (#497) has
+  merged, whichever of the two merges second.
 - LANG sprint, first half, a condition of 0.2.0 · branch
   `feat/lang-20d-sources-come-and-go`
 - Analysis model: Fable 5.2 · Implementation model: —
@@ -40,8 +45,12 @@ None of them knows the record.
 - Changed: deleting, restoring and renaming a source keep the record
   right (below). The trash remembers which language a deleted source was
   in.
-- The open question: a source deleted in the old language and restored
-  after the project was updated.
+- New (the owner's answer on #499): restoring, into an updated project,
+  a file that was deleted while it was still in the old language judges
+  it as the update would. When it can be converted it is restored
+  converted and the restore says so — *Restored and updated: 3 lines
+  removed.* When it cannot, the restore is refused, names the statement
+  and why, and the file stays in the trash, where its text can be read.
 - Migrated, removed: nothing.
 
 ## Mock-up
@@ -72,7 +81,17 @@ Not applicable: the board's banner and the restore's existing messages.
    manifest created if need be, as in rule 1); a language-1 source comes
    back unlisted.
 4. **Restored into a language-2 project**: a language-2 source comes
-   back as it is. A language-1 source: the owner's question.
+   back as it is. A language-1 source is judged as LANG-20b's plan judges
+   an unlisted source (its 0.1.0 reading against the order written; the
+   converted text against the language-2 check): *to convert* — the
+   converted text is what is written, in the restore's one commit, and
+   the restore's message gives what was removed; *blocked* or
+   *unreadable* — nothing is written, the entry stays in the trash, and
+   the refusal names the statement and the reason. The trash's bytes are
+   never changed, so a refused restore can be tried again after the
+   project or the build changes. Until LANG-20b has merged, such a
+   restore is refused with *This file is in the older language; it can be
+   restored when the update is available.*
 5. **Renamed or moved**: the entry keeps its `documentId`; its path and
    its place in the sorted list change in the same commit.
 6. **Deleted for good** (the trash emptied): nothing in the record.
@@ -98,11 +117,16 @@ LANG-20a's language-1 `rooms` with a record and on a language-1 copy of
    1. Tests: P, T `lang20d_criterion_2_*`.
 3. Rule 3: both languages, restored into a project with a record and
    into one without. Tests: P `lang20d_criterion_3_*`.
-4. Rule 4, for the owner's answer; in every answer: an old request
-   without `@after` that ran nowhere in 0.1.0 does not run after the
-   restore unless the person was told. The case of the review: delete an
-   unlisted source, finish the project, restore.
-   Tests: P `lang20d_criterion_4_*`.
+4. Rule 4. A language-1 source that can be converted: after the restore
+   the file holds the converted text, the project loads and passes the
+   check, the message names the count, and the trash no longer holds it.
+   One that cannot — the review's case: an unlisted source with a request
+   without `@after` that ran nowhere in 0.1.0, deleted, the project
+   finished, then restored — is refused, names the request, writes
+   nothing, and the trash still holds the entry byte for byte; so that
+   request does not run. A language-2 source comes back as it is.
+   Tests: P `lang20d_criterion_4_*`, one per case; D
+   `lang20d_criterion_4` for the two messages in the window.
 5. A rename and a move of a listed source: one commit; the record's
    entry has the new path at its sorted place; the project loads.
    Test: P `lang20d_criterion_5`.
