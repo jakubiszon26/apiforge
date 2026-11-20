@@ -2,8 +2,9 @@
 
 - Size: M · Owner review: 20 min · Risk: `visible UI`, `default` (where a
   dropped block lands; cards move to make room)
-- State: **Approved, ready for implementation after LAY-45 (#468) and
-  DIAG-06a (#391) have merged.** Owner's answers of 2026-11-20 on #391:
+- State: **Approved, ready for implementation after LAY-45 (#468),
+  DIAG-06a (#391) and DIAG-06d (#493) have merged. Amended on 2026-11-20
+  after an independent review (criteria 5 and 6).** Owner's answers of 2026-11-20 on #391:
   questions 3 and 4 (what is shown while carrying; a block lands on the
   nearest line), 5 = A (the row makes room), 6 = A (the `if`'s own *Next*;
   no join lines; `↳ next step`; bands after 0.2.0), 9 = A (a check's one
@@ -80,12 +81,22 @@ on screen is asserted.
    step of the main flow and the drop adds it there. A check or value
    carried the same way is not placed by a line (it lands as today).
    Test: `diag06c_criterion_4_*`; the smoke list's flow 3 holds.
-5. After an add or a move on a board as Tidy up left it, every card
-   stands where Tidy up would put it; cards placed by hand that stand
-   after the new place move by one place too, the others not at all; the
-   camera does not move. Test: `diag06c_criterion_5_*`.
-6. A check, value, variable and export show one order socket; a step
-   shows two (LAY-45). Test: `diag06c_criterion_6`.
+5. After an add or a move, the steps of the braces that changed — from
+   the first place that changed to the end of that chain, with the cards
+   hung under them and everything inside an `if` among them — stand where
+   a whole *Tidy up* of the board would put them, whether they were
+   placed by hand or not (question 5 = A). For a move that is both the
+   place left and the place entered, so no gap stays; an `if` takes the
+   room of all its cards. Every other card keeps its position, also when
+   that leaves the rows uneven; the camera does not move. Test:
+   `diag06c_criterion_5_*`: an add, a move later, a move earlier, an `if`
+   moved, each on a tidied board and on one with a card moved by hand
+   before and one after the place.
+6. Order sockets by kind: *Start* one out (*Next*) and none in; a
+   request and a component call one in and *Next*; an `if` one in and
+   three out, *Yes*, *No* and *Next*; a check, value, variable and export
+   one in, which takes *Yes* or *No* only, and none out.
+   Test: `diag06c_criterion_6_*`, one per kind.
 7. A selected ordering line shows *`b` follows `a`* where a selected data
    line shows its text today. Test: `diag06c_criterion_7`.
 8. Every gesture of criteria 1 and 4 leaves a text that passes the check.
