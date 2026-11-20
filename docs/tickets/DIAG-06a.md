@@ -3,8 +3,13 @@
 - Size: M · Owner review: 20 min · Risk: `default` (what *Add step* and a
   wire to an existing step do), `visible UI` (refusal sentences)
 - State: **Approved, ready for implementation after LANG-13 (#386),
-  LANG-06 (#143), LAY-45 (#468) and DIAG-06e (#494, the delete and the
-  Undo that restores the source) have merged.** The owner answered the
+  LANG-06 (#143) and DIAG-06e (#494) have merged.** It no longer waits
+  for LAY-45 (#468), which stopped at its feasibility gate on 2026-11-20:
+  this ticket's gestures are a wire between two sockets found by their
+  names, and its tests read no position of a socket or a line, so they
+  hold wherever LAY-45 puts them. What needs the drawn line — captions,
+  a block dropped on a line — is DIAG-06c (#490), which still follows
+  LAY-45. The owner answered the
   quiz on the round-1 mock-up on 2026-11-20, every question with A
   ([#391](https://github.com/jakubiszon26/apiforge/issues/391)). **Narrowed
   the same day** after an independent review found the first version an
