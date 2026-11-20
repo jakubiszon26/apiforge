@@ -663,8 +663,17 @@ impl AgentSession {
         // A folder without a project gets no `.apiforge/local` from a write.
         let probe = ProjectStore::open_read_only(&self.folder).map_err(storage)?;
         let manifest = ProjectPath::new(MANIFEST_PATH).map_err(storage)?;
-        if read(&probe, std::slice::from_ref(&manifest))?.files[&manifest].is_none() {
+        let Some(bytes) = read(&probe, std::slice::from_ref(&manifest))?
+            .files
+            .remove(&manifest)
+            .flatten()
+        else {
             return Err(tools::storage_error(apiforge_project::Error::NotAProject));
+        };
+        // A project in a newer language is refused before the lock is taken
+        // (LANG-15); a manifest that cannot be read is the load's to report.
+        if let Ok(manifest) = apiforge_project::ProjectManifest::from_bytes(&bytes) {
+            apiforge_project::language::refuse_newer(&manifest).map_err(tools::storage_error)?;
         }
         if self.yielded.swap(false, Ordering::AcqRel) {
             // The person took the project back: the free lock is the

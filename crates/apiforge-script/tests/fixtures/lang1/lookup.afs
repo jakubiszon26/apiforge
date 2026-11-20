@@ -1,0 +1,16 @@
+component Lookup "Look up a product" {
+  description "A reusable lookup with typed exports."
+  @label("Product identifier")
+  input productId: string
+  @optional
+  input "other key": string = "default"
+  action productId
+  begin = start
+  @after(begin)
+  response = GET "/products/{{param.productId}}" {
+    timeout 5s
+    sample 200 { id: "p-1", name: "Example" }
+  }
+  export payload: object = response.body
+  export code: number = response.status
+}

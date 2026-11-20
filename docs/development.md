@@ -496,7 +496,7 @@ opens the saved project read-only for each call and writes nothing, not even
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed`, `null` while a holding window's live setting decides at run time, and its `source`), `interrupted_runs`, server version, `reference_version` |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed`, `null` while a holding window's live setting decides at run time, and its `source`), `interrupted_runs`, server version, `reference_version`, `language_version` (the language the server reads) and `project_language_version` (the one the project is written in, LANG-15) |
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
@@ -899,7 +899,8 @@ unregistered path is `resource_not_found` with `data.code`
   `path_rejected`, `path_exists`, `handle_exists`, `recovery_required`,
   `too_large`, `result_too_large`, `run_in_progress`, `cancelled`,
   `timed_out`, `unknown_outcome`. The read tools use `not_a_project`,
-  `project_unreadable` (any other storage failure, with its message),
+  `project_unreadable` (any other storage failure, and a project in a
+  language the server does not read or run, LANG-15, with its message),
   `recovery_required` (an interrupted transaction), `unknown_document`
   (`details.registered_paths`), `invalid_text` (`details.diagnostics`),
   `invalid_inputs`, `live_disabled`, `run_in_progress`, `too_large`,

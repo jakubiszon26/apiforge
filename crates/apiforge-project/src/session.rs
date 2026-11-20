@@ -3,6 +3,7 @@ use crate::{
     analysis::{self, Analysis, AnalysisInput, AnalysisTicket, Restored, Target},
     context,
     document::{AnalysisState, DocumentSession, Unavailable},
+    language,
     layout::{FixedPlacer, Placer},
 };
 use apiforge_core::format::Project;
@@ -311,6 +312,9 @@ impl ProjectSession {
         &mut self,
         document_id: &str,
     ) -> Result<apiforge_storage::project::LastValidSnapshot> {
+        if let Some(problem) = self.language_problem() {
+            return Err(problem);
+        }
         self.require_no_held_draft(document_id)?;
         self.require_current_registry()?;
         self.settle(document_id)?;
@@ -394,6 +398,7 @@ impl ProjectSession {
         snapshot: ProjectSnapshot,
         too_large: &HashSet<ProjectPath>,
     ) -> Result<Self> {
+        language::refuse_newer(&manifest)?;
         let diagram_path = ProjectPath::new(DIAGRAM_PATH)?;
         let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
         let diagram = match snapshot.files.get(&diagram_path).and_then(Option::as_deref) {
@@ -465,6 +470,12 @@ impl ProjectSession {
     }
     pub fn epoch(&self) -> u64 {
         self.epoch
+    }
+    /// The problem of a project written in an older language than this
+    /// build's (LANG-15): `check` reports it, and a run is refused with it
+    /// until `apiforge fix` has raised the project's language.
+    pub fn language_problem(&self) -> Option<Error> {
+        language::older(&self.manifest, self.store.root())
     }
     pub fn manifest(&self) -> &ProjectManifest {
         &self.manifest
@@ -820,6 +831,7 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
+        let model = kept_chain(&previous, model);
         if *previous == model {
             return Ok(());
         }
@@ -1232,6 +1244,11 @@ impl ProjectSession {
             kind: entry.kind,
             entity_id: entry.entity_id.clone(),
             revision: working_revision(&self.manifest, entry),
+            stored: false,
+            older: crate::language::support(
+                self.manifest.language(),
+                crate::language::LANGUAGE_VERSION,
+            ) == crate::language::Support::Older,
         }
     }
 
@@ -1263,19 +1280,16 @@ impl ProjectSession {
 }
 
 fn empty_manifest(name: &str) -> ProjectManifest {
-    ProjectManifest {
-        format_version: 1,
-        id: uuid::Uuid::new_v4().to_string(),
-        name: name.into(),
-        environment: apiforge_core::format::Environment {
+    language::new_manifest(
+        uuid::Uuid::new_v4().to_string(),
+        name.into(),
+        apiforge_core::format::Environment {
             base_url: String::new(),
             variables: Default::default(),
             secret_names: Vec::new(),
         },
-        contracts: Vec::new(),
-        documents: Vec::new(),
-        revisions: Vec::new(),
-    }
+        Vec::new(),
+    )
 }
 
 /// A working component carries the revision its next publication would get.
@@ -1358,10 +1372,24 @@ fn load_tolerating_large_sources(
     Ok((manifest, snapshot, too_large))
 }
 
+/// Whether `root` has a manifest. One of a project written in a newer
+/// language is refused here, before a store opens for writing (LANG-15);
+/// one that cannot be read is the load's to report.
 fn has_manifest(root: &Path) -> Result<bool> {
     let probe = ProjectStore::open_read_only(root)?;
     let path = ProjectPath::new(MANIFEST_PATH)?;
-    Ok(probe.read(std::slice::from_ref(&path))?.files[&path].is_some())
+    let Some(bytes) = probe
+        .read(std::slice::from_ref(&path))?
+        .files
+        .remove(&path)
+        .flatten()
+    else {
+        return Ok(false);
+    };
+    if let Ok(manifest) = ProjectManifest::from_bytes(&bytes) {
+        language::refuse_newer(&manifest)?;
+    }
+    Ok(true)
 }
 
 /// Keeps local session data out of Git: appends the rule to an existing
@@ -1395,4 +1423,24 @@ pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChang
         expected: FileState::of(&bytes),
         bytes: next,
     }])
+}
+
+/// A board edit keeps the chain of the written language (LANG-13): each
+/// graph of the edited model is rebuilt by [`apiforge_core::chain::edited`],
+/// and the first step placed in a scenario's main flow without a *Start*
+/// gets one written above it, as rule 1 and the fix of a file require. A
+/// component needs no *Start*.
+fn kept_chain(previous: &Document, mut model: Document) -> Document {
+    use apiforge_core::chain::{edited, with_start};
+    match (previous, &mut model) {
+        (Document::Scenario(before), Document::Scenario(after)) => {
+            after.cleanup = edited(&before.cleanup, &after.cleanup);
+            after.graph = with_start(&edited(&before.graph, &after.graph), &[&after.cleanup]);
+        }
+        (Document::Component(before), Document::Component(after)) => {
+            after.graph = edited(&before.graph, &after.graph);
+        }
+        _ => {}
+    }
+    model
 }

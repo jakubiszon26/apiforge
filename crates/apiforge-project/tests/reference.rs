@@ -119,9 +119,14 @@ fn the_block(section: &str) -> String {
 
 #[test]
 fn the_reference_opens_with_its_version_line() {
+    // LANG-15, criterion 6: the line names the language this build reads.
     let first = REFERENCE.lines().next().unwrap_or_default();
+    let prefix = format!(
+        "Language version: {} · grammar of ADR 0005 as of ",
+        apiforge_script::LANGUAGE_VERSION
+    );
     let date = first
-        .strip_prefix("Reference version: 1 · grammar of ADR 0005 as of ")
+        .strip_prefix(prefix.as_str())
         .unwrap_or_else(|| panic!("unexpected first line: {first:?}"));
     let parts: Vec<_> = date.split('-').collect();
     let iso = parts.len() == 3
@@ -387,7 +392,6 @@ fn the_examples_cover_every_predicate_method_and_statement_form() {
         "input attribute label",
         "action",
         "start",
-        "attribute after",
         "attribute label",
         "comment",
         "var",
@@ -447,6 +451,20 @@ fn the_examples_cover_every_predicate_method_and_statement_form() {
         .filter(|word| !coverage.words.contains(*word))
         .collect();
     assert!(missing.is_empty(), "no example shows: {missing:?}");
+}
+
+/// LANG-13 (#386), criterion 12: the reference describes language 2;
+/// `@after` is named only where its diagnostic is explained.
+#[test]
+fn lang13_after_appears_only_in_the_diagnostics() {
+    let (before, diagnostics) = REFERENCE
+        .split_once("\n## Diagnostics and what to do")
+        .expect("a diagnostics section");
+    assert!(
+        !before.contains("@after"),
+        "only the diagnostics name @after"
+    );
+    assert!(diagnostics.contains("`@after` is not part of the language"));
 }
 
 #[test]

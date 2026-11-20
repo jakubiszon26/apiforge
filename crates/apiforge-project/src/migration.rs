@@ -2,7 +2,10 @@
 //! plan, "Upgrade migration"). Activation is all-or-nothing: one atomically
 //! written catalogue lists every migrated project and is also the completion
 //! marker. Original files are never modified. Not used by normal startup yet.
-use crate::{Document, Error, ProjectSession, Result, context::base_project, prepare_project};
+use crate::{
+    Document, Error, ProjectSession, Result, context::base_project, prepare::as_written,
+    prepare_project,
+};
 use apiforge_core::format::{
     Binding, Bindings, Component, Graph, Project, TemplatePart, Workspace,
 };
@@ -493,7 +496,7 @@ fn prepare(folder: &Path, project: &Project, drafts: &[CodeDraft]) -> Result<Vec
             kind: entry.kind,
             base_revision: entry.base_revision,
             path: entry.path.clone(),
-            base_hash: Some(draft.base_hash.clone()),
+            base_hash: Some(written_base(&context, &entry, project, &draft.base_hash)?),
             source_version: 1,
             text: draft.text.clone(),
             selection: TextSelection {
@@ -597,8 +600,14 @@ fn printable(project: &Project) -> Result<()> {
     let mut context = project.clone();
     context.scenarios.clear();
     for scenario in &project.scenarios {
-        let document = Document::Scenario(scenario.clone());
-        if apiforge_script::print_folder_document(&context, &document).is_err() {
+        let written = as_written(&Document::Scenario(scenario.clone()));
+        if written
+            .and_then(|document| {
+                apiforge_script::print_folder_document(&context, &document)
+                    .map_err(|_| Error::Unprintable)
+            })
+            .is_err()
+        {
             return Err(MigrationError::Verification {
                 project_id: project.id.clone(),
                 project_name: project.name.clone(),
@@ -645,7 +654,8 @@ fn read_back(
     document: &Document,
     pinned: Option<&Component>,
 ) -> Option<Document> {
-    let text = apiforge_script::print_folder_document(context, document).ok()?;
+    let written = as_written(document).ok()?;
+    let text = apiforge_script::print_folder_document(context, &written).ok()?;
     let lower = apiforge_script::LowerContext::folder(context);
     let lower = match pinned {
         Some(component) => lower.with_component(component),
@@ -739,6 +749,7 @@ fn draft_document(
                 return Ok(Some(entry.clone()));
             }
             let entry = recovered_entry(manifest, component)?;
+            let component = &written_component(component)?;
             let text = print(context, component)?;
             // Keep the revision's identities and layout, as for the primary copy.
             let next = context
@@ -803,7 +814,14 @@ fn definition_source(
     entry: &DocumentEntry,
     project: &Project,
 ) -> Result<String> {
-    let document = match entry.kind {
+    let document = definition(context, entry, project)?;
+    apiforge_script::print_folder_document(context, &as_written(&document)?)
+        .map_err(|_| Error::Unprintable)
+}
+
+/// The definition a registered document names in the legacy project.
+fn definition(context: &Project, entry: &DocumentEntry, project: &Project) -> Result<Document> {
+    match entry.kind {
         DocumentKind::Scenario => project
             .scenarios
             .iter()
@@ -817,8 +835,36 @@ fn definition_source(
             })
             .map(|component| Document::Component(component.clone())),
     }
-    .ok_or(Error::UnknownDocument)?;
-    apiforge_script::print_folder_document(context, &document).map_err(|_| Error::Unprintable)
+    .ok_or(Error::UnknownDocument)
+}
+
+/// The base a code draft restores on. A draft was written over the text the
+/// legacy window printed, in the stored spelling; the folder source of the
+/// same definition is written in the written language (LANG-13), so a draft
+/// based on that stored text is based on its written source. The draft's
+/// own text is kept as it was: its `@after` lines show their fix.
+fn written_base(
+    context: &Project,
+    entry: &DocumentEntry,
+    project: &Project,
+    base_hash: &str,
+) -> Result<String> {
+    let document = definition(context, entry, project)?;
+    let stored = apiforge_script::print_stored(context, &document).ok();
+    if stored.is_some_and(|text| sha256(text.as_bytes()).as_deref() == Some(base_hash))
+        && let Some(hash) = sha256(definition_source(context, entry, project)?.as_bytes())
+    {
+        return Ok(hash);
+    }
+    Ok(base_hash.to_owned())
+}
+
+/// A working copy of `component`, as the written language says it.
+fn written_component(component: &Component) -> Result<Component> {
+    match as_written(&Document::Component(component.clone()))? {
+        Document::Component(component) => Ok(component),
+        Document::Scenario(_) => unreachable!("a component stays a component"),
+    }
 }
 
 fn print(context: &Project, component: &Component) -> Result<String> {
@@ -856,7 +902,8 @@ fn verify(folder: &Path, project: &Project) -> Result<()> {
                     && document.entry().entity_id == scenario.id
             })
             .and_then(|document| document.model());
-        if model != Some(&Document::Scenario(scenario.clone())) {
+        let written = as_written(&Document::Scenario(scenario.clone())).ok();
+        if model != written.as_ref() {
             return Err(failure_in(
                 Some(&scenario.name),
                 "a scenario differs after reloading",
@@ -875,7 +922,11 @@ fn verify(folder: &Path, project: &Project) -> Result<()> {
             .iter()
             .find(|c| c.id == entry.entity_id && Some(c.revision) == entry.base_revision)
             .ok_or_else(|| failure("a working component has no base revision"))?;
-        let mut normalised = base.clone();
+        let Ok(Document::Component(mut normalised)) =
+            as_written(&Document::Component(base.clone()))
+        else {
+            return Err(failure("a working component did not load"));
+        };
         normalised.revision = working.revision;
         if working != &normalised {
             return Err(failure(

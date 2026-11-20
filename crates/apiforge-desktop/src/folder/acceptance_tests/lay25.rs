@@ -868,23 +868,18 @@ fn lay25_criterion_6_held_values_and_clashes() {
     // Two values named token: the first in document order keeps it.
     let source = r#"scenario "Two tokens" {
   begin = start
-  @after(begin)
   login = POST "/login" {
     sample 200 { token: "t-1" }
   }
-  @after(login)
   refresh = POST "/refresh" {
     sample 200 { token: "t-2" }
   }
-  @after(refresh)
   a = GET "/a/{{login.body.token}}/{{refresh.body.token}}" {
     sample 200 {}
   }
-  @after(a)
   b = GET "/b/{{login.body.token}}/{{refresh.body.token}}" {
     sample 200 {}
   }
-  @after(b)
   c = GET "/c/{{login.body.token}}/{{refresh.body.token}}" {
     sample 200 {}
   }
@@ -959,21 +954,17 @@ fn lay25_criterion_7_nothing_to_save() {
 fn lay25_criterion_8_names() {
     let source = r#"scenario "Names" {
   begin = start
-  @after(begin)
   login = POST "/login" {
     sample 200 { token: "t-1", id: "u-1" }
   }
   token = "taken"
   loginStatus = "taken"
-  @after(login)
   a = GET "/a/{{login.body.token}}/{{login.body.id}}/{{login.status}}" {
     sample 200 {}
   }
-  @after(a)
   b = GET "/b/{{login.body.token}}/{{login.body.id}}/{{login.status}}" {
     sample 200 {}
   }
-  @after(b)
   c = GET "/c/{{login.body.token}}/{{login.body.id}}/{{login.status}}" {
     sample 200 {}
   }

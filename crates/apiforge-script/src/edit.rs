@@ -17,7 +17,6 @@
 //! document, is printed whole, as before.
 use crate::{
     ast::*,
-    branches::Branches,
     format::{head, opening, statements},
     lexer::{Token, TokenKind},
     lower::Document,
@@ -25,6 +24,7 @@ use crate::{
     print::{self, Printer, graphs, print_folder_document, printable, verify},
 };
 use apiforge_core::{
+    branches::Branches,
     format::{Graph, Node, Project},
     model::Branch,
 };
@@ -61,7 +61,7 @@ pub fn edit_in_place(
     }
     let tree = parse(source);
     edited(project, &tree, previous, document)
-        .filter(|text| verify(project, document, true, text).is_ok())
+        .filter(|text| verify(project, document, true, true, text).is_ok())
 }
 
 /// Where a statement is written: the main flow or the cleanup, or a branch
@@ -106,7 +106,7 @@ impl<'d> Side<'d> {
             nodes.insert(node.id.as_str(), (node, true));
         }
         Self {
-            printer: Printer::new(project, document),
+            printer: Printer::new(project, document, true),
             main: (main, Branches::new(main)),
             cleanup: cleanup.map(|graph| (graph, Branches::new(graph))),
             nodes,
@@ -694,21 +694,18 @@ mod tests {
     };
     use std::collections::HashSet;
 
-    /// Not in the window's form: a request block on one line, a check
-    /// without spaces and with a comment after it, and `done` written outside
-    /// the braces whose branch alone orders it.
+    /// Not in the window's form: a request block on one line and a check
+    /// without spaces and with a comment after it.
     const SOURCE: &str = r#"scenario "Edit" {
   description "Edited on the board."
   param count = 1
   begin = start
   // Reads the list.
-  @after(begin)
   list = GET "/items" { sample 200 { items: [] } }
   seen = assert list.status==200 // a quick check
   found = if list.status == 200 {
     item = GET "/items/1"
   }
-  @after(found.then)
   done = POST "/done"
 }
 "#;
@@ -728,8 +725,15 @@ mod tests {
             panic!("a scenario")
         };
         change(scenario);
+        // As a board edit through the session: the chain is kept (LANG-13).
+        let Document::Scenario(before) = &previous else {
+            panic!("a scenario")
+        };
+        scenario.graph = apiforge_core::chain::edited(&before.graph, &scenario.graph);
+        scenario.cleanup = apiforge_core::chain::edited(&before.cleanup, &scenario.cleanup);
         let text = edited(&project, &tree, &previous, &next).expect("written into the text");
-        verify(&project, &next, true, &text).unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+        verify(&project, &next, true, true, &text)
+            .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
         text
     }
 
@@ -746,7 +750,7 @@ mod tests {
             .document
             .unwrap();
         let back = edited(&project, &tree, &previous, &original).expect("written into the text");
-        verify(&project, &original, true, &back)
+        verify(&project, &original, true, true, &back)
             .unwrap_or_else(|errors| panic!("{back}\n{errors:?}"));
         (changed, back)
     }
@@ -792,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_statement_stays_outside_the_braces_it_was_written_outside() {
+    fn a_changed_statement_after_an_if_stays_where_it_is_written() {
         let text = edit(|scenario| {
             node(scenario, "done").inputs.insert(
                 "url".into(),
@@ -821,12 +825,10 @@ mod tests {
         });
         assert_eq!(
             text,
-            SOURCE
-                .replace(
-                    "  found = if list.status == 200 {\n    item = GET \"/items/1\"\n  }\n",
-                    "  item = GET \"/items/1\"\n"
-                )
-                .replace("  @after(found.then)\n", "")
+            SOURCE.replace(
+                "  found = if list.status == 200 {\n    item = GET \"/items/1\"\n  }\n",
+                "  item = GET \"/items/1\"\n"
+            )
         );
     }
 

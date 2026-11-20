@@ -1,5 +1,6 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
+  "languageVersion": 2,
   "id": "rooms",
   "name": "Room booking",
   "environment": {

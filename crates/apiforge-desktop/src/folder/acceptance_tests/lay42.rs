@@ -603,7 +603,7 @@ fn lay42_criterion_5_a_source_in_the_other_branch() {
     let lines = summary_of(
         &[(
             "  cleanup {",
-            "  @after(booked)\n  report = POST \"/reports\" {\n    body { booking: first.body.id }\n  }\n  cleanup {",
+            "  report = POST \"/reports\" {\n    body { booking: first.body.id }\n  }\n  cleanup {",
         )],
         "first.body.id → report.body.booking",
         "report",
