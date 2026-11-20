@@ -70,12 +70,15 @@ Not applicable: the board's banner and the restore's existing messages.
    for a file registered as it is, saving and publishing; not for a
    source this build writes new.
 2. **Deleted.** Moving a listed source to the trash removes its entry
-   from the record in the same commit. The trash entry notes the
-   language the source was read in (*2* when it was listed or the project
-   was language 2; *1* otherwise). An entry without the note — put there
-   by 0.1.0 or before this ticket — is language 1 when the project was
-   not yet language 2 when it was deleted, which the entry's manifest
-   snapshot says, else 2.
+   from the record in the same commit. The trash entry gains a note of
+   the language the source was read in: an optional field `language` of
+   `TrashEntry` (`2` when the source was listed or the project was
+   language 2; `1` otherwise). The trash keeps nothing else to tell by —
+   no copy of the manifest — so **an entry without the note is language
+   1**: it was written by 0.1.0 or by a build before this ticket. For a
+   file deleted by such a build in a project that was already language 2
+   this errs on the safe side: its restore is judged as an old file's
+   and, if it would change what runs, refused.
 3. **Restored into a project being updated**, or into a language-1
    project: a language-2 source comes back listed (the record and the
    manifest created if need be, as in rule 1); a language-1 source comes
@@ -88,10 +91,19 @@ Not applicable: the board's banner and the restore's existing messages.
    the restore's message gives what was removed; *blocked* or
    *unreadable* — nothing is written, the entry stays in the trash, and
    the refusal names the statement and the reason. The trash's bytes are
-   never changed, so a refused restore can be tried again after the
-   project or the build changes. Until LANG-20b has merged, such a
-   restore is refused with *This file is in the older language; it can be
-   restored when the update is available.*
+   never changed, so a refused restore can be tried again. Until LANG-20b
+   has merged, such a restore is refused with *This file is in the older
+   language; it can be restored when the update is available.*
+   - **Its unsaved draft.** An entry can hold the unsaved text the file
+     had when it was deleted (`recovery`), which a restore installs over
+     the file. For a language-1 source restored into a language-2 project
+     the draft is judged too: both texts must be convertible; the file is
+     written converted and the draft is installed converted. When either
+     is blocked the restore is refused as above and names which. A draft
+     is never installed in a language the project does not read.
+   - **Several at once.** A restore of a folder, or of several entries
+     of one deletion, is whole: when one of them is refused nothing is
+     restored, and the refusal names every one that blocks.
 5. **Renamed or moved**: the entry keeps its `documentId`; its path and
    its place in the sorted list change in the same commit.
 6. **Deleted for good** (the trash emptied): nothing in the record.
@@ -123,21 +135,35 @@ LANG-20a's language-1 `rooms` with a record and on a language-1 copy of
    One that cannot — the review's case: an unlisted source with a request
    without `@after` that ran nowhere in 0.1.0, deleted, the project
    finished, then restored — is refused, names the request, writes
-   nothing, and the trash still holds the entry byte for byte; so that
-   request does not run. A language-2 source comes back as it is.
-   Tests: P `lang20d_criterion_4_*`, one per case; D
-   `lang20d_criterion_4` for the two messages in the window.
+   nothing, and the trash still holds the entry byte for byte. A
+   language-2 source comes back as it is. An entry with an unsaved draft
+   holding `@after`: the file and the draft are both converted, or the
+   restore is refused when the draft is blocked although the saved text
+   is not. A folder of three files of which one is blocked: nothing is
+   restored and that file is named. An entry without the note is judged
+   as language 1. Tests: P `lang20d_criterion_4_*`, one per case; T
+   `lang20d_criterion_4_entry_without_a_note`; D `lang20d_criterion_4`
+   for the two messages in the window.
 5. A rename and a move of a listed source: one commit; the record's
    entry has the new path at its sorted place; the project loads.
    Test: P `lang20d_criterion_5`.
-6. In a language-1 project, with or without a record, a board edit in a
-   source the record does not list is refused with *Update the project
-   first.* and changes neither the document nor the file: adding a
-   block, wiring, moving a card's step, deleting, an Inspector change —
-   in the window and through a session's model edit. Moving a card and a
-   text edit in Code work. The same edits work in a listed source and in
-   a language-2 project. Tests: P `lang20d_criterion_6_*`, D
-   `lang20d_criterion_6_*` (on `labels` in language 1).
+6. In a language-1 project, with or without a record, an edit **that
+   would change the source** of a source the record does not list is
+   refused with *Update the project first.* and changes neither the
+   document nor the file: adding a block, wiring, moving a card's step,
+   deleting, an Inspector change — in the window and through a session's
+   model edit. The refusal is decided where the session already tells an
+   edit that changes the text from one that changes only the layout
+   (`install_model`): **moving a card, Tidy up and every other edit of
+   positions alone go through** and are saved. *Save as component* is
+   checked **before anything is created**: refused in an unlisted
+   source, it leaves no component document and no published revision
+   behind. A text edit in Code works. The same edits work in a listed
+   source and in a language-2 project. Tests: P `lang20d_criterion_6_*`
+   (among them a move of a card and Tidy up, saved; and *Save as
+   component* refused with the project's files and revisions compared
+   before and after), D `lang20d_criterion_6_*` (on `labels` in
+   language 1).
 7. After each of these, an open second session (an observing window)
    follows without a reopen (LANG-20a, criterion 7).
    Test: P `lang20d_criterion_7`.
@@ -158,9 +184,9 @@ The record's format and a project's states (LANG-20a). Converting
 
 ## Technical appendix
 
-`apiforge-storage/src/project/trash.rs` (the note in an entry; its
-schema's version), `apiforge-project/src/session.rs` (create, the board
+`apiforge-storage/src/project/trash.rs` (the optional note in an entry;
+`restore_trash` judging and converting, the draft included), `apiforge-project/src/session.rs` (create, the board
 refusal where a model edit is installed), `files.rs` (rename, move,
 delete, restore), `new_document.rs`, `language.rs`;
-`apiforge-desktop/src/folder/save_component.rs` only for the refusal's
-sentence.
+`apiforge-desktop/src/folder/save_component.rs` (the check before the
+component is created and published).
