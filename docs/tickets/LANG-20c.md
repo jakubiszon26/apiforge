@@ -1,6 +1,7 @@
 # LANG-20c: The MCP tool `fix`, and a change of the record alone reaches an open window
 
-- Size: S · Owner review: 10 min · Risk: `format` (it writes what
+- Size: S · Owner review: 10 min (S because LANG-20b returns the whole
+  result of a run and LANG-20a the observation; it designs neither) · Risk: `format` (it writes what
   LANG-20b writes, through the same function)
 - State: **Decided; labelled when the independent review of LANG-20a and
   LANG-20b is ruled.** Split from LANG-20 on 2026-11-20. After LANG-20b
@@ -52,9 +53,15 @@ the MCP harness of `mcp08b`).
    editing. Test: D `lang20c_criterion_3`.
 4. When the agent's `fix` finishes the project, the window shows it in
    language 2 and a run starts. Test: D `lang20c_criterion_4`.
-5. The tool's output schema names the five kinds of source of LANG-20b's
-   plan; the server's instructions name the tool.
-   Test: M `lang20c_criterion_5`.
+5. The tool's result is LANG-20b's result of a run: the five kinds of
+   source, the sources converted, `finished`, and — when the run stopped
+   — why and at which file. A run that converted some sources and then
+   stopped is a **result** (`finished: false` with the converted list),
+   not an error: the tool's error (`wrote: false` or `unknown`,
+   `apiforge-mcp/src/error.rs`) is kept for a run that wrote nothing or
+   whose commit's outcome is not known. The server's instructions name
+   the tool and say so. Tests: M `lang20c_criterion_5_*`: a run stopped
+   after its first commit; one that wrote nothing; the schema.
 
 ## Regression potential
 
