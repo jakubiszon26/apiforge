@@ -624,6 +624,35 @@ impl Board<'_> {
         )
     }
 
+    /// What deleting the blocks `ids` would do in the folder window
+    /// (DIAG-06e): what goes, who would be left reading it, and whether an
+    /// `if` with statements in its braces asks first. The graph beside this
+    /// one (a scenario's cleanup) is read for readers too. `needs_start` is
+    /// true on the main flow of a scenario.
+    pub fn deletion(&self, ids: &[String], needs_start: bool) -> edit::Deletion {
+        let selection: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let beside: Vec<&Graph> = self.sibling.into_iter().collect();
+        edit::delete_preview(self.graph, &beside, &selection, needs_start)
+    }
+
+    /// The folder window's delete, by `deletion`'s answer (DIAG-06e): its
+    /// statements, the wires `wires` and the proxies among `ids`. No input of
+    /// a statement that stays is changed, so call it only for a deletion
+    /// without a refusal. The legacy window keeps [`Board::delete`].
+    pub fn delete_checked(
+        &self,
+        deletion: &edit::Deletion,
+        ids: &[String],
+        wires: &[String],
+    ) -> Graph {
+        let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let wires: HashSet<&str> = wires.iter().map(String::as_str).collect();
+        edit::remove_proxies(
+            &edit::remove_connections(&edit::apply_deletion(self.graph, deletion), &wires),
+            &ids,
+        )
+    }
+
     /// Places a proxy and selects it, which shows at once what it stands for and
     /// what now reads it from here.
     pub fn add_proxy(

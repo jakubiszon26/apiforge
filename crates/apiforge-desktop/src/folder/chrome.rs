@@ -684,6 +684,24 @@ impl FolderApp {
                 paths,
                 error,
             } => self.delete_prompt(context, preview, paths, error),
+            Prompt::DeleteStatements {
+                document_id,
+                cleanup,
+                ids,
+                wires,
+                question,
+                gone,
+            } => self.delete_statements_prompt(
+                context,
+                document_id,
+                cleanup,
+                wires,
+                ConfirmedDelete {
+                    ids,
+                    question,
+                    gone,
+                },
+            ),
             Prompt::Import { rows, error } => self.import_prompt(context, rows, error),
             Prompt::Trash { operations, error } => self.trash_prompt(context, operations, error),
             Prompt::Register { path, kind, error } => {
