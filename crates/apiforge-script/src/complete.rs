@@ -693,9 +693,6 @@ fn statement_keywords(replace: Range<usize>) -> Vec<Completion> {
         Completion::new(Kind::Keyword, "on_error", replace.clone())
             .inserting("on_error stop", 13)
             .detail("stop or continue after a failed step"),
-        Completion::new(Kind::Keyword, "@after", replace.clone())
-            .inserting("@after()", 7)
-            .detail("run this step after another"),
         Completion::new(Kind::Keyword, "@label", replace.clone())
             .inserting("@label(\"\")", 8)
             .detail("the name shown on the board"),

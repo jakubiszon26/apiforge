@@ -19,6 +19,10 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
 #[path = "../../apiforge-project/tests/support/legacy_workspace.rs"]
 pub mod legacy_workspace;
 
+/// A project's manifest rewritten as one of another language (LANG-15).
+#[path = "../../apiforge-project/tests/support/language.rs"]
+pub mod language;
+
 pub type FolderHarness = Harness<'static, Option<FolderApp>>;
 pub type WorkspaceHarness = Harness<'static, Option<App>>;
 
@@ -65,6 +69,38 @@ pub fn shop_project_without_far_reads() -> tempfile::TempDir {
     session.save(&id).unwrap();
     drop(session);
     directory
+}
+
+/// Where [`labels_board`] keeps the `labels` reference scenario.
+pub const LABELS: &str = "scenarios/labels.afs";
+
+/// `fixtures/scenarios/lay/labels.afs` (FIX-01) as the only document of a
+/// folder project of its own, as the room project is copied to one, open on
+/// its board at `size`: the project, the window and the scenario's document
+/// id. A test that measures the board tidies it first.
+pub fn labels_board(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    let text = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/scenarios/lay/labels.afs"),
+    )
+    .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut project = apiforge_core::demos::empty_project();
+    project.scenarios.clear();
+    project.name = "Label validation".into();
+    apiforge_project::prepare_project(directory.path(), &project).unwrap();
+    let mut session = apiforge_project::ProjectSession::open(directory.path()).unwrap();
+    let id = session
+        .create_document(apiforge_project::DocumentKind::Scenario, LABELS, &text)
+        .unwrap();
+    drop(session);
+    let mut harness = folder_harness_in(directory.path(), size, Mode::Diagram);
+    harness
+        .state_mut()
+        .as_mut()
+        .unwrap()
+        .review_open(LABELS, None);
+    settle(&mut harness);
+    (directory, harness, id)
 }
 
 /// The view a project with no stored view starts in under the shared

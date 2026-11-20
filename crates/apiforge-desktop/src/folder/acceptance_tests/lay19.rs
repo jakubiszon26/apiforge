@@ -42,8 +42,14 @@ fn continued(source: &str) -> String {
 }
 
 /// Under *Continue*, `refund` has no sample: the simulation errors there.
+/// `logout` reads the refund, so it is one of its readers: since RUN-01 a
+/// step that only follows a failed one runs (ADR 0015).
 fn refund_without_sample() -> String {
-    replaced(&continued(&shop_30()), REFUND, "")
+    replaced(
+        &replaced(&continued(&shop_30()), REFUND, ""),
+        "  logout = POST \"/logout\" {\n",
+        "  logout = POST \"/logout\" {\n    query { refund: refund.body.amount }\n",
+    )
 }
 
 /// Under *Continue*, the cart view answers with no items: the *Data
@@ -362,7 +368,7 @@ fn lay19_criterion_1_the_count_equals_the_caused_rows() {
     let source = replaced(
         &condition_unmet(),
         "  cleanup {\n",
-        "  @after(begin)\n  extra = GET \"/extra\" {\n  }\n  extra_ok = assert extra.status == 200\n  cleanup {\n",
+        "  extra = GET \"/extra\" {\n  }\n  extra_ok = assert extra.status == 200\n  cleanup {\n",
     );
     let (_project, mut harness) = ran(&source, WIDE);
     let result = run(&harness);

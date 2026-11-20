@@ -1,7 +1,6 @@
 scenario "Room booking day" {
   description "A longer day of bookings: the double booking check comes late."
   begin = start
-  @after(begin)
   token = sign_in@1(user: "tester")
   profile = GET "/me" {
     headers { Authorization: "Bearer {{token}}" }
@@ -12,7 +11,6 @@ scenario "Room booking day" {
     sample 200 { id: "qa", size: 5 }
   }
   big_enough = assert team.body.size > 0
-  @after(big_enough)
   buildings = GET "/buildings" {
     headers { Authorization: "Bearer {{token}}" }
     sample 200 { items: [{ id: "hq", floors: 3 }] }
@@ -22,7 +20,6 @@ scenario "Room booking day" {
     sample 200 { items: [{ number: 1 }, { number: 2 }, { number: 3 }] }
   }
   has_floors = assert nonempty floors.body.items
-  @after(has_floors)
   rooms = GET "/rooms" {
     headers { Authorization: "Bearer {{token}}" }
     query { floor: 2 }
@@ -34,47 +31,40 @@ scenario "Room booking day" {
     sample 200 { items: ["screen", "camera"] }
   }
   has_screen = assert equipment.body.items contains "screen"
-  @after(has_screen)
   policy = GET "/booking-policy" {
     headers { Authorization: "Bearer {{token}}" }
     sample 200 { maxHours: 4 }
   }
   short_enough = assert (policy.body.maxHours >= 1) == true
-  @after(short_enough)
   holidays = GET "/calendar/holidays" {
     headers { Authorization: "Bearer {{token}}" }
     query { year: 2026 }
     sample 200 { items: ["2026-12-25", "2026-12-26"] }
   }
   working_day = assert holidays.body.items contains "2026-12-25"
-  @after(working_day)
   first = POST "/bookings" {
     headers { Authorization: "Bearer {{token}}" }
     body { roomId: rooms.body.items[0].id, start: slot.start, end: slot.end }
     sample 201 { id: "bk-1", roomId: "room-a", start: "2026-12-01T10:00:00Z", end: "2026-12-01T11:00:00Z" }
   }
-  @after(first)
   hold = POST "/payments/holds" {
     headers { Authorization: "Bearer {{token}}" }
     body { booking: first.body.id, amount: 40 }
     sample 201 { id: "h-1", amount: 40 }
   }
   held = assert hold.body.amount == 40
-  @after(held)
   invite = POST "/invitations" {
     headers { Authorization: "Bearer {{token}}" }
     body { booking: first.body.id, team: profile.body.team }
     sample 201 { id: "i-1", invited: 5 }
   }
   invited = assert invite.body.invited == team.body.size
-  @after(invited)
   notice = POST "/notifications" {
     headers { Authorization: "Bearer {{token}}" }
     body { channel: "email", text: "Your booking is confirmed." }
     sample 202 { id: "n-1" }
   }
   sent = assert notice.status == 202
-  @after(sent)
   booked = if first.status == 201 {
     second = POST "/bookings" {
       headers { Authorization: "Bearer {{token}}" }
@@ -82,7 +72,6 @@ scenario "Room booking day" {
       sample 409 { error: { code: "room_unavailable", message: "The room is closed for maintenance." } }
     }
     refused = assert second.status == 409
-    @after(refused)
     calendar = GET "/rooms/{{rooms.body.items[0].id}}/bookings" {
       headers { Authorization: "Bearer {{token}}" }
       query { from: slot.start, to: slot.end }

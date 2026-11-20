@@ -15,12 +15,26 @@ below holds; an agent that finds one does not hold stops and escalates.
 
 | Label | Every item holds |
 | --- | --- |
-| `ready:sol` | The analysis is approved by the owner and the ticket file, or the issue when the ticket has none, says so. Every owner decision the ticket needs is taken and recorded. The acceptance criteria are numbered and each names its test or its QA step. The mock-up, if the ticket has one, is approved as a whole. Size is `S` or `M`; regression potential is named and the test that covers it is listed. No `format`, `migration` or `removal` flag. |
-| `ready:opus` | Everything `ready:sol` requires except the prohibition on `removal`: a `removal` flag, a permission or consent control, or an `M` with an interplay the planning model names (a camera, a wording shared with another ticket, an approved mock-up to match) may be present. Size is `S` or `M`; regression potential is named and the test that covers it is listed. No `format` or `migration` flag. Opus 5.5 or newer takes it unattended and escalates on the same conditions as any other model. Introduced for the UX-1 sprint (2026-11-02) |
+| `ready:sol` | The analysis is approved by the owner and the ticket file, or the issue when the ticket has none, says so. Every owner decision the ticket needs is taken and recorded. The acceptance criteria are numbered and each names its test or its QA step. The mock-up, if the ticket has one, is approved as a whole. Size is `S` or `M`; regression potential is named and the test that covers it is listed. No `format`, `migration` or `removal` flag, without exception. |
+| `ready:opus` | Everything `ready:sol` requires except the prohibition on `removal`: a `removal` flag, a permission or consent control, or an `M` with an interplay the planning model names (a camera, a wording shared with another ticket, an approved mock-up to match) may be present. Size is `S` or `M`; regression potential is named and the test that covers it is listed. No `migration` flag. No `format` flag either, with the one exception written under this table: a `format` ticket whose format is the owner's recorded decision, read by a second model first. Opus 5.5 or newer takes it unattended and escalates on the same conditions as any other model. Introduced for the UX-1 sprint (2026-11-02) |
 | `ready:sonnet` | Everything above, and: size `S`, no risk flag at all, one file or one well-named unit touched, the change spelled out in the ticket to the level of what the code does, no judgement left to make. A typo, a wording, a constant, a test rename. |
 
 A ticket with `decision-needed`, with an open question in its analysis, or
 whose criteria say "probably" is never labelled.
+
+**The one exception for `format`.** A ticket with a `format` flag may be
+labelled `ready:opus`, never `ready:sol` or `ready:sonnet`, when both
+hold: every change it makes to a file a project keeps is named by a
+decision of the owner recorded in a ticket file or on the issue, so that
+the ticket decides nothing about the format itself; and the ticket file
+was first read by a second model that did not write it — against the
+code, for what the criteria miss. The label's comment on the issue names
+the decisions and that review and what it changed. An implementer who
+finds a change to the format that those decisions do not name stops and
+escalates. Introduced on 2026-11-20: the review of the LANG tickets after
+they were labelled found a rule the runner did not follow, a requirement
+that contradicted an earlier decision, and a conversion that could not be
+resumed.
 
 ## Picking a ticket
 
@@ -78,3 +92,12 @@ with the question "may this be labelled?", labels what qualifies, and writes
 the ticket file to the standard the label promises. A ticket the agent had to
 escalate for something the analysis should have said is recorded in the
 retrospective against the analysis, not against the agent.
+
+It also owes the owner more than answers: an analysis of a sprint, of the
+owner's findings or of a ticket above `S` carries the planning model's
+[own proposals](planning.md#the-planning-models-own-proposals) — what would
+solve the underlying problem better than the thing asked — and the strongest
+are filed as candidates for the owner's decision. A one-ticket analysis of
+size `S` may leave them out. A
+sprint in which every feature came from the owner is recorded in the
+retrospective against the analysis.
