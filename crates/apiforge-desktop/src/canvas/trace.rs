@@ -15,7 +15,8 @@
 //! them and everything that ends a wire's selection ends its trace. A line
 //! of the chain of steps is pointed at like a data line (LAY-45): it is lit
 //! and its box says which step follows which, `catalogue → product`; a
-//! click keeps data wires only.
+//! click keeps it too, and then it says *`product` follows `catalogue`*
+//! (DIAG-06c).
 //!
 //! A reader count's list of the fields read (LAY-18) stands in the same box:
 //! at the count while it is pointed at, and while its port's wires are drawn
@@ -372,10 +373,12 @@ impl Trace {
         row: Option<(&str, &str)>,
         selected: &[String],
     ) -> Self {
+        // A click keeps a data line, and a line of the chain of steps
+        // (DIAG-06c), but not a branch's line out of *Yes* or *No*.
         let data: HashSet<String> = board
             .wires
             .iter()
-            .filter(|wire| !wire.control)
+            .filter(|wire| !wire.control || wire.branch.is_none())
             .map(|wire| wire.id.clone())
             .collect();
         let pointable: HashSet<String> = board
@@ -438,6 +441,10 @@ impl Trace {
             };
             let statement = match node {
                 // The chain of steps says which step follows which (LAY-45).
+                // A kept one says which follows which (DIAG-06c).
+                Some(node) if wire.control && kept.contains(id) => {
+                    format!("`{}` follows `{}`", handle(&target.id), handle(node))
+                }
                 Some(node) if wire.control => format!("{} → {}", handle(node), handle(&target.id)),
                 Some(node) => {
                     readers::texts(board.graph, board.project, wire, &target.id, node, None).1

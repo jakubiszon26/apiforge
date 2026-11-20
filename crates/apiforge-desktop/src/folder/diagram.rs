@@ -572,7 +572,22 @@ impl FolderApp {
                 component,
                 position,
                 source,
-            } => Some(board.add_node(block, component, position, source)),
+            } => Some(
+                board
+                    .add_node(block, component, position, source)
+                    .map(|edit| board.made_room(edit)),
+            ),
+            // A step dropped on a line of a chain lands there (DIAG-06c).
+            Command::AddOnLine {
+                block,
+                component,
+                position,
+                after: (source, port),
+            } => Some(
+                board
+                    .add_on_line(block, component, position, &source, &port)
+                    .map(|edit| board.made_room(edit)),
+            ),
             Command::MoveOutOfBranch(id) => {
                 let placed = board.move_out_of_branch(&id);
                 self.apply_move(document_id, model, cleanup, placed);
@@ -583,7 +598,11 @@ impl FolderApp {
                 block,
                 component,
                 position,
-            } => Some(board.add_step(block, component, position, &selection)),
+            } => Some(
+                board
+                    .add_step(block, component, position, &selection)
+                    .map(|edit| board.made_room(edit)),
+            ),
             Command::AddOperator { operator, position } => {
                 Some(Ok(board.push_node(create_operator_node(operator, position))))
             }
@@ -615,9 +634,10 @@ impl FolderApp {
             // An ordering line is the order of the written steps: it is not
             // deleted on its own (DIAG-06a).
             Command::Delete { wires, .. }
-                if wires
-                    .iter()
-                    .any(|wire| graph.edges.iter().any(|edge| &edge.id == wire)) =>
+                if wires.iter().any(|wire| {
+                    wire.starts_with(crate::canvas::AFTER_IF)
+                        || graph.edges.iter().any(|edge| &edge.id == wire)
+                }) =>
             {
                 Some(Err(apiforge_core::edit::EditError::OrderLine.to_string()))
             }
@@ -675,7 +695,9 @@ impl FolderApp {
                     .any(|node| node.id == source && apiforge_core::chain::is_step(node.kind))
                 && graph.nodes.iter().any(|node| node.id == target) =>
             {
-                let placed = board.place(&source, &source_port, &target);
+                let placed = board
+                    .place(&source, &source_port, &target)
+                    .map(|(graph, moved)| (board.make_room(graph), moved));
                 self.apply_move(document_id, model, cleanup, placed);
                 None
             }
@@ -953,6 +975,29 @@ impl FolderApp {
                 }
             }
         }
+    }
+
+    /// The board of `document_id` as a whole *Tidy up* would lay it out
+    /// now, without applying it (DIAG-06c).
+    #[cfg(test)]
+    pub(crate) fn debug_tidied(&self, document_id: &str) -> Option<Graph> {
+        let snapshot = self.snapshot(document_id)?;
+        let model = snapshot.model?;
+        let cleanup = self.cleanup(document_id);
+        let project = self.context_project();
+        let reference = reference_of(&model, cleanup);
+        let parameters = parameters_of(&model);
+        let board = Board {
+            graph: graph_of(&model, cleanup),
+            reference: &reference,
+            project: &project,
+            parameters: &parameters,
+            sibling: sibling_of(&model, cleanup),
+            density: self.density(),
+            satellites: true,
+            lines: lines_of(&self.preferences),
+        };
+        board.tidy_up(&[])
     }
 
     /// Opens the working document of the component a block calls.

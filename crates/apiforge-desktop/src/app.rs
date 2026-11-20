@@ -2472,6 +2472,17 @@ impl App {
                     self.with_board(|board| board.add_node(block, component, position, source));
                 self.apply_edit(result);
             }
+            // The legacy window marks no line; it adds as the Library does.
+            Command::AddOnLine {
+                block,
+                component,
+                position,
+                ..
+            } => {
+                let result =
+                    self.with_board(|board| board.add_node(block, component, position, None));
+                self.apply_edit(result);
+            }
             // The legacy window has no moves across braces (DIAG-06d).
             Command::MoveOutOfBranch(_) => {}
             // The legacy window keeps adding last (DIAG-06a, criterion 9).

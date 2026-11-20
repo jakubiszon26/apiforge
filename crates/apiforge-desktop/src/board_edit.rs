@@ -590,6 +590,140 @@ impl Board<'_> {
         edit::place(self.graph, self.project, target, at).map_err(|error| error.to_string())
     }
 
+    /// `next`, an add or a move of steps on this board, with room made
+    /// (DIAG-06c, question 5 = A): in every braces whose steps changed, the
+    /// steps from the first place that changed to the end of that chain,
+    /// everything in the braces of an `if` among them and the cards hung
+    /// under them in shape D stand where a whole *Tidy up* of the board
+    /// puts them, placed by hand or not. Every other card keeps its
+    /// position.
+    pub fn make_room(&self, next: Graph) -> Graph {
+        use apiforge_core::chain::{braces, is_step};
+        type Key = Option<(String, apiforge_core::model::Branch)>;
+        let steps_of = |graph: &Graph| -> HashMap<Key, Vec<String>> {
+            let written = braces(graph);
+            let mut chains: HashMap<Key, Vec<String>> = HashMap::new();
+            for node in &graph.nodes {
+                if is_step(node.kind) {
+                    let key = written
+                        .get(node.id.as_str())
+                        .map(|(x, branch)| ((*x).to_owned(), *branch));
+                    chains.entry(key).or_default().push(node.id.clone());
+                }
+            }
+            chains
+        };
+        let (old, new) = (steps_of(self.graph), steps_of(&next));
+        let mut affected: HashSet<String> = HashSet::new();
+        for (key, steps) in &new {
+            let before = old.get(key).map(Vec::as_slice).unwrap_or_default();
+            let first = steps
+                .iter()
+                .zip(before.iter().map(Some).chain(std::iter::repeat(None)))
+                .position(|(now, was)| was != Some(now));
+            if let Some(first) = first {
+                affected.extend(steps[first..].iter().cloned());
+            }
+        }
+        if affected.is_empty() {
+            return next;
+        }
+        // Laid out as the document will be once its chain is written: an
+        // add carries the edge of the step it follows beside the edges the
+        // chain will drop (LANG-13).
+        let chained = apiforge_core::chain::edited(self.graph, &next);
+        let Some(tidied) = (Board {
+            graph: &chained,
+            reference: self.reference,
+            project: self.project,
+            parameters: self.parameters,
+            sibling: self.sibling,
+            density: self.density,
+            satellites: self.satellites,
+            lines: self.lines,
+        })
+        .tidy_up(&[]) else {
+            return next;
+        };
+        // Everything in the braces of an `if` among them.
+        let written = braces(&next);
+        let inside = |id: &str| {
+            let mut current = id;
+            while let Some(&(parent, _)) = written.get(current) {
+                if affected.contains(parent) {
+                    return true;
+                }
+                current = parent;
+            }
+            false
+        };
+        let within: Vec<String> = next
+            .nodes
+            .iter()
+            .filter(|node| inside(&node.id))
+            .map(|node| node.id.clone())
+            .collect();
+        affected.extend(within);
+        // The cards hung under them.
+        if let Some(plan) = canvas::shape::plan(&chained, self.sibling) {
+            for (satellite, under) in plan.satellites {
+                if affected.contains(&chained.nodes[plan.spine[under]].id) {
+                    affected.insert(chained.nodes[satellite].id.clone());
+                }
+            }
+        }
+        let mut next = next;
+        for node in &mut next.nodes {
+            if !affected.contains(&node.id) {
+                continue;
+            }
+            if let Some(tidy) = tidied.nodes.iter().find(|tidy| tidy.id == node.id) {
+                node.position = tidy.position.clone();
+                node.auto_placed = true;
+            }
+        }
+        next
+    }
+
+    /// The edit with room made for what it adds or moves ([`Board::make_room`]).
+    pub fn made_room(&self, edit: Edit) -> Edit {
+        Edit {
+            graph: self.make_room(edit.graph),
+            selection: edit.selection,
+        }
+    }
+
+    /// A step from the Library dropped on a line of a chain (DIAG-06c): it
+    /// is added and put after `source`, by `port` (*Next* after it, *Yes* or
+    /// *No* first in that branch), in that line's braces.
+    pub fn add_on_line(
+        &self,
+        block: Block,
+        component: Option<(String, u32)>,
+        position: Position,
+        source: &str,
+        port: &str,
+    ) -> Result<Edit, String> {
+        let added = self.add_node(block, component, position, None)?;
+        let id = added
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.first())
+            .cloned()
+            .ok_or_else(|| edit::EditError::NodeNotFound.to_string())?;
+        let at = match port {
+            TRUE_PORT => edit::Place::First(source, apiforge_core::model::Branch::True),
+            FALSE_PORT => edit::Place::First(source, apiforge_core::model::Branch::False),
+            _ => edit::Place::After(source),
+        };
+        let (graph, _) =
+            edit::place(&added.graph, self.project, &id, at).map_err(|error| error.to_string())?;
+        Ok(Edit {
+            graph,
+            selection: Some(vec![id]),
+        })
+    }
+
     /// *Move out of the branch* (DIAG-06d): the check, value, variable or
     /// export `id` is written after the `if` whose braces hold it.
     pub fn move_out_of_branch(&self, id: &str) -> Result<(Graph, Vec<String>), String> {

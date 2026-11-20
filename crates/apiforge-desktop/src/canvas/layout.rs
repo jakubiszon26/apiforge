@@ -306,6 +306,14 @@ pub struct Card {
     pub outputs: Vec<OutputRow>,
     /// Control outputs: pseudo-port and label.
     pub controls: Vec<(&'static str, &'static str)>,
+    /// The socket of the card's *Next* on its right edge at the title line
+    /// (LAY-45): a step's, and an `if`'s own on a board that moves
+    /// statements across braces (DIAG-06c). A check, value, variable or
+    /// export on such a board has none.
+    pub chain_out: bool,
+    /// Whether the control buttons under the card are drawn and take a
+    /// click: not a check's *Next* on a board that moves statements.
+    pub buttons: bool,
     pub origin: Pos2,
     /// The compact box of a request at the compact density (LAY-16).
     pub compact: Option<Compact>,
@@ -538,6 +546,8 @@ impl Card {
             inputs,
             outputs,
             controls,
+            chain_out: node.kind != NodeKind::If,
+            buttons: true,
             origin: pos2(node.position.x as f32, node.position.y as f32),
             compact: None,
             overview: None,
@@ -683,8 +693,10 @@ impl Card {
     /// Anchor of a data output or a control pseudo-port; `None` for an output
     /// a compact card does not show.
     pub fn output_anchor(&self, name: &str) -> Option<Pos2> {
-        if name == ORDER_PORT && self.controls.iter().any(|(port, _)| *port == ORDER_PORT) {
-            return Some(self.origin + vec2(WIDTH, self.title_line()));
+        if name == ORDER_PORT {
+            return self
+                .chain_out
+                .then(|| self.origin + vec2(WIDTH, self.title_line()));
         }
         if let Some(compact) = &self.compact {
             if let Some(index) = self.controls.iter().position(|(port, _)| *port == name) {
@@ -700,6 +712,21 @@ impl Card {
         }
         let index = self.outputs.iter().position(|row| row.name == name)?;
         Some(self.origin + vec2(WIDTH, self.output_y(index)))
+    }
+
+    /// The ports of the order the card has a socket out of: *Yes* and *No*
+    /// of an `if`, and *Next* where it has one.
+    pub fn order_outputs(&self) -> Vec<&'static str> {
+        let mut ports: Vec<&'static str> = self
+            .controls
+            .iter()
+            .map(|(port, _)| *port)
+            .filter(|port| *port != ORDER_PORT || self.chain_out)
+            .collect();
+        if self.chain_out && !ports.contains(&ORDER_PORT) {
+            ports.push(ORDER_PORT);
+        }
+        ports
     }
 
     /// The height of the card's title line from its origin, where the
