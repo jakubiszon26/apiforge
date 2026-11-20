@@ -87,11 +87,14 @@ unless said, on `labels`, `shop-30` and `rooms/booking-day`, after Tidy up.
    right socket to the left one around the cards, at 20 px.
    Test: `lay45_criterion_7_*`.
 8. Crossings: on every reference board, in both modes and both check
-   states, no more than before this ticket; `shop-30` with every wire is
-   measured against 76 (checks folded) and 116 (drawn), LAY-28's limits
-   before LANG-13, and the result is written on #468 whatever it is.
-   Test: the `lay28` and `lay06` criterion 11 suites with their figures
-   recorded again; the table is in the pull request.
+   states, no more than before this ticket; and `shop-30` with every wire
+   has at most 76 crossings with its checks folded and 116 with them
+   drawn — LAY-28's limits, which LANG-13 passed with the owner's leave
+   (question 1 on #386, answer A, 2026-11-20) on condition that this
+   ticket brings them back. If the side-to-side lines alone do not reach
+   them, the ticket stops and reports the figures on #468; it does not
+   change the limit. Test: the `lay28` and `lay06` criterion 11 suites
+   with those two limits restored; the table is in the pull request.
 9. The cleanup and a component's body draw their chains the same way.
    Test: `lay45_criterion_9_*`.
 10. At 960 × 540 and 1600 × 1000 a board fits as before: the fit zoom of
