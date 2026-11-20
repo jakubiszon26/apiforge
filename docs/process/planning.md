@@ -81,6 +81,19 @@ An analysis that stops at a decision the owner has not yet taken leaves the
 draft open with the `decision-needed` label on the issue; the branch waits,
 nothing else is started on it.
 
+## A rule several tickets share has one owner
+
+When several tickets depend on one rule — what a conversion may write
+and under which reading, where a step may be placed, what a deletion
+takes with it — the rule is written in **one** ticket, which the others
+name and call; no second ticket restates it in its own words. That
+ticket is analysed and reviewed first, by the model that writes it and
+by a second one ([autonomy](autonomy.md#what-makes-a-ticket-ready)),
+before the tickets around it are written. Introduced on 2026-11-20: the
+LANG tickets for updating a project each described the same plan and
+commit, differently; three rounds of review found the defects on the
+seams between them, not inside any one.
+
 ## Mock-ups
 
 An analysis that changes the interface includes a mock-up before approval. A
