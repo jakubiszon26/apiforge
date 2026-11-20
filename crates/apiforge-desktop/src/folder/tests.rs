@@ -2273,7 +2273,7 @@ fn folder_close_cancels_the_run_and_retains_its_project_lock_until_cleanup_finis
             Origin::SESSION,
         )
         .unwrap();
-    let id = session.create_document(DocumentKind::Scenario, "main.afs", "scenario \"Main\" {\n  response = GET \"/slow\"\n  cleanup {\n    cleanup_value = 1\n  }\n}\n").unwrap();
+    let id = session.create_document(DocumentKind::Scenario, "main.afs", "scenario \"Main\" {\n  begin = start\n  response = GET \"/slow\"\n  cleanup {\n    cleanup_value = 1\n  }\n}\n").unwrap();
     drop(session);
     let (context, mut app) = open(directory.path());
     app.request_run(&id, true);
@@ -2669,13 +2669,8 @@ fn read_only_environment_accepts_session_values_without_writing_public_settings(
 fn large_scenario(steps: usize, rows: usize) -> String {
     let mut text = "scenario \"Large\" {\n  begin = start\n".to_owned();
     for index in 0..steps {
-        let after = if index == 0 {
-            "begin".to_owned()
-        } else {
-            format!("ok_{}", index - 1)
-        };
         text.push_str(&format!(
-            "  @after({after})\n  item_{index} = POST \"/items/{index}\" {{\n    body {{\n      \
+            "  item_{index} = POST \"/items/{index}\" {{\n    body {{\n      \
              name: \"item {index}\",\n      price: 12.5\n    }}\n    sample 200 {{\n      rows: [\n"
         ));
         for row in 0..rows {

@@ -392,7 +392,6 @@ fn the_examples_cover_every_predicate_method_and_statement_form() {
         "input attribute label",
         "action",
         "start",
-        "attribute after",
         "attribute label",
         "comment",
         "var",
@@ -452,6 +451,20 @@ fn the_examples_cover_every_predicate_method_and_statement_form() {
         .filter(|word| !coverage.words.contains(*word))
         .collect();
     assert!(missing.is_empty(), "no example shows: {missing:?}");
+}
+
+/// LANG-13 (#386), criterion 12: the reference describes language 2;
+/// `@after` is named only where its diagnostic is explained.
+#[test]
+fn lang13_after_appears_only_in_the_diagnostics() {
+    let (before, diagnostics) = REFERENCE
+        .split_once("\n## Diagnostics and what to do")
+        .expect("a diagnostics section");
+    assert!(
+        !before.contains("@after"),
+        "only the diagnostics name @after"
+    );
+    assert!(diagnostics.contains("`@after` is not part of the language"));
 }
 
 #[test]

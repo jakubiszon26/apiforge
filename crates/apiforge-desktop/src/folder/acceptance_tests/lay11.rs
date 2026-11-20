@@ -351,8 +351,9 @@ fn lay11_criterion_6_a_shared_check_is_counted_twice() {
 }
 
 /// Criterion 7: the gate `valid_cart`, whose value `checkout` and `order`
-/// read, stays with its wires; an `@after` on a folded check is drawn from
-/// its subject with the check's name.
+/// read, stays with its wires; the ordering wire into a step comes from the
+/// step before it (before LANG-13, an `@after` on a folded check was drawn
+/// from its subject with the check's name).
 #[test]
 fn lay11_criterion_7_gates_and_after_wires_stay() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
@@ -377,20 +378,24 @@ fn lay11_criterion_7_gates_and_after_wires_stay() {
         );
     }
 
-    for (check, subject, step) in [
-        ("cart_total", "cart", "address"),
+    // Since LANG-13 a step follows the step written before it, never a
+    // folded check: the ordering wire into `address` and into `logout` comes
+    // from that step and names no check.
+    for (check, before, step) in [
+        ("cart_total", "cart_view", "address"),
         ("refund_amount", "refund", "logout"),
     ] {
         assert!(hidden(&harness, check), "{check} is folded");
-        let (subject_id, step_id) = (id_of(&harness, subject), id_of(&harness, step));
+        let (before_id, step_id) = (id_of(&harness, before), id_of(&harness, step));
         let wire = wires
             .iter()
-            .find(|wire| wire.target == step_id && wire.label.is_some())
-            .unwrap_or_else(|| panic!("the @after of {step} is drawn: {wires:#?}"));
-        assert_eq!(wire.source.as_ref(), Some(&subject_id), "from {subject}");
+            .find(|wire| wire.target == step_id && wire.source.as_ref() == Some(&before_id))
+            .unwrap_or_else(|| panic!("the ordering wire into {step} is drawn: {wires:#?}"));
         assert!(
-            wire.label.as_ref().unwrap().contains(check),
-            "named {check}: {:?}",
+            wire.label
+                .as_ref()
+                .is_none_or(|label| !label.contains(check)),
+            "it names no check: {:?}",
             wire.label
         );
     }

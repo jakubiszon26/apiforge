@@ -1,7 +1,8 @@
-//! #430: `@after(<if>)` (LANG-14, #390) in a folder window. The example of
-//! the language reference, § Branches, opened as the demo shop's scenario,
-//! is valid, prints back with `@after(created)` outside the braces, and its
-//! simulation runs `logout` after the last step of the branch taken.
+//! #430: the step after an `if` (LANG-14, #390) in a folder window. The
+//! example of the language reference, § Branches, opened as the demo shop's
+//! scenario, is valid, prints back with `logout` written after the `if`
+//! (since LANG-13, #386, without `@after`), and its simulation runs `logout`
+//! after the last step of the branch taken.
 use super::*;
 use crate::testing::{MINIMUM, folder_harness_in};
 use apiforge_core::run::{Phase, StepStatus};
@@ -10,6 +11,7 @@ const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 /// The example of `docs/language/reference.md` § Branches.
 const SOURCE: &str = r#"scenario "Branches" {
   param quantity = 2
+  begin = start
   cart = POST "/carts" {
     body { productId: 123, quantity: param.quantity }
     sample 201 { id: "c-1", total: 160 }
@@ -18,14 +20,12 @@ const SOURCE: &str = r#"scenario "Branches" {
     receipt = GET "/carts/{{cart.body.id}}" {
       sample 200 { id: "c-1" }
     }
-    @after(receipt)
     items = GET "/carts/{{cart.body.id}}/items" {
       sample 200 { items: [] }
     }
   } else {
     failed = assert cart.status == 201
   }
-  @after(created)
   logout = POST "/logout" {
     sample 204 {}
   }
@@ -54,12 +54,9 @@ fn issue430_the_reference_example_is_valid_and_simulates_in_a_folder_window() {
     let model = document.model().expect("a valid model").clone();
     let written = apiforge_script::print_folder_document(session.context(), &model)
         .expect("the example prints");
-    let line = |text: &str| written.lines().position(|line| line.trim() == text);
-    let after = line("@after(created)").unwrap_or_else(|| panic!("{written}"));
-    assert!(line("} else {") < Some(after), "{written}");
-    assert_eq!(
-        written.lines().nth(after + 1).map(str::trim),
-        Some("logout = POST \"/logout\" {"),
+    assert!(!written.contains("@after"), "{written}");
+    assert!(
+        written.contains("    failed = assert cart.status == 201\n  }\n  logout = POST"),
         "{written}"
     );
 

@@ -55,8 +55,33 @@ fn an_error_that_replaces_a_warning_at_the_limit_counts_the_warning() {
 // LANG-14 (#390) --------------------------------------------------------------
 
 /// A scenario in canonical form: a chain inside the `then` braces, a branch
-/// without a step, and a step after the whole `if`.
+/// without a step, and a step after the whole `if`. In the written language
+/// since LANG-13 (#386): the order of the lines is the chain.
 const WHOLE_IF: &str = r#"scenario "Whole if" {
+  on_error stop
+  begin = start
+  cart = POST "/carts" {
+    sample 201 { total: 1 }
+  }
+  paid = if cart.body.total > 0 {
+    payment = POST "/payments" {
+      sample 201 { id: "p-1" }
+    }
+    receipt = GET "/receipts" {
+      sample 200 {}
+    }
+  } else {
+    unpaid = assert cart.status == 201
+  }
+  logout = POST "/logout" {
+    sample 204 {}
+  }
+}
+"#;
+
+/// `WHOLE_IF` as 0.1.0 wrote it, every ordering an `@after`: the stored
+/// spelling of a published revision since LANG-13.
+const WHOLE_IF_STORED: &str = r#"scenario "Whole if" {
   on_error stop
   begin = start
   @after(begin)
@@ -83,7 +108,8 @@ const WHOLE_IF: &str = r#"scenario "Whole if" {
 "#;
 
 /// The window's form before LANG-14 of the same ordering: the second step of
-/// the braces outside them, after the branch and the first step.
+/// the braces outside them, after the branch and the first step. Since
+/// LANG-13 only a published revision is read in this spelling.
 const SECOND_OUTSIDE: &str = r#"scenario "Whole if" {
   on_error stop
   begin = start
@@ -114,16 +140,13 @@ const SECOND_OUTSIDE: &str = r#"scenario "Whole if" {
 const NESTED: &str = r#"scenario "Nested" {
   on_error stop
   begin = start
-  @after(begin)
   cart = POST "/carts" {
     sample 201 { total: 1 }
   }
-  @after(cart)
   paid = if cart.body.total > 0 {
     payment = POST "/payments" {
       sample 201 { id: "p-1" }
     }
-    @after(payment)
     mailed = if payment.status == 201 {
       mail = POST "/mail" {
         sample 202 {}
@@ -134,7 +157,6 @@ const NESTED: &str = r#"scenario "Nested" {
       sample 200 {}
     }
   }
-  @after(paid)
   logout = POST "/logout" {
     sample 204 {}
   }
@@ -143,8 +165,21 @@ const NESTED: &str = r#"scenario "Nested" {
 
 /// The scenario lowered in the demo shop project, without a diagnostic.
 fn lowered_scenario(source: &str) -> (Project, Scenario) {
+    lowered_in(source, |project| LowerContext::folder(project))
+}
+
+/// The same in the stored spelling of 0.1.0, where `@after` is read: how a
+/// published revision is read since LANG-13.
+fn lowered_stored(source: &str) -> (Project, Scenario) {
+    lowered_in(source, |project| LowerContext::folder(project).stored())
+}
+
+fn lowered_in(
+    source: &str,
+    context: impl for<'p> Fn(&'p Project) -> LowerContext<'p>,
+) -> (Project, Scenario) {
     let project = apiforge_core::demos::shop_project();
-    let lowered = lower(&parse(source), &LowerContext::folder(&project));
+    let lowered = lower(&parse(source), &context(&project));
     assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
     let Some(Document::Scenario(scenario)) = lowered.document else {
         panic!("not a scenario");
@@ -212,7 +247,7 @@ fn lang14_criterion_1_after_an_if_follows_the_end_of_each_branch() {
 
     // Neither branch holds a step: the `if` is followed through both branches.
     let (_, scenario) = lowered_scenario(
-        "scenario \"Empty\" {\n  x = if true {\n    inside = 1\n  }\n  @after(x)\n  y = 2\n}\n",
+        "scenario \"Empty\" {\n  begin = start\n  x = if true {\n    inside = 1\n  }\n  y = GET \"/y\"\n}\n",
     );
     assert_eq!(follows(&scenario, "y"), sources(&["x.then", "x.else"]));
 }
@@ -230,7 +265,7 @@ fn lang14_criterion_3_a_chain_in_braces_stays_inside_them() {
 
     // The same ordering written outside the braces is printed inside them.
     let (_, inside) = lowered_scenario(WHOLE_IF);
-    let (project, outside) = lowered_scenario(SECOND_OUTSIDE);
+    let (project, outside) = lowered_stored(SECOND_OUTSIDE);
     assert_eq!(follows(&outside, "receipt"), follows(&inside, "receipt"));
     assert_eq!(printed(&project, &outside), WHOLE_IF);
 }
@@ -239,16 +274,16 @@ fn lang14_criterion_3_a_chain_in_braces_stays_inside_them() {
 /// LANG-11 described orders the same as `@after(x)`, which the window prints.
 #[test]
 fn lang14_criterion_4_branches_keep_their_meaning() {
-    let with_after = |after: &str| WHOLE_IF.replace("@after(paid)", after);
-    let (_, scenario) = lowered_scenario(&with_after("@after(paid.else)"));
+    let with_after = |after: &str| WHOLE_IF_STORED.replace("@after(paid)", after);
+    let (_, scenario) = lowered_stored(&with_after("@after(paid.else)"));
     assert_eq!(follows(&scenario, "logout"), sources(&["paid.else"]));
-    let (_, scenario) = lowered_scenario(&with_after("@after(cart, paid.then)"));
+    let (_, scenario) = lowered_stored(&with_after("@after(cart, paid.then)"));
     assert_eq!(
         follows(&scenario, "logout"),
         sources(&["cart", "paid.then"])
     );
 
-    let (project, scenario) = lowered_scenario(&with_after("@after(receipt, paid.else)"));
+    let (project, scenario) = lowered_stored(&with_after("@after(receipt, paid.else)"));
     assert_eq!(
         follows(&scenario, "logout"),
         sources(&["receipt", "paid.else"])
@@ -274,7 +309,7 @@ fn lang14_after_an_if_in_or_after_a_cycle_reports_the_cycle() {
     );
     let project = apiforge_core::demos::shop_project();
     for source in [through_the_if, after_a_cycle] {
-        let lowered = lower(&parse(&source), &LowerContext::folder(&project));
+        let lowered = lower(&parse(&source), &LowerContext::folder(&project).stored());
         let messages: Vec<_> = lowered
             .diagnostics
             .iter()
@@ -307,7 +342,7 @@ fn lang14_after_the_if_from_inside_its_braces_is_an_error() {
             "x",
         ),
     ] {
-        let lowered = lower(&parse(source), &LowerContext::folder(&project));
+        let lowered = lower(&parse(source), &LowerContext::folder(&project).stored());
         let errors: Vec<_> = lowered
             .diagnostics
             .iter()

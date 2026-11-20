@@ -14,11 +14,11 @@ const OUTPUT: &str = "Actual value output";
 
 /// A Cleanup whose second check reads the first, so the first must not
 /// offer it.
-const DEPENDANT: &str = "scenario \"#284\" {\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert gone.status == 200\n    @label(\"Deletion confirmed\")\n    confirmed = assert deleted.passed == true\n  }\n}\n";
+const DEPENDANT: &str = "scenario \"#284\" {\n  begin = start\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert gone.status == 200\n    @label(\"Deletion confirmed\")\n    confirmed = assert deleted.passed == true\n  }\n}\n";
 
 /// The demo's Cleanup reads a Main step from its check instead of the
 /// Cleanup request, so choosing the request is a change.
-const MAIN_SOURCE: &str = "scenario \"#284\" {\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert response.status == 200\n  }\n}\n";
+const MAIN_SOURCE: &str = "scenario \"#284\" {\n  begin = start\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert response.status == 200\n  }\n}\n";
 
 /// The demo shop, its scenario replaced by `text` when one is given, open in
 /// Diagram on the Cleanup board when `cleanup`.

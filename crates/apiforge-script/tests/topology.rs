@@ -2,13 +2,14 @@
 //! semantic round trips, print idempotence and identity-preserving reconciliation.
 use apiforge_core::{ImportLimits, format::*, import_document, validate_workspace};
 use apiforge_script::{
-    Document, LowerContext, Lowered, lower, parse, print_scenario, reconcile, semantic,
+    Document, LowerContext, Lowered, lower, parse, print_folder_document, print_scenario,
+    reconcile, semantic,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
 #[path = "support/generator.rs"]
 mod generator;
-use generator::generate;
+use generator::{generate, generate_chain};
 
 fn project() -> Project {
     import_document(
@@ -175,5 +176,48 @@ fn generated_topologies_round_trip_and_reconcile_without_losing_identity() {
     // Guard against a generator that silently degenerates.
     assert!(nodes > 4000, "{nodes}");
     assert!(edges > 800, "{edges}");
+    assert!(branches > 150, "{branches}");
+}
+
+/// LANG-13 (#386), criterion 7: generated chains with `if`s, read in the
+/// written language, print without `@after` and read back as themselves;
+/// printing again changes nothing.
+#[test]
+fn lang13_generated_chains_round_trip_in_the_written_language() {
+    let project = project();
+    let mut branches = 0;
+    for seed in 0..400 {
+        let source = generate_chain(seed);
+        let lowered = lower(&parse(&source), &LowerContext::folder(&project));
+        assert!(
+            !lowered.has_errors(),
+            "seed={seed}: {:#?}\n{source}",
+            lowered.diagnostics
+        );
+        let original = stored(&lowered, &project);
+        branches += original
+            .graph
+            .edges
+            .iter()
+            .filter(|e| e.branch.is_some())
+            .count();
+        let current = Document::Scenario(original.clone());
+        let text = print_folder_document(&project, &current)
+            .unwrap_or_else(|e| panic!("seed={seed}: {e:#?}\n{source}"));
+        assert!(!text.contains("@after"), "seed={seed}\n{text}");
+        let reprinted = lower(&parse(&text), &LowerContext::folder(&project));
+        assert!(!reprinted.has_errors(), "seed={seed}\n{text}");
+        let reprinted = reprinted.document.unwrap();
+        assert_eq!(
+            semantic(&reprinted, &project),
+            semantic(&current, &project),
+            "seed={seed}\n{source}\n---\n{text}"
+        );
+        assert_eq!(
+            print_folder_document(&project, &reprinted).unwrap(),
+            text,
+            "seed={seed}"
+        );
+    }
     assert!(branches > 150, "{branches}");
 }

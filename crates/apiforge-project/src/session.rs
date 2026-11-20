@@ -831,6 +831,7 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
+        let model = kept_chain(&previous, model);
         if *previous == model {
             return Ok(());
         }
@@ -1243,6 +1244,11 @@ impl ProjectSession {
             kind: entry.kind,
             entity_id: entry.entity_id.clone(),
             revision: working_revision(&self.manifest, entry),
+            stored: false,
+            older: crate::language::support(
+                self.manifest.language(),
+                crate::language::LANGUAGE_VERSION,
+            ) == crate::language::Support::Older,
         }
     }
 
@@ -1417,4 +1423,24 @@ pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChang
         expected: FileState::of(&bytes),
         bytes: next,
     }])
+}
+
+/// A board edit keeps the chain of the written language (LANG-13): each
+/// graph of the edited model is rebuilt by [`apiforge_core::chain::edited`],
+/// and the first step placed in a scenario's main flow without a *Start*
+/// gets one written above it, as rule 1 and the fix of a file require. A
+/// component needs no *Start*.
+fn kept_chain(previous: &Document, mut model: Document) -> Document {
+    use apiforge_core::chain::{edited, with_start};
+    match (previous, &mut model) {
+        (Document::Scenario(before), Document::Scenario(after)) => {
+            after.cleanup = edited(&before.cleanup, &after.cleanup);
+            after.graph = with_start(&edited(&before.graph, &after.graph), &[&after.cleanup]);
+        }
+        (Document::Component(before), Document::Component(after)) => {
+            after.graph = edited(&before.graph, &after.graph);
+        }
+        _ => {}
+    }
+    model
 }

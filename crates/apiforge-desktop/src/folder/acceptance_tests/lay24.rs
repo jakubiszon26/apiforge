@@ -2,7 +2,8 @@
 //! next step. In *Chips for shared values* (the default) an ordering wire
 //! that enters the next step of the spine, from the step in the column
 //! before or a check of it, is not drawn: a short dashed arrow points into
-//! the step's badge, its tooltip says `after quantity_ok`. The rail comes
+//! the step's badge, its tooltip says `after quantity` (since LANG-13 a
+//! step follows the step written before it, never a check). The rail comes
 //! back while the arrow is pointed at and while a card at either end is
 //! selected. *All wires* and the workspace window draw every rail and no
 //! arrow. Rendering only: nothing is written, nothing moves. On `fan-out`
@@ -22,10 +23,13 @@ const ALL_WIRES: &str = "All wires";
 const CHIPS: &str = "Chips for shared values";
 /// The board file `quality` reads (LAY-06 criterion 10).
 const BOARDS: &str = "../apiforge-layout/examples/support/boards.txt";
-/// The steps of `fan-out` whose `@after` names the step before or a check
-/// of it.
-const FAN_OUT_MARKED: [&str; 10] = [
+/// The steps of `fan-out` that follow the step before them: every step but
+/// `begin` since LANG-13 (before it, the ten whose `@after` named the step
+/// before or a check of it).
+const FAN_OUT_MARKED: [&str; 12] = [
     "catalogue",
+    "product",
+    "cart",
     "quantity",
     "apply_coupon",
     "note",
@@ -35,6 +39,23 @@ const FAN_OUT_MARKED: [&str; 10] = [
     "view",
     "checkout",
     "lookup",
+];
+/// The steps of `shop-30` whose ordering wire is an arrow (LANG-13): every
+/// step but `begin` and the two that stand first in `paid`'s braces.
+const SHOP_30_MARKED: [&str; 13] = [
+    "address",
+    "cart",
+    "cart_view",
+    "catalogue",
+    "checkout",
+    "login",
+    "logout",
+    "order",
+    "paid",
+    "product",
+    "promoted",
+    "receipt",
+    "refund",
 ];
 /// The zooms criterion 5 renders.
 const ZOOMS: [f32; 4] = [0.25, 0.44, 0.6, 1.0];
@@ -265,9 +286,8 @@ fn empty(harness: &FolderHarness, id: &str) -> Pos2 {
 }
 
 /// Criterion 1: on `fan-out` no dashed wire is drawn, checks collapsed and
-/// drawn as cards; each of the ten steps whose `@after` names the step
-/// before or a check of it has one arrow at its badge, and `begin`,
-/// `product` and `cart` have none.
+/// drawn as cards; each of the twelve steps that follow the step before
+/// them (all but `begin`, since LANG-13) has one arrow at its badge.
 #[test]
 fn lay24_criterion_1_fan_out_draws_arrows_not_rails() {
     for size in [WIDE, MINIMUM] {
@@ -314,40 +334,40 @@ fn lay24_criterion_1_fan_out_draws_arrows_not_rails() {
     }
 }
 
-/// Criterion 2: on `shop-30` the rail from `cart` to `address` (`after
-/// cart_total`, two columns) and every branch wire are drawn as *All
-/// wires* draws them; `login`, `checkout` and `logout` have an arrow and
-/// no rail.
+/// Criterion 2: on `shop-30`, written in the order its steps run (LANG-13),
+/// every step follows the step before it, never a check: each of those
+/// thirteen ordering wires is an arrow at its step's badge, and what stays
+/// drawn as *All wires* draws it are the wires of `paid`'s branches. (Before
+/// LANG-13 the rail from `cart` to `address`, `after cart_total`, was the
+/// one kept further away.)
 #[test]
 fn lay24_criterion_2_shop_30_keeps_the_rails_further_away() {
+    let arrowed: BTreeSet<String> = SHOP_30_MARKED.map(str::to_owned).into_iter().collect();
     for checks in [Checks::Collapsed, Checks::Expanded] {
+        // Every statement in `paid`'s braces shows the edge of its braces;
+        // drawn as cards, the checks there do too.
+        let inside: &[&str] = match checks {
+            Checks::Collapsed => &["logout", "not_created", "payment", "receipt", "refund"],
+            Checks::Expanded => &[
+                "logout",
+                "not_created",
+                "payment",
+                "receipt",
+                "receipt_total",
+                "refund",
+                "refund_amount",
+            ],
+        };
+        let branches: BTreeSet<(String, String)> = inside
+            .iter()
+            .map(|target| ("paid".to_owned(), (*target).to_owned()))
+            .collect();
         let (_project, mut harness, id) = tidied("shop-30", WIDE, checks);
         fit(&mut harness);
         let marked: BTreeSet<String> = arrows(&harness, &id).into_keys().collect();
-        assert_eq!(
-            marked,
-            ["checkout", "login", "logout"]
-                .map(str::to_owned)
-                .into_iter()
-                .collect(),
-            "{checks:?}: the arrows"
-        );
+        assert_eq!(marked, arrowed, "{checks:?}: the arrows");
         let chips = rails(&harness, &id);
-        for step in ["login", "checkout", "logout"] {
-            assert!(
-                chips.iter().all(|(_, target)| target != step),
-                "{checks:?}: no rail into {step}: {chips:?}"
-            );
-        }
-        let from = if checks == Checks::Collapsed {
-            "cart"
-        } else {
-            "cart_total"
-        };
-        assert!(
-            chips.contains(&(from.to_owned(), "address".to_owned())),
-            "{checks:?}: the rail into address stays: {chips:?}"
-        );
+        assert_eq!(chips, branches, "{checks:?}: the rails left");
         let labels: BTreeMap<String, Option<String>> = board(&harness, &id)
             .debug_wires()
             .iter()
@@ -362,10 +382,7 @@ fn lay24_criterion_2_shop_30_keeps_the_rails_further_away() {
             gone.iter()
                 .map(|(_, target)| target.clone())
                 .collect::<BTreeSet<_>>(),
-            ["checkout", "login", "logout"]
-                .map(str::to_owned)
-                .into_iter()
-                .collect(),
+            arrowed,
             "{checks:?}: only the rails into the next step are left out"
         );
         assert!(chips.is_subset(&every), "{checks:?}");
@@ -402,10 +419,10 @@ fn cameras(mode: &str) -> Vec<(egui::Vec2, f32)> {
     cameras
 }
 
-/// Criterion 3: selecting the step at either end of a marked `@after` draws
-/// its rail in the accent colour, dashed, and lights its arrow; the rail of
-/// a folded check carries its label `after <check>`, and no other wire or
-/// rail drawn in that frame passes through that label. Esc or a click on
+/// Criterion 3: selecting the step at either end of a marked ordering wire
+/// draws its rail in the accent colour, dashed, and lights its arrow; a rail
+/// from a step carries no label (before LANG-13 the rail of a folded check
+/// carried `after <check>`, clear of every other line). Esc or a click on
 /// the board returns to the arrows. No card moves, the camera is where
 /// *All wires* puts it, the wires drawn keep their routes, the document is
 /// not marked changed.
@@ -417,9 +434,9 @@ fn lay24_criterion_3_selecting_an_end_brings_the_rail_back() {
     let cards = positions(&harness, &id);
     let before = routes(&harness, &id);
     let dirty = folder(&harness).debug_dirty(&id);
-    let into_note = edge(&harness, &id, "coupon_ok", "note");
-    let into_stock = edge(&harness, &id, "note_ok", "stock");
-    let into_coupon = edge(&harness, &id, "quantity_ok", "apply_coupon");
+    let into_note = edge(&harness, &id, "apply_coupon", "note");
+    let into_stock = edge(&harness, &id, "note", "stock");
+    let into_coupon = edge(&harness, &id, "quantity", "apply_coupon");
     assert!(!arrow(&harness, &id, "note").lit, "at rest");
 
     let mut unchanged = |harness: &FolderHarness, context: &str| {
@@ -442,7 +459,7 @@ fn lay24_criterion_3_selecting_an_end_brings_the_rail_back() {
         );
     };
     // The labels of the rails brought back, clear of every other line.
-    let labelled = |harness: &FolderHarness, wire: &str, text: &str| {
+    let labelled = |harness: &FolderHarness, wire: &str, text: Option<&str>| {
         let canvas = board(harness, &id);
         let drawn = canvas
             .debug_wires()
@@ -453,8 +470,12 @@ fn lay24_criterion_3_selecting_an_end_brings_the_rail_back() {
             drawn.revealed && drawn.dashed,
             "{wire} dashed, brought back"
         );
-        assert_eq!(drawn.label.as_deref(), Some(text));
-        let label = drawn.label_box.expect("the label is drawn");
+        // A rail from a step carries no label (LANG-13: only the rail of a
+        // folded check did, and no step follows a check any more).
+        assert_eq!(drawn.label.as_deref(), text);
+        let Some(label) = drawn.label_box else {
+            return;
+        };
         let label = Rect::from_min_max(on_screen(canvas, label.min), on_screen(canvas, label.max));
         for other in canvas.debug_wires().iter().filter(|other| other.id != wire) {
             let line: Vec<Pos2> = other
@@ -464,7 +485,7 @@ fn lay24_criterion_3_selecting_an_end_brings_the_rail_back() {
                 .collect();
             assert!(
                 !passes_through(&line, label.shrink(0.5)),
-                "{} passes through the label {text} {label:?}",
+                "{} passes through the label {text:?} {label:?}",
                 other.id
             );
         }
@@ -483,8 +504,8 @@ fn lay24_criterion_3_selecting_an_end_brings_the_rail_back() {
         assert_eq!(lit.color, crate::theme::ACCENT);
     }
     assert!(!arrow(&harness, &id, "apply_coupon").lit);
-    labelled(&harness, &into_note, "after coupon_ok");
-    labelled(&harness, &into_stock, "after note_ok");
+    labelled(&harness, &into_note, None);
+    labelled(&harness, &into_stock, None);
     unchanged(&harness, "note selected");
 
     // The step at the other end.
@@ -496,7 +517,7 @@ fn lay24_criterion_3_selecting_an_end_brings_the_rail_back() {
     );
     assert!(!shown.contains(&into_stock));
     assert!(arrow(&harness, &id, "note").lit);
-    labelled(&harness, &into_coupon, "after quantity_ok");
+    labelled(&harness, &into_coupon, None);
     unchanged(&harness, "apply_coupon selected");
 
     harness.key_press(egui::Key::Escape);
@@ -542,7 +563,7 @@ fn lay24_criterion_4_pointing_at_an_arrow_draws_its_rail() {
     show(&mut harness, &id, "apply_coupon", 1.0);
     let selection = folder(&harness).selections.get(&id).cloned();
     let before = routes(&harness, &id);
-    let into_coupon = edge(&harness, &id, "quantity_ok", "apply_coupon");
+    let into_coupon = edge(&harness, &id, "quantity", "apply_coupon");
     let hit = arrow(&harness, &id, "apply_coupon").hit;
     assert!(revealed(&harness, &id).is_empty(), "nothing is pointed at");
     harness.hover_at(hit.center());
@@ -674,7 +695,7 @@ fn lay24_criterion_5_the_arrow_keeps_clear_at_every_zoom() {
             let focus = board(&harness, &id).debug_focus();
             let drawn = arrows(&harness, &id);
             if name == "fan-out" {
-                assert_eq!(drawn.len(), 10, "{size:?}: all ten arrows at Fit");
+                assert_eq!(drawn.len(), 12, "{size:?}: all twelve arrows at Fit");
             }
             for (handle, arrow) in drawn {
                 assert!(
@@ -704,64 +725,37 @@ fn tooltip(harness: &mut FolderHarness, id: &str, step: &str, text: &str) -> boo
     )
 }
 
-/// Criterion 6: pointing at an arrow shows `after quantity_ok`: the word
-/// `after` and the names the step's `@after` writes for that rail, in the
-/// code's order, comma-separated when it waits for two of the step before.
-/// The arrow's accessible name is `<step> after <names>`.
+/// Criterion 6: pointing at an arrow shows `after quantity`: the word
+/// `after` and the step the step follows, the one written before it (since
+/// LANG-13 an arrow never names a check, and a step follows one step). The
+/// arrow's accessible name is `<step> after <step>`.
 #[test]
 fn lay24_criterion_6_the_arrow_names_what_the_step_waits_for() {
     let (_project, mut harness, id) = tidied("fan-out", WIDE, Checks::Collapsed);
     show(&mut harness, &id, "apply_coupon", 1.0);
-    assert_eq!(
-        arrow(&harness, &id, "apply_coupon").text,
-        "after quantity_ok"
-    );
-    harness.get_by_label("apply_coupon after quantity_ok");
-    assert!(tooltip(
-        &mut harness,
-        &id,
-        "apply_coupon",
-        "after quantity_ok"
-    ));
-    // An `@after` that names the step itself.
+    assert_eq!(arrow(&harness, &id, "apply_coupon").text, "after quantity");
+    harness.get_by_label("apply_coupon after quantity");
+    assert!(tooltip(&mut harness, &id, "apply_coupon", "after quantity"));
     show(&mut harness, &id, "quantity", 1.0);
     assert_eq!(arrow(&harness, &id, "quantity").text, "after cart");
     harness.get_by_label("quantity after cart");
-
-    // Two checks of the step before, written in the other order than
-    // their checks.
-    let text = fixture("fan-out").replace(
-        "  quantity_ok = assert quantity.status == 200\n  @after(quantity_ok)\n",
-        "  quantity_ok = assert quantity.status == 200\n  \
-         quantity_set = assert quantity.body.quantity == 3\n  \
-         @after(quantity_set, quantity_ok)\n",
+    assert_eq!(
+        arrow(&harness, &id, "quantity").wires.len(),
+        1,
+        "a step follows one step"
     );
-    assert!(text.contains("@after(quantity_set, quantity_ok)"));
-    for checks in [Checks::Collapsed, Checks::Expanded] {
-        let (_project, mut harness, id) = tidied_text(&text, WIDE, checks);
-        show(&mut harness, &id, "apply_coupon", 1.0);
-        let marked = arrow(&harness, &id, "apply_coupon");
-        assert_eq!(marked.text, "after quantity_set, quantity_ok", "{checks:?}");
-        assert_eq!(marked.wires.len(), 2, "{checks:?}: one arrow for both");
-        harness.get_by_label("apply_coupon after quantity_set, quantity_ok");
-        assert!(tooltip(
-            &mut harness,
-            &id,
-            "apply_coupon",
-            "after quantity_set, quantity_ok"
-        ));
-    }
 }
 
-/// Criterion 7: the rail brought back can be selected and deleted as any
-/// ordering wire: the `@after` leaves the code and the arrow leaves the
-/// card. An ordering wire dragged from a step into the next one is an
-/// arrow once dropped, and its `@after` is in the code.
+/// Criterion 7: the rail brought back can be selected as any ordering wire.
+/// Since LANG-13 the order is the order the steps are written: deleting the
+/// rail changes neither the code nor the arrow, and an ordering wire dragged
+/// from a step into a step that is not the next one changes nothing either,
+/// until DIAG-06 (#391) gives these gestures their meaning.
 #[test]
 fn lay24_criterion_7_the_rail_brought_back_is_an_ordering_wire() {
     let (_project, mut harness, id) = tidied("fan-out", WIDE, Checks::Collapsed);
     show(&mut harness, &id, "note", 0.6);
-    let into_note = edge(&harness, &id, "coupon_ok", "note");
+    let into_note = edge(&harness, &id, "apply_coupon", "note");
     select(&mut harness, &id, &["note"]);
     let canvas = board(&harness, &id);
     let cards: Vec<Rect> = canvas.debug_cards().iter().map(|(_, rect)| *rect).collect();
@@ -816,19 +810,16 @@ fn lay24_criterion_7_the_rail_brought_back_is_an_ordering_wire() {
         revealed(&harness, &id).contains(&into_note),
         "it stays drawn"
     );
+    let written = source_of(&harness, &id);
     harness.key_press(egui::Key::Delete);
     settle(&mut harness);
     harness.step();
-    let code = source_of(&harness, &id);
-    assert!(!code.contains("@after(coupon_ok)"), "{code}");
-    assert!(
-        !arrows(&harness, &id).contains_key("note"),
-        "the arrow leaves the card"
-    );
+    assert_eq!(source_of(&harness, &id), written, "the code is unchanged");
+    assert_eq!(arrow(&harness, &id, "note").text, "after apply_coupon");
 
-    // An ordering wire from apply_coupon dropped on note.
+    // An ordering wire from quantity dropped on note.
     let from = harness
-        .get_by_label("Output __order of apply_coupon")
+        .get_by_label("Output __order of quantity")
         .rect()
         .center();
     let note = id_of(&harness, &id, "note");
@@ -840,8 +831,7 @@ fn lay24_criterion_7_the_rail_brought_back_is_an_ordering_wire() {
     super::lay16::release(&mut harness, to);
     settle(&mut harness);
     harness.step();
-    let code = source_of(&harness, &id);
-    assert!(code.contains("@after(apply_coupon)\n  note = "), "{code}");
+    assert_eq!(source_of(&harness, &id), written, "the code is unchanged");
     assert_eq!(arrow(&harness, &id, "note").text, "after apply_coupon");
     assert!(
         rails(&harness, &id)
@@ -876,7 +866,7 @@ fn lay24_criterion_8_all_wires_draws_every_rail() {
         assert_eq!(positions(&harness, &id), cards, "{checks:?}: no card moves");
         assert_eq!(board(&harness, &id).debug_camera(), camera, "{checks:?}");
         switch_wires(&mut harness, CHIPS);
-        assert_eq!(arrows(&harness, &id).len(), 10, "{checks:?}");
+        assert_eq!(arrows(&harness, &id).len(), 12, "{checks:?}");
         assert_eq!(positions(&harness, &id), cards, "{checks:?}: no card moves");
         assert_eq!(board(&harness, &id).debug_camera(), camera, "{checks:?}");
     }
