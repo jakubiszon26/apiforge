@@ -61,20 +61,30 @@ Not applicable: no interface change.
 
 Tests in `crates/apiforge-script/tests/lang06.rs` unless said.
 
-1. **No comment is lost, wherever it stands**: the comments of the
-   formatted text are those of the source, in the same order.
-   - On a line of its own between statements, at the top or the end of a
-     block, in a branch, in the cleanup, between the lines of the head
-     (`description`, `param`, `input`), between the lines of a request's
-     block, before the file's first line and after its last brace: kept at
-     that place, on its own line.
-   - Inside an expression or an object that Format writes on one line (a
-     body, headers, a condition), or beside one of its fields: moved to its
-     own line directly above the line that holds it, in the order met.
+1. **No comment is lost, wherever it stands**: every comment of the
+   source is in the formatted text, once.
+   - A **note** — the comments directly above a statement and the one
+     beside it — stays that statement's note, written above it as today.
+   - A **free comment** on a line of its own — between statements, at the
+     top or the end of a block, in a branch, in the cleanup, between the
+     lines of the head, between the lines of a request's block, before the
+     file's first line and after its last brace — is kept at that place.
+   - A comment **inside** something Format writes on one line (an object,
+     a list, a condition's checks) or beside one of its fields is written
+     on its own line directly above the line that holds it: inside a
+     request's block, above that line of the block (`body { … }`), where
+     no statement begins, so it is no note; for a statement that is that
+     one line itself, above the statement with a blank line between, so
+     that it stays free.
+   - Free comments keep their order among themselves. A note beside a
+     statement still moves above it, so the order of all comments is not
+     promised.
    Measured on `main`: all eight such comments of a test file are deleted
-   today. Tests: `lang06_criterion_1_*`, one per place, and
-   `lang06_criterion_1_every_comment_survives` counting comment tokens
-   before and after over generated sources.
+   today. Tests: `lang06_criterion_1_*`, one per place and three mixed
+   ones (a note beside a request that holds comments inside; a comment
+   inside a value's object; a free comment directly above a note), and
+   `lang06_criterion_1_every_comment_survives` comparing the multiset of
+   comments before and after over generated sources.
 2. Formatting changes no note: the formatted text parses to the same note
    on every statement, and to the same free comments in the same order.
    Test: `lang06_criterion_2_notes_stay_notes` over every `.afs` under
@@ -83,7 +93,11 @@ Tests in `crates/apiforge-script/tests/lang06.rs` unless said.
    Test: `lang06_criterion_3_idempotent`, same files; the property test of
    `tests/properties.rs` extended to sources with free comments.
 4. `fmt` no longer reports the warning; `check` reports no warning for a
-   free comment. Test: `lang06_criterion_4_no_warning`;
+   free comment. **The list of free comments stays**, as a function of
+   the script crate that is no diagnostic: the window's question before a
+   whole-file print and the MCP server's report and refusal at
+   publication (`apiforge-mcp/src/agent.rs`, which reads the warning's
+   constant today) both ask it, and behave as before. Test: `lang06_criterion_4_no_warning`;
    `crates/apiforge-cli/tests/fmt.rs` updated to the decided behaviour.
 5. For a statement with several attributes written in any order, `fmt`
    writes them in the canonical order, the same order `print` uses for the
@@ -98,9 +112,10 @@ Tests in `crates/apiforge-script/tests/lang06.rs` unless said.
    `@label` keeps that order on that statement and changes no other line.
    Test: `ktlo37_an_edit_keeps_the_authors_order` beside the LAY-34 tests
    of `crates/apiforge-script/src/edit.rs`.
-7. Publishing a component whose source holds a free comment asks first, as
-   today, and the revision holds no free comment.
-   Test: the publication tests of #64 pass unchanged.
+7. Publishing a component whose source holds a free comment asks first
+   in the window and is reported by the MCP `publish` as today, and the
+   revision holds no free comment. Tests: the publication tests of #64
+   and the MCP publication tests pass unchanged in what they assert.
 8. The reference's *Comments and labels* says what Format keeps and names
    the attribute order; its examples are in that order.
    Test: `crates/apiforge-project/tests/reference.rs`.
@@ -128,7 +143,8 @@ end), `ast.rs` (their place in `File` and `Statement`; the warning's
 constant goes), `format.rs` (`statements`), `print.rs` (one function gives
 the attribute order to both), `edit.rs` (criterion 6; DIAG-06 moves
 statements in the same file afterwards);
-`crates/apiforge-project/src/comments.rs` (the question stays, the warning
-goes); `docs/language/reference.md` (*Comments and labels* only);
+`crates/apiforge-project/src/comments.rs` and
+`crates/apiforge-mcp/src/agent.rs` (both ask the new list of free
+comments; the warning goes); `docs/language/reference.md` (*Comments and labels* only);
 `crates/apiforge-cli/tests/fmt.rs`. Starts from `main` with LANG-13 in it:
 `print.rs`, `format.rs` and the reference are rewritten there.
