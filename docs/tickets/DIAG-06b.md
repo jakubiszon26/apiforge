@@ -1,11 +1,10 @@
 # DIAG-06b: A refusal is shown while carrying; a notice after a delete; `+` on a line; Move earlier and Move later
 
 - Size: M · Owner review: 15 min · Risk: `visible UI`, `default` (two
-  keys, if the owner chooses keys)
-- State: **Approved except one question** (the keys, on
-  [#491](https://github.com/jakubiszon26/apiforge/issues/491)); after
-  DIAG-06c (#490). Owner's answers of 2026-11-20 on #391: 8 = A, 11 = A,
-  12 = A. Not a condition of 0.2.0.
+  keys)
+- State: **Approved, ready for implementation after DIAG-06c (#490) has
+  merged.** Owner's answers of 2026-11-20 on #391: 8 = A, 11 = A, 12 = A;
+  the keys, on #491: **A — Alt+↑ and Alt+↓**. Not a condition of 0.2.0.
 - Issue [#491](https://github.com/jakubiszon26/apiforge/issues/491) ·
   LANG sprint · branch `feat/diag-06b-feedback-and-moves`
 - Analysis model: Fable 5.2 · Implementation model: —
@@ -27,7 +26,7 @@ from the keyboard.
 - New (question 12, view 5b): a `+` on the line of a chain under the
   pointer opens *Add step* and inserts there.
 - New (question 12): *Move earlier* and *Move later* in a step's menu,
-  and their keys (the open question).
+  with Alt+↑ and Alt+↓.
 - Removed or hidden, migrated: nothing.
 
 ## Mock-up
@@ -55,8 +54,9 @@ Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/diag06b.rs`.
 4. *Move earlier* and *Move later* move the selected step by one step in
    its braces, with its checks (DIAG-06a's operation); at the first and
    the last place of the braces, and where a value read forbids it, the
-   command is disabled and its hover text says why. With the keys of the
-   owner's answer, if any. Test: `diag06b_criterion_4_*`.
+   command is disabled and its hover text says why. Alt+↑ and Alt+↓ do
+   the same while the board has the focus and a step is selected; in the
+   code editor the keys keep what they do today. Test: `diag06b_criterion_4_*`.
 5. Every edit here leaves a text that passes the check and is one step
    of Undo. Asserted in the tests of 2–4.
 
