@@ -846,6 +846,23 @@ impl ProjectSession {
         self.apply_edit(document_id, model, origin, Some(moved))
     }
 
+    /// A paste or a duplicate on the board (DIAG-06f): `model` is the
+    /// document with the copies written in their places by
+    /// [`apiforge_core::edit::paste_statements`] or
+    /// [`apiforge_core::edit::duplicate_statements`], with the chain they
+    /// made. The new statements are written into the text where the model
+    /// writes them and nothing else changes; the chain is not rebuilt. One
+    /// step of Undo.
+    pub fn apply_pasted(
+        &mut self,
+        document_id: &str,
+        model: Document,
+        origin: Origin,
+    ) -> Result<()> {
+        let _ = (document_id, model, origin);
+        todo!("DIAG-06f")
+    }
+
     fn apply_edit(
         &mut self,
         document_id: &str,

@@ -6,11 +6,20 @@
 //! selection follow the copies, references to blocks the target also has are
 //! kept, and a reference the target cannot satisfy leaves its slot
 //! unconnected and is reported, so the caller can say what is missing.
+//!
+//! The folder window copies, pastes and duplicates statements of the
+//! written language (DIAG-06f): [`copy_statements`] takes an `if` with
+//! everything in its braces, [`paste_statements`] writes the fragment after
+//! a step, in its braces, and keeps a reference only where it still finds
+//! its step above the place, and [`duplicate_statements`] writes each copy
+//! directly after its original. A paste that would leave a statement reading
+//! what is not there is refused and changes nothing. The legacy window keeps
+//! [`copy_selection`], [`paste_selection`] and [`duplicate_selection`].
 use super::{EditError, unique_id};
 use crate::{
     format::{Binding, Graph, Node, OrderEdge, Position, Project},
     handle::{unique_handle, unique_label},
-    model::NodeKind,
+    model::{Branch, NodeKind},
     validation::output_exists,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -28,6 +37,11 @@ pub struct Fragment {
     /// by identifier, so a paste into another graph can find those blocks by
     /// the name the code gives them.
     pub sources: BTreeMap<String, String>,
+    /// The braces each copied statement stands in, by identifier, when the
+    /// `if` of those braces is copied too (DIAG-06f): the `if` and its
+    /// branch. A copied statement without an entry is written in the braces
+    /// of the place it is pasted to.
+    pub braces: BTreeMap<String, (String, Branch)>,
 }
 
 /// Where a fragment is pasted.
@@ -44,6 +58,9 @@ pub struct PasteTarget<'a> {
     /// should check them; `None` keeps every parameter reference.
     pub parameters: Option<&'a [String]>,
     pub project: &'a Project,
+    /// The graph is a component's, which a refusal names (DIAG-06f): *not
+    /// in this component* rather than *not in this scenario*.
+    pub component: bool,
 }
 
 impl<'a> PasteTarget<'a> {
@@ -55,6 +72,7 @@ impl<'a> PasteTarget<'a> {
             reserved: &[],
             parameters: None,
             project,
+            component: false,
         }
     }
 }
@@ -131,6 +149,7 @@ pub fn copy_selection(graph: &Graph, reference: &Graph, selected: &HashSet<&str>
             edges,
         },
         sources,
+        braces: BTreeMap::new(),
     }
 }
 
@@ -301,6 +320,53 @@ pub fn duplicate_selection(
         &copy_selection(graph, graph, selected),
         &PASTE_OFFSET,
     )
+}
+
+/// The folder window's *Copy* (DIAG-06f): the selected statements and, for
+/// a selected `if`, every statement in its braces at any depth, also when
+/// only the `if` is selected. A statement selected without its `if` is
+/// copied as a plain statement, which a paste writes in the braces of the
+/// place. `reference` is read as by [`copy_selection`].
+pub fn copy_statements(graph: &Graph, reference: &Graph, selected: &HashSet<&str>) -> Fragment {
+    let _ = (graph, reference, selected);
+    todo!("DIAG-06f")
+}
+
+/// The folder window's *Paste* (DIAG-06f): the copies of `fragment` written
+/// directly after the step `after`, its braces and the checks and values
+/// written under it, in the braces it stands in, as *Add step* puts a step
+/// ([`super::add_step_after`]); last in the graph when `after` is `None`.
+/// Statements copied with their `if` stay in its braces; the others stand in
+/// the braces of the place, in the order they were copied. The ordering
+/// edges are one chain per braces ([`crate::chain::chain`]).
+///
+/// A reference outside the fragment is kept when the target has a statement
+/// of that identity or handle with that output that stands above the place;
+/// otherwise the paste is refused, naming every statement that would read
+/// what is not there, and nothing is pasted. Handles and labels are numbered
+/// as by [`paste_selection`]; the copies keep their positions.
+pub fn paste_statements(
+    target: &PasteTarget<'_>,
+    fragment: &Fragment,
+    after: Option<&str>,
+) -> Result<Pasted, EditError> {
+    let _ = (target, fragment, after);
+    todo!("DIAG-06f")
+}
+
+/// The folder window's *Duplicate* (DIAG-06f): the selection copied as by
+/// [`copy_statements`], each selected step with the checks, values and
+/// variables written directly under it that read it and no other step, and
+/// pasted into the same graph taken per braces: in each braces the copies
+/// follow the last selected step of those braces (or the last selected
+/// statement, when no step of them is selected), its braces and what is
+/// written under it, in their order. Refused as [`paste_statements`] is.
+pub fn duplicate_statements(
+    target: &PasteTarget<'_>,
+    selected: &HashSet<&str>,
+) -> Result<Pasted, EditError> {
+    let _ = (target, selected);
+    todo!("DIAG-06f")
 }
 
 #[cfg(test)]
@@ -694,5 +760,650 @@ mod tests {
             wires(graph).len() + 2,
             "both nested wires of the copy are remapped"
         );
+    }
+}
+
+#[cfg(test)]
+mod diag06f {
+    //! DIAG-06f, criteria 1, 2, 4 and 5 on the operations. The documents are
+    //! written in the language and lowered by `apiforge-script`, which links
+    //! another build of this crate: they cross between the two builds as
+    //! JSON. Every edit ends by printing the edited document, reading it back
+    //! without an error and as the same document.
+    use super::*;
+    use crate::{
+        chain::{braces, is_step},
+        edit::add_step_after,
+        format::Scenario,
+        graph::sequence,
+    };
+    use serde::{Serialize, de::DeserializeOwned};
+
+    /// A value of one build of this crate as the same type of the other.
+    fn crossed<A: Serialize, B: DeserializeOwned>(value: &A) -> B {
+        serde_json::from_value(serde_json::to_value(value).unwrap()).unwrap()
+    }
+
+    fn lowered(project: &Project, text: &str) -> apiforge_script::Document {
+        let theirs = crossed(project);
+        let lowered = apiforge_script::lower(
+            &apiforge_script::parse(text),
+            &apiforge_script::LowerContext::folder(&theirs),
+        );
+        assert!(!lowered.has_errors(), "{:#?}", lowered.diagnostics);
+        lowered.document.expect("a document")
+    }
+
+    fn scenario(project: &Project, text: &str) -> Scenario {
+        match lowered(project, text) {
+            apiforge_script::Document::Scenario(scenario) => crossed(&scenario),
+            other => panic!("not a scenario: {other:?}"),
+        }
+    }
+
+    fn fixture(name: &str) -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/scenarios/lay")
+                .join(name),
+        )
+        .unwrap()
+    }
+
+    fn shop() -> (Project, Scenario) {
+        let project = crate::demos::shop_project();
+        let scenario = scenario(&project, &fixture("shop-30.afs"));
+        (project, scenario)
+    }
+
+    fn labels() -> (Project, Scenario) {
+        let project = crate::demos::shop_project();
+        let scenario = scenario(&project, &fixture("labels.afs"));
+        (project, scenario)
+    }
+
+    fn small(text: &str) -> (Project, Scenario) {
+        let project = super::super::test_support::empty_project();
+        let scenario = scenario(&project, text);
+        (project, scenario)
+    }
+
+    fn node<'g>(graph: &'g Graph, handle: &str) -> &'g Node {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+            .unwrap_or_else(|| panic!("a statement `{handle}`"))
+    }
+
+    fn id(graph: &Graph, handle: &str) -> String {
+        node(graph, handle).id.clone()
+    }
+
+    fn ids<'g>(graph: &'g Graph, handles: &[&str]) -> HashSet<&'g str> {
+        handles
+            .iter()
+            .map(|handle| node(graph, handle).id.as_str())
+            .collect()
+    }
+
+    fn handles(graph: &Graph, ids: &[String]) -> Vec<String> {
+        ids.iter()
+            .map(|id| {
+                graph
+                    .nodes
+                    .iter()
+                    .find(|node| &node.id == id)
+                    .unwrap()
+                    .handle
+                    .clone()
+            })
+            .collect()
+    }
+
+    /// The steps in the order they run.
+    fn steps(graph: &Graph) -> Vec<String> {
+        sequence(graph)
+            .into_iter()
+            .filter_map(|id| graph.nodes.iter().find(|node| node.id == id))
+            .filter(|node| is_step(node.kind))
+            .map(|node| node.handle.clone())
+            .collect()
+    }
+
+    /// Every statement in written order.
+    fn written(graph: &Graph) -> Vec<&str> {
+        graph
+            .nodes
+            .iter()
+            .map(|node| node.handle.as_str())
+            .collect()
+    }
+
+    /// The braces the statement `handle` stands in, by the handle of its
+    /// `if`.
+    fn braces_of(graph: &Graph, handle: &str) -> Option<(String, Branch)> {
+        let written = braces(graph);
+        written.get(id(graph, handle).as_str()).map(|(x, branch)| {
+            let x = graph.nodes.iter().find(|node| node.id == *x).unwrap();
+            (x.handle.clone(), *branch)
+        })
+    }
+
+    /// The scenario with `graph` as its main flow, printed, read back
+    /// without an error and as itself.
+    fn reads_back(project: &Project, scenario: &Scenario, graph: Graph) -> Scenario {
+        let mut result = scenario.clone();
+        result.graph = graph;
+        let theirs = crossed(project);
+        let document = apiforge_script::Document::Scenario(crossed(&result));
+        let text = apiforge_script::print_folder_document(&theirs, &document)
+            .expect("the edited document prints");
+        let read = lowered(project, &text);
+        assert_eq!(
+            apiforge_script::semantic(&read, &theirs),
+            apiforge_script::semantic(&document, &theirs),
+            "the text reads back as the document:\n{text}"
+        );
+        result
+    }
+
+    fn target<'a>(
+        graph: &'a Graph,
+        project: &'a Project,
+        parameters: &'a [String],
+    ) -> PasteTarget<'a> {
+        PasteTarget {
+            parameters: Some(parameters),
+            ..PasteTarget::graph(graph, project)
+        }
+    }
+
+    fn parameters(scenario: &Scenario) -> Vec<String> {
+        scenario
+            .parameters
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    /// *Duplicate* of `selected` in the main flow, checked by printing.
+    fn duplicated(
+        project: &Project,
+        scenario: &Scenario,
+        selected: &[&str],
+    ) -> (Scenario, Vec<String>) {
+        let parameters = parameters(scenario);
+        let pasted = duplicate_statements(
+            &target(&scenario.graph, project, &parameters),
+            &ids(&scenario.graph, selected),
+        )
+        .unwrap_or_else(|error| panic!("{selected:?} duplicates: {error}"));
+        let result = reads_back(project, scenario, pasted.graph);
+        let copies = handles(&result.graph, &pasted.ids);
+        (result, copies)
+    }
+
+    /// `fragment` pasted into the main flow of `scenario` after the step
+    /// *Add step* names for `selected`.
+    fn pasted(
+        project: &Project,
+        scenario: &Scenario,
+        fragment: &Fragment,
+        selected: &[&str],
+    ) -> Result<(Scenario, Vec<String>), String> {
+        let parameters = parameters(scenario);
+        let selection: Vec<String> = selected.iter().map(|h| id(&scenario.graph, h)).collect();
+        let selection: Vec<&str> = selection.iter().map(String::as_str).collect();
+        let after = add_step_after(&scenario.graph, &selection);
+        let pasted = paste_statements(
+            &target(&scenario.graph, project, &parameters),
+            fragment,
+            after,
+        )
+        .map_err(|error| error.to_string())?;
+        let result = reads_back(project, scenario, pasted.graph);
+        let copies = handles(&result.graph, &pasted.ids);
+        Ok((result, copies))
+    }
+
+    fn copied(scenario: &Scenario, selected: &[&str]) -> Fragment {
+        copy_statements(
+            &scenario.graph,
+            &scenario.graph,
+            &ids(&scenario.graph, selected),
+        )
+    }
+
+    // Criterion 1 -------------------------------------------------------------
+
+    #[test]
+    fn diag06f_criterion_1_one_step_is_duplicated_after_itself_with_its_checks() {
+        let (project, shop) = shop();
+        let (result, copies) = duplicated(&project, &shop, &["cart"]);
+        // `cart_created` reads only `cart`; `cart_total` also reads
+        // `expected_total` and is not the step's own.
+        assert_eq!(copies, ["cart_2", "cart_created_2"]);
+        let order = written(&result.graph);
+        let at = |handle: &str| order.iter().position(|h| *h == handle).unwrap();
+        assert_eq!(at("cart_2"), at("cart_total") + 1, "{order:?}");
+        assert_eq!(at("cart_created_2"), at("cart_2") + 1, "{order:?}");
+        assert_eq!(at("cart_view"), at("cart_created_2") + 1, "{order:?}");
+        let order = steps(&result.graph);
+        let at = |step: &str| order.iter().position(|s| s == step).unwrap();
+        assert_eq!(at("cart_2"), at("cart") + 1, "{order:?}");
+        assert_eq!(at("cart_view"), at("cart_2") + 1, "{order:?}");
+        // The copy reads what the original reads, and its check reads it.
+        let (original, copy) = (node(&result.graph, "cart"), node(&result.graph, "cart_2"));
+        assert_eq!(original.inputs, copy.inputs);
+        assert!(
+            node(&result.graph, "cart_created_2").inputs["actual"].references_node(&copy.id),
+            "the copied check reads the copy"
+        );
+    }
+
+    #[test]
+    fn diag06f_criterion_1_several_in_one_braces_follow_the_last_selected_step() {
+        let (project, shop) = shop();
+        let (result, copies) = duplicated(&project, &shop, &["login", "catalogue"]);
+        assert_eq!(
+            copies,
+            [
+                "login_2",
+                "logged_in_2",
+                "known_user_2",
+                "catalogue_2",
+                "listed_2",
+                "first_2",
+                "second_2"
+            ]
+        );
+        let order = written(&result.graph);
+        let at = |handle: &str| order.iter().position(|h| *h == handle).unwrap();
+        assert_eq!(at("login_2"), at("second") + 1, "{order:?}");
+        assert_eq!(at("product"), at("second_2") + 1, "{order:?}");
+        let order = steps(&result.graph);
+        assert_eq!(
+            order[..5],
+            ["begin", "login", "catalogue", "login_2", "catalogue_2"]
+        );
+        // A reference inside the selection follows the copies.
+        let catalogue = node(&result.graph, "catalogue_2");
+        let login = node(&result.graph, "login_2");
+        assert!(
+            catalogue
+                .inputs
+                .values()
+                .any(|binding| binding.references_node(&login.id)),
+            "{:?}",
+            catalogue.inputs
+        );
+    }
+
+    #[test]
+    fn diag06f_criterion_1_a_selection_across_yes_and_no_is_taken_per_braces() {
+        let (project, shop) = shop();
+        let (result, copies) = duplicated(&project, &shop, &["receipt", "not_created"]);
+        assert_eq!(copies, ["receipt_2", "not_created_2"]);
+        let paid = Some(("paid".to_owned(), Branch::True));
+        assert_eq!(braces_of(&result.graph, "receipt_2"), paid);
+        assert_eq!(
+            braces_of(&result.graph, "not_created_2"),
+            Some(("paid".to_owned(), Branch::False))
+        );
+        let order = written(&result.graph);
+        let at = |handle: &str| order.iter().position(|h| *h == handle).unwrap();
+        // After `receipt` and `receipt_total`, written under it.
+        assert_eq!(at("receipt_2"), at("receipt_total") + 1, "{order:?}");
+        assert_eq!(at("not_created_2"), at("not_created") + 1, "{order:?}");
+        assert_eq!(
+            steps(&result.graph)[10..],
+            [
+                "paid",
+                "payment",
+                "receipt",
+                "receipt_2",
+                "refund",
+                "logout"
+            ]
+        );
+    }
+
+    #[test]
+    fn diag06f_criterion_1_a_statement_in_a_selected_if_is_copied_once() {
+        let (project, shop) = shop();
+        let (result, copies) = duplicated(&project, &shop, &["paid", "payment", "not_created"]);
+        assert_eq!(
+            copies,
+            [
+                "paid_2",
+                "payment_2",
+                "receipt_2",
+                "receipt_total_2",
+                "refund_2",
+                "refund_amount_2",
+                "logout_2",
+                "not_created_2"
+            ]
+        );
+        assert_eq!(result.graph.nodes.len(), shop.graph.nodes.len() + 8);
+        assert_eq!(
+            steps(&result.graph)[10..],
+            [
+                "paid",
+                "payment",
+                "receipt",
+                "refund",
+                "logout",
+                "paid_2",
+                "payment_2",
+                "receipt_2",
+                "refund_2",
+                "logout_2"
+            ]
+        );
+    }
+
+    // Criterion 2 -------------------------------------------------------------
+
+    const NESTED: &str = r#"scenario "Nested" {
+  begin = start
+  a = GET "/a" {
+    sample 200 { ok: true, id: 1 }
+  }
+  x = if a.body.ok {
+    b = GET "/b/{{a.body.id}}" {
+      sample 200 { ok: true }
+    }
+    b_ok = assert b.status == 200
+    y = if b.body.ok {
+      c = GET "/c" {
+        sample 200 {}
+      }
+    } else {
+      d = GET "/d" {
+        sample 200 {}
+      }
+    }
+  } else {
+    e = GET "/e" {
+      sample 200 {}
+    }
+  }
+  f = GET "/f" {
+    sample 200 {}
+  }
+}
+"#;
+
+    #[test]
+    fn fragment_takes_the_braces() {
+        let (project, scenario) = small(NESTED);
+        let fragment = copied(&scenario, &["x"]);
+        let copied: Vec<&str> = fragment
+            .graph
+            .nodes
+            .iter()
+            .map(|node| node.handle.as_str())
+            .collect();
+        assert_eq!(copied, ["x", "b", "b_ok", "y", "c", "d", "e"]);
+        let brace = |handle: &str| -> Option<(&str, Branch)> {
+            let copy = node(&fragment.graph, handle);
+            fragment.braces.get(&copy.id).map(|(x, branch)| {
+                (
+                    fragment
+                        .graph
+                        .nodes
+                        .iter()
+                        .find(|node| &node.id == x)
+                        .unwrap()
+                        .handle
+                        .as_str(),
+                    *branch,
+                )
+            })
+        };
+        assert_eq!(brace("x"), None, "the `if` itself is pasted at the place");
+        assert_eq!(brace("b"), Some(("x", Branch::True)));
+        assert_eq!(brace("y"), Some(("x", Branch::True)));
+        assert_eq!(brace("c"), Some(("y", Branch::True)));
+        assert_eq!(brace("d"), Some(("y", Branch::False)));
+        assert_eq!(brace("e"), Some(("x", Branch::False)));
+
+        // Pasted after `f`: the copy's branches hold what the original's hold.
+        let (result, copies) = pasted(&project, &scenario, &fragment, &["f"]).unwrap();
+        assert_eq!(copies, ["x_2", "b_2", "b_ok_2", "y_2", "c_2", "d_2", "e_2"]);
+        assert_eq!(braces_of(&result.graph, "x_2"), None);
+        for (handle, x, branch) in [
+            ("b_2", "x_2", Branch::True),
+            ("b_ok_2", "x_2", Branch::True),
+            ("y_2", "x_2", Branch::True),
+            ("c_2", "y_2", Branch::True),
+            ("d_2", "y_2", Branch::False),
+            ("e_2", "x_2", Branch::False),
+        ] {
+            assert_eq!(
+                braces_of(&result.graph, handle),
+                Some((x.to_owned(), branch)),
+                "{handle}"
+            );
+        }
+        assert_eq!(
+            steps(&result.graph),
+            [
+                "begin", "a", "x", "b", "y", "c", "d", "e", "f", "x_2", "b_2", "y_2", "c_2", "d_2",
+                "e_2"
+            ]
+        );
+        // `b_2` reads `a`, which stands above the place.
+        assert!(
+            node(&result.graph, "b_2")
+                .inputs
+                .values()
+                .any(|binding| binding.references_node(&id(&result.graph, "a")))
+        );
+    }
+
+    #[test]
+    fn fragment_without_its_if_is_plain_steps() {
+        let (project, scenario) = small(NESTED);
+        let fragment = copied(&scenario, &["b", "c"]);
+        assert!(fragment.braces.is_empty(), "{:?}", fragment.braces);
+        let (result, copies) = pasted(&project, &scenario, &fragment, &["f"]).unwrap();
+        assert_eq!(copies, ["b_2", "c_2"]);
+        assert_eq!(braces_of(&result.graph, "b_2"), None);
+        assert_eq!(braces_of(&result.graph, "c_2"), None);
+        assert_eq!(
+            steps(&result.graph),
+            [
+                "begin", "a", "x", "b", "y", "c", "d", "e", "f", "b_2", "c_2"
+            ]
+        );
+        // Into the braces of the place: after `b`, they stand in *Yes* of `x`.
+        let (result, _) = pasted(&project, &scenario, &fragment, &["b"]).unwrap();
+        assert_eq!(
+            braces_of(&result.graph, "b_2"),
+            Some(("x".to_owned(), Branch::True))
+        );
+        assert_eq!(
+            braces_of(&result.graph, "c_2"),
+            Some(("x".to_owned(), Branch::True))
+        );
+        let order = written(&result.graph);
+        let at = |handle: &str| order.iter().position(|h| *h == handle).unwrap();
+        assert_eq!(at("b_2"), at("b_ok") + 1, "{order:?}");
+        assert_eq!(at("c_2"), at("b_2") + 1, "{order:?}");
+    }
+
+    // Criterion 4 -------------------------------------------------------------
+
+    #[test]
+    fn paste_keeps_a_reference_whose_step_stands_above_the_place() {
+        let (project, shop) = shop();
+        let fragment = copied(&shop, &["cart_view"]);
+        let (result, copies) = pasted(&project, &shop, &fragment, &["address"]).unwrap();
+        assert_eq!(copies, ["cart_view_2"]);
+        assert_eq!(
+            node(&result.graph, "cart_view").inputs,
+            node(&result.graph, "cart_view_2").inputs,
+            "it reads `cart` and `login`, as the original does"
+        );
+        let order = steps(&result.graph);
+        let at = |step: &str| order.iter().position(|s| s == step).unwrap();
+        assert_eq!(at("cart_view_2"), at("address") + 1, "{order:?}");
+    }
+
+    #[test]
+    fn paste_keeps_a_reference_by_handle_in_another_document() {
+        let (project, shop) = shop();
+        let fragment = copied(&shop, &["cart_created"]);
+        let (other_project, other) = small(
+            r#"scenario "Other" {
+  begin = start
+  cart = POST "/carts" {
+    sample 201 { id: 7 }
+  }
+}
+"#,
+        );
+        let _ = project;
+        let (result, copies) = pasted(&other_project, &other, &fragment, &[]).unwrap();
+        assert_eq!(copies, ["cart_created"]);
+        assert!(
+            node(&result.graph, "cart_created").inputs["actual"]
+                .references_node(&id(&result.graph, "cart")),
+            "it reads the `cart` of this scenario"
+        );
+    }
+
+    #[test]
+    fn paste_keeps_a_reference_of_a_nested_slot() {
+        // `cart_total` reads `cart` and `expected_total` inside its
+        // comparison; pasted after `checkout`, both stand above it.
+        let (project, shop) = shop();
+        let fragment = copied(&shop, &["cart_total"]);
+        let (result, _) = pasted(&project, &shop, &fragment, &["checkout"]).unwrap();
+        assert_eq!(
+            node(&result.graph, "cart_total").inputs,
+            node(&result.graph, "cart_total_2").inputs
+        );
+    }
+
+    // Criterion 5 -------------------------------------------------------------
+
+    const OTHER: &str = r#"scenario "Other" {
+  begin = start
+  login = POST "/login" {
+    sample 200 { token: "t" }
+  }
+  subtotal = GET "/subtotal" {
+    sample 200 { value: 5 }
+  }
+}
+"#;
+
+    #[test]
+    fn paste_refuses_a_step_that_is_not_there() {
+        let (_, shop) = shop();
+        let (project, other) = small(OTHER);
+        // `cart_view` reads `login`, which the other scenario has, and
+        // `cart`, which it lacks.
+        let fragment = copied(&shop, &["cart_view"]);
+        assert_eq!(
+            pasted(&project, &other, &fragment, &[]).unwrap_err(),
+            "`cart_view` reads `cart`, which is not in this scenario. Copy it too."
+        );
+        // Two readers of two missing steps.
+        let fragment = copied(&shop, &["cart_view", "checkout"]);
+        assert_eq!(
+            pasted(&project, &other, &fragment, &[]).unwrap_err(),
+            "`cart_view` and `checkout` read `cart`, `valid_cart` and `expected_total`, which \
+             are not in this scenario. Copy them too."
+        );
+    }
+
+    #[test]
+    fn paste_refuses_a_step_of_that_name_without_that_output() {
+        let (source_project, source) = small(
+            r#"scenario "Source" {
+  begin = start
+  subtotal = 5
+  total = assert subtotal == 5
+}
+"#,
+        );
+        let _ = source_project;
+        let (project, other) = small(OTHER);
+        // `subtotal` here is a request, which has no `value`.
+        let fragment = copied(&source, &["total"]);
+        assert_eq!(
+            pasted(&project, &other, &fragment, &[]).unwrap_err(),
+            "`total` reads `subtotal.value`; `subtotal` in this scenario has no `value`."
+        );
+    }
+
+    #[test]
+    fn paste_refuses_a_parameter_the_target_does_not_declare() {
+        let (_, labels) = labels();
+        let (project, shop) = shop();
+        let fragment = copied(&labels, &["no_token"]);
+        assert_eq!(
+            pasted(&project, &shop, &fragment, &[]).unwrap_err(),
+            "`no_token` reads `param.parcel_id`, which this scenario does not declare."
+        );
+        // A component's input is named so in a component.
+        let parameters: Vec<String> = vec![];
+        let component = PasteTarget {
+            component: true,
+            ..target(&shop.graph, &project, &parameters)
+        };
+        assert_eq!(
+            paste_statements(&component, &fragment, None)
+                .unwrap_err()
+                .to_string(),
+            "`no_token` reads `param.parcel_id`, which this component does not declare."
+        );
+    }
+
+    #[test]
+    fn paste_refuses_a_nested_binding_that_does_not_resolve() {
+        let (_, shop) = shop();
+        let (project, other) = small(
+            r#"scenario "Other" {
+  begin = start
+  cart = POST "/carts" {
+    sample 201 { total: 7 }
+  }
+}
+"#,
+        );
+        // `cart_total` compares `cart.body.total` with `expected_total`.
+        let fragment = copied(&shop, &["cart_total"]);
+        assert_eq!(
+            pasted(&project, &other, &fragment, &[]).unwrap_err(),
+            "`cart_total` reads `expected_total`, which is not in this scenario. Copy it too."
+        );
+    }
+
+    #[test]
+    fn paste_refuses_a_step_below_the_place() {
+        let (project, shop) = shop();
+        // Pasted after `login`, `cart_view` would run before `cart`.
+        let fragment = copied(&shop, &["cart_view"]);
+        assert_eq!(
+            pasted(&project, &shop, &fragment, &["login"]).unwrap_err(),
+            "`cart_view` reads `cart.body.id`, which runs after this place. Paste it below \
+             `cart`."
+        );
+    }
+
+    #[test]
+    fn paste_refuses_a_second_start() {
+        let (project, shop) = shop();
+        let fragment = copied(&shop, &["begin", "login"]);
+        assert!(matches!(
+            paste_statements(&target(&shop.graph, &project, &[]), &fragment, None),
+            Err(EditError::PasteSecondStart)
+        ));
     }
 }

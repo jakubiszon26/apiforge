@@ -776,6 +776,7 @@ impl Board<'_> {
             reserved: &sibling,
             parameters: Some(self.parameters),
             project: self.project,
+            component: false,
         };
         let pasted = edit::paste_selection(&target, fragment, &Position { x: 0.0, y: 0.0 })
             .map_err(|error| error.to_string())?;
