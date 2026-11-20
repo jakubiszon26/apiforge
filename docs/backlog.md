@@ -474,21 +474,28 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   #412 (#486), and beside the sprint #474, #476 (plans and process) and
   #484 (CI).
 - To the 0.2.0 release, in merge order: LANG-13 #386 (pull request #488;
-  it also makes the build read language 2); then side by side LANG-20
-  [#481](https://github.com/jakubiszon26/apiforge/issues/481) (`apiforge fix --folder`: a whole project or nothing),
-  LANG-06 #143 with KTLO-37 #211, LANG-05 #142 and LAY-45
-  [#468](https://github.com/jakubiszon26/apiforge/issues/468) (moved here from LAY-2); then DIAG-06a #391 (every edit
-  keeps the chain); then DIAG-06c [#490](https://github.com/jakubiszon26/apiforge/issues/490) (the board shows and takes
-  the chain); then LANG-21 [#482](https://github.com/jakubiszon26/apiforge/issues/482) (the window offers *Update the
-  project*); then REL-05 #414. DIAG-06b [#491](https://github.com/jakubiszon26/apiforge/issues/491) (feedback while
-  carrying, *Move earlier* and *Move later*) follows DIAG-06c and is not a
-  condition of the release. About 215 owner minutes ahead. LANG-12 #385
-  is closed as replaced by LANG-13; LAY-13 #297 (bands) comes after 0.2.0.
+  it also makes the build read language 2); then side by side LANG-06
+  #143 with KTLO-37 #211, LANG-05 #142, LAY-45
+  [#468](https://github.com/jakubiszon26/apiforge/issues/468) (moved here from LAY-2) and LANG-20
+  [#481](https://github.com/jakubiszon26/apiforge/issues/481) (`apiforge fix --folder`: file by file, with a record
+  of the files done); then DIAG-06a #391 (a step moves inside its
+  braces), DIAG-06d [#493](https://github.com/jakubiszon26/apiforge/issues/493) (with an `if`'s braces and across
+  them), then side by side DIAG-06c [#490](https://github.com/jakubiszon26/apiforge/issues/490) (the board shows and
+  takes the chain) and DIAG-06e [#494](https://github.com/jakubiszon26/apiforge/issues/494) (delete and paste keep the
+  check); LANG-21a [#482](https://github.com/jakubiszon26/apiforge/issues/482) (the window offers *Update the project*)
+  after LANG-20; then REL-05 #414. Not conditions of the release:
+  DIAG-06b [#491](https://github.com/jakubiszon26/apiforge/issues/491) and LANG-21b [#495](https://github.com/jakubiszon26/apiforge/issues/495). About 270 owner
+  minutes ahead. LANG-12 #385 is closed as replaced by LANG-13; LAY-13
+  #297 (bands) comes after 0.2.0.
 - Decided by the owner on 2026-11-20 and recorded on the issues: the two
   questions of LANG-13 (#386), LANG-05 (#142, option A), LANG-21 (#482,
-  in 0.2.0, and its mock-up), the sixteen questions of DIAG-06 (#391) and
-  the keys of DIAG-06b (#491). Nothing of the first half waits for a
-  decision.
+  in 0.2.0, and its mock-up), the sixteen questions of DIAG-06 (#391),
+  the keys of DIAG-06b (#491), the three of DIAG-06e (#494), and LANG-20
+  (#481): file by file, with a record.
+- Waiting for the owner: two questions on #481 that follow from that
+  last decision (a board edit in a source not yet converted; what the
+  window's update does when not every file can be converted), on which
+  LANG-20 and LANG-21a wait.
 - Beside the sprint: [#489](https://github.com/jakubiszon26/apiforge/issues/489), a Windows timing failure of one `mcp08b`
   test, rerun once and noted there until its cause is read.
 - After it: LANG-16 #413 (part B of LANG-00), then LANG-01 #127 with

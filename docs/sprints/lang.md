@@ -77,23 +77,28 @@ In progress since 2026-11-20. **Merged that day:** FIX-01 (#485), RUN-01
 (#487), LANG-15 (#486); beside them #474 and #476 (plans and process) and
 #484 (CI). LANG-13 is pull request #488.
 
-Merge order from here: LANG-13 → LANG-20, LANG-06, LANG-05 and LAY-45 side
-by side → DIAG-06a → DIAG-06c → LANG-21 and DIAG-06b → REL-05.
+Merge order from here: LANG-13 → LANG-06, LANG-05, LAY-45 and LANG-20 side
+by side → DIAG-06a → DIAG-06d → DIAG-06c and DIAG-06e side by side →
+LANG-21a (after LANG-20) → REL-05; DIAG-06b and LANG-21b follow and are
+not conditions of the release.
 
 | Order | Ticket | Size | Needs | Files |
 | --- | --- | --- | --- | --- |
 | done | RUN-01 #126 the chain goes on after an error; only a missing value blocks | M · 20 · `default` | merged in #487 | runner, ADR 0015 |
 | done | LANG-15 #412 the language version in the manifest; the two refusals | M · 20 · `format` | merged in #486, with `LANGUAGE_VERSION = 1` | storage, project, command line, MCP |
 | 1 | LANG-13 #386 the steps of a block run in the order written; `@after` leaves the language; the fix of one file; **the build reads language 2** | M, upper end · 30 · `format` | pull request #488; amended on 2026-11-20 (a component needs no `start`; a check that reads no step runs; the constant and the run refusal moved here from LANG-20) | `apiforge-script`, `apiforge-core` (`graph.rs`, `validation.rs`), `apiforge-project`, `apiforge-runner/src/plan.rs`, every test source with `@after`, `fixtures/scenarios`, `fixtures/scripts`, `reference.md`, ADR 0003 and 0005 |
-| 2 | LANG-20 #481 `apiforge fix --folder` converts a whole project or nothing, in one commit of the store; `--check`, `--as-written`; the MCP tool `fix` | M · 15 · `format` | LANG-13 merged | `apiforge-cli`, `apiforge-mcp`, `apiforge-project/src/language.rs` |
+| 2 | LANG-20 #481 `apiforge fix --folder` updates a project **file by file, with a record** of the files done (`.apiforge/language-update.json`, kept by Git; the owner's decision of 2026-11-20, not the planning model's recommendation); `--check`, `--as-written`; the MCP tool `fix` | M · 20 · `format` | redesigned 2026-11-20; waits for an independent review and two questions on the issue; then LANG-13 merged | `apiforge-cli`, `apiforge-mcp`, `apiforge-project/src/language.rs`, `apiforge-storage` (the record) |
 | 2 | LANG-06 #143 with KTLO-37 #211 Format loses no comment, wherever it stands; one attribute order | M · 15 · `format` | LANG-13 merged | `apiforge-script` `parser.rs`, `ast.rs`, `format.rs`, `print.rs`, `edit.rs`; `reference.md` |
 | 2 | LANG-05 #142 a check that is a comparison or a logical operation is written as typed; a bare value keeps `== true` | S · 10 · `format` | decided 2026-11-20 (A); LANG-13 merged; beside LANG-06, the second merges `main` first | `apiforge-script` `print.rs`, `format.rs`; `reference.md`, ADR 0005 |
 | 2 | LAY-45 #468 the chain is drawn side to side, sockets on the cards' sides in both *Wires* modes; the badge arrow and the row-end mark go | M · 20 · `visible UI`, `removal` | moved here from LAY-2 by the owner on 2026-11-20; LANG-13 merged; brings `shop-30` with every wire back to 76 and 116 crossings | `apiforge-desktop/src/canvas/`, layout measurements |
-| 3 | DIAG-06a #391 every edit keeps the chain: a wire to an existing step moves it, with an `if`'s braces and its checks, across braces, refused against a value read; *Add step* after the selected step; deleting an `if` asks once | M · 25 · `default`, `visible UI` | LANG-13, LANG-06 (`edit.rs`) and LAY-45 merged | `apiforge-core/src/edit`, `apiforge-script/src/edit.rs`, `apiforge-project/src/session.rs`, desktop |
-| 4 | DIAG-06c #490 the board shows and takes the chain: the `if`'s own *Next*, the caption while carrying, a block lands on the nearest line, the row makes room | M · 20 · `visible UI`, `default` | LAY-45 and DIAG-06a merged | `apiforge-desktop/src/canvas/`, `dnd.rs`, `library.rs` |
-| 5 | LANG-21 #482 the window offers *Update the project*: a check first, then *Update N files* or the list to place by hand | M · 25 · `visible UI` | decided 2026-11-20 (in 0.2.0; nine answers on the mock-up); LANG-20 merged | `apiforge-desktop/src/folder/`, `apiforge-project/src/language.rs` |
-| 5 | DIAG-06b #491 a refusal shown while carrying; a notice after a delete; `+` on a line; *Move earlier* and *Move later* (Alt+↑, Alt+↓) | M · 15 · `visible UI` | DIAG-06c merged; not a condition of 0.2.0 | `apiforge-desktop/src/canvas/`, `folder/notices.rs` |
-| 6 | REL-05 #414 release 0.2.0 | S · 15 | all above except DIAG-06b | release notes |
+| 3 | DIAG-06a #391 a step is placed and moved inside its braces: a wire to an existing step moves it with its checks, refused against a value read; *Add step* after the selected step; one placement contract; the legacy window untouched | M · 20 · `default`, `visible UI` | LANG-13, LANG-06 (`edit.rs`) and LAY-45 merged | `apiforge-core/src/edit`, `apiforge-script/src/edit.rs`, `apiforge-project/src/session.rs`, desktop |
+| 4 | DIAG-06d #493 a step moves with an `if`'s braces and across braces; a check into and out of a branch; deleting an `if` asks once | M · 20 · `default`, `visible UI` | DIAG-06a merged | the same files |
+| 5 | DIAG-06c #490 the board shows and takes the chain: the `if`'s own *Next*, the caption while carrying, a block lands on the nearest line, the row makes room | M · 20 · `visible UI`, `default` | LAY-45, DIAG-06a and DIAG-06d merged | `apiforge-desktop/src/canvas/`, `dnd.rs`, `library.rs` |
+| 5 | DIAG-06e #494 deleting a step that is read is refused; *Duplicate* directly after its original, *Paste* after the selected step; a paste that would read what is not there is refused | M · 15 · `default`, `visible UI` | decided 2026-11-20 (three answers, A); waits for the independent review; DIAG-06a merged | `apiforge-core/src/edit`, `board_edit.rs` |
+| 6 | LANG-21a #482 the window offers *Update the project*: a check first, then the update | M · 20 · `visible UI` | decided 2026-11-20 (in 0.2.0; nine answers on the mock-up); restated when the window's question on #481 is answered; LANG-20 merged | `apiforge-desktop/src/folder/`, `apiforge-project/src/language.rs` |
+| 7 | LANG-21b #495 the list of statements to place by hand leads to each one; the count follows each save | M · 15 · `visible UI` | LANG-21a merged; not a condition of 0.2.0 | `apiforge-desktop/src/folder/` |
+| 7 | DIAG-06b #491 a refusal shown while carrying; a notice after a delete; `+` on a line; *Move earlier* and *Move later* (Alt+↑, Alt+↓) | M · 15 · `visible UI` | DIAG-06c merged; not a condition of 0.2.0 | `apiforge-desktop/src/canvas/`, `folder/notices.rs` |
+| 8 | REL-05 #414 release 0.2.0 | S · 15 | all above except DIAG-06b and LANG-21b | release notes |
 | — | LAY-13 #297 branch bands | — | after 0.2.0 (DIAG-06 question 6 = A) | — |
 
 **Side by side.** Rows with the same order number touch different files:
@@ -101,13 +106,18 @@ LANG-20 (command line, MCP, `language.rs`), LANG-06 and LANG-05 (the
 script crate's writer, in different functions), LAY-45 (`canvas/`).
 DIAG-06a follows LANG-06 because both edit `apiforge-script/src/edit.rs`,
 and LAY-45 because the gestures are tested against the sockets' final
-place. DIAG-02 (#145, REQ) is not open together with LAY-45, DIAG-06a or
-DIAG-06c: they share `canvas/`. `reference.md` is touched in different
+place; DIAG-06d and DIAG-06e add cases to DIAG-06a's one operation.
+DIAG-06c (`canvas/`) and DIAG-06e (`edit`) run side by side. DIAG-02
+(#145, REQ) is not open together with LAY-45 or a DIAG-06 ticket that
+works in `canvas/`. `reference.md` is touched in different
 sections; each ticket merges `main` before its last push.
 
-**Owner minutes** still ahead on 2026-11-20: about 215 (LANG-13 30,
-LANG-20 15, LANG-06 15, LANG-05 10, LAY-45 20, DIAG-06a 25, DIAG-06c 20,
-LANG-21 25, DIAG-06b 15, REL-05 15, and the acceptance captures).
+**Owner minutes** still ahead on 2026-11-20: about 270 (LANG-13 30,
+LANG-20 20, LANG-06 15, LANG-05 10, LAY-45 20, DIAG-06a 20, DIAG-06d 20,
+DIAG-06c 20, DIAG-06e 15, LANG-21a 20, LANG-21b 15, DIAG-06b 15, REL-05
+15, and the acceptance captures). The first half grew that day from six
+tickets to fourteen: two independent reviews of the ticket files found
+four of them to be larger than estimated, and they were split.
 
 **Open beside the sprint:** #489, a Windows timing failure of
 `mcp08b::take_back_waits_for_the_agents_run_and_its_cleanup` on #486's
@@ -175,7 +185,9 @@ Exit criteria of the second half are written by LANG-16.
 | 2026-11-20, LANG-05: the short form of a check is canonical for a comparison or a logical operation; a bare value keeps `== true` | #142 |
 | 2026-11-20, LANG-21: the window offers the update in 0.2.0; nine answers on its mock-up (the band, a check before writing, *Save all and update*, the list with *Show*, the count follows each save) | #482 |
 | 2026-11-20, DIAG-06: sixteen answers on its mock-up, all the recommended option; split into DIAG-06a, DIAG-06c and DIAG-06b; LAY-45 moves into this sprint before them; bands (LAY-13) after 0.2.0; the keys of *Move earlier* and *Move later* are Alt+↑ and Alt+↓ | #391, #490, #491, #468 |
-| 2026-11-20: the conversion of a project is whole or not at all (after an independent review of the ticket files) | #481, #411 |
+| 2026-11-20, LANG-20: a project is converted **file by file, with a record** kept by Git of the sources already converted; the project is in two languages for a while and nothing runs until the manifest is raised. The owner's choice against the recommended "whole or not at all"; it adds a file to what a project keeps | #481 |
+| 2026-11-20, DIAG-06e: deleting a step that another reads is refused, naming the readers; *Duplicate* lands directly after its original and *Paste* after the selected step; a pasted reference that finds its step is kept, otherwise the paste is refused | #494 |
+| 2026-11-20: two independent reviews of the ticket files; every finding accepted; DIAG-06a split into DIAG-06a, DIAG-06d and DIAG-06e, LANG-21 into LANG-21a and LANG-21b | #411, #391, #482 |
 
 ADRs the first half amends: [0003](../decisions/0003-start-reachability.md)
 (a flow with a step has a start; a step outside the flow is an error),
