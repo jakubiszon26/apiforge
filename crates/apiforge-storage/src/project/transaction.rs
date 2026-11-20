@@ -44,6 +44,11 @@ impl FileState {
     }
 }
 
+/// What a caller read and decided its changes from (LANG-20e): each path
+/// with the state it saw, a fingerprint or `Missing`. A commit given one
+/// writes nothing when any of these paths has changed (ADR 0011).
+pub type ReadSet = BTreeMap<ProjectPath, FileState>;
+
 #[derive(Clone, Debug)]
 pub enum ProjectChange {
     Write {
@@ -434,18 +439,40 @@ impl ProjectStore {
     /// Executes one logical operation. Expected fingerprints are supplied by the
     /// caller's last observation; a queued plan never silently adopts new bytes.
     pub fn commit(&self, changes: Vec<ProjectChange>) -> Result<u64> {
-        self.commit_with_hook(changes, |_| Ok(()))
+        self.commit_with_read_set(changes, &ReadSet::new())
     }
 
+    /// [`Self::commit`] under what the caller read: `read` holds paths it
+    /// only read as well as paths it writes, with the state it saw. A path
+    /// whose state differs, when the commit takes the lock or after staging,
+    /// refuses the commit with [`ProjectError::Conflict`] naming it, and
+    /// nothing is written or journalled. A path also written must be read
+    /// as its change expects, or the commit is
+    /// [`ProjectError::InvalidTransaction`]. The read set does not count
+    /// toward the commit's limits.
+    pub fn commit_with_read_set(&self, changes: Vec<ProjectChange>, read: &ReadSet) -> Result<u64> {
+        self.commit_reading_with_hook(changes, read, |_| Ok(()))
+    }
+
+    #[cfg(test)]
     fn commit_with_hook(
         &self,
         changes: Vec<ProjectChange>,
         boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<u64> {
+        self.commit_reading_with_hook(changes, &ReadSet::new(), boundary)
+    }
+
+    fn commit_reading_with_hook(
+        &self,
+        changes: Vec<ProjectChange>,
+        read: &ReadSet,
+        boundary: impl FnMut(&str) -> Result<()>,
+    ) -> Result<u64> {
         self.writable()?;
         let _worker = self.owner.lock_worker();
         self.validate_public_changes(&changes)?;
-        self.commit_locked(changes, boundary)
+        self.commit_locked_reading(changes, read, boundary)
     }
 
     pub(super) fn validate_public_changes(&self, changes: &[ProjectChange]) -> Result<()> {
@@ -471,9 +498,23 @@ impl ProjectStore {
         Ok(())
     }
 
+    /// A commit of the storage's own services, which read nothing they do
+    /// not write: an empty read set.
     pub(super) fn commit_locked(
         &self,
         changes: Vec<ProjectChange>,
+        boundary: impl FnMut(&str) -> Result<()>,
+    ) -> Result<u64> {
+        self.commit_locked_reading(changes, &ReadSet::new(), boundary)
+    }
+
+    /// The read set is compared with the folder where the written targets
+    /// are, before staging and again immediately before activation; it is
+    /// not journalled, so recovery never compares it (ADR 0011, LANG-20e).
+    fn commit_locked_reading(
+        &self,
+        changes: Vec<ProjectChange>,
+        read: &ReadSet,
         mut boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<u64> {
         self.writable()?;
@@ -483,6 +524,7 @@ impl ProjectStore {
         }
         let manifest_before = self.read_file(MANIFEST_PATH)?;
         let (descriptor, payloads) = self.plan(&head, changes)?;
+        let only_read = only_read(&descriptor, read)?;
         self.validate_manifest_plan(&descriptor, &payloads)?;
         self.preflight_directories(&descriptor)?;
         for operation in &descriptor.operations {
@@ -490,6 +532,7 @@ impl ProjectStore {
                 return Err(self.conflict(&operation.path));
             }
         }
+        self.check_read(&only_read)?;
         boundary("preflight")?;
         let directory = self.transaction_path(&descriptor.transaction_id)?;
         create_directory(&directory)?;
@@ -504,12 +547,14 @@ impl ProjectStore {
                 &json_bytes(&descriptor)?,
             )?;
             boundary("descriptor")?;
-            // Recheck all targets after staging and before durable activation.
+            // Recheck all targets and what was only read after staging and
+            // before durable activation.
             for operation in &descriptor.operations {
                 if self.state(operation.path.as_str())? != operation.expected {
                     return Err(self.conflict(&operation.path));
                 }
             }
+            self.check_read(&only_read)?;
             if self.head()? != head || self.read_file(MANIFEST_PATH)? != manifest_before {
                 return Err(ProjectError::Busy);
             }
@@ -995,6 +1040,17 @@ impl ProjectStore {
             Ok(())
         }
     }
+
+    /// Every path only read still has the state its caller saw.
+    fn check_read(&self, read: &[(&ProjectPath, &FileState)]) -> Result<()> {
+        for (path, seen) in read {
+            if self.state(path.as_str())? != **seen {
+                return Err(self.conflict(path));
+            }
+        }
+        Ok(())
+    }
+
     fn conflict(&self, path: &ProjectPath) -> ProjectError {
         ProjectError::Conflict {
             path: self.root.join(path.as_str()),
@@ -1064,6 +1120,36 @@ fn removed_from(earlier: &[Operation], directory: &ProjectPath) -> Vec<std::ffi:
         .filter(|path| path.parent() == Some(Path::new(directory.as_str())))
         .filter_map(|path| path.file_name().map(ToOwned::to_owned))
         .collect()
+}
+
+/// The paths of `read` that no operation writes. A path also written is
+/// compared once, by the operation's expectation, with which the state read
+/// must agree; a read set that does not is a malformed commit.
+fn only_read<'a>(
+    descriptor: &Descriptor,
+    read: &'a ReadSet,
+) -> Result<Vec<(&'a ProjectPath, &'a FileState)>> {
+    // Lowercase, as the plan's own duplicate check: one file on a
+    // case-insensitive folder.
+    let written: BTreeMap<String, &FileState> = descriptor
+        .operations
+        .iter()
+        .map(|operation| (operation.path.as_str().to_lowercase(), &operation.expected))
+        .collect();
+    let mut only = Vec::new();
+    for (path, seen) in read {
+        if let FileState::File { sha256, .. } = seen
+            && !schema::valid_hash(sha256)
+        {
+            return Err(ProjectError::InvalidTransaction);
+        }
+        match written.get(&path.as_str().to_lowercase()) {
+            Some(expected) if *expected == seen => {}
+            Some(_) => return Err(ProjectError::InvalidTransaction),
+            None => only.push((path, seen)),
+        }
+    }
+    Ok(only)
 }
 
 /// One JSON line beside the lock, replaced atomically; an unknown holder
