@@ -44,6 +44,11 @@ impl FileState {
     }
 }
 
+/// What a caller read and decided its changes from (LANG-20e): each path
+/// with the state it saw, a fingerprint or `Missing`. A commit given one
+/// writes nothing when any of these paths has changed (ADR 0011).
+pub type ReadSet = BTreeMap<ProjectPath, FileState>;
+
 #[derive(Clone, Debug)]
 pub enum ProjectChange {
     Write {
@@ -434,12 +439,28 @@ impl ProjectStore {
     /// Executes one logical operation. Expected fingerprints are supplied by the
     /// caller's last observation; a queued plan never silently adopts new bytes.
     pub fn commit(&self, changes: Vec<ProjectChange>) -> Result<u64> {
-        self.commit_with_hook(changes, |_| Ok(()))
+        self.commit_with_read_set(changes, &ReadSet::new())
     }
 
+    /// [`Self::commit`] under what the caller read: `read` holds paths it
+    /// only read as well as paths it writes, with the state it saw.
+    pub fn commit_with_read_set(&self, changes: Vec<ProjectChange>, read: &ReadSet) -> Result<u64> {
+        self.commit_reading_with_hook(changes, read, |_| Ok(()))
+    }
+
+    #[cfg(test)]
     fn commit_with_hook(
         &self,
         changes: Vec<ProjectChange>,
+        boundary: impl FnMut(&str) -> Result<()>,
+    ) -> Result<u64> {
+        self.commit_reading_with_hook(changes, &ReadSet::new(), boundary)
+    }
+
+    fn commit_reading_with_hook(
+        &self,
+        changes: Vec<ProjectChange>,
+        _read: &ReadSet,
         boundary: impl FnMut(&str) -> Result<()>,
     ) -> Result<u64> {
         self.writable()?;
