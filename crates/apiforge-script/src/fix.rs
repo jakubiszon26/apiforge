@@ -85,7 +85,7 @@ pub fn fix_source(text: &str, context: &LowerContext<'_>) -> Fixed {
     }
     // From the end, so earlier ranges stay valid; a deletion before an
     // insertion at the same place.
-    fixes.sort_by(|a, b| (b.range.start, b.range.end).cmp(&(a.range.start, a.range.end)));
+    fixes.sort_by_key(|fix| std::cmp::Reverse((fix.range.start, fix.range.end)));
     let mut fixed = text.to_owned();
     for fix in fixes {
         fixed.replace_range(fix.range, &fix.replacement);
