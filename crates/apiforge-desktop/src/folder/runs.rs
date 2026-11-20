@@ -729,6 +729,7 @@ impl FolderApp {
                             next: Box::new(Document::Scenario(scenario)),
                             selection: None,
                             check: None,
+                            moved: Vec::new(),
                         },
                     );
                 }
@@ -782,6 +783,7 @@ impl FolderApp {
                                 before,
                                 checks,
                             })),
+                            moved: Vec::new(),
                         },
                     );
                 }

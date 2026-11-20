@@ -20,7 +20,7 @@
 - Issue [#391](https://github.com/jakubiszon26/apiforge/issues/391) · LANG
   sprint, first half, a condition of 0.2.0 (REL-05) · branch
   `feat/diag-06a-edits-keep-the-chain`
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Goal
 

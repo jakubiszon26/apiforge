@@ -350,9 +350,11 @@ pub fn active(graph: &Graph) -> Option<HashSet<&str>> {
 /// the library is written last and runs last, one added from a step's *Next*
 /// is written after that step and runs after it, a removed step joins its
 /// neighbours. An ordering edge the edit adds between two blocks that both
-/// existed before, or takes away while both remain, is undone first: what
-/// such a wire means is DIAG-06's (#391), and until then it changes nothing,
-/// so a statement never leaves its braces by it.
+/// existed before, or takes away while both remain, is undone first: the
+/// order of the steps is the order they are written in, which a move on the
+/// board changes ([`crate::edit::place`], DIAG-06a), never an edge, so a
+/// statement never leaves its braces by one. Paste and duplicate rely on
+/// this rebuild until DIAG-06f.
 pub fn edited(before: &Graph, after: &Graph) -> Graph {
     let existed: HashSet<&str> = before.nodes.iter().map(|node| node.id.as_str()).collect();
     let remains: HashSet<&str> = after.nodes.iter().map(|node| node.id.as_str()).collect();

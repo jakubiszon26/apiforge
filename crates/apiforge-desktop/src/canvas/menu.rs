@@ -46,6 +46,9 @@ pub struct ActionMenu {
     focus_search: bool,
     /// Operator groups open in the popup's Operators section.
     open_groups: Vec<OperatorGroup>,
+    /// Opened by *Add step* on the board's bar: a step it adds goes after
+    /// the selection (DIAG-06a).
+    bar: bool,
 }
 
 /// The output a card's menu starts from: control flow for Start and IF, otherwise
@@ -78,6 +81,16 @@ impl ActionMenu {
             search: String::new(),
             focus_search: true,
             open_groups: library::default_open_groups(),
+            bar: false,
+        }
+    }
+
+    /// The menu of *Add step* on the board's bar: what it adds goes after
+    /// the selection, not last (DIAG-06a).
+    pub fn bar(screen: Pos2, world: Pos2) -> Self {
+        Self {
+            bar: true,
+            ..Self::new(screen, world, None)
         }
     }
 
@@ -294,11 +307,19 @@ impl ActionMenu {
                                                 y: node.position.y + 20.0,
                                             },
                                         );
-                                        outcome = Outcome::Add(Command::AddNode {
-                                            block: action.block,
-                                            component: action.component.clone(),
-                                            position,
-                                            source: self.source.clone(),
+                                        outcome = Outcome::Add(if self.bar {
+                                            Command::AddStep {
+                                                block: action.block,
+                                                component: action.component.clone(),
+                                                position,
+                                            }
+                                        } else {
+                                            Command::AddNode {
+                                                block: action.block,
+                                                component: action.component.clone(),
+                                                position,
+                                                source: self.source.clone(),
+                                            }
                                         });
                                     }
                                 }

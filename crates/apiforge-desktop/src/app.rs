@@ -2471,6 +2471,16 @@ impl App {
                     self.with_board(|board| board.add_node(block, component, position, source));
                 self.apply_edit(result);
             }
+            // The legacy window keeps adding last (DIAG-06a, criterion 9).
+            Command::AddStep {
+                block,
+                component,
+                position,
+            } => {
+                let result =
+                    self.with_board(|board| board.add_node(block, component, position, None));
+                self.apply_edit(result);
+            }
             Command::AddOperator { operator, position } => {
                 self.push_node(create_operator_node(operator, position))
             }

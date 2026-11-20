@@ -104,6 +104,14 @@ pub enum Command {
         position: Position,
         source: Option<(String, String)>,
     },
+    /// A block from *Add step* on the board's bar: a step goes after the
+    /// selection, in its braces; with nothing selected, and for any other
+    /// block, last (DIAG-06a). The legacy window adds it last.
+    AddStep {
+        block: Block,
+        component: Option<(String, u32)>,
+        position: Position,
+    },
     AddOperator {
         operator: Operator,
         position: Position,
@@ -782,7 +790,7 @@ impl Canvas {
     pub(crate) fn debug_open_menu(&mut self) {
         let at = self.last_viewport.min + vec2(16.0, 48.0);
         let camera = self.screen_camera(self.last_viewport);
-        self.menu = Some(ActionMenu::new(at, camera.to_world(at), None));
+        self.menu = Some(ActionMenu::bar(at, camera.to_world(at)));
     }
 
     #[cfg(test)]
@@ -3886,13 +3894,17 @@ impl Canvas {
             .chain(&input.graph.nodes)
             .find(|node| node.id == value.node_id);
         let card = |id: &str| cards.iter().find(|card| card.id == id);
-        let far = match (source, card(&value.node_id), card(target)) {
-            (Some(source), Some(from), Some(to)) => {
-                matches!(source.kind, NodeKind::Request | NodeKind::Component)
-                    && readers::far(cards, from, to)
-            }
-            _ => false,
-        };
+        // A wire of the order is no value to save first (DIAG-06a): from
+        // *Next*, *Yes* or *No* it moves the step it is dropped on.
+        let control = value.port.starts_with("__");
+        let far = !control
+            && match (source, card(&value.node_id), card(target)) {
+                (Some(source), Some(from), Some(to)) => {
+                    matches!(source.kind, NodeKind::Request | NodeKind::Component)
+                        && readers::far(cards, from, to)
+                }
+                _ => false,
+            };
         match input.scenario {
             Some((main, cleanup)) if far && !input.read_only => {
                 self.menu = None;
@@ -4028,7 +4040,7 @@ impl Canvas {
                             {
                                 let at = ui.min_rect().left_bottom() + vec2(-6.0, 12.0);
                                 let camera = self.screen_camera(viewport);
-                                self.menu = Some(ActionMenu::new(at, camera.to_world(at), None));
+                                self.menu = Some(ActionMenu::bar(at, camera.to_world(at)));
                             }
                             if input.can_paste
                                 && editable

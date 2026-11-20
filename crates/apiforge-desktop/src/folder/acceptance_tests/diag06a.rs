@@ -394,7 +394,7 @@ fn diag06a_criterion_3() {
     );
     let text = source_of(&harness, &id);
     let line = |prefix: &str| super::diag07::line_of(&text, prefix);
-    assert!(line("second = ") < line("cart = ") && line("cart = ") < line("product = "));
+    assert!(line("var second = ") < line("cart = ") && line("cart = ") < line("product = "));
     assert!(line("cart_created = ") < line("product = "), "{text}");
     assert!(line("expected_total = ") < line("cart_total = "), "{text}");
 }

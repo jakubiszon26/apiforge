@@ -52,9 +52,10 @@ fn default_slot(node: &Node) -> Option<(String, Vec<String>)> {
 ///
 /// - From a control pseudo-port the block gets an ordering edge (taking the IF
 ///   branch of `__true`/`__false`). From a step's `__order` it is written after
-///   that step and the checks and values that follow it, so it runs directly
-///   after it, and it follows the branches that step follows, so it stands in
-///   the same braces; every other new block is written last.
+///   that step and the checks and values that follow it (after an `if`, after
+///   its braces too), so it runs directly after it, and it follows the
+///   branches that step follows, so it stands in the same braces; every other
+///   new block is written last.
 /// - From a data output the block's default input is bound to it: `actual` for
 ///   checks, `value` for values, `body` for requests and the action input of a
 ///   component. A block without such an input gets an ordering edge instead.
@@ -171,10 +172,24 @@ pub fn add_node(
 /// The index after `source` and the checks and values written after it,
 /// before the next step: where a step that follows `source` is written, so
 /// that it runs directly after it (DIAG-07). Among ready blocks the engine
-/// takes the one written first.
+/// takes the one written first. After an `if`, the statements of its braces
+/// are passed too: a step after the whole `if` (DIAG-06a, *Add step* with
+/// the `if` selected) is written after its closing brace.
 fn after_step(graph: &Graph, source: &str) -> usize {
     let Some(index) = graph.nodes.iter().position(|node| node.id == source) else {
         return graph.nodes.len();
+    };
+    let braces = crate::chain::braces(graph);
+    let inside = |id: &str| {
+        let mut current = id;
+        for _ in 0..=graph.nodes.len() {
+            match braces.get(current) {
+                Some(&(x, _)) if x == source => return true,
+                Some(&(x, _)) => current = x,
+                None => return false,
+            }
+        }
+        false
     };
     graph.nodes[index + 1..]
         .iter()
@@ -182,7 +197,7 @@ fn after_step(graph: &Graph, source: &str) -> usize {
             matches!(
                 node.kind,
                 NodeKind::Start | NodeKind::Request | NodeKind::Component | NodeKind::If
-            )
+            ) && !inside(&node.id)
         })
         .map_or(graph.nodes.len(), |offset| index + 1 + offset)
 }

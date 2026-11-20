@@ -821,8 +821,37 @@ impl ProjectSession {
     pub fn apply_model_edit(
         &mut self,
         document_id: &str,
+        model: Document,
+        origin: Origin,
+    ) -> Result<()> {
+        self.apply_edit(document_id, model, origin, None)
+    }
+
+    /// A move on the board (DIAG-06a): `model` is the document with a step
+    /// put at a place by [`apiforge_core::edit::place`], `moved` the blocks
+    /// it moved. Their lines are moved in the text and nothing else changes;
+    /// a move that cannot be written so is refused with
+    /// [`Error::MoveNotWritten`] and never printed whole. One step of Undo.
+    ///
+    /// The model already holds the chain the move made, so LANG-13's rebuild
+    /// of the chain ([`kept_chain`]), which paste and duplicate still need
+    /// until DIAG-06f, is not applied to it.
+    pub fn apply_move(
+        &mut self,
+        document_id: &str,
+        model: Document,
+        moved: &[String],
+        origin: Origin,
+    ) -> Result<()> {
+        self.apply_edit(document_id, model, origin, Some(moved))
+    }
+
+    fn apply_edit(
+        &mut self,
+        document_id: &str,
         mut model: Document,
         origin: Origin,
+        moved: Option<&[String]>,
     ) -> Result<()> {
         let index = self.index(document_id)?;
         self.require_no_held_draft(document_id)?;
@@ -838,12 +867,15 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
-        let model = kept_chain(&previous, model);
+        let model = match moved {
+            Some(_) => model,
+            None => kept_chain(&previous, model),
+        };
         if *previous == model {
             return Ok(());
         }
         let text = self.documents[index].text().to_owned();
-        self.install_model(index, model, origin)?;
+        self.install_model(index, model, origin, moved)?;
         let document = &mut self.documents[index];
         document.history.record(Step {
             text,
@@ -851,22 +883,6 @@ impl ProjectSession {
         });
         document.history.present = Some(document.text().to_owned());
         Ok(())
-    }
-
-    /// A move on the board (DIAG-06a): `model` is the document with a step
-    /// put at a place by [`apiforge_core::edit::place`], `moved` the blocks
-    /// it moved. Their lines are moved in the text and nothing else changes;
-    /// a move that cannot be written so is refused with
-    /// [`Error::MoveNotWritten`] and never printed whole. One step of Undo.
-    pub fn apply_move(
-        &mut self,
-        document_id: &str,
-        model: Document,
-        moved: &[String],
-        origin: Origin,
-    ) -> Result<()> {
-        let _ = moved;
-        self.apply_model_edit(document_id, model, origin)
     }
 
     pub fn undo(&mut self, document_id: &str, origin: Origin) -> Result<bool> {
@@ -972,7 +988,13 @@ impl ProjectSession {
         Ok(())
     }
 
-    fn install_model(&mut self, index: usize, model: Document, origin: Origin) -> Result<()> {
+    fn install_model(
+        &mut self,
+        index: usize,
+        model: Document,
+        origin: Origin,
+        moved: Option<&[String]>,
+    ) -> Result<()> {
         let context = apiforge_script::LowerContext::folder(&self.context);
         apiforge_script::validate_document_model(&model, &context)
             .map_err(|_| Error::InvalidModel)?;
@@ -985,13 +1007,22 @@ impl ProjectSession {
             // (LAY-34). Only printing the whole file drops comments that
             // belong to no statement, so only then is the person asked first
             // (owner, 2026-11-17).
-            let text = match apiforge_script::edit_in_place(
-                &self.context,
-                document.text(),
-                previous,
-                &model,
-            ) {
+            let written = match moved {
+                Some(moved) => apiforge_script::edit_in_place_moving(
+                    &self.context,
+                    document.text(),
+                    previous,
+                    &model,
+                    moved,
+                ),
+                None => {
+                    apiforge_script::edit_in_place(&self.context, document.text(), previous, &model)
+                }
+            };
+            let text = match written {
                 Some(text) => text,
+                // A move is written line by line or not at all (DIAG-06a).
+                None if moved.is_some() => return Err(Error::MoveNotWritten),
                 None => {
                     self.require_comment_decision(index)?;
                     apiforge_script::print_folder_document(&self.context, &model)

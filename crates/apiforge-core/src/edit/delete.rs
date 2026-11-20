@@ -153,7 +153,7 @@ fn listed(handles: &[&str]) -> String {
 }
 
 /// The statements a node reads, by identifier, each once.
-fn reads(node: &Node) -> Vec<&str> {
+pub(super) fn reads(node: &Node) -> Vec<&str> {
     let mut result: Vec<&str> = vec![];
     for binding in node.inputs.values() {
         for reference in binding.references() {
@@ -166,11 +166,61 @@ fn reads(node: &Node) -> Vec<&str> {
 }
 
 /// A check, a value or a variable: what goes with what it reads.
-fn follows_what_it_reads(kind: NodeKind) -> bool {
+pub(super) fn follows_what_it_reads(kind: NodeKind) -> bool {
     matches!(
         kind,
         NodeKind::Assert | NodeKind::Condition | NodeKind::Value
     )
+}
+
+/// Adds to `with` what goes with its statements, until nothing more is
+/// added: a statement `may` accepts that reads at least one statement of
+/// `with` and, besides them, only statements of `neutral`. Each added
+/// statement is recorded with what it goes with: the statements of `with`
+/// that went without going with another, through the ones it reads. The
+/// same notion takes the checks along with a deleted step (DIAG-06e) and
+/// with a moved one (DIAG-06a).
+pub(super) fn taken_along<'g>(
+    graph: &'g Graph,
+    with: &mut HashMap<&'g str, Vec<&'g str>>,
+    may: impl Fn(&Node) -> bool,
+    neutral: &HashSet<&str>,
+) {
+    loop {
+        let mut added = false;
+        for node in &graph.nodes {
+            let id = node.id.as_str();
+            if with.contains_key(id) || !may(node) {
+                continue;
+            }
+            let read = reads(node);
+            if read.iter().any(|source| with.contains_key(source))
+                && read
+                    .iter()
+                    .all(|source| with.contains_key(source) || neutral.contains(source))
+            {
+                let mut owners: Vec<&str> = vec![];
+                for source in read.into_iter().filter(|source| with.contains_key(source)) {
+                    let own = &with[source];
+                    let sources = if own.is_empty() {
+                        std::slice::from_ref(&source)
+                    } else {
+                        own.as_slice()
+                    };
+                    for owner in sources {
+                        if !owners.contains(owner) {
+                            owners.push(owner);
+                        }
+                    }
+                }
+                with.insert(id, owners);
+                added = true;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
 }
 
 /// What deleting `selection` from `graph` would do. `beside` are the graphs
@@ -242,37 +292,12 @@ pub fn delete_preview(
         }
     }
     // A check, value or variable that reads only what goes goes with it.
-    loop {
-        let mut added = false;
-        for node in &graph.nodes {
-            let id = node.id.as_str();
-            if with.contains_key(id) || !follows_what_it_reads(node.kind) {
-                continue;
-            }
-            let read = reads(node);
-            if !read.is_empty() && read.iter().all(|source| with.contains_key(source)) {
-                let mut owners: Vec<&str> = vec![];
-                for source in read {
-                    let own = &with[source];
-                    let sources = if own.is_empty() {
-                        std::slice::from_ref(&source)
-                    } else {
-                        own.as_slice()
-                    };
-                    for owner in sources {
-                        if !owners.contains(owner) {
-                            owners.push(owner);
-                        }
-                    }
-                }
-                with.insert(id, owners);
-                added = true;
-            }
-        }
-        if !added {
-            break;
-        }
-    }
+    taken_along(
+        graph,
+        &mut with,
+        |node| follows_what_it_reads(node.kind),
+        &HashSet::new(),
+    );
 
     let gone: Vec<String> = graph
         .nodes

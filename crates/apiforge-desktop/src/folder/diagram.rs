@@ -2,6 +2,7 @@
 //! inspector of its selected block.
 
 use super::*;
+use apiforge_core::graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT};
 
 impl FolderApp {
     /// Where the sleeping dog is in its four-second loop, or its rest frame in
@@ -337,6 +338,7 @@ impl FolderApp {
                         next: Box::new(with_graphs(model, saved.main, saved.cleanup)),
                         selection: Some(selection),
                         check: None,
+                        moved: Vec::new(),
                     },
                 );
             }
@@ -569,6 +571,12 @@ impl FolderApp {
                 position,
                 source,
             } => Some(board.add_node(block, component, position, source)),
+            // After the selection, in its braces (DIAG-06a).
+            Command::AddStep {
+                block,
+                component,
+                position,
+            } => Some(board.add_step(block, component, position, &selection)),
             Command::AddOperator { operator, position } => {
                 Some(Ok(board.push_node(create_operator_node(operator, position))))
             }
@@ -597,6 +605,15 @@ impl FolderApp {
                 .map(|result| result.map(Into::into)),
             // One preview drives the refusal, the question and the delete
             // (DIAG-06e).
+            // An ordering line is the order of the written steps: it is not
+            // deleted on its own (DIAG-06a).
+            Command::Delete { wires, .. }
+                if wires
+                    .iter()
+                    .any(|wire| graph.edges.iter().any(|edge| &edge.id == wire)) =>
+            {
+                Some(Err(apiforge_core::edit::EditError::OrderLine.to_string()))
+            }
             Command::Delete { ids, wires } => {
                 let needs_start = matches!(model, Document::Scenario(_)) && !cleanup;
                 let deletion = board.deletion(&ids, needs_start);
@@ -634,6 +651,27 @@ impl FolderApp {
                 }
             }
             Command::AddProxy { source, position } => Some(board.add_proxy(source, position)),
+            // A wire of the order between two steps of the board moves the
+            // step it is dropped on (DIAG-06a).
+            Command::Connect {
+                source,
+                source_port,
+                target,
+                target_input,
+                ..
+            } if target_input == ORDER_PORT
+                && [ORDER_PORT, TRUE_PORT, FALSE_PORT].contains(&source_port.as_str())
+                && [&source, &target].iter().all(|id| {
+                    graph
+                        .nodes
+                        .iter()
+                        .any(|node| &&node.id == id && apiforge_core::chain::is_step(node.kind))
+                }) =>
+            {
+                let placed = board.place(&source, &source_port, &target);
+                self.apply_move(document_id, model, cleanup, placed);
+                None
+            }
             Command::Connect {
                 source,
                 source_port,
@@ -874,6 +912,35 @@ impl FolderApp {
                     next: Box::new(with_graph(model, cleanup, edit.graph)),
                     selection: edit.selection,
                     check: None,
+                    moved: Vec::new(),
+                },
+            ),
+            Err(message) => {
+                if let Some(canvas) = self.canvases.get_mut(document_id) {
+                    canvas.set_error(message);
+                }
+            }
+        }
+    }
+
+    /// Applies a move on the board as one model edit whose moved blocks the
+    /// text moves line by line (DIAG-06a), or shows its refusal in the
+    /// board's banner.
+    fn apply_move(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        cleanup: bool,
+        placed: Result<(Graph, Vec<String>), String>,
+    ) {
+        match placed {
+            Ok((graph, moved)) => self.component_action(
+                document_id,
+                publication::Action::Model {
+                    next: Box::new(with_graph(model, cleanup, graph)),
+                    selection: None,
+                    check: None,
+                    moved,
                 },
             ),
             Err(message) => {
@@ -1058,6 +1125,7 @@ impl FolderApp {
                                 next: Box::new(with_graphs(&model, read.main, read.cleanup)),
                                 selection: Some(Vec::new()),
                                 check: None,
+                                moved: Vec::new(),
                             },
                         ),
                         Err(error) => {

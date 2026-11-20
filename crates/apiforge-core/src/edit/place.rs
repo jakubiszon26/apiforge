@@ -14,11 +14,18 @@
 //! Where a check or a value is written is no reason: data statements stand
 //! anywhere in their block. Until DIAG-06d a step moves only inside its own
 //! braces, and an `if` with statements in its braces does not move.
-use super::EditError;
-use crate::{
-    format::{Graph, Project},
-    model::Branch,
+use super::{
+    EditError,
+    delete::{follows_what_it_reads, reads, taken_along},
+    shared::{ValueRef, value_text},
 };
+use crate::{
+    chain::{Braces, braces, chain, is_step},
+    format::{Graph, Node, Project},
+    graph::{dependency_index, has_cycle, sequence},
+    model::{Branch, NodeKind},
+};
+use std::collections::{HashMap, HashSet};
 
 /// Where a step is put.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,8 +49,265 @@ pub fn place(
     step: &str,
     at: Place<'_>,
 ) -> Result<(Graph, Vec<String>), EditError> {
-    let _ = (graph, project, step, at);
-    Err(EditError::NotMovableYet)
+    let find = |id: &str| graph.nodes.iter().find(|node| node.id == id);
+    let node = find(step).ok_or(EditError::NodeNotFound)?;
+    if node.kind == NodeKind::Start {
+        return Err(EditError::StartHasPredecessor);
+    }
+    if !is_step(node.kind) {
+        return Err(EditError::NodeNotFound);
+    }
+    let anchor = match at {
+        Place::After(anchor) | Place::First(anchor, _) => anchor,
+    };
+    let anchor_node = find(anchor).ok_or(EditError::NodeNotFound)?;
+    if anchor == step {
+        return Err(EditError::SelfConnection);
+    }
+    if matches!(at, Place::First(..)) && anchor_node.kind != NodeKind::If {
+        return Err(EditError::BranchRequired);
+    }
+    let written = braces(graph);
+    let own = written.get(step).copied();
+    let target = match at {
+        Place::After(anchor) => written.get(anchor).copied(),
+        Place::First(x, branch) => Some((x, branch)),
+    };
+    // Until DIAG-06d: an `if` moves only with empty braces, and a step only
+    // inside the braces it stands in.
+    if node.kind == NodeKind::If
+        && graph
+            .nodes
+            .iter()
+            .any(|other| inside(&written, &other.id, step))
+        || own != target
+    {
+        return Err(EditError::NotMovableYet);
+    }
+
+    // What goes with the step: the checks, values and variables written
+    // directly under it that read it and no other step.
+    let index = graph
+        .nodes
+        .iter()
+        .position(|node| node.id == step)
+        .expect("the step is in the graph");
+    let under: HashSet<&str> = graph.nodes[index + 1..]
+        .iter()
+        .take_while(|node| node.kind.is_data() && written.get(node.id.as_str()).copied() == own)
+        .filter(|node| follows_what_it_reads(node.kind))
+        .map(|node| node.id.as_str())
+        .collect();
+    let mut with: HashMap<&str, Vec<&str>> = HashMap::from([(step, vec![])]);
+    taken_along(
+        graph,
+        &mut with,
+        |node| under.contains(node.id.as_str()),
+        &constants(graph),
+    );
+    let moving: Vec<&Node> = graph
+        .nodes
+        .iter()
+        .filter(|node| with.contains_key(node.id.as_str()))
+        .collect();
+    let rest: Vec<&Node> = graph
+        .nodes
+        .iter()
+        .filter(|node| !with.contains_key(node.id.as_str()))
+        .collect();
+
+    // Where it goes among the rest.
+    let at_index = match at {
+        Place::After(anchor) => {
+            let position = rest
+                .iter()
+                .position(|node| node.id == anchor)
+                .expect("the anchor stays");
+            let last_inside = rest
+                .iter()
+                .enumerate()
+                .filter(|(_, node)| inside(&written, &node.id, anchor))
+                .map(|(index, _)| index)
+                .max()
+                .unwrap_or(position)
+                .max(position);
+            let mut end = last_inside + 1;
+            while end < rest.len()
+                && rest[end].kind.is_data()
+                && written.get(rest[end].id.as_str()).copied() == own
+            {
+                end += 1;
+            }
+            end
+        }
+        Place::First(x, branch) => match rest
+            .iter()
+            .position(|node| written.get(node.id.as_str()).copied() == Some((x, branch)))
+        {
+            Some(first) => first,
+            None => {
+                let position = rest
+                    .iter()
+                    .position(|node| node.id == x)
+                    .expect("the if stays");
+                if branch == Branch::True {
+                    position + 1
+                } else {
+                    rest.iter()
+                        .enumerate()
+                        .filter(|(_, node)| inside(&written, &node.id, x))
+                        .map(|(index, _)| index)
+                        .max()
+                        .unwrap_or(position)
+                        .max(position)
+                        + 1
+                }
+            }
+        },
+    };
+    let mut ordered = graph.clone();
+    ordered.nodes = rest[..at_index]
+        .iter()
+        .chain(&moving)
+        .chain(&rest[at_index..])
+        .map(|node| (*node).clone())
+        .collect();
+    let result = chain(&ordered, &written);
+    if has_cycle(&result) {
+        return Err(EditError::PlaceRefused(cycle(&result, project)));
+    }
+    let moved = moving.iter().map(|node| node.id.clone()).collect();
+    Ok((result, moved))
+}
+
+/// Whether the statement `id` stands in the braces of the `if` `x`, at any
+/// depth.
+fn inside(braces: &Braces<'_>, id: &str, x: &str) -> bool {
+    let mut current = id;
+    for _ in 0..=braces.len() {
+        match braces.get(current) {
+            Some(&(parent, _)) if parent == x => return true,
+            Some(&(parent, _)) => current = parent,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// The data statements that read no step, directly or through others: a
+/// literal, a check of constants, a value of a parameter or of `env`. A
+/// check that reads a step and one of them reads no other step.
+fn constants(graph: &Graph) -> HashSet<&str> {
+    let nodes: HashMap<&str, &Node> = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    let mut known: HashMap<&str, bool> = HashMap::new();
+    fn constant<'g>(
+        id: &'g str,
+        nodes: &HashMap<&'g str, &'g Node>,
+        known: &mut HashMap<&'g str, bool>,
+        depth: usize,
+    ) -> bool {
+        if let Some(&answer) = known.get(id) {
+            return answer;
+        }
+        let answer = depth <= nodes.len()
+            && nodes.get(id).is_some_and(|node| {
+                node.kind.is_data()
+                    && reads(node)
+                        .into_iter()
+                        .all(|source| constant(source, nodes, known, depth + 1))
+            });
+        known.insert(id, answer);
+        answer
+    }
+    graph
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .filter(|id| constant(id, &nodes, &mut known, 0))
+        .collect()
+}
+
+/// The board's sentence for a move whose result has a cycle: the first
+/// step, in written order, that reads something which depends on it, what
+/// it reads, and the step that something comes from. A check or a value is
+/// named only when no step is: it may stand anywhere in its block, so its
+/// place is never the reason.
+fn cycle(graph: &Graph, project: &Project) -> String {
+    let index = dependency_index(graph);
+    let handles: HashMap<&str, &Node> = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect();
+    // Whether `from` depends on `on`, through ordering and values.
+    let depends = |from: &str, on: &str| -> bool {
+        let mut seen: HashSet<&str> = HashSet::new();
+        let mut stack = vec![from];
+        while let Some(id) = stack.pop() {
+            for &source in index.get(id).into_iter().flatten() {
+                if source == on {
+                    return true;
+                }
+                if seen.insert(source) {
+                    stack.push(source);
+                }
+            }
+        }
+        false
+    };
+    let readers = graph
+        .nodes
+        .iter()
+        .filter(|node| is_step(node.kind))
+        .chain(graph.nodes.iter().filter(|node| !is_step(node.kind)));
+    for reader in readers {
+        for binding in reader.inputs.values() {
+            for reference in binding.references() {
+                let Some(read) = handles.get(reference.node_id) else {
+                    continue;
+                };
+                if !depends(&read.id, &reader.id) {
+                    continue;
+                }
+                // The step what it reads comes from: itself, or the first
+                // step it is computed from that depends on the reader.
+                let mut below = None;
+                let mut seen: HashSet<&str> = HashSet::new();
+                let mut stack = vec![read.id.as_str()];
+                while let Some(id) = stack.pop() {
+                    let Some(node) = handles.get(id) else {
+                        continue;
+                    };
+                    if is_step(node.kind) && (id == read.id || depends(id, &reader.id)) {
+                        below = Some(node.handle.as_str());
+                        break;
+                    }
+                    for &source in index.get(id).into_iter().flatten().rev() {
+                        if seen.insert(source) {
+                            stack.push(source);
+                        }
+                    }
+                }
+                let value = value_text(
+                    graph,
+                    None,
+                    project,
+                    &ValueRef::new(reference.node_id, reference.port, reference.path),
+                );
+                if let Some(below) = below {
+                    return format!(
+                        "`{}` reads `{value}`; it stays below `{below}`.",
+                        reader.handle
+                    );
+                }
+            }
+        }
+    }
+    EditError::ConnectionCycle.to_string()
 }
 
 /// The step *Add step* on the board's bar puts a new step after: with a
@@ -52,8 +316,36 @@ pub fn place(
 /// last. `None` with nothing selected, or when no selected statement is
 /// written under a step: the new step goes last in the main flow.
 pub fn add_step_after<'g>(graph: &'g Graph, selection: &[&str]) -> Option<&'g str> {
-    let _ = (graph, selection);
-    None
+    let written = braces(graph);
+    let runs: HashMap<&str, usize> = sequence(graph)
+        .into_iter()
+        .enumerate()
+        .map(|(rank, id)| (id, rank))
+        .collect();
+    let under = |id: &str| -> Option<&'g str> {
+        let index = graph.nodes.iter().position(|node| node.id == id)?;
+        let node = &graph.nodes[index];
+        if is_step(node.kind) {
+            return Some(node.id.as_str());
+        }
+        let own = written.get(node.id.as_str()).copied();
+        for above in graph.nodes[..index].iter().rev() {
+            if own.is_some_and(|(x, _)| x == above.id) {
+                return None;
+            }
+            if written.get(above.id.as_str()).copied() != own {
+                continue;
+            }
+            if is_step(above.kind) {
+                return Some(above.id.as_str());
+            }
+        }
+        None
+    };
+    selection
+        .iter()
+        .filter_map(|id| under(id))
+        .max_by_key(|id| runs.get(id).copied().unwrap_or(0))
 }
 
 #[cfg(test)]
