@@ -1,10 +1,15 @@
 # DIAG-06e: Deleting a step that is read, and pasting or duplicating steps, keep the chain and the check
 
 - Size: M · Owner review: 15 min · Risk: `default`, `visible UI`
-- State: **Analysis; waits for three owner decisions** on
-  [#494](https://github.com/jakubiszon26/apiforge/issues/494). Split from
-  DIAG-06a on 2026-11-20 after an independent review. After DIAG-06a
-  (#391). A condition of 0.2.0 (REL-05, condition 5).
+- State: **Decided; waits for the independent review before it is
+  labelled.** The owner answered the three questions on
+  [#494](https://github.com/jakubiszon26/apiforge/issues/494) on
+  2026-11-20: 1 = A (a delete of a step that is read is refused, naming
+  the readers), 2 = A (*Duplicate* directly after its original; *Paste*
+  after the selected step, else at the end), 3 = A (a reference that
+  still finds its step is kept; otherwise the paste is refused). Split
+  from DIAG-06a on 2026-11-20. After DIAG-06a (#391). A condition of
+  0.2.0 (REL-05, condition 5).
 - Branch `feat/diag-06e-delete-and-paste`
 - Analysis model: Fable 5.2 · Implementation model: —
 
@@ -25,9 +30,7 @@ refuses. Pasted and duplicated steps are written last (LANG-13).
 
 ## Decisions
 
-1. Deleting a step whose value another step reads — question 1 on #494.
-2. Where pasted and duplicated steps land — question 2.
-3. A pasted step that reads a step which is not there — question 3.
+The owner's, 2026-11-20 (#494): the three answers above.
 
 Ruled by the planning model, following from rules already decided:
 
@@ -40,8 +43,7 @@ Ruled by the planning model, following from rules already decided:
 
 ## Acceptance criteria
 
-Written for the recommended answers (1 A, 2 A, 3 A); restated if the
-owner chooses otherwise. Tests named `diag06e`, in the files of DIAG-06a;
+Tests named `diag06e`, in the files of DIAG-06a;
 every test of an edit ends by asserting the check.
 
 1. Deleting a step that another step, outside the selection, reads is
