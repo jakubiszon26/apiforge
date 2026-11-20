@@ -141,51 +141,87 @@ They are REL-05's release conditions:
 - [ ] The reference describes language 2 only; ADR 0003, ADR 0005 and
       ADR 0010 are amended by the tickets that change them.
 
-### After the reviews of 2026-11-20: the tickets as split
+### After the reviews and the cut of 2026-11-20
 
 Four independent reviews of the ticket files on 2026-11-20 found the
 tickets around the project update, the board's edits and the window's
-offer larger than estimated, and their shared rules owned by nobody.
-They were split so that each is `S` or `M` and each shared rule has one
-owner. **This table replaces the rows of LANG-20, LANG-21 and DIAG-06 in
-the table above**; the other rows stand. Which of them may be taken
-unattended is on the issues.
+offer larger than estimated, and their shared rules owned by nobody;
+they were split so that each is `S` or `M` and each shared rule has one
+owner. The same evening **the owner cut the project update to one
+ticket**: before 0.2.0 nobody uses the application, so one command that
+converts a project whole is enough. **This table replaces the rows of
+LANG-20, LANG-21 and DIAG-06 in the table above**; the other rows stand.
+Which tickets may be taken unattended is on the issues.
+
+Merged on 2026-11-20 and after: LANG-13 (#488), LANG-20e (#504, the
+store's read set), LANG-05 (#505), DIAG-06g (#507, Undo restores the
+file), LANG-06 with KTLO-37 (#508), LAY-45 (#509), DIAG-06e (#510, the
+delete).
 
 | Ticket | Owns | Size | After |
 | --- | --- | --- | --- |
-| LANG-20a #481 | the record of converted sources (`.apiforge/language-update.json`), a project's three states, what run, check and the overview do while it is being updated | M · 20 · `format` | LANG-13 |
-| LANG-20e #500 | a commit of the project store refuses when something it only read has changed | S · 10 | LANG-13 |
-| LANG-20d #499 | the record when a source is created, deleted, restored or renamed; a board edit in a source not yet converted is refused | M · 20 · `format`, `default` | LANG-20a; a restore of an old file into an updated project converts it when it can (the owner, #499) |
-| LANG-20b #497 | the plan of an update, its commits, the finish, `apiforge fix --folder` with `--check` and `--as-written` | M · 20 · `format` | LANG-20a, LANG-20e |
-| LANG-20f #501 | the update after a save | S · 10 · `format` | LANG-20b |
-| LANG-20c #498 | the MCP tool `fix` | S · 10 · `format` | LANG-20b |
-| LANG-21a #482 | the window's offer: one dialog in parts, *Update N files*, *Finish the update*, *This file is ready as written* | M · 30 · `visible UI` | LANG-20f |
-| LANG-21b #495 | the list leads to each statement; the band's count follows each save | M · 20 · `visible UI` | LANG-21a; not a condition of 0.2.0 |
-| DIAG-06g #502 | Undo and Redo restore the file byte for byte | M · 15 | LANG-13 |
-| DIAG-06e #494 | a delete is refused when something read would go; an `if` asks once | M · 20 · `default`, `visible UI` | DIAG-06g |
-| DIAG-06a #391 | a step is placed and moved inside its braces; the one placement rule | M · 20 · `default`, `visible UI` | LANG-06, LAY-45, DIAG-06e |
+| LANG-20 #481 | `apiforge fix --folder`: a whole project in one commit, or nothing and a list of what to do by hand; `--check` | M · 15 · `format` | one independent review |
+| DIAG-06a #391 | a step is placed and moved inside its braces; the one placement rule | M · 20 · `default`, `visible UI` | — |
 | DIAG-06d #493 | a step moves with an `if`'s braces and across braces | M · 20 · `default`, `visible UI` | DIAG-06a |
-| DIAG-06c #490 | the board shows and takes the chain | M · 20 · `visible UI`, `default` | LAY-45, DIAG-06d |
+| DIAG-06c #490 | the board shows and takes the chain | M · 20 · `visible UI`, `default` | DIAG-06d |
 | DIAG-06f #496 | paste and duplicate land in the chain and keep what they read; an `if` is copied with its braces | M · 15 · `default`, `visible UI` | DIAG-06d |
 | DIAG-06b #491 | feedback while carrying, the notice after a delete, `+` on a line, *Move earlier* and *Move later* | M · 15 · `visible UI` | DIAG-06c; not a condition of 0.2.0 |
+| REL-05 #414 | release 0.2.0 | S · 15 | all above except DIAG-06b |
 
-Merge order: LANG-13 → side by side LANG-06, LANG-05, LAY-45, LANG-20a,
-LANG-20e, DIAG-06g → DIAG-06e, LANG-20d, LANG-20b → LANG-20f, LANG-20c,
-DIAG-06a → LANG-21a, DIAG-06d → DIAG-06c, DIAG-06f → REL-05; LANG-21b
-and DIAG-06b after it or beside it. About 330 owner minutes ahead on
-2026-11-20; the owner kept the whole scope for 0.2.0, the window's
-update included.
+Merge order: LANG-20 beside DIAG-06a → DIAG-06d → DIAG-06c and DIAG-06f
+→ REL-05. About 120 owner minutes ahead.
 
-Owner decisions of 2026-11-20 these build, each recorded on its issue:
-a project is updated file by file, with a record (#481, against the
-recommended "whole or not at all"); a board edit in a source not yet
-converted is refused (#481); the window converts what it can, in one
-dialog (#481), and takes a file that is ready as written (#482);
+**Cut from 0.2.0 by the owner on 2026-11-20, in the backlog, to be taken
+only if users appear:** LANG-20b #497 (converting in guarded steps),
+LANG-20c #498 (the MCP tool `fix`), LANG-20d #499 (the record when
+sources come and go; the refusal of a board edit in an old source),
+LANG-20f #501 (the update after a save), LANG-21a #482 and LANG-21b #495
+(the window's *Update the project*). Their ticket files stay on their
+branches as reviewed. With them go the decisions of the same day that
+only they built: converting file by file with a record (#481), the
+window's dialog and *This file is ready as written* (#482), a restore
+that converts (#499). What a language-1 project shows in the window and
+to an agent is what LANG-15 and LANG-13 built: its errors without a
+per-line fix, and a run refused with the sentence that names the
+command.
+
+Owner decisions of 2026-11-20 that stand, each recorded on its issue:
+a project is converted whole, by one command, or not at all (#481);
 deleting a step that is read is refused, *Duplicate* lands after its
 original, a paste that would read what is not there is refused (#494);
-an `if` is copied with its braces (#496); a file deleted in the old
-language and restored after the update is converted by the restore when
-it can be, else the restore is refused (#499).
+an `if` is copied with its braces (#496); the chain is drawn side to
+side and its crossings are measured as three measures (#468); a corridor
+for a value many steps read is LAY-47 (#506), LAY-2, after 0.2.0.
+
+### Notes for the retrospective
+
+Recorded as they came up, for the sprint's review
+([retrospective](../process/retrospective.md)):
+
+- **A limit was proposed without a measurement.** LAY-45 was given the
+  condition "`shop-30` with every wire back to 76 and 116 crossings";
+  its feasibility gate showed that no drawing of the chain could reach
+  it (52 and 77 of them are data against data). The rule is now in
+  [estimation](../process/estimation.md#a-limit-comes-with-its-measurement).
+- **The reviews split tickets and nobody asked whether the scope was
+  still worth it.** The project update grew from one ticket to eight
+  over four rounds of review, each round finding real defects on the
+  seams and each answered by another split. With no user before 0.2.0, a
+  migration that needed a record, a state between two languages and a
+  window flow should have raised the question "should this be cut?" at
+  the second round, from the planning model, before the owner had to ask
+  it. A review that finds a ticket to be `L` twice is a signal about the
+  scope, not only about the split.
+- **A ticket was given a number that was taken.** The corridor for data
+  lines was filed as LAY-46 while LAY-46 was #469; a review of the plan
+  found it and it became LAY-47. Before an ID is written anywhere:
+  `gh issue list --state all --search "<ID> in:title"` and `git grep
+  <ID> -- docs`.
+- Three readings of approved text were wrong and were caught by an
+  independent review after the tickets were labelled (a `start` for a
+  component; a check that reads no step; a conversion that could not be
+  resumed). The review now comes before the label
+  ([autonomy](../process/autonomy.md#what-makes-a-ticket-ready)).
 
 ## Second half — the language grows
 
