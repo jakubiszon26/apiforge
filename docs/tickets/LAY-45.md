@@ -134,7 +134,7 @@ and fails criterion 3) and a higher price for crossing the chain (more
 crossings elsewhere). The owner chose to keep the drawing and measure
 the two kinds of crossing apart. A corridor for a value many steps read,
 where the data-against-data crossings can fall, is a later ticket of
-LAY-2 (LAY-46), not a condition of this one.
+LAY-2 (LAY-47, #506), not a condition of this one.
 
 ## Regression potential
 

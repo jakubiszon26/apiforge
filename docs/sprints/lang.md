@@ -191,7 +191,7 @@ deleting a step that is read is refused, *Duplicate* lands after its
 original, a paste that would read what is not there is refused (#494);
 an `if` is copied with its braces (#496); the chain is drawn side to
 side and its crossings are measured as three measures (#468); a corridor
-for a value many steps read is LAY-46 (#506), LAY-2, after 0.2.0.
+for a value many steps read is LAY-47 (#506), LAY-2, after 0.2.0.
 
 ### Notes for the retrospective
 
@@ -212,6 +212,11 @@ Recorded as they came up, for the sprint's review
   the second round, from the planning model, before the owner had to ask
   it. A review that finds a ticket to be `L` twice is a signal about the
   scope, not only about the split.
+- **A ticket was given a number that was taken.** The corridor for data
+  lines was filed as LAY-46 while LAY-46 was #469; a review of the plan
+  found it and it became LAY-47. Before an ID is written anywhere:
+  `gh issue list --state all --search "<ID> in:title"` and `git grep
+  <ID> -- docs`.
 - Three readings of approved text were wrong and were caught by an
   independent review after the tickets were labelled (a `start` for a
   component; a check that reads no step; a conversion that could not be
