@@ -333,9 +333,9 @@ fn applying_a_new_statement_places_it_clear_of_the_other_blocks() {
     }
 }
 
-/// An error on line 3; a warning on line 1 after three two-byte characters,
-/// at character column 17 (byte column 20).
-const MIXED: &str = "scenario \"Żółw\" // c\n{\n  other = )\n}\n";
+/// An error on line 1 after three two-byte characters, at character column
+/// 23 (byte column 26), and one on line 2.
+const MIXED: &str = "scenario \"Żółw\" { a = )\n  other = )\n}\n";
 
 /// The 1-based line and the column, counted in characters, of `offset`.
 fn line_column(text: &str, offset: usize) -> (usize, usize) {
@@ -366,17 +366,11 @@ fn issue346_criterion_2_workspace_check_of_a_file_prints_path_line_and_column() 
     let lines: Vec<&str> = stderr.lines().collect();
     let shown = source.display();
     assert!(
-        lines.contains(&format!("{shown}:3:11: error: Expected an expression").as_str()),
+        lines.contains(&format!("{shown}:1:23: error: Expected an expression").as_str()),
         "{stderr}"
     );
     assert!(
-        lines.contains(
-            &format!(
-                "{shown}:1:17: warning: {}",
-                apiforge_script::UNATTACHED_COMMENT
-            )
-            .as_str()
-        ),
+        lines.contains(&format!("{shown}:2:11: error: Expected an expression").as_str()),
         "{stderr}"
     );
     assert!(!lines.iter().any(|line| has_byte_range(line)), "{stderr}");

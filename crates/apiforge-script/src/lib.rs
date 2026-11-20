@@ -10,7 +10,7 @@ mod lower;
 mod parser;
 pub use lower::{Document, LowerContext, Lowered, lower, validate_document_model};
 
-pub use ast::{Diagnostic, Fix, Severity, SyntaxTree, UNATTACHED_COMMENT};
+pub use ast::{Diagnostic, Fix, Severity, SyntaxTree};
 pub use edit::{edit_folder_document, edit_in_place};
 pub use far::{FAR_READ, far_read_warnings};
 pub use fix::{
@@ -18,6 +18,19 @@ pub use fix::{
 };
 pub use format::{format, format_tree};
 pub use parser::parse;
+
+/// The comments of `source` that are no statement's note, in source order
+/// (LANG-06). Format keeps them; a file printed whole from its document, as
+/// a board edit that cannot be written into the text or a publication
+/// prints it, has no place for them, so the window and the MCP server ask
+/// before such a print.
+pub fn free_comments(source: &str) -> Vec<std::ops::Range<usize>> {
+    parse(source)
+        .comments
+        .into_iter()
+        .map(|comment| comment.range)
+        .collect()
+}
 
 /// The `.afs` language this build reads and writes (LANG-00, section 2). It
 /// is raised only when a file that was valid means something else or becomes

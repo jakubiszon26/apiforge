@@ -1103,9 +1103,9 @@ mod issue346 {
     use std::{ffi::OsStr, fs};
 
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
-    /// An error on line 3; a warning on line 1 after three two-byte
-    /// characters, at character column 17 (byte column 20).
-    const TEXT: &str = "scenario \"Żółw\" // c\n{\n  other = )\n}\n";
+    /// An error on line 1 after three two-byte characters, at character
+    /// column 23 (byte column 26), and one on line 2.
+    const TEXT: &str = "scenario \"Żółw\" { a = )\n  other = )\n}\n";
 
     #[test]
     fn issue346_criterion_1_folder_check_prints_path_line_and_character_column() {
@@ -1120,17 +1120,11 @@ mod issue346 {
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         let lines: Vec<&str> = stderr.lines().collect();
         assert!(
-            lines.contains(&format!("{SCENARIO}:3:11: error: Expected an expression").as_str()),
+            lines.contains(&format!("{SCENARIO}:1:23: error: Expected an expression").as_str()),
             "{stderr}"
         );
         assert!(
-            lines.contains(
-                &format!(
-                    "{SCENARIO}:1:17: warning: {}",
-                    apiforge_script::UNATTACHED_COMMENT
-                )
-                .as_str()
-            ),
+            lines.contains(&format!("{SCENARIO}:2:11: error: Expected an expression").as_str()),
             "{stderr}"
         );
         assert!(!lines.iter().any(|line| has_byte_range(line)), "{stderr}");
