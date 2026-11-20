@@ -141,6 +141,52 @@ They are REL-05's release conditions:
 - [ ] The reference describes language 2 only; ADR 0003, ADR 0005 and
       ADR 0010 are amended by the tickets that change them.
 
+### After the reviews of 2026-11-20: the tickets as split
+
+Four independent reviews of the ticket files on 2026-11-20 found the
+tickets around the project update, the board's edits and the window's
+offer larger than estimated, and their shared rules owned by nobody.
+They were split so that each is `S` or `M` and each shared rule has one
+owner. **This table replaces the rows of LANG-20, LANG-21 and DIAG-06 in
+the table above**; the other rows stand. Which of them may be taken
+unattended is on the issues.
+
+| Ticket | Owns | Size | After |
+| --- | --- | --- | --- |
+| LANG-20a #481 | the record of converted sources (`.apiforge/language-update.json`), a project's three states, what run, check and the overview do while it is being updated | M · 20 · `format` | LANG-13 |
+| LANG-20e #500 | a commit of the project store refuses when something it only read has changed | S · 10 | LANG-13 |
+| LANG-20d #499 | the record when a source is created, deleted, restored or renamed; a board edit in a source not yet converted is refused | M · 20 · `format`, `default` | LANG-20a; a restore of an old file into an updated project converts it when it can (the owner, #499) |
+| LANG-20b #497 | the plan of an update, its commits, the finish, `apiforge fix --folder` with `--check` and `--as-written` | M · 20 · `format` | LANG-20a, LANG-20e |
+| LANG-20f #501 | the update after a save | S · 10 · `format` | LANG-20b |
+| LANG-20c #498 | the MCP tool `fix` | S · 10 · `format` | LANG-20b |
+| LANG-21a #482 | the window's offer: one dialog in parts, *Update N files*, *Finish the update*, *This file is ready as written* | M · 30 · `visible UI` | LANG-20f |
+| LANG-21b #495 | the list leads to each statement; the band's count follows each save | M · 20 · `visible UI` | LANG-21a; not a condition of 0.2.0 |
+| DIAG-06g #502 | Undo and Redo restore the file byte for byte | M · 15 | LANG-13 |
+| DIAG-06e #494 | a delete is refused when something read would go; an `if` asks once | M · 20 · `default`, `visible UI` | DIAG-06g |
+| DIAG-06a #391 | a step is placed and moved inside its braces; the one placement rule | M · 20 · `default`, `visible UI` | LANG-06, LAY-45, DIAG-06e |
+| DIAG-06d #493 | a step moves with an `if`'s braces and across braces | M · 20 · `default`, `visible UI` | DIAG-06a |
+| DIAG-06c #490 | the board shows and takes the chain | M · 20 · `visible UI`, `default` | LAY-45, DIAG-06d |
+| DIAG-06f #496 | paste and duplicate land in the chain and keep what they read; an `if` is copied with its braces | M · 15 · `default`, `visible UI` | DIAG-06d |
+| DIAG-06b #491 | feedback while carrying, the notice after a delete, `+` on a line, *Move earlier* and *Move later* | M · 15 · `visible UI` | DIAG-06c; not a condition of 0.2.0 |
+
+Merge order: LANG-13 → side by side LANG-06, LANG-05, LAY-45, LANG-20a,
+LANG-20e, DIAG-06g → DIAG-06e, LANG-20d, LANG-20b → LANG-20f, LANG-20c,
+DIAG-06a → LANG-21a, DIAG-06d → DIAG-06c, DIAG-06f → REL-05; LANG-21b
+and DIAG-06b after it or beside it. About 330 owner minutes ahead on
+2026-11-20; the owner kept the whole scope for 0.2.0, the window's
+update included.
+
+Owner decisions of 2026-11-20 these build, each recorded on its issue:
+a project is updated file by file, with a record (#481, against the
+recommended "whole or not at all"); a board edit in a source not yet
+converted is refused (#481); the window converts what it can, in one
+dialog (#481), and takes a file that is ready as written (#482);
+deleting a step that is read is refused, *Duplicate* lands after its
+original, a paste that would read what is not there is refused (#494);
+an `if` is copied with its braces (#496); a file deleted in the old
+language and restored after the update is converted by the restore when
+it can be, else the restore is refused (#499).
+
 ## Second half — the language grows
 
 | Order | Ticket | Note |
