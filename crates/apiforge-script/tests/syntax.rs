@@ -108,7 +108,7 @@ fn precedence_associativity_and_parenthesized_check_operands_survive() {
         contains_value = assert a contains b
     }"#,
     );
-    assert!(output.contains("bare = assert (a >= b) == true"));
+    assert!(output.contains("bare = assert a >= b\n"));
     assert!(output.contains("nested = assert (a == b) == true"));
     assert!(parse(r#"scenario "Bad" { check = assert a == b contains c }"#).has_errors());
 }
