@@ -1,7 +1,6 @@
 scenario "Double booking is refused" {
   description "A room booked for a time cannot be booked again for the same time."
   begin = start
-  @after(begin)
   token = sign_in@1(user: "tester")
   rooms = GET "/rooms" {
     headers { Authorization: "Bearer {{token}}" }
@@ -21,7 +20,6 @@ scenario "Double booking is refused" {
       sample 409 { error: { code: "room_unavailable", message: "The room is closed for maintenance." } }
     }
     refused = assert second.status == 409
-    @after(refused)
     calendar = GET "/rooms/{{rooms.body.items[0].id}}/bookings" {
       headers { Authorization: "Bearer {{token}}" }
       query { from: slot.start, to: slot.end }

@@ -379,7 +379,12 @@ cargo run -p apiforge-cli --locked -- check --folder /path/to/project
 cargo run -p apiforge-cli --locked -- print --folder /path/to/project --file scenarios/main.afs
 cargo run -p apiforge-cli --locked -- apply --folder /path/to/project --file scenarios/main.afs incoming.afs
 cargo run -p apiforge-cli --locked -- run --folder /path/to/project --scenario scenarios/main.afs --json
+cargo run -p apiforge-cli --locked -- fix --folder /path/to/project [--check]
 ```
+
+`fix` converts a project written for 0.1.0 to language 2 in one commit, or
+writes nothing and lists what to change by hand
+([Projects written for 0.1.0](folder-projects.md#projects-written-for-010)).
 
 `check` optionally selects one registered source with `--file`. Besides the
 diagnostics MCP's `check` returns, it warns, as the Code view does, at each place

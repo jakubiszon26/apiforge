@@ -2,6 +2,7 @@
 //! inspector of its selected block.
 
 use super::*;
+use apiforge_core::graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT};
 
 impl FolderApp {
     /// Where the sleeping dog is in its four-second loop, or its rest frame in
@@ -247,6 +248,7 @@ impl FolderApp {
                     },
                     scenario: Some(scenario_of(&model)),
                     shared: &shared,
+                    moves: true,
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
@@ -337,6 +339,7 @@ impl FolderApp {
                         next: Box::new(with_graphs(model, saved.main, saved.cleanup)),
                         selection: Some(selection),
                         check: None,
+                        moved: Vec::new(),
                     },
                 );
             }
@@ -569,6 +572,17 @@ impl FolderApp {
                 position,
                 source,
             } => Some(board.add_node(block, component, position, source)),
+            Command::MoveOutOfBranch(id) => {
+                let placed = board.move_out_of_branch(&id);
+                self.apply_move(document_id, model, cleanup, placed);
+                None
+            }
+            // After the selection, in its braces (DIAG-06a).
+            Command::AddStep {
+                block,
+                component,
+                position,
+            } => Some(board.add_step(block, component, position, &selection)),
             Command::AddOperator { operator, position } => {
                 Some(Ok(board.push_node(create_operator_node(operator, position))))
             }
@@ -595,18 +609,75 @@ impl FolderApp {
                 .set_input(&node, &input, &path, binding)
                 .transpose()
                 .map(|result| result.map(Into::into)),
+            // One preview drives the refusal, the question and the delete
+            // (DIAG-06e).
+            // An ordering line is the order of the written steps: it is not
+            // deleted on its own (DIAG-06a).
+            Command::Delete { wires, .. }
+                if wires
+                    .iter()
+                    .any(|wire| graph.edges.iter().any(|edge| &edge.id == wire)) =>
+            {
+                Some(Err(apiforge_core::edit::EditError::OrderLine.to_string()))
+            }
             Command::Delete { ids, wires } => {
-                let next = board.delete(&ids, &wires);
-                let kept = selection
-                    .into_iter()
-                    .filter(|id| !ids.contains(id))
-                    .collect();
-                Some(Ok(Edit {
-                    graph: next,
-                    selection: Some(kept),
-                }))
+                let needs_start = matches!(model, Document::Scenario(_)) && !cleanup;
+                let deletion = board.deletion(&ids, needs_start);
+                let confirmed = self.confirmed_delete.take();
+                if let Some(refusal) = deletion.refusal() {
+                    Some(Err(refusal))
+                } else if let Some(question) = deletion.question().filter(|question| {
+                    // Confirmed only as asked: the same selection, question
+                    // and statements; anything else asks again.
+                    confirmed.as_ref()
+                        != Some(&ConfirmedDelete {
+                            ids: ids.clone(),
+                            question: question.clone(),
+                            gone: deletion.gone.clone(),
+                        })
+                }) {
+                    self.prompt = Some(Prompt::DeleteStatements {
+                        document_id: document_id.to_owned(),
+                        cleanup,
+                        ids,
+                        wires,
+                        question,
+                        gone: deletion.gone.clone(),
+                    });
+                    None
+                } else {
+                    let kept = selection
+                        .into_iter()
+                        .filter(|id| !ids.contains(id) && !deletion.gone.contains(id))
+                        .collect();
+                    Some(Ok(Edit {
+                        graph: board.delete_checked(&deletion, &ids, &wires),
+                        selection: Some(kept),
+                    }))
+                }
             }
             Command::AddProxy { source, position } => Some(board.add_proxy(source, position)),
+            // A wire of the order from a step dropped on a statement of the
+            // board moves it (DIAG-06a): into other braces too, and a check
+            // only from *Yes* or *No* (DIAG-06d).
+            Command::Connect {
+                source,
+                source_port,
+                target,
+                target_input,
+                ..
+            } if target_input == ORDER_PORT
+                && [ORDER_PORT, TRUE_PORT, FALSE_PORT].contains(&source_port.as_str())
+                && graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == source && apiforge_core::chain::is_step(node.kind))
+                && graph.nodes.iter().any(|node| node.id == target) =>
+            {
+                let placed = board.place(&source, &source_port, &target);
+                self.apply_move(document_id, model, cleanup, placed);
+                None
+            }
             Command::Connect {
                 source,
                 source_port,
@@ -713,6 +784,62 @@ impl FolderApp {
         }
     }
 
+    /// The one question a delete asks: an `if` with statements in its braces
+    /// (DIAG-06e). *Delete* runs the delete again on the document as it is
+    /// then, so a refusal that has appeared meanwhile still refuses, and a
+    /// delete that would now take or ask anything else asks again.
+    pub(super) fn delete_statements_prompt(
+        &mut self,
+        context: &egui::Context,
+        document_id: String,
+        cleanup: bool,
+        wires: Vec<String>,
+        asked: ConfirmedDelete,
+    ) -> Option<Prompt> {
+        let (mut confirm, mut cancel) = (false, false);
+        let response =
+            dialogs::centered_modal(egui::Id::new("board-delete"), context).show(context, |ui| {
+                ui.set_width(420.0);
+                ui.heading(&asked.question);
+                ui.add_space(theme::SPACE_MD);
+                ui.horizontal(|ui| {
+                    confirm = ui.add(widgets::primary_button("Delete")).clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if response.should_close() || cancel {
+            return None;
+        }
+        if confirm {
+            let snapshot = self.snapshot(&document_id)?;
+            let model = snapshot.model?;
+            let ids = asked.ids.clone();
+            self.confirmed_delete = Some(asked);
+            self.board_command(
+                &document_id,
+                &model,
+                cleanup,
+                snapshot.editable,
+                Command::Delete { ids, wires },
+            );
+            self.confirmed_delete = None;
+            return self.prompt.take();
+        }
+        let ConfirmedDelete {
+            ids,
+            question,
+            gone,
+        } = asked;
+        Some(Prompt::DeleteStatements {
+            document_id,
+            cleanup,
+            ids,
+            wires,
+            question,
+            gone,
+        })
+    }
+
     /// Applies a paste or a duplicate as one model edit, so one undo removes
     /// it, brings the copies into view, and names what they read that this
     /// board lacks: each such reference is left unconnected (UX-34).
@@ -791,6 +918,35 @@ impl FolderApp {
                     next: Box::new(with_graph(model, cleanup, edit.graph)),
                     selection: edit.selection,
                     check: None,
+                    moved: Vec::new(),
+                },
+            ),
+            Err(message) => {
+                if let Some(canvas) = self.canvases.get_mut(document_id) {
+                    canvas.set_error(message);
+                }
+            }
+        }
+    }
+
+    /// Applies a move on the board as one model edit whose moved blocks the
+    /// text moves line by line (DIAG-06a), or shows its refusal in the
+    /// board's banner.
+    fn apply_move(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        cleanup: bool,
+        placed: Result<(Graph, Vec<String>), String>,
+    ) {
+        match placed {
+            Ok((graph, moved)) => self.component_action(
+                document_id,
+                publication::Action::Model {
+                    next: Box::new(with_graph(model, cleanup, graph)),
+                    selection: None,
+                    check: None,
+                    moved,
                 },
             ),
             Err(message) => {
@@ -975,6 +1131,7 @@ impl FolderApp {
                                 next: Box::new(with_graphs(&model, read.main, read.cleanup)),
                                 selection: Some(Vec::new()),
                                 check: None,
+                                moved: Vec::new(),
                             },
                         ),
                         Err(error) => {

@@ -19,7 +19,7 @@ pub use migration::{
     CATALOGUE_FILE, CatalogueEntry, MigrationError, MigrationOutcome, PROJECTS_DIRECTORY,
     ProjectCatalogue, migrate_workspace,
 };
-pub use prepare::prepare_project;
+pub use prepare::{as_written, prepare_project};
 pub use session::{
     CommitChange, CommitChangeKind, ConflictDecision, ConflictPreview, ConflictTarget, Declaration,
     DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict,
@@ -62,6 +62,10 @@ pub enum Error {
     InvalidModel,
     #[error("The model cannot be written as source without semantic loss.")]
     Unprintable,
+    /// A move on the board whose statements cannot be moved line by line in
+    /// the text as it is written (DIAG-06a); the file is not printed again.
+    #[error("This move cannot be written into the code as it is laid out. Move the lines in Code.")]
+    MoveNotWritten,
     #[error("Published component {component_id}@{revision} is not a valid definition.")]
     InvalidRevision { component_id: String, revision: u32 },
     #[error("Only a component can be published.")]
@@ -130,6 +134,18 @@ pub enum Error {
         build: u32,
         folder: std::path::PathBuf,
     },
+    /// `apiforge fix`: a source of the project cannot be converted, so
+    /// nothing is written (LANG-20).
+    #[error("Nothing was written: a source of this project cannot be converted yet.")]
+    NotConvertible,
+    /// `apiforge fix`: the store refused the commit for its limits.
+    #[error("This project is too large to convert in one step.")]
+    TooLargeToConvert,
+    /// `apiforge fix`: a file the command read changed before its commit.
+    #[error(
+        "{path} changed while the project was being converted; nothing was written. Run the command again."
+    )]
+    ChangedWhileConverting { path: String },
 }
 
 impl From<apiforge_storage::StorageError> for Error {

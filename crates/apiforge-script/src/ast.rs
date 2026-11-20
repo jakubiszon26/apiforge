@@ -14,12 +14,6 @@ pub struct Fix {
     pub replacement: String,
 }
 
-/// The warning a comment gets when it belongs to no statement: canonical
-/// printing keeps notes attached to statements and drops the rest. Callers
-/// recognise it by this constant rather than by its wording.
-pub const UNATTACHED_COMMENT: &str =
-    "This comment is not attached to a statement and will be dropped by formatting";
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     pub range: Range<usize>,
@@ -50,6 +44,50 @@ pub struct SyntaxTree {
     pub diagnostics: Vec<Diagnostic>,
     /// Diagnostics found beyond `MAX_DIAGNOSTICS` and not kept.
     pub omitted_diagnostics: usize,
+    /// The comments that are no statement's note, in source order (LANG-06).
+    pub comments: Vec<Comment>,
+}
+
+/// A comment that is no statement's note: Format keeps it at its place
+/// (LANG-06); a file printed whole from its document has no place for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Comment {
+    /// The comment's bytes, `//` included; a comment inside an
+    /// interpolation is one too.
+    pub range: Range<usize>,
+    pub place: Place,
+}
+
+/// Where Format writes a free comment: at the place it stands, or directly
+/// above the line that holds it when Format writes that line differently.
+/// Offsets name what the comment is written above by where it starts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Place {
+    /// Above the file's first line.
+    Top,
+    /// Under the file's last brace.
+    Bottom,
+    /// Above the part of the head, or the `cleanup`, written at this offset.
+    Head(usize),
+    /// Above the statement written at this offset and its note, with a
+    /// blank line under it so that it stays free.
+    Statement(usize),
+    /// Above line `index` of the braces of the request or condition written
+    /// at `statement`: one of its fields, or one of its checks.
+    Line { statement: usize, index: usize },
+    /// The last lines inside braces, above their `}`.
+    End(Braces),
+}
+
+/// Braces that hold statements or lines, by the statement that opens them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Braces {
+    File,
+    Cleanup,
+    Then(usize),
+    Else(usize),
+    /// A request's fields or a condition's checks.
+    Lines(usize),
 }
 
 impl SyntaxTree {

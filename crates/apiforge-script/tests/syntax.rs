@@ -108,7 +108,7 @@ fn precedence_associativity_and_parenthesized_check_operands_survive() {
         contains_value = assert a contains b
     }"#,
     );
-    assert!(output.contains("bare = assert (a >= b) == true"));
+    assert!(output.contains("bare = assert a >= b\n"));
     assert!(output.contains("nested = assert (a == b) == true"));
     assert!(parse(r#"scenario "Bad" { check = assert a == b contains c }"#).has_errors());
 }
@@ -165,7 +165,7 @@ fn multiline_strings_are_dedented_once_and_keep_interpolation() {
 }
 
 #[test]
-fn comments_attach_to_the_nearest_statement_and_floating_comments_warn() {
+fn comments_attach_to_the_nearest_statement_and_floating_comments_are_free() {
     let source = r#"// A floating file comment.
     scenario "Notes" {
       // First line
@@ -179,12 +179,20 @@ fn comments_attach_to_the_nearest_statement_and_floating_comments_warn() {
       // This comment has no statement.
     }"#;
     let tree = valid(source);
+    // LANG-06 (#143): a comment that belongs to no statement is free, kept
+    // by Format, and gives no warning.
+    assert!(tree.diagnostics.is_empty());
+    let free: Vec<&str> = tree
+        .comments
+        .iter()
+        .map(|comment| &source[comment.range.clone()])
+        .collect();
     assert_eq!(
-        tree.diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Warning)
-            .count(),
-        2
+        free,
+        [
+            "// A floating file comment.",
+            "// This comment has no statement."
+        ]
     );
     let file = tree.file.unwrap();
     assert_eq!(

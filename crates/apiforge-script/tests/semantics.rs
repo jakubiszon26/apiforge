@@ -52,13 +52,17 @@ fn every_workspace_scenario_and_component_round_trips() {
 fn examples_lower_with_branches_and_cleanup_provenance() {
     let workspace = workspace();
     let project = &workspace.projects[0];
-    let Document::Scenario(scenario) = lowered(
-        include_str!("../../../fixtures/scripts/checkout.afs"),
-        project,
-    ) else {
+    // The fixtures are folder sources, read in the written language: one
+    // chain, its `if` and the two branches (LANG-13).
+    let checkout = lower(
+        &parse(include_str!("../../../fixtures/scripts/checkout.afs")),
+        &LowerContext::folder(project),
+    );
+    assert!(!checkout.has_errors(), "{:#?}", checkout.diagnostics);
+    let Some(Document::Scenario(scenario)) = checkout.document else {
         panic!()
     };
-    assert_eq!(scenario.graph.edges.len(), 4);
+    assert_eq!(scenario.graph.edges.len(), 5);
     assert_eq!(scenario.cleanup.nodes.len(), 1);
     let component = lowered(
         include_str!("../../../fixtures/scripts/lookup.afs"),

@@ -806,10 +806,12 @@ impl FolderApp {
         let Some(session) = self.session.as_ref() else {
             return;
         };
-        let text = match apiforge_script::print_folder_document(
-            session.context(),
-            &Document::Component(request.component),
-        ) {
+        // Written as one chain in the order its steps ran, with a start
+        // first (LANG-13): the steps came from a board without one.
+        let written = apiforge_project::as_written(&Document::Component(request.component));
+        let text = match written.map_err(|_| ()).and_then(|document| {
+            apiforge_script::print_folder_document(session.context(), &document).map_err(|_| ())
+        }) {
             Ok(text) => text,
             Err(_) => {
                 dialog.error = Some("The component cannot be written as code.".into());
@@ -937,6 +939,7 @@ impl FolderApp {
                         next: Box::new(next),
                         selection: Some(vec![call]),
                         check: None,
+                        moved: Vec::new(),
                     },
                 );
             }

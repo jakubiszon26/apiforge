@@ -29,23 +29,48 @@ pub enum Unavailable {
     TooLarge,
 }
 
+/// One state of a document's history: its exact text and the model read
+/// from it, whose identities and positions an Undo keeps (DIAG-06g).
+#[derive(Clone, Debug)]
+pub(crate) struct Step {
+    pub text: String,
+    pub model: Arc<Document>,
+}
+
+/// The document's one linear history. Every settled change of the text is a
+/// step, a change made on the board or typed in Code alike, also one that
+/// changes no block; a layout change is a step with the same text.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct History {
-    pub undo: Vec<Arc<Document>>,
-    pub redo: Vec<Arc<Document>>,
+    pub undo: Vec<Step>,
+    pub redo: Vec<Step>,
     pub generation: u64,
+    /// The text of the state the history stands at: the text the next step
+    /// recorded will hold. `None` until the document's text first settles
+    /// as valid, and again when the history is cleared, so that the text a
+    /// document then follows is never a step back to an earlier one.
+    pub present: Option<String>,
 }
 
 const HISTORY_LIMIT: usize = 100;
 
 impl History {
-    pub fn record(&mut self, previous: Arc<Document>) {
+    pub fn record(&mut self, previous: Step) {
         if self.undo.len() == HISTORY_LIMIT {
             self.undo.remove(0);
         }
         self.undo.push(previous);
         self.redo.clear();
         self.generation += 1;
+    }
+
+    /// Forgets every step: the document now follows a text it was not
+    /// edited to (a reload, a foreign write, a resolved conflict, a revert).
+    pub fn clear(&mut self) {
+        *self = Self {
+            generation: self.generation + 1,
+            ..Self::default()
+        };
     }
 }
 

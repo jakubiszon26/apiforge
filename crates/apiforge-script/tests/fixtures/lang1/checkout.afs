@@ -1,0 +1,31 @@
+scenario "Checkout" {
+  description "Fetch a product and place an order."
+  on_error stop
+  param quantity = 2
+  begin = start
+  // Retrieve available products.
+  @after(begin)
+  products = GET "/products" {
+    headers { Accept: "application/json" }
+    query { limit: 10 }
+    timeout 5s
+    sample 200 { items: [{ id: "p-1", price: 12.5 }] }
+  }
+  status_ok = assert products.status == 200
+  var first = products.body.items[0]
+  total = first.price * param.quantity
+  @after(status_ok)
+  @label("Place an order")
+  order = POST "/orders" {
+    body { productId: first.id, quantity: param.quantity, total: total }
+    sample 201 { id: "o-1" }
+  }
+  created = if order.status == 201 {
+    receipt = GET "/orders/{{order.body.id}}"
+  } else {
+    failed = assert false == true
+  }
+  cleanup {
+    removed = DELETE "/orders/{{order.body.id}}"
+  }
+}

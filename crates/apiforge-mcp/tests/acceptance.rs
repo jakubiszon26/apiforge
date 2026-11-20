@@ -183,7 +183,7 @@ fn criterion_3_the_overview_describes_the_demo_shop() {
     assert_eq!(overview.server_version, env!("CARGO_PKG_VERSION"));
     // MCP-03 criterion 12: the version of the reference `language_reference`
     // serves (empty until MCP-03).
-    assert_eq!(overview.reference_version, "1");
+    assert_eq!(overview.reference_version, "2");
 }
 
 #[test]
@@ -402,14 +402,10 @@ fn criterion_5_a_project_with_errors_is_reported_not_refused() {
 fn criterion_5_beyond_a_thousand_diagnostics_the_rest_are_counted() {
     let directory = checkout();
     let root = directory.path();
-    // 1 101 comments that belong to no statement: 1 101 warnings.
-    edit(root, PRODUCT, |text| {
-        let mut text = text.to_owned();
-        for index in 0..1101 {
-            text.push_str(&format!("// note {index}\n"));
-        }
-        text
-    });
+    // 1 100 characters the lexer refuses after the component, and the
+    // parser's error for text after the file: 1 101 errors. A free comment,
+    // which filled the list before, gives no warning since LANG-06 (#143).
+    edit(root, PRODUCT, |text| format!("{text}{}", "$".repeat(1100)));
     let session = ProjectSession::open_saved_read_only(root).unwrap();
     let document = session
         .documents()
@@ -430,7 +426,7 @@ fn criterion_5_beyond_a_thousand_diagnostics_the_rest_are_counted() {
         product
             .diagnostics
             .iter()
-            .all(|d| d.severity == Severity::Warning)
+            .all(|d| d.severity == Severity::Error)
     );
     let source = tools::read_source(root, PRODUCT).unwrap();
     assert_eq!((source.diagnostics.len(), source.omitted), (1000, 101));
@@ -557,7 +553,9 @@ const MANIFEST: &str = "apiforge.project.json";
 const DEMO_BASE_URL: &str = "http://127.0.0.1:4318/demo/shop";
 
 /// Every top-level step of the demo scenario, the cleanup's last.
-const DEMO_STEPS: [&str; 8] = [
+/// The demo shop's top-level steps; `begin` is the start LANG-13 writes.
+const DEMO_STEPS: [&str; 9] = [
+    "begin",
     "expected_price",
     "product",
     "field_inna_nazwa",
@@ -886,7 +884,7 @@ fn mcp03_criterion_2_the_errors_a_registration_would_meet() {
 fn mcp03_criterion_3_unpublished_revisions_unknown_handles_and_missing_variables_are_named() {
     let directory = checkout();
     let root = directory.path();
-    let text = "scenario \"Calls\" {\n  next = product@2(id: 123)\n  other = nosuch@1(id: 1)\n  missing = GET \"/x/{{env.MISSING}}\" {\n    sample 200 {}\n  }\n}\n";
+    let text = "scenario \"Calls\" {\n  begin = start\n  next = product@2(id: 123)\n  other = nosuch@1(id: 1)\n  missing = GET \"/x/{{env.MISSING}}\" {\n    sample 200 {}\n  }\n}\n";
     for path in [SCENARIO, "scenarios/calls.afs"] {
         let result = tools::check_text(root, path, text).unwrap();
         assert!(!result.valid, "{path}");
@@ -932,12 +930,13 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
     );
     assert!(report.report.is_none(), "compact by default");
     let steps = report.steps.as_deref().unwrap();
-    assert_eq!(report.step_count, 18);
-    assert_eq!(count(steps), 18, "as `apiforge run` prints 18 lines");
+    // The demo shop's steps and the start LANG-13 writes first.
+    assert_eq!(report.step_count, 19);
+    assert_eq!(count(steps), 19, "as `apiforge run` prints 19 lines");
     assert_eq!(handles(steps), DEMO_STEPS);
-    assert_eq!(steps[1].label.as_deref(), Some("Product"));
+    assert_eq!(steps[2].label.as_deref(), Some("Product"));
     assert_eq!(
-        handles(steps[1].steps.as_deref().unwrap()),
+        handles(steps[2].steps.as_deref().unwrap()),
         ["fetch_product", "product"],
         "a component's steps nested beneath it"
     );
@@ -946,7 +945,7 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
             .iter()
             .all(|s| s.status == StepStatus::Passed)
     );
-    assert_eq!(steps[6].phase, Phase::Cleanup);
+    assert_eq!(steps[7].phase, Phase::Cleanup);
     assert_eq!(steps[0].phase, Phase::Main);
     assert_eq!(tree(root), before, "a simulation writes nothing");
     assert!(!root.join(".apiforge/local").exists());
@@ -1048,9 +1047,9 @@ fn mcp03_criterion_6_compact_by_default_and_the_full_report_on_request() {
     let report = full.report.unwrap();
     assert_eq!(report["status"], "passed");
     assert_eq!(report["mode"], "simulation");
-    assert_eq!(report["steps"].as_array().unwrap().len(), 8);
+    assert_eq!(report["steps"].as_array().unwrap().len(), 9);
     assert!(report["steps"][0]["outputs"].is_object());
-    assert_eq!(full.step_count, 18);
+    assert_eq!(full.step_count, 19);
 }
 
 #[test]
@@ -1061,7 +1060,7 @@ fn mcp03_criterion_6_a_result_over_two_mebibytes_is_refused_never_cut() {
     fs::write(
         root.join(SCENARIO),
         format!(
-            "scenario \"Big\" {{\n  big = GET \"/big\" {{\n    sample 200 [{strings}]\n  }}\n  a = big.body\n  b = big.body\n  c = big.body\n}}\n"
+            "scenario \"Big\" {{\n  begin = start\n  big = GET \"/big\" {{\n    sample 200 [{strings}]\n  }}\n  a = big.body\n  b = big.body\n  c = big.body\n}}\n"
         ),
     )
     .unwrap();
@@ -1149,7 +1148,7 @@ fn mcp03_criterion_9_the_shared_executor_returns_data_and_prints_nothing() {
     let outcome = executor::execute(request, None, CancellationToken::new(), DEADLINE).unwrap();
     assert_eq!(outcome.ended_by, EndedBy::Completed);
     assert_eq!(outcome.report.status, apiforge_core::run::RunStatus::Passed);
-    assert_eq!(outcome.report.steps.len(), 8);
+    assert_eq!(outcome.report.steps.len(), 9);
     assert!(outcome.interrupted_before.is_empty());
     assert!(!outcome.journal_unreadable);
 }
@@ -1196,7 +1195,7 @@ fn mcp03_criterion_10_cancelling_a_run_stops_it_and_runs_the_cleanup() {
         "{main:#?}"
     );
     let cleanup: Vec<_> = steps.iter().filter(|s| s.phase == Phase::Cleanup).collect();
-    assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
+    assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[7..]);
     assert!(
         cleanup.iter().all(|s| s.status != StepStatus::Cancelled),
         "the cleanup ran: {cleanup:#?}"
@@ -1288,10 +1287,10 @@ fn mcp03_criterion_12_the_language_reference_and_its_version() {
     let text = fs::read_to_string(file).unwrap();
     let served = tools::language_reference().unwrap();
     assert_eq!(served.text, text);
-    assert_eq!(served.version, "1");
+    assert_eq!(served.version, "2");
     // LANG-15 renamed the line: it names the language version.
-    assert!(text.starts_with("Language version: 1 "));
-    assert_eq!(reference::version(), "1");
+    assert!(text.starts_with("Language version: 2 "));
+    assert_eq!(reference::version(), "2");
     let directory = checkout();
     assert_eq!(
         tools::project_overview(directory.path())
@@ -1355,50 +1354,48 @@ fn mcp03_criterion_12_resources_list_and_read() {
     assert_eq!(tree(root), before);
 }
 
+/// The limit holds with a lowering error in a full list: 1 102 errors found,
+/// 1 000 kept, the folder-pin error among them.
+fn assert_kept_within_the_limit(root: &Path, path: &str, message: &str) {
+    let session = ProjectSession::open_saved_read_only(root).unwrap();
+    let document = session
+        .documents()
+        .iter()
+        .find(|d| d.entry().path.as_str() == path)
+        .unwrap();
+    assert_eq!(document.diagnostics().len(), 1000, "{path}");
+    assert_eq!(document.omitted_diagnostics(), 102, "{path}: 1 102 found");
+    assert!(
+        document.diagnostics().iter().any(|d| d.message == message),
+        "{path}: the project-level error is kept"
+    );
+    let result = tools::check(root, Some(path)).unwrap();
+    let checked = &result.documents[0];
+    assert!(!checked.valid);
+    assert_eq!((checked.diagnostics.len(), checked.omitted), (1000, 102));
+    assert!(checked.diagnostics.iter().any(|d| d.message == message));
+}
+
 #[test]
 fn mcp03_carry_over_1_project_level_errors_are_kept_within_the_limit() {
-    let notes = (0..1101)
-        .map(|index| format!("// note {index}\n"))
-        .collect::<String>();
-
-    // The folder-pin error is found while lowering, after 1 000 warnings.
+    // A free comment, which filled the list with warnings before, gives no
+    // warning since LANG-06 (#143); the list is filled with errors (#143).
+    // Lowering drops an error of its own beyond the limit, so the
+    // folder-pin error comes first, and one statement after it writes
+    // `@label` 1 102 times: 1 101 `Duplicate block attribute` errors.
     let directory = checkout();
     let root = directory.path();
-    let scenario = fs::read_to_string(root.join(SCENARIO)).unwrap();
+    let labels = "@label(\"Filler\")\n".repeat(1102);
     edit(root, SCENARIO, |text| {
-        format!(
-            "{}{notes}",
-            text.replace("product = product@1(id: 123)", "product = product(id: 123)")
-        )
+        let text = text.replace("product = product@1(id: 123)", "product = product(id: 123)");
+        let end = text.rfind('}').unwrap();
+        format!("{}{labels}filler = 1\n{}", &text[..end], &text[end..])
     });
-    // A component file that holds a scenario: the kind check comes last.
-    fs::write(root.join(PRODUCT), format!("{scenario}{notes}")).unwrap();
-
-    let session = ProjectSession::open_saved_read_only(root).unwrap();
-    for (path, message) in [
-        (
-            SCENARIO,
-            "Folder component calls require an explicit revision",
-        ),
-        (PRODUCT, "This code describes a different kind of document"),
-    ] {
-        let document = session
-            .documents()
-            .iter()
-            .find(|d| d.entry().path.as_str() == path)
-            .unwrap();
-        assert_eq!(document.diagnostics().len(), 1000, "{path}");
-        assert_eq!(document.omitted_diagnostics(), 102, "{path}: 1 102 found");
-        assert!(
-            document.diagnostics().iter().any(|d| d.message == message),
-            "{path}: the project-level error is kept"
-        );
-        let result = tools::check(root, Some(path)).unwrap();
-        let checked = &result.documents[0];
-        assert!(!checked.valid);
-        assert_eq!((checked.diagnostics.len(), checked.omitted), (1000, 102));
-        assert!(checked.diagnostics.iter().any(|d| d.message == message));
-    }
+    assert_kept_within_the_limit(
+        root,
+        SCENARIO,
+        "Folder component calls require an explicit revision",
+    );
 }
 
 #[test]
@@ -2011,7 +2008,7 @@ fn mcp04_criterion_4_create_document_refuses_on_any_error() {
     fs::write(root.join(DRAFT), DRAFT_TEXT).unwrap();
     let product = fs::read_to_string(root.join(PRODUCT)).unwrap();
     let renamed = product.replacen("component product", "component other_product", 1);
-    let broken = "scenario \"Broken\" {\n  x = nosuch@1(id: 1)\n}\n";
+    let broken = "scenario \"Broken\" {\n  begin = start\n  x = nosuch@1(id: 1)\n}\n";
     let before = shared(root);
     let agent = agent(root);
     let cases = [
@@ -2091,8 +2088,8 @@ fn mcp04_criterion_4_create_document_refuses_on_any_error() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["severity"] == "error" && d["line"] == 2),
-        "an error on line 2"
+            .any(|d| d["severity"] == "error" && d["line"] == 3),
+        "an error on line 3, below `begin = start`"
     );
 }
 
@@ -3060,7 +3057,7 @@ fn mcp06_criterion_6_a_cancelled_or_timed_out_live_run() {
             .collect();
         assert_eq!(marked.len(), 1, "{} steps", steps.len());
         assert_eq!(marked[0].handle, "fetch_product");
-        assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
+        assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[7..]);
         assert!(
             steps[steps.len() - 2..]
                 .iter()
@@ -4545,7 +4542,7 @@ const WRAPPER: &str = "components/wrapper.afs";
 const WRAPPER_TEXT: &str = "component wrapper \"Wrapper\" {\n  description \"A product fetched through its first revision.\"\n  @label(\"Product ID\")\n  input id: number = 123\n  @label(\"Fetched\")\n  fetched = product@1(id: param.id)\n  @label(\"Product\")\n  export product: object = fetched\n}\n";
 const WRAPPED: &str = "scenarios/wrapped.afs";
 /// Calls `wrapper@1` twice and `product@1`, which `wrapper@1` calls too.
-const WRAPPED_TEXT: &str = "scenario \"Wrapped\" {\n  first = wrapper@1(id: 123)\n  second = wrapper@1(id: 124)\n  direct = product@1(id: 123)\n}\n";
+const WRAPPED_TEXT: &str = "scenario \"Wrapped\" {\n  begin = start\n  first = wrapper@1(id: 123)\n  second = wrapper@1(id: 124)\n  direct = product@1(id: 123)\n}\n";
 
 /// `used` as (path, handle, revision, hash), in the order given.
 fn used(used: &[tools::UsedSource]) -> Vec<(String, String, u32, String)> {
@@ -4697,7 +4694,7 @@ fn mcp21_criterion_3_a_component_run_alone_does_not_use_itself() {
 fn mcp21_criterion_4_an_unresolved_call_adds_nothing() {
     let directory = checkout();
     let root = directory.path();
-    let text = "scenario \"Calls\" {\n  direct = product@1(id: 123)\n  later = product@9(id: 1)\n  other = nosuch@1(id: 1)\n}\n";
+    let text = "scenario \"Calls\" {\n  begin = start\n  direct = product@1(id: 123)\n  later = product@9(id: 1)\n  other = nosuch@1(id: 1)\n}\n";
     for path in [SCENARIO, "scenarios/calls.afs"] {
         let result = tools::check_text(root, path, text).unwrap();
         assert!(!result.valid, "{path}");
@@ -5084,20 +5081,16 @@ fn run04_criterion_7_an_agent_reads_stopped_on_every_step_not_reached() {
         root.join(SCENARIO),
         r#"scenario "A chain stopped by a check" {
   begin = start
-  @after(begin)
   a = GET "/a" {
     sample 200 { ok: true }
   }
   broken = assert a.body.ok == false
-  @after(a)
   b = GET "/b" {
     sample 200 {}
   }
-  @after(b)
   c = GET "/c" {
     sample 200 {}
   }
-  @after(c)
   d = GET "/d" {
     sample 200 {}
   }
@@ -5246,7 +5239,6 @@ mod lang15 {
     /// parse in this build's language (the case before `apiforge fix`) gets
     /// the sentence with the fix, not `invalid_text`.
     #[test]
-    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
     fn lang15_criterion_4_a_run_names_the_language_before_the_source() {
         let directory = checkout();
         let root = directory.path();
@@ -5281,7 +5273,6 @@ mod lang15 {
     /// the manifest with both versions and the fix, `run` (simulated and
     /// live) is refused with it and sends nothing, and a write still works.
     #[test]
-    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
     fn lang15_criterion_4_an_older_project_is_checked_and_does_not_run() {
         let directory = checkout();
         let root = directory.path();

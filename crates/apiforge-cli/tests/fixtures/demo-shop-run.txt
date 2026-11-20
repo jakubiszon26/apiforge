@@ -1,3 +1,4 @@
+       ok  begin
        ok  Expected price
        ok  Product
        ok    Fetch product
