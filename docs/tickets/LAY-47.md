@@ -1,4 +1,4 @@
-# LAY-46: A value many steps read runs in one corridor, so data lines cross each other less
+# LAY-47: A value many steps read runs in one corridor, so data lines cross each other less
 
 - Size: M (to be confirmed by the measurement below) · Owner review:
   20 min · Risk: `visible UI`
@@ -7,7 +7,9 @@
   of LAY-45 (#468). No decision is taken yet and no criterion below is
   approved: they say what the analysis has to measure and show.
 - Issue [#506](https://github.com/jakubiszon26/apiforge/issues/506) ·
-  LAY-2 · branch `feat/lay-46-data-corridor`
+  LAY-2 · branch `feat/lay-47-data-corridor`
+- Filed on 2026-11-20 as LAY-46 by mistake: that number is #469 (the
+  checks line at the Overview zoom). Renumbered the same day.
 - Analysis model: Fable 5.2 · Implementation model: —
 
 ## Goal
