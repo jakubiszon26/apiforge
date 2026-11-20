@@ -1,11 +1,14 @@
-# LANG-20b: `apiforge fix` converts a project in guarded commits: the plan, its read set, and the finish
+# LANG-20b: `apiforge fix` converts a project: the plan, its commits and the finish
 
 - Size: M · Owner review: 20 min · Risk: `format` (sources rewritten, the
   record and the manifest written)
 - State: **Decided; waits for the independent review before it is
   labelled.** Split from LANG-20 on 2026-11-20. The owner's decision of
   that day (#481, question 4 = B): file by file, with a record. After
-  LANG-20a (#481), which gives the record and the project's states.
+  LANG-20a (#481), which gives the record and the project's states, and
+  LANG-20e (#500), which gives the store a read set. **Narrowed** after
+  the review's second pass: the store's change is LANG-20e, the update
+  after a save is LANG-20f (#501).
 - Issue [#497](https://github.com/jakubiszon26/apiforge/issues/497) · LANG
   sprint, first half, a condition of 0.2.0 · branch
   `feat/lang-20b-fix-command`
@@ -65,38 +68,33 @@ MCP tool and by LANG-21a's window. Making it writes nothing.
 
 ## The commit
 
-5. A plan is committed only against what it read. The project store
-   gains what it lacks today: a commit takes the plan's **read set** and
-   refuses, writing nothing, when any fingerprint in it — of a file it
-   writes or not, the manifest and the record among them — is not the
-   one on disk when the commit takes the store's lock
-   (`apiforge-storage/src/project/transaction.rs`: today only the files
-   written are compared, and the manifest against its state when the
-   commit began). ADR 0011 is amended.
+5. A plan is committed only against what it read: every commit passes
+   the store a read set (LANG-20e) — every source, the record and the
+   manifest, written or not — and is refused, writing nothing, when one
+   has changed, at the lock or after staging.
 6. The sources of a plan are written in commits that each fit the
    store's limits (64 MiB, 1 024 operations). Every commit carries the
    record for the sources it converts, so each leaves a project being
    updated in a consistent state; the last one finishes. A single source
-   over the limit is *unreadable*.
-7. An interrupted commit is rolled forward by the store's recovery at
+   over the limit is *unreadable*. **Between commits only what the run
+   itself wrote moves on**: for a path a commit wrote, the next commit
+   expects the fingerprint that commit acknowledged; for every other
+   path, still the one the plan read. A file changed by anyone else
+   between two commits stops the run there.
+7. A run returns what it **did**, not only what it planned: the sources
+   converted, commit by commit; whether it finished; and when it stopped,
+   why and at which file. A run that stopped after its first commit is
+   reported as that — some converted, not finished — never as nothing
+   written and never as unknown.
+8. An interrupted commit is rolled forward by the store's recovery at
    the next writable open, as any commit (ADR 0011); a foreign write in
    between stops recovery with its conflict, as today. After recovery
    has run, no source is converted and unlisted.
-8. **After a save.** A caller that saved something between the plan and
-   the commit (the window's *Save all and update*) does not carry the
-   old plan over: it makes the plan again from the disk and commits the
-   new one only when it would write exactly what the shown one would —
-   the same sources with the same texts, the same blocked and unreadable
-   lists, the same finish. Otherwise nothing is converted and the new
-   plan is what the person is shown. The manifest written is built from
-   the manifest read by the new plan, so settings saved in between are
-   kept. This function is part of this ticket; the window only calls it.
 
 ## Acceptance criteria
 
 Tests in `crates/apiforge-cli/tests/fix.rs` (C),
-`crates/apiforge-project/tests/lang20b.rs` (P) and
-`crates/apiforge-storage/tests/acceptance.rs` (T), on the language-1
+`crates/apiforge-project/tests/lang20b.rs` (P), on the language-1
 copy of `rooms` of LANG-20a and its variant with one statement moved
 above the step it follows and one request nothing orders.
 
@@ -128,21 +126,17 @@ above the step it follows and one request nothing orders.
    *done* source is changed on disk; a source the plan does not write is
    changed; the manifest is changed although the plan does not write it;
    the record is changed. In each case the commit refuses, no file
-   changes, and the run says which file. Tests: T
-   `lang20b_criterion_7_read_set_*`, P `lang20b_criterion_7_*`.
+   changes, and the run says which file. Tests: P `lang20b_criterion_7_*` (the store's own tests are LANG-20e's).
 8. More sources than one commit holds (the test lowers the limits): the
    run converts them in several commits, the project is consistent after
-   each, and finished after the last; a failure in the second leaves the
-   first's sources converted and listed. Test: P `lang20b_criterion_8_*`.
+   each, and finished after the last. A failure in the second leaves the
+   first's sources converted and listed, and the run's result says which
+   were converted and where it stopped. A source the first commit
+   converted, changed by the test before the second: the run stops and
+   names it. Test: P `lang20b_criterion_8_*`.
 9. An interrupted commit: after the next writable open every converted
    source is listed. Test: P `lang20b_criterion_9`.
-10. *After a save* (rule 8): with a dirty buffer saved in between and
-    nothing else changed, the new plan equals the shown one and is
-    committed; with a foreign write during the save, with a setting saved
-    in between (kept in the manifest written), and with a buffer whose
-    saving changes what is blocked — the first two as said, the last
-    converts nothing and returns the new plan.
-    Test: P `lang20b_criterion_10_*`.
+10. (Moved to LANG-20f.)
 11. `--check` prints the report and writes nothing; its exit code is the
     run's. A project already in language 2: nothing changes, exit code 0.
     No comment is lost in any converted source.
@@ -152,10 +146,8 @@ above the step it follows and one request nothing orders.
 
 | What can break | Covered by |
 | --- | --- |
-| Every other commit of the store (saves, publication, trash): the read set is optional and empty for them | the storage suites unchanged; criterion 7's T tests |
 | A converted source judged again by its 0.1.0 reading | criterion 3 |
 | An old source taken for a converted one | criteria 4 and 6 |
-| Settings saved in the window lost by the update | criterion 10 |
 | The command writes a person's files | criteria 2, 3, 11 |
 
 ## Not in scope
@@ -166,8 +158,6 @@ file does (LANG-13).
 
 ## Technical appendix
 
-`apiforge-storage/src/project/transaction.rs` (the read set of a
-commit), ADR 0011; `apiforge-project/src/language.rs` (the plan, the
-commit, *after a save*); `apiforge-cli` (`main.rs`, a new `fix.rs`);
+`apiforge-project/src/language.rs` (the plan, the run and its result); `apiforge-cli` (`main.rs`, a new `fix.rs`);
 `README.md`, `docs/folder-projects.md`. This ticket does not touch
 `apiforge-script`.
