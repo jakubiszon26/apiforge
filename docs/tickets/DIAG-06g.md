@@ -1,7 +1,7 @@
 # DIAG-06g: Undo and Redo restore the file byte for byte
 
-- Size: M · Owner review: 15 min · Risk: none (nothing visible changes
-  except that Undo gives back what was there)
+- Size: M · Owner review: 15 min · Risk: `default` (a comment typed in
+  Code becomes a step of Undo)
 - State: **Decided; waits for the independent review before it is
   labelled.** Split from DIAG-06e on 2026-11-20. After LANG-13 (#386)
   only; before DIAG-06e (#494).
@@ -32,11 +32,17 @@ while newer edits arrive (`storage_work.rs`).
 
 - Changed: Undo after an edit on the board gives the file back byte for
   byte; Redo gives the edited file back byte for byte.
-- Unchanged: the order of Undo. The history stays one sequence for the
-  document: Undo takes back the **last** change, whether it was made on
-  the board or in Code. After a delete on the board and then a comment
-  typed in Code, the first Undo takes back the comment, the second the
-  delete. Nothing is skipped and nothing is merged.
+- Changed: every settled edit of the text is a step of the history,
+  also one that changes no block — a comment, a blank line. Today a Code
+  edit enters the history only when it changes the document
+  (`apply_analysis`), so a comment typed after a board edit is no step,
+  and an Undo that restored the earlier text would silently take it
+  away. After this ticket Undo takes back the **last** change, whatever
+  it was: after a delete on the board and then a comment typed in Code,
+  the first Undo takes back the comment, the second the delete. Nothing
+  is skipped, nothing is merged, and nothing typed is lost without being
+  the thing undone. (For the owner's veto at acceptance: it is one more
+  kind of step in an order that is otherwise today's.)
 - Removed or hidden, migrated: nothing.
 
 ## Mock-up
@@ -60,11 +66,16 @@ edit.
 2. A chain of three edits undone three times and redone three times
    passes through the same texts, byte for byte.
    Test: P `diag06g_criterion_2`.
-3. **Interleaved with Code.** A delete on the board, then a comment typed
-   in Code and settled: the first Undo gives the text after the delete
-   (the comment gone, because it is what was undone), the second the text
-   before the delete; two Redos give both back, the comment last. No
-   Undo gives a text that never existed. Test: P `diag06g_criterion_3`.
+3. **Interleaved with Code.** The history takes an entry when a settled
+   analysis finds the **text** changed, whether or not the document did.
+   A delete on the board, then a comment typed in Code and settled: the
+   first Undo gives the text after the delete (the comment gone, because
+   it is what was undone), the second the text before the delete; two
+   Redos give both back, the comment last. A Code edit that is not yet
+   settled when Undo is pressed is settled first, so it is a step and is
+   not lost. No Undo gives a text that never existed.
+   Tests: P `diag06g_criterion_3_*`: the comment; a blank line; an edit
+   still being typed.
 4. **During a save.** An edit made while a save is in progress is kept;
    after the save completes, Undo and Redo still pass through the same
    texts, among them the one that was being saved.
@@ -94,5 +105,6 @@ DIAG-06f): each asserts this ticket's property for its own edits.
 ## Technical appendix
 
 `apiforge-project/src/session.rs` (a history entry keeps the source text
-with the document; Undo and Redo install both), `storage_work.rs` (the
+with the document; `apply_analysis` pushes an entry when the text
+changed, not only when the document did; Undo and Redo install both), `storage_work.rs` (the
 entries a save's completion rewrites keep their texts).
