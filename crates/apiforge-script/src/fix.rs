@@ -11,9 +11,9 @@ use crate::{
     parse,
 };
 use apiforge_core::{
-    chain::{Unchained, chained},
-    format::Graph,
-    model::Branch,
+    chain::{Braces, Unchained, braces, chain, chained, is_step},
+    format::{Graph, OrderEdge},
+    model::{Branch, NodeKind},
 };
 use std::{collections::HashMap, collections::HashSet, ops::Range};
 
@@ -51,9 +51,20 @@ impl Fixed {
 /// the order it runs today. Applied again it changes nothing. The window, the
 /// command line and the MCP server call this one function.
 pub fn fix_source(text: &str, context: &LowerContext<'_>) -> Fixed {
-    let unchanged = |refused| Fixed {
-        text: text.to_owned(),
-        refused,
+    fixed_with_edits(text, context).0
+}
+
+/// [`fix_source`], with the fixes it applied, as ranges of `text` in source
+/// order: none when it changed nothing.
+fn fixed_with_edits(text: &str, context: &LowerContext<'_>) -> (Fixed, Vec<Fix>) {
+    let unchanged = |refused| {
+        (
+            Fixed {
+                text: text.to_owned(),
+                refused,
+            },
+            vec![],
+        )
     };
     let tree = parse(text);
     if let Some(error) = tree
@@ -93,9 +104,10 @@ pub fn fix_source(text: &str, context: &LowerContext<'_>) -> Fixed {
     fixes.sort_by_key(|fix| std::cmp::Reverse((fix.range.start, fix.range.end)));
     let applied = fixes.len();
     let mut fixed = text.to_owned();
-    for fix in fixes {
-        fixed.replace_range(fix.range, &fix.replacement);
+    for fix in &fixes {
+        fixed.replace_range(fix.range.clone(), &fix.replacement);
     }
+    fixes.reverse();
     // What the fix writes has no error the text did not have.
     let errors = |diagnostics: &[Diagnostic]| {
         diagnostics
@@ -112,10 +124,325 @@ pub fn fix_source(text: &str, context: &LowerContext<'_>) -> Fixed {
             .cloned();
         return unchanged(new);
     }
-    Fixed {
-        text: fixed,
-        refused: None,
+    (
+        Fixed {
+            text: fixed,
+            refused: None,
+        },
+        fixes,
+    )
+}
+
+/// What a source written for language 1 becomes in the written language
+/// (LANG-20): judged always by its 0.1.0 reading, also without an `@after`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Judged {
+    /// The text in the written language, runs as today: the same text when
+    /// nothing changes. `edits` are the fixes applied, as ranges of the
+    /// original text, in source order.
+    Convertible { text: String, edits: Vec<Fix> },
+    /// The statements that stand in the way, in source order; nothing is
+    /// converted.
+    Blocked(Vec<Blocker>),
+    /// The text does not parse: its first syntax error.
+    Unparsable(Diagnostic),
+}
+
+/// A statement that stands in the way of a conversion, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Blocker {
+    /// The statement's range in the text.
+    pub range: Range<usize>,
+    /// The statement's handle; empty for an error of the check that names
+    /// no statement.
+    pub handle: String,
+    pub reason: Blocked,
+}
+
+/// Why a statement stands in the way of a conversion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Blocked {
+    /// A step that runs nowhere today: nothing orders it after `start`.
+    /// `above` is the step written above it in its braces, whose `@after` the
+    /// person may write on it instead of deleting it.
+    RunsNowhere { above: Option<String> },
+    /// A statement written elsewhere than where it runs today: `after` names
+    /// the statements it runs after today, by handle.
+    NotInPlace { after: Vec<String> },
+    /// The converted text would not pass the check of the written language.
+    Invalid(Diagnostic),
+}
+
+/// Judges `text`, a source of a project written in language 1, by its
+/// 0.1.0 reading, whether or not it holds an `@after`: in its main flow, its
+/// cleanup and a component's body, the steps it runs today, in their order,
+/// must be the steps written, in the order written, and the converted text
+/// must pass the check of the written language. [`fix_source`] makes the
+/// comparison only for a file with an `@after` or without its `start`;
+/// `apiforge fix --folder` makes it for every source with this function.
+pub fn judge_language_1(text: &str, context: &LowerContext<'_>) -> Judged {
+    let tree = parse(text);
+    if let Some(error) = tree
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == Severity::Error)
+    {
+        return Judged::Unparsable(error.clone());
     }
+    let written_context = context.clone().written();
+    let lowered = lower(&tree, &written_context);
+    let mut blockers = match &lowered.document {
+        Some(written) => out_of_order(&tree, context, written),
+        None => vec![],
+    };
+    // The errors of the written check that are not the fix's own: the text
+    // would not pass it once converted. The fix's own are judged above, and
+    // an error of the whole file (a cycle the written order makes) follows
+    // from a statement out of its place, which is named instead.
+    let ordered = blockers.is_empty();
+    blockers.extend(
+        lowered
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity == Severity::Error && !fix_message(&d.message))
+            .filter(|d| ordered || d.range != (0..text.len()))
+            .map(invalid),
+    );
+    if blockers.is_empty() {
+        let (fixed, edits) = fixed_with_edits(text, context);
+        if let Some(refused) = fixed.refused {
+            blockers.push(invalid(&refused));
+        } else {
+            let after = lower(&parse(&fixed.text), &written_context);
+            blockers.extend(
+                after
+                    .diagnostics
+                    .iter()
+                    .filter(|d| d.severity == Severity::Error)
+                    .map(|d| Blocker {
+                        // A range of the converted text says nothing of the
+                        // original: the error is the file's.
+                        range: 0..0,
+                        handle: String::new(),
+                        reason: Blocked::Invalid(d.clone()),
+                    }),
+            );
+            if blockers.is_empty() {
+                return Judged::Convertible {
+                    text: fixed.text,
+                    edits,
+                };
+            }
+        }
+    }
+    blockers.sort_by_key(|blocker| (blocker.range.start, blocker.range.end));
+    Judged::Blocked(blockers)
+}
+
+/// The messages of the written language that the conversion itself
+/// resolves or judges by the 0.1.0 reading.
+fn fix_message(message: &str) -> bool {
+    matches!(
+        message,
+        AFTER_REMOVED | START_MISSING | START_NOT_FIRST | RUNS_NOWHERE | NOT_IN_PLACE
+    )
+}
+
+fn invalid(diagnostic: &Diagnostic) -> Blocker {
+    Blocker {
+        range: diagnostic.range.clone(),
+        handle: String::new(),
+        reason: Blocked::Invalid(diagnostic.clone()),
+    }
+}
+
+/// Every statement whose place in the written reading is not where the
+/// 0.1.0 reading runs it, in each graph of the document. After each one
+/// found, it is taken out of both readings, its neighbours joined, so that
+/// the next is judged on its own.
+fn out_of_order(tree: &SyntaxTree, context: &LowerContext<'_>, written: &Document) -> Vec<Blocker> {
+    let Some(file) = tree.file.as_ref() else {
+        return vec![];
+    };
+    let Some(stored) = lower(tree, &context.clone().stored()).document else {
+        return vec![];
+    };
+    let mut ranges = HashMap::new();
+    statement_ranges(&file.statements, &mut ranges);
+    statement_ranges(file.cleanup.as_deref().unwrap_or_default(), &mut ranges);
+    let mut attributes = HashMap::new();
+    attribute_ends(&file.statements, &mut attributes);
+    attribute_ends(file.cleanup.as_deref().unwrap_or_default(), &mut attributes);
+    // A statement is named from its handle, after its attributes and the
+    // comments written between them and it.
+    for (handle, range) in &mut ranges {
+        if let Some(end) = attributes.get(handle)
+            && let Some(token) = tree.tokens.iter().find(|token| {
+                token.range.start >= *end
+                    && !matches!(
+                        token.kind,
+                        crate::lexer::TokenKind::Whitespace | crate::lexer::TokenKind::Comment
+                    )
+            })
+            && token.range.start < range.end
+        {
+            range.start = token.range.start;
+        }
+    }
+    let mut blockers = vec![];
+    for (stored, written) in graphs(&stored).into_iter().zip(graphs(written)) {
+        let (mut stored, mut written) = (stored.clone(), written.clone());
+        // Each round takes one statement out, so this ends.
+        for _ in 0..=written.nodes.len() + stored.nodes.len() {
+            let Some((id, reason)) = first_out_of_order(&stored, &written) else {
+                break;
+            };
+            if let Some(range) = ranges.get(&id) {
+                blockers.push(Blocker {
+                    range: range.clone(),
+                    handle: id.clone(),
+                    reason,
+                });
+            }
+            if !take_out(&mut stored, &mut written, &id) {
+                break;
+            }
+        }
+    }
+    blockers
+}
+
+/// The first statement of `written` out of the order `stored` runs today,
+/// and why, or `None` when the two agree.
+fn first_out_of_order(stored: &Graph, written: &Graph) -> Option<(String, Blocked)> {
+    let handle = |graph: &Graph, id: &str| {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .map_or_else(|| id.to_owned(), |node| node.handle.clone())
+    };
+    let sources = |graph: &Graph, id: &str| {
+        let mut sources: Vec<String> = vec![];
+        for edge in graph.edges.iter().filter(|edge| edge.target == id) {
+            let source = handle(graph, &edge.source);
+            if !sources.contains(&source) {
+                sources.push(source);
+            }
+        }
+        sources
+    };
+    let expected = match chained(stored) {
+        Ok(expected) => expected,
+        Err(Unchained::RunsNowhere(id)) => {
+            let above = step_above(written, &id).map(|above| handle(written, &above));
+            return Some((id, Blocked::RunsNowhere { above }));
+        }
+        Err(Unchained::NotAChain(id)) => {
+            let after = sources(stored, &id);
+            return Some((id, Blocked::NotInPlace { after }));
+        }
+    };
+    let incoming = |graph: &Graph| {
+        let mut edges: HashMap<String, HashSet<(String, Option<Branch>)>> = HashMap::new();
+        for edge in &graph.edges {
+            edges
+                .entry(edge.target.clone())
+                .or_default()
+                .insert((edge.source.clone(), edge.branch));
+        }
+        edges
+    };
+    let (wanted, actual) = (incoming(&expected), incoming(written));
+    let empty = HashSet::new();
+    let id = written
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .chain(expected.nodes.iter().map(|node| node.id.as_str()))
+        .find(|id| wanted.get(*id).unwrap_or(&empty) != actual.get(*id).unwrap_or(&empty))?
+        .to_owned();
+    let after = sources(&expected, &id);
+    Some((id, Blocked::NotInPlace { after }))
+}
+
+/// The step written above `id` in its braces, in the written reading.
+fn step_above(written: &Graph, id: &str) -> Option<String> {
+    let braces = braces(written);
+    let own = braces.get(id).copied();
+    let mut above = None;
+    for node in &written.nodes {
+        if node.id == id {
+            return above;
+        }
+        if is_step(node.kind) && braces.get(node.id.as_str()).copied() == own {
+            above = Some(node.id.clone());
+        }
+    }
+    None
+}
+
+/// Takes the statement `id` out of both readings: the 0.1.0 reading joins
+/// what ran before it to what ran after it; the written reading chains its
+/// neighbours, as a deleted line would. An `if`, whose braces hold other
+/// statements, is not taken out: `false`, and the judgement of this graph
+/// stops at it.
+fn take_out(stored: &mut Graph, written: &mut Graph, id: &str) -> bool {
+    let is_if = |graph: &Graph| {
+        graph
+            .nodes
+            .iter()
+            .any(|node| node.id == id && node.kind == NodeKind::If)
+    };
+    if is_if(stored) || is_if(written) {
+        return false;
+    }
+    let before: Vec<(String, Option<Branch>)> = stored
+        .edges
+        .iter()
+        .filter(|edge| edge.target == id)
+        .map(|edge| (edge.source.clone(), edge.branch))
+        .collect();
+    let after: Vec<String> = stored
+        .edges
+        .iter()
+        .filter(|edge| edge.source == id)
+        .map(|edge| edge.target.clone())
+        .collect();
+    stored.nodes.retain(|node| node.id != id);
+    stored
+        .edges
+        .retain(|edge| edge.source != id && edge.target != id);
+    for (source, branch) in &before {
+        for target in &after {
+            let joined = stored.edges.iter().any(|edge| {
+                edge.source == *source && edge.target == *target && edge.branch == *branch
+            });
+            if !joined {
+                stored.edges.push(OrderEdge {
+                    id: format!("joined-{}", stored.edges.len()),
+                    source: source.clone(),
+                    target: target.clone(),
+                    branch: *branch,
+                });
+            }
+        }
+    }
+    let kept: HashMap<String, (String, Branch)> = braces(written)
+        .into_iter()
+        .filter(|(node, _)| *node != id)
+        .map(|(node, (parent, branch))| (node.to_owned(), (parent.to_owned(), branch)))
+        .collect();
+    let mut rest = written.clone();
+    rest.nodes.retain(|node| node.id != id);
+    rest.edges
+        .retain(|edge| edge.source != id && edge.target != id);
+    let kept: Braces<'_> = kept
+        .iter()
+        .map(|(node, (parent, branch))| (node.as_str(), (parent.as_str(), *branch)))
+        .collect();
+    *written = chain(&rest, &kept);
+    true
 }
 
 /// The fix that removes the attribute at `range` and nothing else: the
@@ -267,6 +594,22 @@ fn graphs(document: &Document) -> Vec<&Graph> {
     match document {
         Document::Scenario(scenario) => vec![&scenario.graph, &scenario.cleanup],
         Document::Component(component) => vec![&component.graph],
+    }
+}
+
+/// Where the last attribute of each statement that has one ends, by handle.
+fn attribute_ends(statements: &[Statement], ends: &mut HashMap<String, usize>) {
+    for statement in statements {
+        if let Some(last) = statement.attributes.iter().map(|a| a.range.end).max() {
+            ends.insert(statement.handle.clone(), last);
+        }
+        if let Form::If {
+            then, otherwise, ..
+        } = &statement.form
+        {
+            attribute_ends(then, ends);
+            attribute_ends(otherwise.as_deref().unwrap_or_default(), ends);
+        }
     }
 }
 

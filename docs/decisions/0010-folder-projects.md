@@ -77,9 +77,19 @@ on; an existing manifest is written back in the format it was read in. A
 project in a newer language is not opened: *This project is written in
 language 3; this build reads language 2. Update API Forge.* A project in an
 older language opens for reading and editing; `check` reports it at the
-manifest with `apiforge fix --folder <directory>`, and it does not run until
+manifest with `apiforge fix --folder <directory>`, its `@after` lines say to
+run that command rather than delete them by hand, and it does not run until
 the fix has raised it. A release before LANG-15 refuses `formatVersion: 2` as
 an unsupported format.
+
+A project is converted whole (LANG-20): `apiforge fix --folder` judges every
+document of the manifest by its 0.1.0 reading and writes every changed source
+and the manifest, raised to `formatVersion: 2, languageVersion: 2`, in one
+commit of the project store whose read set is every document and the manifest
+([ADR 0011](0011-project-transactions.md)); or it writes nothing. There is no
+state between the two languages, no record of converted files and no
+conversion in parts: a project larger than one commit is refused, and an
+interrupted commit is finished by the store's recovery like any other.
 
 An unsupported shared format is preserved without writes. Bad shared metadata is
 reported and requires explicit recovery before replacement. Technical file errors

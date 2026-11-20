@@ -1,4 +1,5 @@
 mod document;
+mod fix;
 mod folder;
 mod mcp;
 mod run;
@@ -37,9 +38,10 @@ fn main() -> ExitCode {
     }
     if args.len() == 1 && matches!(args[0].to_str(), Some("--help" | "-h")) {
         println!(
-            "apiforge fmt <file.afs> [--check]\n{}\n{}\n{}\n{}\napiforge --version",
+            "apiforge fmt <file.afs> [--check]\n{}\n{}\n{}\n{}\n{}\napiforge --version",
             document::USAGE,
             folder::USAGE,
+            fix::USAGE,
             run::USAGE,
             mcp::USAGE
         );
@@ -55,6 +57,9 @@ fn main() -> ExitCode {
         } else {
             document::run(&args)
         });
+    }
+    if args.first().and_then(|a| a.to_str()) == Some("fix") {
+        return ExitCode::from(fix::run(&args));
     }
     if args.first().and_then(|a| a.to_str()) == Some("run") {
         return ExitCode::from(run::run(&args));
