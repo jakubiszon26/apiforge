@@ -457,3 +457,95 @@ fn lang13_criterion_15_no_fix_in_an_older_project() {
         "{run}"
     );
 }
+
+// Review of #488 -------------------------------------------------------------
+
+/// The start a board edit writes into a scenario takes a handle and an
+/// identifier no block of the file has, cleanup included.
+#[test]
+fn lang13_review_the_written_start_avoids_the_cleanups_handles_and_ids() {
+    let directory = prepared_demo();
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    let id = session
+        .create_document(
+            DocumentKind::Scenario,
+            "scenarios/x.afs",
+            "scenario \"X\" {\n  cleanup {\n    begin = DELETE \"/temporary\"\n  }\n}\n",
+        )
+        .unwrap();
+    let mut before = model(&session, &id);
+    // The cleanup block's persistent identifier is `start`.
+    if let apiforge_script::Document::Scenario(scenario) = &mut before {
+        scenario.cleanup.nodes[0].id = "start".into();
+    }
+    let (edited, _) = add(&before, Block::Request, None);
+    session.apply_model_edit(&id, edited, Origin(1)).unwrap();
+    let after = passes(&mut session, &id);
+    let apiforge_script::Document::Scenario(scenario) = &after else {
+        panic!("a scenario");
+    };
+    let start = scenario
+        .graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Start)
+        .expect("a start is written");
+    assert_eq!(start.handle, "begin_2");
+    assert!(
+        scenario
+            .cleanup
+            .nodes
+            .iter()
+            .all(|node| node.id != start.id)
+    );
+}
+
+/// The same when a legacy scenario without a start is migrated: its cleanup
+/// already has a block `begin` whose identifier is `start`.
+#[test]
+fn lang13_review_migration_writes_a_start_beside_a_cleanup_begin() {
+    let mut project = apiforge_core::demos::shop_project();
+    let scenario = &mut project.scenarios[0];
+    scenario
+        .graph
+        .nodes
+        .retain(|node| node.kind != NodeKind::Start);
+    // A cleanup block no other block reads or follows.
+    let begin = scenario
+        .cleanup
+        .nodes
+        .iter_mut()
+        .find(|node| node.kind == NodeKind::Assert)
+        .expect("the demo's cleanup has a check");
+    begin.id = "start".into();
+    begin.handle = "begin".into();
+
+    let written = as_written(&apiforge_script::Document::Scenario(
+        project.scenarios[0].clone(),
+    ))
+    .unwrap();
+    let apiforge_script::Document::Scenario(written) = written else {
+        panic!("a scenario");
+    };
+    let start = written
+        .graph
+        .nodes
+        .iter()
+        .find(|node| node.kind == NodeKind::Start)
+        .expect("a start is written");
+    assert_eq!(start.handle, "begin_2");
+    assert_ne!(start.id, "start");
+
+    let directory = tempfile::tempdir().unwrap();
+    let store = WorkspaceStore::open_exclusive(directory.path().join("workspace.json")).unwrap();
+    store
+        .save(&apiforge_core::format::Workspace {
+            version: project.version,
+            active_id: project.id.clone(),
+            projects: vec![project],
+        })
+        .unwrap();
+    let outcome = migrate_workspace(&store).expect("the project migrates");
+    let mut session = ProjectSession::open(Path::new(&outcome.catalogue.projects[0].path)).unwrap();
+    every_document_passes(&mut session);
+}

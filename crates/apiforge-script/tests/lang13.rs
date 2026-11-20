@@ -909,3 +909,64 @@ fn lang13_the_document_model_is_unchanged_in_shape() {
     assert_eq!(keys, set(&["nodes", "edges"]));
     let _: &Scenario = &scenario;
 }
+
+// Review of #488 -------------------------------------------------------------
+
+/// A comment written inside an `@after` stays: the fix removes the
+/// attribute's own text, not the comments in it (LF and CRLF).
+#[test]
+fn lang13_review_a_comment_inside_an_after_is_kept() {
+    let project = project();
+    for newline in ["\n", "\r\n"] {
+        let text = "scenario \"X\" {\n  begin = start\n  @after( // keep this explanation\n    begin)\n  a = GET \"/a\"\n}\n"
+            .replace('\n', newline);
+        let expected =
+            "scenario \"X\" {\n  begin = start\n  // keep this explanation\n  a = GET \"/a\"\n}\n"
+                .replace('\n', newline);
+        assert_eq!(fixed_once(&text), expected, "{newline:?}");
+        let fixed = fix_source(&text, &LowerContext::folder(&project));
+        assert_eq!(fixed.refused, None, "{newline:?}");
+        assert_eq!(fixed.text, expected, "{newline:?}");
+    }
+}
+
+/// A file without `@after` whose order in language 2 is not the order it
+/// ran in language 1 is refused and left as it is: a request that reads one
+/// written below it, and a request nothing ordered after `start`.
+#[test]
+fn lang13_review_a_file_without_after_that_would_run_otherwise_is_not_fixed() {
+    let project = project();
+    let context = LowerContext::folder(&project);
+    let forward = "scenario \"X\" {\n  a = GET \"/{{b.body.id}}\"\n  b = GET \"/b\" { sample 200 { id: 1 } }\n}\n";
+    let lowered = lower(&parse(forward), &context);
+    let start = lowered
+        .diagnostics
+        .iter()
+        .find(|d| d.message == START_MISSING)
+        .expect("the start is missing");
+    assert!(start.fix.is_none(), "no fix that would make a cycle");
+    let fixed = fix_source(forward, &context);
+    assert_eq!(fixed.text, forward);
+    let refused = fixed.refused.expect("refused");
+    assert_eq!(refused.message, NOT_IN_PLACE);
+    assert!(forward[refused.range].starts_with("a = GET"));
+
+    let nowhere = "scenario \"X\" {\n  begin = start\n  loose = GET \"/loose\"\n}\n";
+    let fixed = fix_source(nowhere, &context);
+    assert_eq!(fixed.text, nowhere);
+    let refused = fixed.refused.expect("refused");
+    assert_eq!(refused.message, RUNS_NOWHERE);
+    assert!(nowhere[refused.range].starts_with("loose = GET"));
+}
+
+/// What the fix writes passes the check.
+#[test]
+fn lang13_review_the_fixed_text_passes_the_check() {
+    let project = project();
+    let context = LowerContext::folder(&project);
+    for name in ["checkout", "lookup", "booking-day", "labels", "sign-in"] {
+        let fixed = fix_source(&lang1(name), &context);
+        assert_eq!(fixed.refused, None, "{name}");
+        written(&project, &fixed.text);
+    }
+}
