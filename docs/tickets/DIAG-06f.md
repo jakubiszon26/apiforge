@@ -1,13 +1,15 @@
 # DIAG-06f: Pasted and duplicated steps land in the chain and keep what they read
 
 - Size: M · Owner review: 15 min · Risk: `default`, `visible UI`
-- State: **Waits for one owner decision** (what a copy of an `if` takes,
-  on [#496](https://github.com/jakubiszon26/apiforge/issues/496)), then
-  for the independent review. Split from DIAG-06e on 2026-11-20. The
-  owner's answers on #494 stand: 2 = A (*Duplicate* directly after its
-  original; *Paste* after the selected step, else at the end), 3 = A (a
+- State: **Decided; waits for the independent review before it is
+  labelled.** Split from DIAG-06e on 2026-11-20. The owner's answers of
+  that day: on #494, 2 = A (*Duplicate* directly after its original;
+  *Paste* after the selected step, else at the end) and 3 = A (a
   reference that still finds its step is kept; otherwise the paste is
-  refused). After DIAG-06d (#493). A condition of 0.2.0.
+  refused); on [#496](https://github.com/jakubiszon26/apiforge/issues/496),
+  A — an `if` is copied and duplicated with everything in its braces, and
+  steps selected without their `if` are pasted as ordinary steps of the
+  place. After DIAG-06d (#493). A condition of 0.2.0.
 - Branch `feat/diag-06f-paste-and-duplicate`
 - Analysis model: Fable 5.2 · Implementation model: —
 
@@ -34,7 +36,10 @@ can leave a request without its URL. Pasted steps are written last
   place of the paste is kept; a paste that would leave a statement
   reading what is not there is refused: *`pay` reads `cart`, which is not
   in this scenario. Copy it too.*
-- The open question: whether an `if` is copied with its braces.
+- Default behaviour that changes (the answer on #496): *Copy* and
+  *Duplicate* take an `if` with everything in its braces, also when only
+  the `if` is selected; steps selected without their `if` are pasted as
+  ordinary steps of the place they are pasted to.
 - Removed or hidden, migrated: nothing.
 
 ## Mock-up
@@ -43,8 +48,7 @@ Not applicable: no new element; the banner's sentence.
 
 ## Acceptance criteria
 
-Written for the recommended answer (an `if` is copied with everything in
-its braces); restated otherwise. Tests named `diag06f`, in the files of
+Tests named `diag06f`, in the files of
 DIAG-06a; every test of an edit ends by asserting the check. Placement
 goes through DIAG-06a's contract.
 
@@ -56,8 +60,11 @@ goes through DIAG-06a's contract.
    Tests: K, D `diag06f_criterion_1_*`, among them a selection across
    *Yes* and *No*.
 2. An `if` is copied and duplicated with every statement in its braces,
-   at any depth; the copy's branches hold what the original's hold.
-   Test: K `fragment_takes_the_braces`, D `diag06f_criterion_2`.
+   at any depth, also when only the `if` is selected; the copy's branches
+   hold what the original's hold. Steps selected without their `if` are
+   pasted as steps of the braces of the place, in their order, with no
+   branch of their own. Tests: K `fragment_takes_the_braces`,
+   `fragment_without_its_if_is_plain_steps`; D `diag06f_criterion_2_*`.
 3. *Paste* writes the fragment after the selected step, in its braces
    (DIAG-06a's rule for *Add step*, also for several selected and for a
    check selected), else last in the main flow, in the copied order.
