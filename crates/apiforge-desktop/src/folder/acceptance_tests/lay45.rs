@@ -776,7 +776,7 @@ fn lay45_criterion_8_three_measures_of_crossings() {
                 let (_project, harness, id) = tidied(name, WIDE, expanded, wires);
                 let label = format!("{name}, {wires:?}, checks drawn: {expanded}");
                 let (data, chained, kept) = measures(&harness, &id, &label);
-                eprintln!("LAY-45 {label}: data×data {data}, chain×data {chained}, gap {kept}");
+                errln!("LAY-45 {label}: data×data {data}, chain×data {chained}, gap {kept}");
                 let (most, _, _) = before(name, wires, expanded);
                 if !HELD.contains(&(name, wires, expanded)) {
                     assert!(
@@ -857,7 +857,7 @@ fn lay45_criterion_8_data_lines_against_the_board_without_order() {
                 let (data, _, _) = measures(&harness, &id, &label);
                 let alone = without_order(&harness, &id);
                 let (was, _, _) = before(name, wires, expanded);
-                eprintln!(
+                errln!(
                     "LAY-45 {label}: data×data {data}, without ordering lines {alone}, before {was}"
                 );
                 if HELD.contains(&(name, wires, expanded)) {
