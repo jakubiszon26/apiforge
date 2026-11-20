@@ -197,7 +197,13 @@ scenario "Checkout" {
 The steps of a block run in the order they are written; checks and values
 run as soon as what they read exists. `apiforge fmt`, `check`, `print`,
 `apply` and `run` format, validate, print and execute scenarios from the
-command line. The grammar and the round-trip
+command line. A project written for 0.1.0, whose steps were ordered with
+`@after`, opens and can be edited but does not run until
+`apiforge fix --folder <project>` has converted it: the command converts every
+source and the project file in one step, or writes nothing and lists, file by
+file and line by line, each statement to change by hand (one that runs nowhere
+today or is written elsewhere than where it runs), and each file it cannot
+read. `--check` prints the same report without writing. The grammar and the round-trip
 contract are in [ADR 0005](docs/decisions/0005-scenario-language.md); the
 reference given to models is [docs/language/reference.md](docs/language/reference.md).
 

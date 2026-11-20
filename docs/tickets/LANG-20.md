@@ -19,7 +19,7 @@
 - Issue [#481](https://github.com/jakubiszon26/apiforge/issues/481) · LANG
   sprint, first half, a condition of 0.2.0 · branch
   `feat/lang-20-project-fix`
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Owner decision (2026-11-20)
 
