@@ -49,7 +49,9 @@ fn unqualified_folder_calls_have_an_explicit_pin_fix_while_legacy_keeps_latest()
         panic!("scenario")
     };
     assert_eq!(scenario.graph.nodes[0].config.revision, Some(2));
-    let folder = lower(&tree, &LowerContext::folder(&project));
+    // A folder source runs its steps from `start` (LANG-13).
+    let source = "scenario \"Main\" { begin = start call = (Helper()) }";
+    let folder = lower(&parse(source), &LowerContext::folder(&project));
     assert!(folder.has_errors());
     let fix = folder
         .diagnostics
@@ -66,7 +68,8 @@ fn unqualified_folder_calls_have_an_explicit_pin_fix_while_legacy_keeps_latest()
     let Some(Document::Scenario(scenario)) = old.document else {
         panic!("scenario")
     };
-    assert_eq!(scenario.graph.nodes[0].config.revision, Some(1));
+    let call = scenario.graph.nodes.iter().find(|n| n.handle == "call");
+    assert_eq!(call.unwrap().config.revision, Some(1));
 }
 
 #[test]
@@ -87,7 +90,7 @@ fn folder_printing_supports_component_only_projects_and_keeps_pins() {
         "legacy needs a scenario"
     );
     project.components.push(component);
-    let tree = parse("scenario \"Main\" { call = (Helper@1()) }");
+    let tree = parse("scenario \"Main\" { begin = start call = (Helper@1()) }");
     let scenario = lower(&tree, &LowerContext::folder(&project))
         .document
         .unwrap();

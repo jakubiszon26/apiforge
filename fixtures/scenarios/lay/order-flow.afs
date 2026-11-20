@@ -1,7 +1,6 @@
 scenario "Order flow" {
   description "A longer scenario for the layout analysis."
   begin = start
-  @after(begin)
   login = POST "/login" {
     body { user: "demo", password: "demo" }
     sample 200 { token: "t-1" }
@@ -21,7 +20,6 @@ scenario "Order flow" {
     sample 201 { id: "c-1", total: 28.0 }
   }
   cart_total = assert cart.body.total ~= total within 0.01
-  @after(cart_total)
   order = POST "/orders" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     body { cartId: cart.body.id, total: total }

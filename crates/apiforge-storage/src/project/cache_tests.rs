@@ -276,8 +276,8 @@ fn source_model_disagreement_and_unqualified_calls_cannot_be_sealed_as_last_vali
     .into_workspace()
     .projects
     .remove(0);
-    let scenario = &project.scenarios[0];
-    let source = apiforge_script::print_scenario(&project, scenario).unwrap();
+    let scenario = &written(&project.scenarios[0]);
+    let source = folder_source(&project, scenario);
     let snapshot = LastValidSnapshot::capture(
         DocumentKey::Working {
             document_id: "fixture-document".into(),
@@ -419,8 +419,8 @@ fn independent_dependency_versions_and_configuration_are_inside_the_snapshot_dig
     .into_workspace()
     .projects
     .remove(0);
-    let document = &project.scenarios[0];
-    let source = apiforge_script::print_scenario(&project, document).unwrap();
+    let document = &written(&project.scenarios[0]);
+    let source = folder_source(&project, document);
     let cached = LastValidSnapshot::capture(
         DocumentKey::Working {
             document_id: "fixture".into(),
@@ -571,4 +571,23 @@ fn an_unregistered_document_makes_only_its_own_entry_obsolete() {
     // An ordinary save, without explicit replacement, drops the obsolete entry.
     let saved = store.save_last_valid_cache(&after, &[]).unwrap();
     assert!(saved.preserved_copy().is_none());
+}
+
+/// A legacy scenario as a folder source says it since LANG-13: each graph
+/// one chain in the order it runs, with a start first.
+pub(in crate::project) fn written(
+    scenario: &apiforge_core::format::Scenario,
+) -> apiforge_core::format::Scenario {
+    use apiforge_core::chain::{chained, with_start};
+    let mut scenario = scenario.clone();
+    scenario.cleanup = chained(&scenario.cleanup).expect("a chain");
+    scenario.graph = with_start(
+        &chained(&scenario.graph).expect("a chain"),
+        &[&scenario.cleanup],
+    );
+    scenario
+}
+
+fn folder_source(project: &Project, scenario: &apiforge_core::format::Scenario) -> String {
+    apiforge_script::print_folder_document(project, &Document::Scenario(scenario.clone())).unwrap()
 }

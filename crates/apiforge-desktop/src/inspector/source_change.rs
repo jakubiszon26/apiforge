@@ -392,7 +392,6 @@ mod tests {
 
     const SCENARIO: &str = r#"scenario "Double booking" {
   begin = start
-  @after(begin)
   token = "secret"
   rooms = GET "/rooms" {
     headers { Authorization: "Bearer {{token}}" }
@@ -414,7 +413,6 @@ mod tests {
   } else {
     not_booked = assert first.status == 201
   }
-  @after(booked)
   report = POST "/reports" {
     body { booking: first.body.id }
   }

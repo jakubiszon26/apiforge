@@ -627,7 +627,8 @@ fn mcp03_check_text_run_the_reference_and_resources_over_stdio() {
     let report = structured(&report);
     assert_eq!(report["status"], "passed");
     assert_eq!(report["ended_by"], "completed");
-    assert_eq!(report["step_count"], 18);
+    // The demo shop's steps and the start LANG-13 writes first.
+    assert_eq!(report["step_count"], 19);
     assert_eq!(report["redacted"], true);
 
     let live = call(
@@ -640,7 +641,7 @@ fn mcp03_check_text_run_the_reference_and_resources_over_stdio() {
 
     let reference = call(&mut server, 6, "language_reference", json!({}));
     let reference = structured(&reference);
-    assert_eq!(reference["version"], "1");
+    assert_eq!(reference["version"], "2");
     let text = reference["text"].as_str().unwrap().to_owned();
 
     let listed = server.request(7, "resources/list", json!({}));

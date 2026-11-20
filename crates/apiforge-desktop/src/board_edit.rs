@@ -10,7 +10,7 @@ use apiforge_core::{
     block::Block,
     edit,
     format::{Binding, Graph, Node, Position, Project, Proxy, ProxySource},
-    graph::delete_nodes,
+    graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT, delete_nodes},
 };
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -537,6 +537,59 @@ impl Board<'_> {
         })
     }
 
+    /// *Add step* on the board's bar in the folder window (DIAG-06a): a step
+    /// goes directly after the step [`edit::add_step_after`] names for the
+    /// selection, in its braces, as one from that step's *Next* does; with
+    /// nothing selected, and any other block, it is added as the library
+    /// adds it, last.
+    pub fn add_step(
+        &self,
+        block: Block,
+        component: Option<(String, u32)>,
+        position: Position,
+        selection: &[String],
+    ) -> Result<Edit, String> {
+        let selected: Vec<&str> = selection.iter().map(String::as_str).collect();
+        let anchor = (apiforge_core::chain::is_step(block.kind())
+            && block.kind() != apiforge_core::model::NodeKind::Start)
+            .then(|| edit::add_step_after(self.graph, &selected))
+            .flatten();
+        match anchor {
+            Some(anchor) => {
+                let near = self
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == anchor)
+                    .map_or(position, |node| Position {
+                        x: node.position.x + 340.0,
+                        y: node.position.y + 20.0,
+                    });
+                let source = (anchor.to_owned(), ORDER_PORT.to_owned());
+                self.add_node(block, component, near, Some(source))
+            }
+            None => self.add_node(block, component, position, None),
+        }
+    }
+
+    /// A wire from a step's *Next*, or from an `if`'s *Yes* or *No*, dropped
+    /// on a step of the board (DIAG-06a): the step is put at that place,
+    /// with what goes with it, or the move is refused with the board's
+    /// sentence. Returns the moved blocks beside the graph.
+    pub fn place(
+        &self,
+        source: &str,
+        source_port: &str,
+        target: &str,
+    ) -> Result<(Graph, Vec<String>), String> {
+        let at = match source_port {
+            TRUE_PORT => edit::Place::First(source, apiforge_core::model::Branch::True),
+            FALSE_PORT => edit::Place::First(source, apiforge_core::model::Branch::False),
+            _ => edit::Place::After(source),
+        };
+        edit::place(self.graph, self.project, target, at).map_err(|error| error.to_string())
+    }
+
     /// An *Export* passes values out of a component, so it is a sink: the
     /// left edge one gap right of the rightmost card or chip, when `x` is not
     /// already there (UX-21). Being right of everything on the board, it
@@ -620,6 +673,35 @@ impl Board<'_> {
         let wires: HashSet<&str> = wires.iter().map(String::as_str).collect();
         edit::remove_proxies(
             &edit::remove_connections(&delete_nodes(self.graph, &ids), &wires),
+            &ids,
+        )
+    }
+
+    /// What deleting the blocks `ids` would do in the folder window
+    /// (DIAG-06e): what goes, who would be left reading it, and whether an
+    /// `if` with statements in its braces asks first. The graph beside this
+    /// one (a scenario's cleanup) is read for readers too. `needs_start` is
+    /// true on the main flow of a scenario.
+    pub fn deletion(&self, ids: &[String], needs_start: bool) -> edit::Deletion {
+        let selection: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let beside: Vec<&Graph> = self.sibling.into_iter().collect();
+        edit::delete_preview(self.graph, &beside, &selection, needs_start)
+    }
+
+    /// The folder window's delete, by `deletion`'s answer (DIAG-06e): its
+    /// statements, the wires `wires` and the proxies among `ids`. No input of
+    /// a statement that stays is changed, so call it only for a deletion
+    /// without a refusal. The legacy window keeps [`Board::delete`].
+    pub fn delete_checked(
+        &self,
+        deletion: &edit::Deletion,
+        ids: &[String],
+        wires: &[String],
+    ) -> Graph {
+        let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let wires: HashSet<&str> = wires.iter().map(String::as_str).collect();
+        edit::remove_proxies(
+            &edit::remove_connections(&edit::apply_deletion(self.graph, deletion), &wires),
             &ids,
         )
     }

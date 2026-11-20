@@ -56,7 +56,7 @@ fn row_label(harness: &FolderHarness, text: &str) -> Option<egui::Rect> {
         .find(|found| on_row(main, *found))
 }
 
-/// The steps summary ("6 steps · All steps") on the row of the Main tab.
+/// The steps summary ("7 steps") on the row of the Main tab.
 fn summary(harness: &FolderHarness) -> Option<egui::Rect> {
     let main = rect(harness, "Main");
     harness
@@ -301,8 +301,9 @@ fn tab_runs_from_the_name_through_main_and_cleanup_to_add_step_and_the_tools() {
 }
 
 /// Criterion 4: at 960 × 540 nothing on the row overlaps or is clipped, in
-/// Diagram with the block library open and in Split. Diagram drops only the
-/// kind; Split drops the steps summary.
+/// Diagram with the block library open and in Split. Diagram keeps every
+/// part since the summary reads only `N steps` (LANG-13, owner 2026-11-20);
+/// Split drops the steps summary.
 #[test]
 fn at_the_minimum_window_the_row_fits_without_overlap() {
     let (_project, wide) = open(WIDE, "Diagram");
@@ -320,8 +321,8 @@ fn at_the_minimum_window_the_row_fits_without_overlap() {
         name.width()
     );
     assert!(
-        row_label(&diagram, KIND).is_none(),
-        "the kind is the first part dropped"
+        row_label(&diagram, KIND).is_some(),
+        "the kind stays at 960 px"
     );
     let summary_at = summary(&diagram).expect("the steps summary still fits at 960 px");
     let mut row = vec![(NAME.to_owned(), name)];
@@ -387,7 +388,7 @@ fn a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summar
         previous = level;
         let expected = match width as u32 {
             1600 => Some(0),
-            960 => Some(1),
+            960 => Some(0),
             880 => Some(2),
             760 => Some(3),
             _ => None,

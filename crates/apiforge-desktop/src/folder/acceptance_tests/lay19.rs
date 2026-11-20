@@ -368,7 +368,7 @@ fn lay19_criterion_1_the_count_equals_the_caused_rows() {
     let source = replaced(
         &condition_unmet(),
         "  cleanup {\n",
-        "  @after(begin)\n  extra = GET \"/extra\" {\n  }\n  extra_ok = assert extra.status == 200\n  cleanup {\n",
+        "  extra = GET \"/extra\" {\n  }\n  extra_ok = assert extra.status == 200\n  cleanup {\n",
     );
     let (_project, mut harness) = ran(&source, WIDE);
     let result = run(&harness);

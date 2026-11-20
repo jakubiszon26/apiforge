@@ -2,13 +2,14 @@
 //! presence is semantic but whose normal spelling intentionally uses defaults.
 use crate::{
     ast::*,
-    branches::Branches,
-    format::print_file,
+    format::{Checks, print_file_with},
     lower::{Document, LowerContext, lower, validate_document_model},
     parse,
     reconcile::semantic,
 };
-use apiforge_core::{format::*, graph, model::*, operator::Operator, path::JsonPath};
+use apiforge_core::{
+    branches::Branches, format::*, graph, model::*, operator::Operator, path::JsonPath,
+};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
@@ -22,20 +23,36 @@ pub fn print_component(
     print_document(project, &Document::Component(component.clone()))
 }
 /// Prints a folder definition with the folder policy: component-only projects
-/// are valid and every call must carry its explicit published revision.
+/// are valid and every call must carry its explicit published revision. The
+/// text is in the written language (LANG-13): the steps of each block in the
+/// order of its chain and no `@after`. A document that is not a chain does not
+/// read back as itself and is not printable ([`apiforge_core::chain::chained`]
+/// writes one as a chain first).
 pub fn print_folder_document(
     project: &Project,
     document: &Document,
 ) -> Result<String, Vec<Diagnostic>> {
-    print_with(project, document, true)
+    print_with(project, document, true, true)
+}
+/// Prints a published revision in its stored spelling, as 0.1.0 wrote it:
+/// the folder policy with `@after`, so a revision is written and read exactly
+/// as before and runs as it was published (LANG-13).
+pub fn print_revision(project: &Project, component: &Component) -> Result<String, Vec<Diagnostic>> {
+    print_stored(project, &Document::Component(component.clone()))
+}
+/// A folder definition in the stored spelling of 0.1.0, `@after` included:
+/// a published revision, or the text a legacy draft was based on.
+pub fn print_stored(project: &Project, document: &Document) -> Result<String, Vec<Diagnostic>> {
+    print_with(project, document, true, false)
 }
 fn print_document(project: &Project, document: &Document) -> Result<String, Vec<Diagnostic>> {
-    print_with(project, document, false)
+    print_with(project, document, false, false)
 }
 fn print_with(
     project: &Project,
     document: &Document,
     folder: bool,
+    written: bool,
 ) -> Result<String, Vec<Diagnostic>> {
     if !printable(project, document, folder) {
         return Err(vec![Diagnostic::error(
@@ -43,8 +60,14 @@ fn print_with(
             "Cannot print an invalid document",
         )]);
     }
-    let source = print_file(&Printer::new(project, document).file(document));
-    verify(project, document, folder, &source)?;
+    // The short form of a compound check is the written language's; the
+    // stored spelling writes it in full, as 0.1.0 did (LANG-05).
+    let checks = if written { Checks::Short } else { Checks::Full };
+    let source = print_file_with(
+        &Printer::new(project, document, written).file(document),
+        checks,
+    );
+    verify(project, document, folder, written, &source)?;
     Ok(source)
 }
 pub(crate) fn printable(project: &Project, document: &Document, folder: bool) -> bool {
@@ -70,6 +93,7 @@ pub(crate) fn verify(
     project: &Project,
     document: &Document,
     folder: bool,
+    written: bool,
     source: &str,
 ) -> Result<(), Vec<Diagnostic>> {
     if source.len() > crate::MAX_SOURCE_BYTES {
@@ -79,10 +103,11 @@ pub(crate) fn verify(
         )]);
     }
     let tree = parse(source);
-    let context = if folder {
-        LowerContext::folder(project)
-    } else {
-        LowerContext::document(project)
+    let context = match (folder, written) {
+        (true, true) => LowerContext::folder(project),
+        (true, false) => LowerContext::folder(project).stored(),
+        (false, true) => LowerContext::document(project).written(),
+        (false, false) => LowerContext::document(project),
     };
     let context = if let Document::Component(component) = document {
         context.with_component(component)
@@ -223,9 +248,11 @@ pub(crate) struct Printer<'a> {
     nodes: HashMap<&'a str, &'a Node>,
     /// Nodes written elsewhere in the text, left out of the braces of an `if`.
     pub(crate) skip: HashSet<&'a str>,
+    /// The written language: no `@after`, the order written is the chain.
+    written: bool,
 }
 impl<'a> Printer<'a> {
-    pub(crate) fn new(project: &'a Project, document: &'a Document) -> Self {
+    pub(crate) fn new(project: &'a Project, document: &'a Document, written: bool) -> Self {
         let (main, cleanup) = graphs(document);
         Self {
             project,
@@ -236,6 +263,7 @@ impl<'a> Printer<'a> {
                 .map(|n| (n.id.as_str(), n))
                 .collect(),
             skip: HashSet::new(),
+            written,
         }
     }
     /// The document as the window writes it.
@@ -474,7 +502,7 @@ impl<'a> Printer<'a> {
                 })
             })
             .collect();
-        if !order.is_empty() {
+        if !order.is_empty() && !self.written {
             attributes.push(attribute("after", order));
         }
         let mut expected_config = NodeConfig::default();

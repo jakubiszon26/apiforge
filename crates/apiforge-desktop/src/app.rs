@@ -137,12 +137,6 @@ struct Printed {
 }
 
 impl App {
-    /// The board of the workspace window.
-    #[cfg(test)]
-    pub(crate) fn debug_canvas(&self) -> &Canvas {
-        &self.canvas
-    }
-
     pub fn new(context: &egui::Context, source: Source) -> Self {
         theme::apply(context);
         let mut notice = None;
@@ -2475,6 +2469,16 @@ impl App {
             } => {
                 let result =
                     self.with_board(|board| board.add_node(block, component, position, source));
+                self.apply_edit(result);
+            }
+            // The legacy window keeps adding last (DIAG-06a, criterion 9).
+            Command::AddStep {
+                block,
+                component,
+                position,
+            } => {
+                let result =
+                    self.with_board(|board| board.add_node(block, component, position, None));
                 self.apply_edit(result);
             }
             Command::AddOperator { operator, position } => {

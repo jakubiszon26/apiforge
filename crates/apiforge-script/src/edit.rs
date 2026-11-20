@@ -9,7 +9,10 @@
 //! A new statement, or one the edit takes out of its braces, is written in
 //! the braces the window prints it in, directly after the statement before
 //! it in the document's order: after the step it follows, its checks and
-//! values, when it was added from that step's *Next* (DIAG-07). The parts
+//! values, when it was added from that step's *Next* (DIAG-07). A statement
+//! whose place among the statements of its braces changed — a step moved on
+//! the board and what went with it (DIAG-06a) — is cut and written again in
+//! its new place as the author wrote it, line for line. The parts
 //! of the file before its statements are edited one by one in the same way:
 //! an `on_error` the author left out stays out until its value changes.
 //!
@@ -17,18 +20,21 @@
 //! document, is printed whole, as before.
 use crate::{
     ast::*,
-    branches::Branches,
-    format::{head, opening, statements},
+    format::{attribute_rank, head, opening, statements},
     lexer::{Token, TokenKind},
     lower::Document,
     parse,
     print::{self, Printer, graphs, print_folder_document, printable, verify},
 };
 use apiforge_core::{
+    branches::Branches,
     format::{Graph, Node, Project},
     model::Branch,
 };
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
 
 /// `source` edited to say `document`, as a board edit writes it: `previous`
 /// is the document `source` says, which names the blocks of its statements.
@@ -60,8 +66,30 @@ pub fn edit_in_place(
         return None;
     }
     let tree = parse(source);
-    edited(project, &tree, previous, document)
-        .filter(|text| verify(project, document, true, text).is_ok())
+    edited(project, &tree, previous, document, &HashSet::new())
+        .filter(|text| verify(project, document, true, true, text).is_ok())
+}
+
+/// As [`edit_in_place`], for a move on the board (DIAG-06a): `moved` names
+/// the blocks whose place in the document's order changed — a step put at
+/// a place and the statements that went with it. Their lines are cut and
+/// written in the new place as the author wrote them; every other statement
+/// stays where it is written. `None` when the move cannot be written so: a
+/// move is never printed whole.
+pub fn edit_in_place_moving(
+    project: &Project,
+    source: &str,
+    previous: &Document,
+    document: &Document,
+    moved: &[String],
+) -> Option<String> {
+    if !printable(project, document, true) {
+        return None;
+    }
+    let tree = parse(source);
+    let moved: HashSet<&str> = moved.iter().map(String::as_str).collect();
+    edited(project, &tree, previous, document, &moved)
+        .filter(|text| verify(project, document, true, true, text).is_ok())
 }
 
 /// Where a statement is written: the main flow or the cleanup, or a branch
@@ -106,7 +134,7 @@ impl<'d> Side<'d> {
             nodes.insert(node.id.as_str(), (node, true));
         }
         Self {
-            printer: Printer::new(project, document),
+            printer: Printer::new(project, document, true),
             main: (main, Branches::new(main)),
             cleanup: cleanup.map(|graph| (graph, Branches::new(graph))),
             nodes,
@@ -133,10 +161,12 @@ impl<'d> Side<'d> {
         Some(statement)
     }
 
-    /// What `node` owns in `key`'s braces: its text without its note and
-    /// without the statements inside its own braces, an `if` up to its `{`.
-    fn own(&self, node: &Node, cleanup: bool, key: Key<'_>) -> Option<String> {
+    /// What `node` owns in `key`'s braces, spelled as `author` writes it:
+    /// its text without its note and without the statements inside its own
+    /// braces, an `if` up to its `{`.
+    fn own(&self, node: &Node, cleanup: bool, key: Key<'_>, author: &Statement) -> Option<String> {
         let mut statement = self.written(node, cleanup, key)?;
+        spelled(&mut statement, author);
         statement.note = None;
         let branch = if let Form::If {
             then, otherwise, ..
@@ -189,17 +219,23 @@ struct Edit<'s, 'd> {
     ids: HashMap<&'d str, &'d str>,
     /// Statements left where they are written, by identifier.
     kept: HashMap<&'d str, (&'s Statement, Key<'d>)>,
+    /// Statements whose place among the statements of their braces changed,
+    /// by identifier, with their lines as the author wrote them.
+    moved: HashMap<&'d str, (&'s Statement, Key<'d>, String)>,
     blocks: HashMap<Key<'d>, Block>,
     missing: HashMap<Key<'d>, Missing>,
     /// Replacements, as `(range, order, text)`; an insertion has an empty range.
     edits: Vec<(Range<usize>, usize, String)>,
 }
 
+/// `hint` names the blocks a move moved: where the order of the statements
+/// of some braces changed, they are the ones whose lines move.
 fn edited(
     project: &Project,
     tree: &SyntaxTree,
     previous: &Document,
     document: &Document,
+    hint: &HashSet<&str>,
 ) -> Option<String> {
     if tree.has_errors() || std::mem::discriminant(previous) != std::mem::discriminant(document) {
         return None;
@@ -218,6 +254,7 @@ fn edited(
         new: Side::new(project, document),
         ids,
         kept: HashMap::new(),
+        moved: HashMap::new(),
         blocks: HashMap::new(),
         missing: HashMap::new(),
         edits: vec![],
@@ -228,9 +265,11 @@ fn edited(
         edit.classify(cleanup, Key::Top { cleanup: true }, true)?;
     }
     edit.top_blocks(file)?;
+    edit.reorder(hint)?;
     // New statements are printed with the new statements of their braces
-    // only; the kept ones stay where they are written.
-    edit.new.printer.skip = edit.kept.keys().copied().collect();
+    // only; the kept ones stay where they are written and the moved ones
+    // are written as they were.
+    edit.new.printer.skip = edit.kept.keys().chain(edit.moved.keys()).copied().collect();
     edit.rewrite()?;
     edit.insert(false)?;
     edit.insert(true)?;
@@ -456,6 +495,68 @@ impl<'s, 'd> Edit<'s, 'd> {
         Some(())
     }
 
+    /// Finds the statements whose place among the kept statements of their
+    /// braces changed and cuts their lines (DIAG-06a). Of the statements of
+    /// some braces, the most that keep their order stay where they are
+    /// written; the others move. The statements of `hint` move first, then
+    /// the shortest. A statement that does not stand on lines of its own
+    /// cannot move so, and the edit is not written.
+    fn reorder(&mut self, hint: &HashSet<&str>) -> Option<()> {
+        let mut rank: HashMap<&str, usize> = HashMap::new();
+        let main = self.new.main.0;
+        for (index, node) in main.nodes.iter().enumerate() {
+            rank.insert(node.id.as_str(), index);
+        }
+        if let Some((cleanup, _)) = &self.new.cleanup {
+            for (index, node) in cleanup.nodes.iter().enumerate() {
+                rank.insert(node.id.as_str(), main.nodes.len() + index);
+            }
+        }
+        let mut by_key: HashMap<Key<'d>, Vec<(&'d str, &'s Statement)>> = HashMap::new();
+        for (&id, &(statement, key)) in &self.kept {
+            by_key.entry(key).or_default().push((id, statement));
+        }
+        let mut keys: Vec<Key<'d>> = by_key.keys().copied().collect();
+        keys.sort_by_key(|key| by_key[key].iter().map(|(_, s)| s.range.start).min());
+        for key in keys {
+            let mut old = by_key.remove(&key).unwrap_or_default();
+            old.sort_by_key(|(_, statement)| statement.range.start);
+            let mut new = old.clone();
+            new.sort_by_key(|(id, _)| rank.get(id).copied().unwrap_or(usize::MAX));
+            if old
+                .iter()
+                .map(|(id, _)| id)
+                .eq(new.iter().map(|(id, _)| id))
+            {
+                continue;
+            }
+            let weight = |id: &str, statement: &Statement| -> u64 {
+                if hint.contains(id) {
+                    1
+                } else {
+                    (1 << 32) + (statement.extent.end - statement.extent.start) as u64
+                }
+            };
+            let staying = heaviest_common(&old, &new, weight);
+            for (id, statement) in old {
+                if staying.contains(id) {
+                    continue;
+                }
+                let range = self.lines(statement.extent.clone());
+                let whole = range.start == self.line_start(range.start)
+                    && (range.end == self.text.len() || self.text[..range.end].ends_with('\n'));
+                if !whole || range.start != self.line_start(statement.extent.start) {
+                    return None;
+                }
+                self.kept.remove(id);
+                self.moved
+                    .insert(id, (statement, key, self.text[range.clone()].to_owned()));
+                self.replace(range, String::new());
+            }
+        }
+        Some(())
+    }
+
     /// Rewrites what a kept statement owns when the edit changes it.
     fn rewrite(&mut self) -> Option<()> {
         let mut kept: Vec<_> = self
@@ -467,8 +568,8 @@ impl<'s, 'd> Edit<'s, 'd> {
         for (id, statement, key) in kept {
             let (old, cleanup) = self.old.nodes[id];
             let (new, _) = self.new.nodes[id];
-            let was = self.old.own(old, cleanup, key)?;
-            let is = self.new.own(new, cleanup, key)?;
+            let was = self.old.own(old, cleanup, key, statement)?;
+            let is = self.new.own(new, cleanup, key, statement)?;
             let indent = self.indent_at(statement.range.start);
             if was != is {
                 let end = match &statement.form {
@@ -480,7 +581,10 @@ impl<'s, 'd> Edit<'s, 'd> {
                     is.replace('\n', &format!("\n{indent}")),
                 );
             }
-            if old.note != new.note {
+            // A note its author wrote as `@note` is rewritten with the
+            // statement, in that attribute.
+            let attribute = statement.attributes.iter().any(|a| a.name == "note");
+            if old.note != new.note && !attribute {
                 let comments = self.new.written(new, cleanup, key)?.note;
                 let note = comments.as_ref().map_or_else(String::new, |note| {
                     note.split('\n')
@@ -502,12 +606,27 @@ impl<'s, 'd> Edit<'s, 'd> {
         enum Step<'d> {
             Kept(Key<'d>, Option<usize>),
             New(Key<'d>, String),
+            /// A moved statement's lines, as the author wrote them.
+            Moved(Key<'d>, String),
         }
         let mut steps = vec![];
         if let Some((graph, branches)) = self.new.graph(cleanup) {
             for node in &graph.nodes {
                 if let Some(&(statement, key)) = self.kept.get(node.id.as_str()) {
                     steps.push(Step::Kept(key, self.line_after(statement.extent.end)));
+                    continue;
+                }
+                if let Some((statement, key, lines)) = self.moved.get(node.id.as_str()) {
+                    // Its lines move as they are only when the edit changes
+                    // nothing else of it.
+                    let (old, _) = self.old.nodes.get(node.id.as_str())?;
+                    let unchanged = old.note == node.note
+                        && self.old.own(old, cleanup, *key, statement)?
+                            == self.new.own(node, cleanup, *key, statement)?;
+                    if !unchanged {
+                        return None;
+                    }
+                    steps.push(Step::Moved(*key, lines.clone()));
                     continue;
                 }
                 let key = match branches.parent(&node.id) {
@@ -543,6 +662,13 @@ impl<'s, 'd> Edit<'s, 'd> {
                     let at = after.get(&key).copied().unwrap_or(block.open)?;
                     let text = indented(&text, &block.indent);
                     self.insert_at(at, text);
+                    after.insert(key, Some(at));
+                }
+                Step::Moved(key, lines) => {
+                    let block = self.blocks.get_mut(&key)?;
+                    block.filled = true;
+                    let at = after.get(&key).copied().unwrap_or(block.open)?;
+                    self.insert_at(at, lines);
                     after.insert(key, Some(at));
                 }
             }
@@ -668,6 +794,76 @@ impl<'s, 'd> Edit<'s, 'd> {
     }
 }
 
+/// The statements of `old` that keep their order in `new`, the heaviest such
+/// set by `weight`: a longest common subsequence of the two orders of the
+/// same statements.
+fn heaviest_common<'d>(
+    old: &[(&'d str, &Statement)],
+    new: &[(&'d str, &Statement)],
+    weight: impl Fn(&str, &Statement) -> u64,
+) -> HashSet<&'d str> {
+    let (rows, columns) = (old.len(), new.len());
+    let mut table = vec![vec![0u64; columns + 1]; rows + 1];
+    for i in (0..rows).rev() {
+        for j in (0..columns).rev() {
+            table[i][j] = if old[i].0 == new[j].0 {
+                weight(old[i].0, old[i].1) + table[i + 1][j + 1]
+            } else {
+                table[i + 1][j].max(table[i][j + 1])
+            };
+        }
+    }
+    let (mut i, mut j) = (0, 0);
+    let mut common = HashSet::new();
+    while i < rows && j < columns {
+        if old[i].0 == new[j].0 {
+            common.insert(old[i].0);
+            i += 1;
+            j += 1;
+        } else if table[i + 1][j] >= table[i][j + 1] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    common
+}
+
+/// `statement` as `author` spells it (KTLO-37): a note the author wrote as
+/// `@note` stays that attribute, and the attributes keep the author's order;
+/// one the author did not write goes before the first whose canonical place
+/// is after its own.
+fn spelled(statement: &mut Statement, author: &Statement) {
+    let written: Vec<&str> = author.attributes.iter().map(|a| a.name.as_str()).collect();
+    if written.contains(&"note")
+        && !statement.attributes.iter().any(|a| a.name == "note")
+        && let Some(note) = statement.note.take()
+    {
+        statement.attributes.push(Attribute {
+            name: "note".into(),
+            arguments: vec![Expr {
+                kind: ExprKind::Literal(note.into()),
+                range: 0..0,
+            }],
+            range: 0..0,
+        });
+    }
+    let (mut ordered, rest): (Vec<Attribute>, Vec<Attribute>) =
+        std::mem::take(&mut statement.attributes)
+            .into_iter()
+            .partition(|a| written.contains(&a.name.as_str()));
+    ordered.sort_by_key(|a| written.iter().position(|name| *name == a.name));
+    for attribute in rest {
+        let rank = attribute_rank(&attribute.name, false);
+        let at = ordered
+            .iter()
+            .position(|a| attribute_rank(&a.name, false) > rank)
+            .unwrap_or(ordered.len());
+        ordered.insert(at, attribute);
+    }
+    statement.attributes = ordered;
+}
+
 /// `text`, lines printed at depth 0, indented by `indent`.
 fn indented(text: &str, indent: &str) -> String {
     text.lines()
@@ -694,21 +890,18 @@ mod tests {
     };
     use std::collections::HashSet;
 
-    /// Not in the window's form: a request block on one line, a check
-    /// without spaces and with a comment after it, and `done` written outside
-    /// the braces whose branch alone orders it.
+    /// Not in the window's form: a request block on one line and a check
+    /// without spaces and with a comment after it.
     const SOURCE: &str = r#"scenario "Edit" {
   description "Edited on the board."
   param count = 1
   begin = start
   // Reads the list.
-  @after(begin)
   list = GET "/items" { sample 200 { items: [] } }
   seen = assert list.status==200 // a quick check
   found = if list.status == 200 {
     item = GET "/items/1"
   }
-  @after(found.then)
   done = POST "/done"
 }
 "#;
@@ -728,8 +921,16 @@ mod tests {
             panic!("a scenario")
         };
         change(scenario);
-        let text = edited(&project, &tree, &previous, &next).expect("written into the text");
-        verify(&project, &next, true, &text).unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+        // As a board edit through the session: the chain is kept (LANG-13).
+        let Document::Scenario(before) = &previous else {
+            panic!("a scenario")
+        };
+        scenario.graph = apiforge_core::chain::edited(&before.graph, &scenario.graph);
+        scenario.cleanup = apiforge_core::chain::edited(&before.cleanup, &scenario.cleanup);
+        let text = edited(&project, &tree, &previous, &next, &HashSet::new())
+            .expect("written into the text");
+        verify(&project, &next, true, true, &text)
+            .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
         text
     }
 
@@ -745,8 +946,9 @@ mod tests {
         let previous = lower(&tree, &LowerContext::folder(&project))
             .document
             .unwrap();
-        let back = edited(&project, &tree, &previous, &original).expect("written into the text");
-        verify(&project, &original, true, &back)
+        let back = edited(&project, &tree, &previous, &original, &HashSet::new())
+            .expect("written into the text");
+        verify(&project, &original, true, true, &back)
             .unwrap_or_else(|errors| panic!("{back}\n{errors:?}"));
         (changed, back)
     }
@@ -792,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_statement_stays_outside_the_braces_it_was_written_outside() {
+    fn a_changed_statement_after_an_if_stays_where_it_is_written() {
         let text = edit(|scenario| {
             node(scenario, "done").inputs.insert(
                 "url".into(),
@@ -821,12 +1023,10 @@ mod tests {
         });
         assert_eq!(
             text,
-            SOURCE
-                .replace(
-                    "  found = if list.status == 200 {\n    item = GET \"/items/1\"\n  }\n",
-                    "  item = GET \"/items/1\"\n"
-                )
-                .replace("  @after(found.then)\n", "")
+            SOURCE.replace(
+                "  found = if list.status == 200 {\n    item = GET \"/items/1\"\n  }\n",
+                "  item = GET \"/items/1\"\n"
+            )
         );
     }
 
@@ -944,5 +1144,152 @@ mod tests {
         });
         assert!(opened.contains("cleanup {"));
         assert_eq!(back, SOURCE);
+    }
+
+    /// LANG-06, criterion 6 (KTLO-37): a board edit that rewrites a
+    /// statement whose author wrote `@note` above `@label` keeps that order
+    /// and that spelling on it, and changes no other line.
+    #[test]
+    fn ktlo37_an_edit_keeps_the_authors_order() {
+        for note in ["Reads the list.", " padded"] {
+            let source = format!(
+                "scenario \"Edit\" {{\n  begin = start\n  @note({note:?})\n  @label(\"List\")\n  list = GET \"/items\"\n  done = POST \"/done\"\n}}\n"
+            );
+            let project = apiforge_core::demos::shop_project();
+            let tree = parse(&source);
+            let lowered = lower(&tree, &LowerContext::folder(&project));
+            assert!(!lowered.has_errors(), "{:?}", lowered.diagnostics);
+            let previous = lowered.document.unwrap();
+            let mut next = previous.clone();
+            let Document::Scenario(scenario) = &mut next else {
+                panic!("a scenario")
+            };
+            node(scenario, "list").label = Some("Items".into());
+            let text = edited(&project, &tree, &previous, &next, &HashSet::new())
+                .expect("written into the text");
+            verify(&project, &next, true, true, &text)
+                .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+            assert_eq!(
+                text,
+                source.replace("@label(\"List\")", "@label(\"Items\")"),
+                "{note:?}"
+            );
+        }
+    }
+
+    // DIAG-06a --------------------------------------------------------------
+
+    /// Not in the window's form: notes as comments, attributes, a request on
+    /// one line, a check without spaces with a comment after it, and a blank
+    /// line that belongs to no statement.
+    const MOVE: &str = r#"scenario "Move" {
+  begin = start
+  // Reads the list.
+  @label("List")
+  list = GET "/items" { sample 200 { items: [] } }
+  seen = assert list.status==200 // a quick check
+
+  other = GET "/other"
+  // Posts the end.
+  @label("Done")
+  done = POST "/done" {
+    body { n: 1 }
+  }
+  done_ok = assert done.status == 200 // the end
+}
+"#;
+
+    /// `source` with the step `step` put after `anchor` as the board puts
+    /// it, written into the text and checked to read back as the moved
+    /// document.
+    fn moved_text(source: &str, step: &str, anchor: &str) -> String {
+        let project = apiforge_core::demos::shop_project();
+        let tree = parse(source);
+        let lowered = lower(&tree, &LowerContext::folder(&project));
+        assert!(!lowered.has_errors(), "{:?}", lowered.diagnostics);
+        let previous = lowered.document.unwrap();
+        let mut next = previous.clone();
+        let Document::Scenario(scenario) = &mut next else {
+            panic!("a scenario")
+        };
+        let (step, anchor) = (id(scenario, step), id(scenario, anchor));
+        let (graph, moved) = apiforge_core::edit::place(
+            &scenario.graph,
+            &project,
+            &step,
+            apiforge_core::edit::Place::After(&anchor),
+        )
+        .expect("the step moves");
+        scenario.graph = graph;
+        let text = edit_in_place_moving(&project, source, &previous, &next, &moved)
+            .expect("the move is written into the text");
+        verify(&project, &next, true, true, &text)
+            .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+        text
+    }
+
+    /// DIAG-06a, criterion 2: the file after a move differs from the file
+    /// before only by the moved statements' lines standing in the new place,
+    /// with their notes, attributes and comments; nothing is reformatted.
+    #[test]
+    fn a_moved_statement_takes_only_its_own_lines() {
+        let done = "  // Posts the end.\n  @label(\"Done\")\n  done = POST \"/done\" {\n    body { n: 1 }\n  }\n  done_ok = assert done.status == 200 // the end\n";
+        let list = "  // Reads the list.\n  @label(\"List\")\n  list = GET \"/items\" { sample 200 { items: [] } }\n  seen = assert list.status==200 // a quick check\n";
+        // Forwards: `done` and its check go up, after `list` and `seen`.
+        assert_eq!(
+            moved_text(MOVE, "done", "list"),
+            MOVE.replace(done, "")
+                .replace(list, &format!("{list}{done}"))
+        );
+        // Backwards: `list` and its check go down, after `other`.
+        assert_eq!(
+            moved_text(MOVE, "list", "other"),
+            MOVE.replace(list, "").replace(
+                "  other = GET \"/other\"\n",
+                &format!("  other = GET \"/other\"\n{list}")
+            )
+        );
+    }
+
+    /// DIAG-06a, criterion 3: the checks and values written under a step
+    /// that read it and no other step go with it, in their order; one that
+    /// also reads another step stays where it is written.
+    #[test]
+    fn a_step_moves_with_its_checks() {
+        const CHECKS: &str = r#"scenario "Checks" {
+  begin = start
+  a = GET "/a" {
+    sample 200 { n: 1 }
+  }
+  b = GET "/b" {
+    sample 200 { n: 2 }
+  }
+  b_ok = assert b.status == 200
+  b_both = assert b.body.n == a.body.n
+  b_n = b.body.n
+  c = GET "/c" {
+    sample 200 {}
+  }
+}
+"#;
+        assert_eq!(
+            moved_text(CHECKS, "b", "begin"),
+            r#"scenario "Checks" {
+  begin = start
+  b = GET "/b" {
+    sample 200 { n: 2 }
+  }
+  b_ok = assert b.status == 200
+  b_n = b.body.n
+  a = GET "/a" {
+    sample 200 { n: 1 }
+  }
+  b_both = assert b.body.n == a.body.n
+  c = GET "/c" {
+    sample 200 {}
+  }
+}
+"#
+        );
     }
 }

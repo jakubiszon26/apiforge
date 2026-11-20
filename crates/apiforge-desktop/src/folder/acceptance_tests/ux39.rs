@@ -261,6 +261,16 @@ fn ux39_criterion_2_wiring_or_the_step_clears_it() {
     let (mut harness, scenario) = window(project.path(), WIDE, SCENARIO, "Diagram");
     select(&mut harness, &scenario, &["active_promotion"]);
     copy(&mut harness);
+    // `active_promotion` reads `product`, which refuses the delete
+    // (DIAG-06e): its input is given a value first.
+    let active = id_of(&harness, &scenario, "active_promotion");
+    app(&mut harness).active_board_command(Command::Bind {
+        node: active,
+        input: "product".into(),
+        path: Vec::new(),
+        binding: apiforge_core::format::Binding::from_json(serde_json::json!({ "id": 123 })),
+    });
+    settle(&mut harness);
     let product = id_of(&harness, &scenario, "product");
     app(&mut harness).active_board_command(Command::Delete {
         ids: vec![product],

@@ -18,6 +18,7 @@ const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 /// kind the ticket names.
 const SOURCE: &str = r#"scenario "Check cards" {
   on_error continue
+  begin = start
   create = POST "/orders" {
     body { item: 1 }
     sample 422 { id: "557", count: 3 }

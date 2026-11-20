@@ -658,7 +658,7 @@ const NUDGE: f32 = 1.0;
 
 /// What the chips and the counts keep clear of, on screen (LAY-37).
 pub struct Clear<'a> {
-    /// The cards and the continuation marks.
+    /// The cards and their badges.
     pub boxes: &'a [Rect],
     /// The lines drawn at rest.
     pub lines: &'a [Vec<Pos2>],

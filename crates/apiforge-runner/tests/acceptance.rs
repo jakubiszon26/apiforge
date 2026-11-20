@@ -279,11 +279,21 @@ fn lay01_criterion_5_shop_30_keeps_its_shape() {
     assert!(wires(graph).iter().all(|wire| {
         wire.target != catalogue.id || wire.target_input.as_deref() != Some("query")
     }));
-    // `@after` on a check, which LAY-11 criterion 7 draws from its subject.
-    let (cart_total, address) = (node(&scenario, "cart_total"), node(&scenario, "address"));
-    assert!(graph.edges.iter().any(|edge| {
-        edge.source == cart_total.id && edge.target == address.id && edge.branch.is_none()
-    }));
+    // Since LANG-13 a step follows the step written before it, never a
+    // check: `address` follows `cart_view`, not `cart_total`.
+    let (cart_view, address) = (node(&scenario, "cart_view"), node(&scenario, "address"));
+    let follows = |target: &str| -> BTreeSet<&str> {
+        graph
+            .edges
+            .iter()
+            .filter(|edge| edge.target == target)
+            .map(|edge| edge.source.as_str())
+            .collect()
+    };
+    assert_eq!(
+        follows(&address.id),
+        BTreeSet::from([cart_view.id.as_str()])
+    );
     // The branch, with `receipt` inside it and an arm that never runs.
     let paid = node(&scenario, "paid");
     assert_eq!(paid.kind, NodeKind::If);
@@ -295,7 +305,9 @@ fn lay01_criterion_5_shop_30_keeps_its_shape() {
     };
     assert!(arm("payment", Branch::True));
     assert!(read_by(&scenario, node(&scenario, "receipt")).contains("payment"));
-    assert!(arm("refund", Branch::True), "@after(paid.then)");
+    // `refund` stands in the `then` braces of `paid`, where 0.1.0's
+    // `@after(paid.then)` ran it (LANG-13).
+    assert!(arm("refund", Branch::True));
     assert!(arm("not_created", Branch::False));
     // The cleanup.
     let handles: Vec<_> = scenario
@@ -462,7 +474,6 @@ async fn not_run_causes_are_an_enum_with_one_variant_per_branch() {
     let (project, scenario) = lowered(
         r#"scenario "Causes stop" {
   begin = start
-  @after(begin)
   first = GET "/a" {
     sample 200 { ok: true }
   }
@@ -490,7 +501,6 @@ async fn not_run_causes_are_an_enum_with_one_variant_per_branch() {
     let (project, scenario) = lowered(
         r#"scenario "Causes branch" {
   begin = start
-  @after(begin)
   first = GET "/a" {
     sample 200 { ok: true }
   }
@@ -536,13 +546,11 @@ async fn not_run_causes_are_an_enum_with_one_variant_per_branch() {
         r#"scenario "Causes continue" {
   on_error continue
   begin = start
-  @after(begin)
   missing = GET "/m" {
   }
   reader = GET "/r/{{missing.body.id}}" {
     sample 200 {}
   }
-  @after(begin)
   first = GET "/a" {
     sample 200 { id: 1 }
   }
@@ -660,28 +668,27 @@ async fn causes_on_shop_30() {
 
 // LANG-11 (#357) --------------------------------------------------------------
 
-/// A `then` branch of three requests in a chain, and `later`, written before
-/// the `if`, ordered after the branch's last statement and the other branch.
+/// A `then` branch of three requests in a chain, and `later`, written after
+/// the `if`: it follows the branch's last statement and the other branch.
+/// Since LANG-13 the order of the lines is the chain.
 fn after_the_branch(taken: bool) -> String {
     format!(
         r#"scenario "After the branch" {{
   param taken = {taken}
-  @after(third, choice.else)
-  later = GET "/later" {{
-    sample 200 {{}}
-  }}
+  begin = start
   choice = if param.taken == true {{
     made = POST "/made" {{
       sample 201 {{}}
     }}
-    @after(made)
     second = GET "/second" {{
       sample 200 {{}}
     }}
-    @after(second)
     third = GET "/third" {{
       sample 200 {{}}
     }}
+  }}
+  later = GET "/later" {{
+    sample 200 {{}}
   }}
 }}
 "#
@@ -735,13 +742,12 @@ async fn lang11_criterion_1_after_the_other_branch_runs_when_it_is_taken() {
 
 /// A value read by two requests, and a call in each request's body.
 const SENT_IDS: &str = r#"scenario "Sent ids" {
+  begin = start
   order = uuid()
-  @after(order)
   first = POST "/orders" {
     body { orderId: order, lineId: uuid() }
     sample 201 {}
   }
-  @after(first)
   second = POST "/orders" {
     body { orderId: order, lineId: uuid() }
     sample 201 {}
@@ -767,7 +773,6 @@ const NESTED_IDS: &str = r#"scenario "Nested ids" {
 /// Two values that are never sent, for a live run with no API.
 const LIVE_IDS: &str = r#"scenario "Live ids" {
   one = uuid()
-  @after(one)
   two = uuid()
 }
 "#;
@@ -818,7 +823,9 @@ fn nested_ids() -> (Project, Scenario) {
     tagger.id = "tagger".into();
     tagger.revision = 1;
     project.components.push(tagger);
-    let result = lower(&parse(NESTED_IDS), &LowerContext::folder(&project));
+    // Values ordered by `@after`, a graph without *Start*: since LANG-13
+    // (#386) only a published revision is read in this spelling.
+    let result = lower(&parse(NESTED_IDS), &LowerContext::folder(&project).stored());
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let Some(Document::Scenario(scenario)) = result.document else {
         panic!("not a scenario");
@@ -910,28 +917,26 @@ async fn lang10_criterion_4_a_live_run_gives_random_ids() {
 
 // LANG-14 (#390) --------------------------------------------------------------
 
-/// `later`, written first, follows the whole `if`; `then` is a chain of two
-/// requests with the given sample lines, and `otherwise` the `else` braces.
+/// `later`, written after the `if`, follows the whole `if`; `then` is a chain
+/// of two requests with the given sample lines, and `otherwise` the `else`
+/// braces.
 fn after_the_whole_if(taken: bool, made: &str, second: &str, otherwise: &str) -> String {
     format!(
         r#"scenario "After the whole if" {{
   on_error continue
   param taken = {taken}
-  @after(choice)
-  later = GET "/later" {{
-    sample 200 {{}}
-  }}
   begin = start
-  @after(begin)
   choice = if param.taken == true {{
     made = POST "/made" {{
       {made}
     }}
-    @after(made)
     second = GET "/second" {{
       {second}
     }}
   }}{otherwise}
+  later = GET "/later" {{
+    sample 200 {{}}
+  }}
 }}
 "#
     )

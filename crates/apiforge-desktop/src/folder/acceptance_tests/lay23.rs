@@ -566,7 +566,7 @@ fn lay23_criterion_5_nothing_is_written() {
 }
 
 /// Criterion 6: a chip's text is at least 9 px on screen at every zoom and
-/// a chip never covers a card, a continuation mark or the tray of a
+/// a chip never covers a card or the tray of a
 /// selected card: where the gap has no room it says the source step, then
 /// the arrow alone. Fit shows every chip whole, the first column's
 /// included.
@@ -590,7 +590,6 @@ fn lay23_criterion_6_chips_fit_the_gap_at_every_zoom() {
                 .iter()
                 .filter_map(|node| canvas.debug_world(&node.id))
                 .collect();
-            let marks: Vec<Rect> = canvas.debug_marks().iter().map(|mark| mark.rect).collect();
             let drawn = canvas.debug_tags();
             assert!(!drawn.is_empty(), "{name} at {zoom} draws chips");
             for tag in drawn {
@@ -598,9 +597,6 @@ fn lay23_criterion_6_chips_fit_the_gap_at_every_zoom() {
                 assert!(tag.font >= 9.0, "{context}: {} px", tag.font);
                 for card in &cards {
                     assert!(!tag.world.intersects(*card), "{context} covers {card:?}");
-                }
-                for mark in &marks {
-                    assert!(!tag.world.intersects(*mark), "{context} covers a mark");
                 }
                 let arrow_only = tag.shown == "←";
                 // One of the chip's forms, widest first: the step and its
@@ -619,13 +615,6 @@ fn lay23_criterion_6_chips_fit_the_gap_at_every_zoom() {
                     assert!(
                         !count.world.intersects(*card),
                         "{name} at {zoom}: {} covers a card",
-                        count.count.label
-                    );
-                }
-                for mark in &marks {
-                    assert!(
-                        !count.world.intersects(*mark),
-                        "{name} at {zoom}: {} covers a mark",
                         count.count.label
                     );
                 }
@@ -802,16 +791,8 @@ fn lay23_criterion_8_the_setting_moves_nothing_and_restores_every_wire() {
         .iter()
         .flat_map(|tag| tag.tag.wires.clone())
         .collect();
-    // The rails into the next step are arrows in this mode (LAY-24).
-    let at_rest: BTreeSet<String> = routes(&harness, &id)
-        .into_keys()
-        .chain(
-            board(&harness, &id)
-                .debug_arrows()
-                .iter()
-                .flat_map(|arrow| arrow.wires.clone()),
-        )
-        .collect();
+    // The chain of steps is drawn in this mode too (LAY-45).
+    let at_rest: BTreeSet<String> = routes(&harness, &id).into_keys().collect();
     assert!(!chipped.is_empty(), "shop-30 draws chips");
 
     switch_wires(&mut harness, ALL_WIRES);

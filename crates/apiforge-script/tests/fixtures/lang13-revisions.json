@@ -1,0 +1,190 @@
+{
+  "sign-in": {
+    "handle": "sign_in",
+    "name": "Sign in",
+    "description": "Open a session on the room booking API and return its token.",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "string",
+        "label": "User",
+        "defaultValue": "tester"
+      }
+    ],
+    "action": null,
+    "graph": {
+      "nodes": {
+        "session": {
+          "config": {
+            "method": "POST",
+            "bodyFormat": "json",
+            "sampleResponse": {
+              "token": "tok-1"
+            },
+            "sampleStatus": 201
+          },
+          "handle": "session",
+          "kind": "request",
+          "inputs": {
+            "url": {
+              "kind": "literal",
+              "value": "/sessions"
+            },
+            "body": {
+              "kind": "object",
+              "fields": {
+                "user": {
+                  "kind": "parameter",
+                  "name": "user"
+                },
+                "password": {
+                  "kind": "literal",
+                  "value": "secret"
+                }
+              }
+            }
+          }
+        },
+        "token": {
+          "config": {
+            "type": "string"
+          },
+          "handle": "token",
+          "kind": "export",
+          "inputs": {
+            "value": {
+              "kind": "reference",
+              "nodeId": "session",
+              "port": "body",
+              "path": "token"
+            }
+          }
+        }
+      },
+      "edges": []
+    }
+  },
+  "stored": {
+    "handle": "stored",
+    "name": "Stored",
+    "description": "",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "number"
+      }
+    ],
+    "action": null,
+    "graph": {
+      "nodes": {
+        "begin": {
+          "config": {},
+          "handle": "begin",
+          "kind": "start",
+          "inputs": {}
+        },
+        "id": {
+          "config": {
+            "type": "number"
+          },
+          "handle": "id",
+          "kind": "export",
+          "inputs": {
+            "value": {
+              "kind": "reference",
+              "nodeId": "joined",
+              "port": "body",
+              "path": "id"
+            }
+          }
+        },
+        "joined": {
+          "config": {
+            "method": "GET",
+            "sampleResponse": {
+              "id": 3
+            },
+            "sampleStatus": 200
+          },
+          "handle": "joined",
+          "kind": "request",
+          "inputs": {
+            "url": {
+              "kind": "literal",
+              "value": "/joined"
+            }
+          }
+        },
+        "left": {
+          "config": {
+            "method": "GET",
+            "sampleResponse": {
+              "id": 1
+            },
+            "sampleStatus": 200
+          },
+          "handle": "left",
+          "kind": "request",
+          "inputs": {
+            "url": {
+              "kind": "template",
+              "parts": [
+                {
+                  "kind": "text",
+                  "text": "/left/"
+                },
+                {
+                  "kind": "value",
+                  "binding": {
+                    "kind": "parameter",
+                    "name": "id"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "loose": {
+          "config": {
+            "method": "GET",
+            "sampleResponse": {
+              "id": 4
+            },
+            "sampleStatus": 200
+          },
+          "handle": "loose",
+          "kind": "request",
+          "inputs": {
+            "url": {
+              "kind": "literal",
+              "value": "/loose"
+            }
+          }
+        },
+        "right": {
+          "config": {
+            "method": "GET",
+            "sampleResponse": {
+              "id": 2
+            },
+            "sampleStatus": 200
+          },
+          "handle": "right",
+          "kind": "request",
+          "inputs": {
+            "url": {
+              "kind": "literal",
+              "value": "/right"
+            }
+          }
+        }
+      },
+      "edges": [
+        "[\"begin\",\"left\",null]",
+        "[\"begin\",\"right\",null]",
+        "[\"left\",\"joined\",null]",
+        "[\"right\",\"joined\",null]"
+      ]
+    }
+  }
+}
