@@ -199,13 +199,26 @@ an ADR.
 
 ## Continuous integration
 
-A pull request runs the workflow on Linux once; a newer commit cancels the
-older run. Windows runs on every push to `main`, on a pull request labelled
-`ci:windows` and by hand (*Run workflow*) ([#407](https://github.com/jakubiszon26/apiforge/issues/407)).
-Add `ci:windows` to a pull request that changes processes or IPC, files and
-paths, `build.rs`, packaging or anything else Windows-specific. A red Windows
-run on `main` gets a fix ticket before further merges; `release.yml` still
-builds and tests Windows for every release.
+The workflow runs on Linux and on Windows as follows
+([#407](https://github.com/jakubiszon26/apiforge/issues/407),
+[#483](https://github.com/jakubiszon26/apiforge/issues/483)):
+
+| When | What runs |
+| --- | --- |
+| An ordinary pull request: the parser, checks, card layout | Linux; a newer commit cancels the older run |
+| A pull request that touches files, locks, paths, processes or IPC, window start, native dependencies, `build.rs` or packaging | Linux and Windows before merge: add the label `ci:windows` |
+| A push to `main` | Linux |
+| Each night (02:00 UTC) on the newest `main` | Windows, when anything outside the documentation changed since `main`'s last green Windows run; otherwise the run says it skipped |
+| By hand (*Run workflow*) | Linux and Windows |
+| A release tag | `release.yml` builds and tests Windows on that exact commit before publishing |
+
+In the LANG sprint, for example, the fix that rewrites a project's files and
+the manifest's language version take `ci:windows`; a syntax-only change does
+not.
+
+After an ordinary merge the next ticket starts at once: nobody waits for a run
+of `main` that is still in progress. A red run of `main`, Linux or the nightly
+Windows, gets a fix ticket before further merges.
 
 The workflow runs these steps on both systems: formatting, clippy, tests, the scenario
 examples and workspace check, a release build and `--check` with the release binary.

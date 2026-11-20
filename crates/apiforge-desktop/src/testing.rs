@@ -67,6 +67,38 @@ pub fn shop_project_without_far_reads() -> tempfile::TempDir {
     directory
 }
 
+/// Where [`labels_board`] keeps the `labels` reference scenario.
+pub const LABELS: &str = "scenarios/labels.afs";
+
+/// `fixtures/scenarios/lay/labels.afs` (FIX-01) as the only document of a
+/// folder project of its own, as the room project is copied to one, open on
+/// its board at `size`: the project, the window and the scenario's document
+/// id. A test that measures the board tidies it first.
+pub fn labels_board(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    let text = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/scenarios/lay/labels.afs"),
+    )
+    .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut project = apiforge_core::demos::empty_project();
+    project.scenarios.clear();
+    project.name = "Label validation".into();
+    apiforge_project::prepare_project(directory.path(), &project).unwrap();
+    let mut session = apiforge_project::ProjectSession::open(directory.path()).unwrap();
+    let id = session
+        .create_document(apiforge_project::DocumentKind::Scenario, LABELS, &text)
+        .unwrap();
+    drop(session);
+    let mut harness = folder_harness_in(directory.path(), size, Mode::Diagram);
+    harness
+        .state_mut()
+        .as_mut()
+        .unwrap()
+        .review_open(LABELS, None);
+    settle(&mut harness);
+    (directory, harness, id)
+}
+
 /// The view a project with no stored view starts in under the shared
 /// harnesses. The application chooses Diagram for a scenario (LAY-40); the
 /// tests that are not about the first view were written against Code and
