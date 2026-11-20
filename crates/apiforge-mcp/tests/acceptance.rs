@@ -1398,29 +1398,6 @@ fn mcp03_carry_over_1_project_level_errors_are_kept_within_the_limit() {
     );
 }
 
-/// The kind check, a project-level error that takes the last diagnostic's
-/// place in a full list, runs only when lowering finds no error
-/// (`analysis.rs`), so only warnings can fill the list before it; since
-/// LANG-06 no text holds 1 000 of them.
-#[test]
-#[ignore = "LANG-06 (#143): the kind check runs only on a text without errors, and no text holds 1 000 warnings since free comments give none; asked on #143"]
-fn mcp03_carry_over_1_a_kind_error_is_kept_within_the_limit() {
-    let directory = checkout();
-    let root = directory.path();
-    let scenario = fs::read_to_string(root.join(SCENARIO)).unwrap();
-    // A component file that holds a scenario: the kind check comes last.
-    fs::write(
-        root.join(PRODUCT),
-        format!("{scenario}{}", "$".repeat(1100)),
-    )
-    .unwrap();
-    assert_kept_within_the_limit(
-        root,
-        PRODUCT,
-        "This code describes a different kind of document",
-    );
-}
-
 #[test]
 fn mcp03_carry_over_3_a_source_over_one_mebibyte_is_unavailable_and_the_rest_served() {
     let directory = checkout();
