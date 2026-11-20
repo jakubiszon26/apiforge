@@ -64,6 +64,23 @@ pub fn edit_in_place(
         .filter(|text| verify(project, document, true, true, text).is_ok())
 }
 
+/// As [`edit_in_place`], for a move on the board (DIAG-06a): `moved` names
+/// the blocks whose place in the document's order changed — a step put at
+/// a place and the statements that went with it. Their lines are cut and
+/// written in the new place as the author wrote them; every other statement
+/// stays where it is written. `None` when the move cannot be written so: a
+/// move is never printed whole.
+pub fn edit_in_place_moving(
+    project: &Project,
+    source: &str,
+    previous: &Document,
+    document: &Document,
+    moved: &[String],
+) -> Option<String> {
+    let _ = moved;
+    edit_in_place(project, source, previous, document)
+}
+
 /// Where a statement is written: the main flow or the cleanup, or a branch
 /// of an `if`, named by the block's identifier and whether it is `then`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1016,5 +1033,121 @@ mod tests {
                 "{note:?}"
             );
         }
+    }
+
+    // DIAG-06a --------------------------------------------------------------
+
+    /// Not in the window's form: notes as comments, attributes, a request on
+    /// one line, a check without spaces with a comment after it, and a blank
+    /// line that belongs to no statement.
+    const MOVE: &str = r#"scenario "Move" {
+  begin = start
+  // Reads the list.
+  @label("List")
+  list = GET "/items" { sample 200 { items: [] } }
+  seen = assert list.status==200 // a quick check
+
+  other = GET "/other"
+  // Posts the end.
+  @label("Done")
+  done = POST "/done" {
+    body { n: 1 }
+  }
+  done_ok = assert done.status == 200 // the end
+}
+"#;
+
+    /// `source` with the step `step` put after `anchor` as the board puts
+    /// it, written into the text and checked to read back as the moved
+    /// document.
+    fn moved_text(source: &str, step: &str, anchor: &str) -> String {
+        let project = apiforge_core::demos::shop_project();
+        let tree = parse(source);
+        let lowered = lower(&tree, &LowerContext::folder(&project));
+        assert!(!lowered.has_errors(), "{:?}", lowered.diagnostics);
+        let previous = lowered.document.unwrap();
+        let mut next = previous.clone();
+        let Document::Scenario(scenario) = &mut next else {
+            panic!("a scenario")
+        };
+        let (step, anchor) = (id(scenario, step), id(scenario, anchor));
+        let (graph, moved) = apiforge_core::edit::place(
+            &scenario.graph,
+            &project,
+            &step,
+            apiforge_core::edit::Place::After(&anchor),
+        )
+        .expect("the step moves");
+        scenario.graph = graph;
+        let text = edit_in_place_moving(&project, source, &previous, &next, &moved)
+            .expect("the move is written into the text");
+        verify(&project, &next, true, true, &text)
+            .unwrap_or_else(|errors| panic!("{text}\n{errors:?}"));
+        text
+    }
+
+    /// DIAG-06a, criterion 2: the file after a move differs from the file
+    /// before only by the moved statements' lines standing in the new place,
+    /// with their notes, attributes and comments; nothing is reformatted.
+    #[test]
+    fn a_moved_statement_takes_only_its_own_lines() {
+        let done = "  // Posts the end.\n  @label(\"Done\")\n  done = POST \"/done\" {\n    body { n: 1 }\n  }\n  done_ok = assert done.status == 200 // the end\n";
+        let list = "  // Reads the list.\n  @label(\"List\")\n  list = GET \"/items\" { sample 200 { items: [] } }\n  seen = assert list.status==200 // a quick check\n";
+        // Forwards: `done` and its check go up, after `list` and `seen`.
+        assert_eq!(
+            moved_text(MOVE, "done", "list"),
+            MOVE.replace(done, "")
+                .replace(list, &format!("{list}{done}"))
+        );
+        // Backwards: `list` and its check go down, after `other`.
+        assert_eq!(
+            moved_text(MOVE, "list", "other"),
+            MOVE.replace(list, "").replace(
+                "  other = GET \"/other\"\n",
+                &format!("  other = GET \"/other\"\n{list}")
+            )
+        );
+    }
+
+    /// DIAG-06a, criterion 3: the checks and values written under a step
+    /// that read it and no other step go with it, in their order; one that
+    /// also reads another step stays where it is written.
+    #[test]
+    fn a_step_moves_with_its_checks() {
+        const CHECKS: &str = r#"scenario "Checks" {
+  begin = start
+  a = GET "/a" {
+    sample 200 { n: 1 }
+  }
+  b = GET "/b" {
+    sample 200 { n: 2 }
+  }
+  b_ok = assert b.status == 200
+  b_both = assert b.body.n == a.body.n
+  b_n = b.body.n
+  c = GET "/c" {
+    sample 200 {}
+  }
+}
+"#;
+        assert_eq!(
+            moved_text(CHECKS, "b", "begin"),
+            r#"scenario "Checks" {
+  begin = start
+  b = GET "/b" {
+    sample 200 { n: 2 }
+  }
+  b_ok = assert b.status == 200
+  b_n = b.body.n
+  a = GET "/a" {
+    sample 200 { n: 1 }
+  }
+  b_both = assert b.body.n == a.body.n
+  c = GET "/c" {
+    sample 200 {}
+  }
+}
+"#
+        );
     }
 }

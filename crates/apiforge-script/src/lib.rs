@@ -11,7 +11,7 @@ mod parser;
 pub use lower::{Document, LowerContext, Lowered, lower, validate_document_model};
 
 pub use ast::{Diagnostic, Fix, Severity, SyntaxTree};
-pub use edit::{edit_folder_document, edit_in_place};
+pub use edit::{edit_folder_document, edit_in_place, edit_in_place_moving};
 pub use far::{FAR_READ, far_read_warnings};
 pub use fix::{
     AFTER_REMOVED, Fixed, NOT_IN_PLACE, RUNS_NOWHERE, START_MISSING, START_NOT_FIRST, fix_source,

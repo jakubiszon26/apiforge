@@ -4,7 +4,7 @@
 use apiforge_core::{
     ImportLimits,
     block::Block,
-    edit::{OutputRef, add_node, connect, remove_connections},
+    edit::{OutputRef, Place, add_node, place},
     format::{Graph, Position},
     graph::{ORDER_PORT, TRUE_PORT, delete_nodes, sequence},
     import_document,
@@ -282,54 +282,42 @@ fn lang13_criterion_9_a_removed_middle_step_joins_its_neighbours() {
     );
 }
 
+/// Restated by DIAG-06a (#391), which replaces LANG-13's interim: an
+/// ordering wire between two existing steps no longer changes nothing, it
+/// moves the step it is dropped on to directly after the step it comes from
+/// (and its check with it), and only their lines move in the text.
 #[test]
-fn lang13_criterion_9_an_ordering_wire_between_existing_steps_changes_nothing() {
+fn lang13_criterion_9_an_ordering_wire_between_existing_steps_moves_the_step() {
     let (_directory, mut session, id) = opened();
     let before = model(&session, &id);
-    let written = text(&session, &id);
     let context = session.context().clone();
-    // A wire from `first` to `last`.
-    let wired = {
-        let mut next = before.clone();
-        let graph = main_graph_mut(&mut next);
-        *graph = connect(
-            graph,
-            &context,
-            &id_of(&before, "first"),
-            ORDER_PORT,
-            &id_of(&before, "last"),
-            ORDER_PORT,
-            &[],
-        )
-        .expect("the wire is drawn");
-        next
-    };
-    session.apply_model_edit(&id, wired, Origin(1)).unwrap();
-    assert_eq!(text(&session, &id), written);
+    // A wire from `first`'s *Next* to `last`.
+    let (graph, moved) = place(
+        main_graph(&before),
+        &context,
+        &id_of(&before, "last"),
+        Place::After(&id_of(&before, "first")),
+    )
+    .expect("the move is allowed");
+    let mut next = before.clone();
+    *main_graph_mut(&mut next) = graph;
+    session.apply_move(&id, next, &moved, Origin(1)).unwrap();
+    let after = passes(&mut session, &id);
     assert_eq!(
-        semantic(&model(&session, &id), &context),
-        semantic(&before, &context)
+        steps(main_graph(&after)),
+        ["begin", "first", "last", "middle", "chosen", "inside"]
     );
-    // Deleting the wire from `middle` to `last`.
-    let unwired = {
-        let mut next = before.clone();
-        let graph = main_graph_mut(&mut next);
-        let (middle, last) = (id_of(&before, "middle"), id_of(&before, "last"));
-        let wire = graph
-            .edges
-            .iter()
-            .find(|edge| edge.source == middle && edge.target == last)
-            .expect("middle is followed by last")
-            .id
-            .clone();
-        *graph = remove_connections(graph, &HashSet::from([wire.as_str()]));
-        next
-    };
-    session.apply_model_edit(&id, unwired, Origin(2)).unwrap();
-    assert_eq!(text(&session, &id), written);
     assert_eq!(
-        semantic(&model(&session, &id), &context),
-        semantic(&before, &context)
+        text(&session, &id),
+        CHAIN
+            .replace(
+                "  last = GET \"/last\" {\n    sample 200 { id: 3 }\n  }\n",
+                ""
+            )
+            .replace(
+                "  middle = GET",
+                "  last = GET \"/last\" {\n    sample 200 { id: 3 }\n  }\n  middle = GET"
+            )
     );
 }
 

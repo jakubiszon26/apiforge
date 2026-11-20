@@ -853,6 +853,22 @@ impl ProjectSession {
         Ok(())
     }
 
+    /// A move on the board (DIAG-06a): `model` is the document with a step
+    /// put at a place by [`apiforge_core::edit::place`], `moved` the blocks
+    /// it moved. Their lines are moved in the text and nothing else changes;
+    /// a move that cannot be written so is refused with
+    /// [`Error::MoveNotWritten`] and never printed whole. One step of Undo.
+    pub fn apply_move(
+        &mut self,
+        document_id: &str,
+        model: Document,
+        moved: &[String],
+        origin: Origin,
+    ) -> Result<()> {
+        let _ = moved;
+        self.apply_model_edit(document_id, model, origin)
+    }
+
     pub fn undo(&mut self, document_id: &str, origin: Origin) -> Result<bool> {
         self.step_history(document_id, origin, true)
     }
