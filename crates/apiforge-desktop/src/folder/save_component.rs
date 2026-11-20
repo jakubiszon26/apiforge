@@ -939,6 +939,7 @@ impl FolderApp {
                         next: Box::new(next),
                         selection: Some(vec![call]),
                         check: None,
+                        moved: Vec::new(),
                     },
                 );
             }

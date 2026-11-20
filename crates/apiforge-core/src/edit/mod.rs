@@ -14,6 +14,7 @@ mod fold;
 mod inputs;
 mod inspect;
 mod nodes;
+mod place;
 mod proxies;
 mod shared;
 mod storage;
@@ -47,6 +48,7 @@ pub use nodes::{
     AddedNode, AssignedVariable, OutputRef, add_check, add_node, assign_response_variable,
     field_assertion,
 };
+pub use place::{Place, add_step_after, place};
 pub use proxies::{
     add_proxy, move_proxies, proxy_binding, proxy_source, prune_proxies, remove_proxies,
 };
@@ -116,6 +118,20 @@ pub enum EditError {
     /// it, or statements that stay and read what would go, by name.
     #[error("{0}")]
     DeleteRefused(String),
+    /// A move refused on the board (DIAG-06a): the result would have a
+    /// cycle through ordering and values. Names the reader, what it reads
+    /// and the step it stays below.
+    #[error("{0}")]
+    PlaceRefused(String),
+    /// A move of an `if` with its braces, or into other braces: DIAG-06d.
+    #[error(
+        "Moving a condition with its steps, or a step into another branch, is not possible yet."
+    )]
+    NotMovableYet,
+    /// *Delete* on an ordering line (DIAG-06a): the line is the order of the
+    /// written steps.
+    #[error("The line is the order of the steps. Move or delete a step.")]
+    OrderLine,
     #[error("{0}")]
     InvalidProject(#[from] ImportError),
 }

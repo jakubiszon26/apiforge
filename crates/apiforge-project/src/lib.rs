@@ -62,6 +62,10 @@ pub enum Error {
     InvalidModel,
     #[error("The model cannot be written as source without semantic loss.")]
     Unprintable,
+    /// A move on the board whose statements cannot be moved line by line in
+    /// the text as it is written (DIAG-06a); the file is not printed again.
+    #[error("This move cannot be written into the code as it is laid out. Move the lines in Code.")]
+    MoveNotWritten,
     #[error("Published component {component_id}@{revision} is not a valid definition.")]
     InvalidRevision { component_id: String, revision: u32 },
     #[error("Only a component can be published.")]
