@@ -19,6 +19,10 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
 #[path = "../../apiforge-project/tests/support/legacy_workspace.rs"]
 pub mod legacy_workspace;
 
+/// A project's manifest rewritten as one of another language (LANG-15).
+#[path = "../../apiforge-project/tests/support/language.rs"]
+pub mod language;
+
 pub type FolderHarness = Harness<'static, Option<FolderApp>>;
 pub type WorkspaceHarness = Harness<'static, Option<App>>;
 

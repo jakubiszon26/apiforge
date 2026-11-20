@@ -1,4 +1,7 @@
 use apiforge_project::{AnalysisState, DocumentKind, Origin, ProjectSession, prepare_project};
+
+#[path = "../../apiforge-project/tests/support/language.rs"]
+mod language;
 use std::{
     ffi::OsStr,
     fs,
@@ -1287,5 +1290,168 @@ mod issue430 {
             assert_eq!(step.status, expected, "{}", step.handle);
         }
         assert_eq!(report.status, RunStatus::Passed);
+    }
+}
+
+/// LANG-15 (#412): a project names its language version, and the command
+/// line says when this build cannot read it. The build reads
+/// `LANGUAGE_VERSION`; LANG-20 (#481) raises it to 2.
+mod lang15 {
+    use super::language::{language_of, write_language};
+    use super::run;
+    use apiforge_script::LANGUAGE_VERSION;
+    use std::{
+        collections::BTreeMap,
+        ffi::OsStr,
+        fs,
+        path::{Path, PathBuf},
+    };
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const PRODUCT: &str = "components/product.afs";
+
+    fn shop() -> tempfile::TempDir {
+        let directory = tempfile::tempdir().unwrap();
+        apiforge_project::prepare_project(directory.path(), &apiforge_core::demos::shop_project())
+            .unwrap();
+        directory
+    }
+
+    /// Every file and directory under `root`, with the bytes of each file.
+    fn tree(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+        fn walk(root: &Path, at: &Path, files: &mut BTreeMap<PathBuf, Option<Vec<u8>>>) {
+            for entry in fs::read_dir(at).unwrap() {
+                let path = entry.unwrap().path();
+                let relative = path.strip_prefix(root).unwrap().to_owned();
+                if path.is_dir() {
+                    files.insert(relative, None);
+                    walk(root, &path, files);
+                } else {
+                    files.insert(relative, Some(fs::read(&path).unwrap()));
+                }
+            }
+        }
+        let mut files = BTreeMap::new();
+        walk(root, root, &mut files);
+        files
+    }
+
+    /// Criterion 3: `check`, `print`, `apply` and `run` (simulated and live)
+    /// refuse a project written in a newer language with the one sentence
+    /// that names both versions; no file of the project changes.
+    #[test]
+    fn lang15_criterion_3_the_command_line_refuses_a_newer_project() {
+        let directory = shop();
+        let root = directory.path();
+        fs::remove_dir_all(root.join(".apiforge/local")).unwrap();
+        let newer = LANGUAGE_VERSION + 1;
+        write_language(root, newer);
+        let incoming = tempfile::NamedTempFile::new().unwrap();
+        fs::write(incoming.path(), fs::read(root.join(PRODUCT)).unwrap()).unwrap();
+        let before = tree(root);
+        let sentence = format!(
+            "This project is written in language {newer}; this build reads language {LANGUAGE_VERSION}. Update API Forge."
+        );
+        for (command, rest) in [
+            ("check", vec![]),
+            ("check", vec![OsStr::new("--file"), OsStr::new(PRODUCT)]),
+            ("print", vec![OsStr::new("--file"), OsStr::new(PRODUCT)]),
+            (
+                "apply",
+                vec![
+                    OsStr::new("--file"),
+                    OsStr::new(PRODUCT),
+                    incoming.path().as_os_str(),
+                ],
+            ),
+            ("run", vec![OsStr::new("--scenario"), OsStr::new(SCENARIO)]),
+            (
+                "run",
+                vec![
+                    OsStr::new("--scenario"),
+                    OsStr::new(SCENARIO),
+                    OsStr::new("--live"),
+                ],
+            ),
+        ] {
+            let output = run(root, command, &rest);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(
+                output.status.code(),
+                Some(1),
+                "{command} {rest:?}: {stderr}"
+            );
+            assert_eq!(stderr.trim_end(), sentence, "{command} {rest:?}");
+            assert!(output.stdout.is_empty(), "{command} {rest:?}");
+            assert_eq!(tree(root), before, "{command} {rest:?} changed the project");
+        }
+    }
+
+    /// Criterion 4: an older project opens. `check --folder` exits 1 and its
+    /// first line is for the manifest, with both versions and the fix; `run`
+    /// is refused with that sentence and sends nothing; `apply` saves.
+    #[test]
+    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
+    fn lang15_criterion_4_an_older_project_is_checked_and_does_not_run() {
+        let directory = shop();
+        let root = directory.path();
+        let older = LANGUAGE_VERSION - 1;
+        write_language(root, older);
+        let both = format!(
+            "This project is written in language {older}; this build reads language {LANGUAGE_VERSION}."
+        );
+        let fix = format!("apiforge fix --folder {}", root.display());
+
+        let check = run(root, "check", &[]);
+        assert_eq!(check.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&check.stderr);
+        let first = stderr.lines().next().unwrap_or_default();
+        assert!(
+            first.starts_with("apiforge.project.json:"),
+            "the first line is for the manifest: {stderr}"
+        );
+        assert!(first.contains(&both) && first.contains(&fix), "{first}");
+
+        for rest in [
+            vec![OsStr::new("--scenario"), OsStr::new(SCENARIO)],
+            vec![
+                OsStr::new("--scenario"),
+                OsStr::new(SCENARIO),
+                OsStr::new("--live"),
+            ],
+        ] {
+            let output = run(root, "run", &rest);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(1), "{rest:?}: {stderr}");
+            assert!(stderr.contains(&both) && stderr.contains(&fix), "{stderr}");
+            assert!(output.stdout.is_empty(), "nothing ran: {rest:?}");
+        }
+
+        let incoming = root.join("incoming.txt");
+        let text = fs::read_to_string(root.join(PRODUCT)).unwrap();
+        fs::write(&incoming, format!("{text}\n")).unwrap();
+        let apply = run(
+            root,
+            "apply",
+            &[
+                OsStr::new("--file"),
+                OsStr::new(PRODUCT),
+                incoming.as_os_str(),
+            ],
+        );
+        assert!(
+            apply.status.success(),
+            "{}",
+            String::from_utf8_lossy(&apply.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            format!("{text}\n")
+        );
+        assert_eq!(
+            language_of(root),
+            older,
+            "a save does not raise the language"
+        );
     }
 }

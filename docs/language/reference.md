@@ -1,4 +1,4 @@
-Reference version: 1 · grammar of ADR 0005 as of 2026-10-27
+Language version: 1 · grammar of ADR 0005 as of 2026-10-27
 
 # The .afs language
 

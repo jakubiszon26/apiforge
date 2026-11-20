@@ -16,6 +16,10 @@ pub use far::{FAR_READ, far_read_warnings};
 pub use format::{format, format_tree};
 pub use parser::parse;
 
+/// The `.afs` language this build reads and writes (LANG-00, section 2). It
+/// is raised only when a file that was valid means something else or becomes
+/// invalid; a project's manifest names the version its files are written in.
+pub const LANGUAGE_VERSION: u32 = 1;
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 pub const MAX_DEPTH: usize = 64;
 pub const MAX_DIAGNOSTICS: usize = 1000;
