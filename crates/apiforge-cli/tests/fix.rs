@@ -439,6 +439,32 @@ fn lang20_criterion_3_a_cleanup_reading_below_is_blocked() {
     assert_eq!(language_of(&root), 1);
 }
 
+/// Rule 1: a source whose converted text would not pass the check a
+/// language-2 project makes of it (here a scenario registered as a
+/// component) blocks the project and is named.
+#[test]
+fn lang20_rule_1_a_result_that_would_not_pass_the_check_is_blocked() {
+    let (_directory, root) = project();
+    write(
+        &root,
+        SIGN_IN,
+        LOOSE
+            .replacen("  ping = GET", "  @after(begin)\n  ping = GET", 1)
+            .as_str(),
+    );
+    let before = files(&root);
+    let output = fix(&root);
+    assert_eq!(output.status.code(), Some(1), "{}", both(&output));
+    let report = stderr(&output);
+    assert!(
+        report.contains(&format!(
+            "{SIGN_IN}: Once converted, the file would not pass the check: This code describes a different kind of document. Repair it."
+        )),
+        "{report}"
+    );
+    assert_eq!(files(&root), before);
+}
+
 // Criterion 4 ----------------------------------------------------------------
 
 /// A source that is missing, does not parse or is over 1 MiB refuses the

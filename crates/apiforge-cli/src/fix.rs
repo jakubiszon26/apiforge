@@ -151,10 +151,14 @@ fn blocked(report: &FixReport) {
             } else {
                 format!("`{}`: ", problem.statement)
             };
-            eprintln!(
-                "{path}:{}:{}: {statement}{} {}",
-                problem.line, problem.column, problem.reason, problem.todo
-            );
+            if problem.line == 0 {
+                eprintln!("{path}: {} {}", problem.reason, problem.todo);
+            } else {
+                eprintln!(
+                    "{path}:{}:{}: {statement}{} {}",
+                    problem.line, problem.column, problem.reason, problem.todo
+                );
+            }
         }
     }
     if !unreadable.is_empty() {

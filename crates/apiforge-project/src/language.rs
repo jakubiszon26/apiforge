@@ -6,8 +6,8 @@ use crate::{Error, FixedPlacer, Result};
 use apiforge_core::format::{Contract, Environment};
 use apiforge_script::{Blocked, Judged, LowerContext};
 use apiforge_storage::project::{
-    FileState, Holder, MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath,
-    ProjectStore, ReadSet,
+    DocumentEntry, DocumentKind, FileState, Holder, MANIFEST_PATH, ProjectChange, ProjectError,
+    ProjectManifest, ProjectPath, ProjectStore, ReadSet,
 };
 use std::path::Path;
 
@@ -262,6 +262,21 @@ pub fn plan_fix(folder: &Path, check: bool) -> Result<Planned> {
             Some(Err(_)) => SourceOutcome::Unreadable(whole_file(NOT_TEXT)),
             Some(Ok(text)) => {
                 let (outcome, converted) = judge(text, &lower_context);
+                // The converted text passes the check a session makes of
+                // it: its kind, its identity and its validity in the
+                // project, beside the language's own rules.
+                let written = match (&outcome, &converted) {
+                    (SourceOutcome::Unchanged, _) => Some(text),
+                    (_, Some(converted)) => Some(converted.as_str()),
+                    _ => None,
+                };
+                let refused = written.and_then(|written| {
+                    checked(written, &target(&manifest, entry), &context).err()
+                });
+                let (outcome, converted) = match refused {
+                    Some(problems) => (SourceOutcome::Blocked(problems), None),
+                    None => (outcome, converted),
+                };
                 if let Some(converted) = converted {
                     changes.push(ProjectChange::Write {
                         path: entry.path.clone(),
@@ -324,6 +339,57 @@ fn whole_file(reason: &str) -> Problem {
 /// A message as a sentence of the report: one final full stop.
 fn sentence(message: &str) -> String {
     format!("{}.", message.trim_end_matches('.'))
+}
+
+/// The definition a working source must describe, as the session reads it.
+fn target(manifest: &ProjectManifest, entry: &DocumentEntry) -> crate::analysis::Target {
+    let revision = match entry.kind {
+        DocumentKind::Scenario => 0,
+        DocumentKind::Component => manifest
+            .revisions
+            .iter()
+            .filter(|revision| revision.component_id == entry.entity_id)
+            .map(|revision| revision.revision)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1),
+    };
+    crate::analysis::Target {
+        kind: entry.kind,
+        entity_id: entry.entity_id.clone(),
+        revision,
+        stored: false,
+        older: None,
+    }
+}
+
+/// The errors of `converted` in the analysis of a language-2 project, each
+/// one a problem of the whole file: its places are those of a text not
+/// written yet.
+fn checked(
+    converted: &str,
+    target: &crate::analysis::Target,
+    context: &apiforge_core::format::Project,
+) -> std::result::Result<(), Vec<Problem>> {
+    let (diagnostics, model) =
+        crate::analysis::derive(target, converted, context, None, None, &FixedPlacer);
+    if model.is_some() {
+        return Ok(());
+    }
+    Err(diagnostics
+        .iter()
+        .filter(|d| d.severity == apiforge_script::Severity::Error)
+        .map(|d| Problem {
+            line: 0,
+            column: 0,
+            statement: String::new(),
+            reason: format!(
+                "Once converted, the file would not pass the check: {}",
+                sentence(&d.message)
+            ),
+            todo: "Repair it.".to_owned(),
+        })
+        .collect())
 }
 
 /// The judgement of one source, and its converted text when it changes.
