@@ -130,6 +130,18 @@ pub enum Error {
         build: u32,
         folder: std::path::PathBuf,
     },
+    /// `apiforge fix`: a source of the project cannot be converted, so
+    /// nothing is written (LANG-20).
+    #[error("Nothing was written: a source of this project cannot be converted yet.")]
+    NotConvertible,
+    /// `apiforge fix`: the store refused the commit for its limits.
+    #[error("This project is too large to convert in one step.")]
+    TooLargeToConvert,
+    /// `apiforge fix`: a file the command read changed before its commit.
+    #[error(
+        "{path} changed while the project was being converted; nothing was written. Run the command again."
+    )]
+    ChangedWhileConverting { path: String },
 }
 
 impl From<apiforge_storage::StorageError> for Error {

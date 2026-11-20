@@ -14,7 +14,8 @@ pub use ast::{Diagnostic, Fix, Severity, SyntaxTree};
 pub use edit::{edit_folder_document, edit_in_place};
 pub use far::{FAR_READ, far_read_warnings};
 pub use fix::{
-    AFTER_REMOVED, Fixed, NOT_IN_PLACE, RUNS_NOWHERE, START_MISSING, START_NOT_FIRST, fix_source,
+    AFTER_REMOVED, Blocked, Blocker, Fixed, Judged, NOT_IN_PLACE, RUNS_NOWHERE, START_MISSING,
+    START_NOT_FIRST, fix_source, judge_language_1,
 };
 pub use format::{format, format_tree};
 pub use parser::parse;

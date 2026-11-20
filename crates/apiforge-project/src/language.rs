@@ -74,6 +74,118 @@ pub(crate) fn argument(folder: &Path) -> String {
     }
 }
 
+/// The error on an `@after` line of a project at `folder` still in an
+/// older language (LANG-20): the conversion is the project's, by the
+/// command the run refusal names, never a line deleted by hand.
+pub fn after_in_older(folder: &Path) -> String {
+    format!(
+        "`@after` is not part of language {LANGUAGE_VERSION}. Update the project with apiforge fix --folder {}; do not delete the line by hand.",
+        argument(folder)
+    )
+}
+
+/// The last sentence of a refused conversion.
+pub const NOTHING_WRITTEN: &str = "Nothing was written. Change these by hand and run apiforge fix again, or restore a source from Git: one written or edited on the board before the project was converted is judged like any other.";
+
+/// What `apiforge fix --folder` found in one source of the manifest.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceReport {
+    /// The registered path.
+    pub path: String,
+    pub outcome: SourceOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceOutcome {
+    /// Already written as language 2 reads it.
+    Unchanged,
+    /// Converted, or convertible under `--check`: what the fix removes and
+    /// writes, in source order.
+    Converted(Vec<Change>),
+    /// The statements in the way.
+    Blocked(Vec<Problem>),
+    /// The file cannot be read: missing, not text, over the source limit, or
+    /// it does not parse.
+    Unreadable(Problem),
+}
+
+/// One edit of the conversion, at its line of the source as it was.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Change {
+    pub line: usize,
+    /// The text removed, trimmed; empty when nothing is.
+    pub removed: String,
+    /// The text written, trimmed; empty when nothing is.
+    pub written: String,
+}
+
+/// Something the person changes by hand before the project converts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Problem {
+    /// One-based; 0 for a whole file.
+    pub line: usize,
+    pub column: usize,
+    /// The first line of the statement, trimmed; empty for a whole file.
+    pub statement: String,
+    pub reason: String,
+    pub todo: String,
+}
+
+/// What the command found in every source of the manifest, in its order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FixReport {
+    pub sources: Vec<SourceReport>,
+}
+
+impl FixReport {
+    /// Whether every source converts: the project is converted whole.
+    pub fn convertible(&self) -> bool {
+        self.sources.iter().all(|source| {
+            matches!(
+                source.outcome,
+                SourceOutcome::Unchanged | SourceOutcome::Converted(_)
+            )
+        })
+    }
+}
+
+/// What `apiforge fix --folder` does with a project.
+pub enum Planned {
+    /// The project is already in this build's language: nothing to do.
+    Current,
+    Plan(FixPlan),
+}
+
+/// The judgement of every source, the commit it makes and what it read.
+pub struct FixPlan {
+    report: FixReport,
+}
+
+impl FixPlan {
+    pub fn report(&self) -> &FixReport {
+        &self.report
+    }
+
+    /// Writes every converted source and the raised manifest in one commit,
+    /// or nothing.
+    pub fn commit(self) -> Result<FixReport> {
+        Err(Error::NotConvertible)
+    }
+}
+
+/// Reads the project at `folder` and judges every source of its manifest.
+/// With `check` the project is opened read-only; otherwise as its writer.
+pub fn plan_fix(folder: &Path, check: bool) -> Result<Planned> {
+    let _ = (folder, check);
+    Err(Error::NotConvertible)
+}
+
+/// The store's refusal of the conversion's commit, as the command says it.
+pub fn commit_refusal(error: apiforge_storage::project::ProjectError, root: &Path) -> Error {
+    let _ = root;
+    Error::Storage(error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::argument;

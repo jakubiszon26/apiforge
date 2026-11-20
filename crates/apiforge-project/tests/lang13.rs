@@ -403,7 +403,9 @@ mod language;
 /// A5: in a project still in language 1 the `@after` and `start` errors are
 /// shown without their fix (the unit of conversion is the project, LANG-20),
 /// and a run is refused with LANG-15's sentence; in a language-2 project the
-/// same text offers the fix.
+/// same text offers the fix. Restated by LANG-20 (#481, criterion 10): in
+/// language 1 the error on the `@after` line names `apiforge fix --folder`
+/// instead of saying "delete this line".
 #[test]
 fn lang13_criterion_15_no_fix_in_an_older_project() {
     use apiforge_script::{AFTER_REMOVED, START_MISSING};
@@ -411,6 +413,7 @@ fn lang13_criterion_15_no_fix_in_an_older_project() {
     // Written for 0.1.0: no `start` and an `@after`.
     let text = "scenario \"Old\" {\n  first = GET \"/first\" {\n    sample 200 {}\n  }\n  @after(first)\n  second = GET \"/second\" {\n    sample 200 {}\n  }\n}\n";
     let fixes = |root: &Path| {
+        let older = apiforge_project::language::after_in_older(root);
         let mut session = ProjectSession::open(root).unwrap();
         let id = session
             .documents()
@@ -420,13 +423,21 @@ fn lang13_criterion_15_no_fix_in_an_older_project() {
             .id()
             .to_owned();
         session.settle(&id).unwrap();
-        let ours: Vec<bool> = session
+        let ours: Vec<(bool, bool, bool)> = session
             .document(&id)
             .unwrap()
             .diagnostics()
             .iter()
-            .filter(|d| matches!(d.message.as_str(), AFTER_REMOVED | START_MISSING))
-            .map(|d| d.fix.is_some())
+            .filter(|d| {
+                matches!(d.message.as_str(), AFTER_REMOVED | START_MISSING) || d.message == older
+            })
+            .map(|d| {
+                (
+                    d.message == AFTER_REMOVED,
+                    d.message == older,
+                    d.fix.is_some(),
+                )
+            })
             .collect();
         let run = session.prepare_run(&id).map(|_| ()).err();
         (ours, run)
@@ -439,16 +450,21 @@ fn lang13_criterion_15_no_fix_in_an_older_project() {
         .unwrap();
     drop(session);
 
-    // Language 2: both errors carry their fix.
+    // Language 2: both errors carry their fix; the `@after` one says
+    // "delete this line".
     let (ours, _) = fixes(root);
     assert_eq!(ours.len(), 2, "{ours:?}");
-    assert!(ours.iter().all(|fix| *fix), "{ours:?}");
+    assert!(ours.iter().all(|(_, _, fix)| *fix), "{ours:?}");
+    assert_eq!(ours.iter().filter(|(after, ..)| *after).count(), 1);
 
-    // Language 1: the same errors, without a fix; a run is refused.
+    // Language 1: the same errors, without a fix, the `@after` one naming
+    // the command; a run is refused.
     language::write_language(root, 1);
     let (ours, run) = fixes(root);
     assert_eq!(ours.len(), 2, "{ours:?}");
-    assert!(ours.iter().all(|fix| !*fix), "{ours:?}");
+    assert!(ours.iter().all(|(_, _, fix)| !*fix), "{ours:?}");
+    assert_eq!(ours.iter().filter(|(after, ..)| *after).count(), 0);
+    assert_eq!(ours.iter().filter(|(_, older, _)| *older).count(), 1);
     let run = run.expect("a run is refused");
     assert!(matches!(run, Error::OlderLanguage { .. }), "{run:?}");
     assert!(

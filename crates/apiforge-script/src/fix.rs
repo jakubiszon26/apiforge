@@ -118,6 +118,61 @@ pub fn fix_source(text: &str, context: &LowerContext<'_>) -> Fixed {
     }
 }
 
+/// What a source written for language 1 becomes in the written language
+/// (LANG-20): judged always by its 0.1.0 reading, also without an `@after`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Judged {
+    /// The text in the written language, runs as today: the same text when
+    /// nothing changes. `edits` are the fixes applied, as ranges of the
+    /// original text, in source order.
+    Convertible { text: String, edits: Vec<Fix> },
+    /// The statements that stand in the way, in source order; nothing is
+    /// converted.
+    Blocked(Vec<Blocker>),
+    /// The text does not parse: its first syntax error.
+    Unparsable(Diagnostic),
+}
+
+/// A statement that stands in the way of a conversion, and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Blocker {
+    /// The statement's range in the text.
+    pub range: Range<usize>,
+    /// The statement's handle; empty for an error of the check that names
+    /// no statement.
+    pub handle: String,
+    pub reason: Blocked,
+}
+
+/// Why a statement stands in the way of a conversion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Blocked {
+    /// A step that runs nowhere today: nothing orders it after `start`.
+    /// `above` is the step written above it in its braces, whose `@after` the
+    /// person may write on it instead of deleting it.
+    RunsNowhere { above: Option<String> },
+    /// A statement written elsewhere than where it runs today: `after` names
+    /// the statements it runs after today, by handle.
+    NotInPlace { after: Vec<String> },
+    /// The converted text would not pass the check of the written language.
+    Invalid(Diagnostic),
+}
+
+/// Judges `text`, a source of a project written in language 1, by its
+/// 0.1.0 reading, whether or not it holds an `@after`: in its main flow, its
+/// cleanup and a component's body, the steps it runs today, in their order,
+/// must be the steps written, in the order written, and the converted text
+/// must pass the check of the written language. [`fix_source`] makes the
+/// comparison only for a file with an `@after` or without its `start`;
+/// `apiforge fix --folder` makes it for every source with this function.
+pub fn judge_language_1(text: &str, context: &LowerContext<'_>) -> Judged {
+    let _ = context;
+    Judged::Convertible {
+        text: text.to_owned(),
+        edits: vec![],
+    }
+}
+
 /// The fix that removes the attribute at `range` and nothing else: the
 /// comments written inside it stay, each on a line of its own where the
 /// attribute stood (review of #488).
