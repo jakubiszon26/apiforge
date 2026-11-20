@@ -2,9 +2,9 @@
 //! dropped on a step of the same braces moves that step to directly after
 //! it, with the checks that read only it; a move with a cycle is refused in
 //! the board's banner; *Add step* on the bar puts the new step after the
-//! selection; *Delete* on an ordering line is refused; and a wire dropped on
-//! an `if` with statements, or on a step of other braces, is refused until
-//! DIAG-06d. On `shop-30` in the demo shop and on the room project, through
+//! selection; and *Delete* on an ordering line is refused. Moves across
+//! braces and of an `if` with its braces are DIAG-06d's (`diag06d.rs`). On
+//! `shop-30` in the demo shop and on the room project, through
 //! the gestures a person makes: a wire carried from a socket found by its
 //! name to the step's order socket.
 use super::diag07::{board, empty_point};
@@ -17,8 +17,6 @@ use egui::{Pos2, Rect};
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 const DIAGRAM: &str = ".apiforge/diagram.json";
-const NOT_YET: &str =
-    "Moving a condition with its steps, or a step into another branch, is not possible yet.";
 const ORDER_LINE: &str = "The line is the order of the steps. Move or delete a step.";
 
 fn lay(name: &str) -> String {
@@ -53,7 +51,7 @@ fn open_in(project: &std::path::Path, path: &str) -> (FolderHarness, String) {
 }
 
 /// `text` as a scenario of the demo shop, open on the board.
-fn shop_with(text: &str) -> (tempfile::TempDir, FolderHarness, String) {
+pub(super) fn shop_with(text: &str) -> (tempfile::TempDir, FolderHarness, String) {
     let project = crate::testing::shop_project();
     fs::write(project.path().join(SCENARIO), text).unwrap();
     let (harness, id) = open_in(project.path(), SCENARIO);
@@ -61,7 +59,7 @@ fn shop_with(text: &str) -> (tempfile::TempDir, FolderHarness, String) {
     (project, harness, id)
 }
 
-fn shop_30() -> (tempfile::TempDir, FolderHarness, String) {
+pub(super) fn shop_30() -> (tempfile::TempDir, FolderHarness, String) {
     shop_with(&lay("shop-30.afs"))
 }
 
@@ -79,7 +77,7 @@ fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
 }
 
 /// The room project, `path` open on the board, after `prepare`.
-fn rooms(
+pub(super) fn rooms(
     path: &str,
     prepare: impl FnOnce(&std::path::Path),
 ) -> (tempfile::TempDir, FolderHarness, String) {
@@ -121,7 +119,7 @@ fn component() -> (tempfile::TempDir, FolderHarness, String) {
 }
 
 /// The graph on the board: the cleanup's while the board shows it.
-fn graph(harness: &FolderHarness, id: &str) -> Graph {
+pub(super) fn graph(harness: &FolderHarness, id: &str) -> Graph {
     let snapshot = folder(harness).snapshot(id).unwrap();
     graph_of(
         snapshot.model.as_ref().unwrap(),
@@ -130,7 +128,7 @@ fn graph(harness: &FolderHarness, id: &str) -> Graph {
     .clone()
 }
 
-fn id_of(graph: &Graph, handle: &str) -> String {
+pub(super) fn id_of(graph: &Graph, handle: &str) -> String {
     graph
         .nodes
         .iter()
@@ -141,7 +139,7 @@ fn id_of(graph: &Graph, handle: &str) -> String {
 }
 
 /// The steps of the board in the order they run.
-fn steps(harness: &FolderHarness, id: &str) -> Vec<String> {
+pub(super) fn steps(harness: &FolderHarness, id: &str) -> Vec<String> {
     let board = graph(harness, id);
     sequence(&board)
         .into_iter()
@@ -152,7 +150,7 @@ fn steps(harness: &FolderHarness, id: &str) -> Vec<String> {
 }
 
 /// Every statement of the board in written order.
-fn written(harness: &FolderHarness, id: &str) -> Vec<String> {
+pub(super) fn written(harness: &FolderHarness, id: &str) -> Vec<String> {
     graph(harness, id)
         .nodes
         .iter()
@@ -160,7 +158,7 @@ fn written(harness: &FolderHarness, id: &str) -> Vec<String> {
         .collect()
 }
 
-fn at(order: &[String], handle: &str) -> usize {
+pub(super) fn at(order: &[String], handle: &str) -> usize {
     order
         .iter()
         .position(|step| step == handle)
@@ -168,7 +166,7 @@ fn at(order: &[String], handle: &str) -> usize {
 }
 
 /// The source passes the check and says the board's model.
-fn passes(harness: &FolderHarness, id: &str) -> String {
+pub(super) fn passes(harness: &FolderHarness, id: &str) -> String {
     let text = source_of(harness, id);
     assert!(!text.contains("@after"), "{text}");
     let session = folder(harness).session.as_ref().unwrap();
@@ -193,7 +191,7 @@ fn screen(harness: &FolderHarness, id: &str, world: Pos2) -> Pos2 {
 
 /// Brings the cards `handles` into view together: centred on the first, at
 /// the largest zoom that shows them all inside the board.
-fn show(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
+pub(super) fn show(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
     let board_graph = graph(harness, id);
     let ids: Vec<String> = handles
         .iter()
@@ -223,7 +221,7 @@ fn show(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
 /// Carries a wire from the socket `port` of `source` (`__order` for *Next*,
 /// `__true` and `__false` for *Yes* and *No*) to the order socket of
 /// `target`, and drops it there.
-fn wire(harness: &mut FolderHarness, id: &str, source: &str, port: &str, target: &str) {
+pub(super) fn wire(harness: &mut FolderHarness, id: &str, source: &str, port: &str, target: &str) {
     show(harness, id, &[source, target]);
     let target_id = id_of(&graph(harness, id), target);
     let from = centre(harness, &format!("Output {port} of {source}"));
@@ -237,7 +235,7 @@ fn wire(harness: &mut FolderHarness, id: &str, source: &str, port: &str, target:
 
 /// The wire is refused with `message` in the board's banner, and nothing
 /// changes: not the source, not the model.
-fn refused(
+pub(super) fn refused(
     harness: &mut FolderHarness,
     id: &str,
     (source, port, target): (&str, &str, &str),
@@ -264,17 +262,13 @@ fn undone(harness: &mut FolderHarness, id: &str, before: &str) {
 
 /// A move done by a wire: the source changed, passes the check, and one
 /// Undo gives it back.
-fn moved(
+pub(super) fn moved(
     harness: &mut FolderHarness,
     id: &str,
     (source, port, target): (&str, &str, &str),
 ) -> Vec<String> {
     let before = source_of(harness, id);
     wire(harness, id, source, port, target);
-    assert!(
-        harness.query_by_label(NOT_YET).is_none(),
-        "the move is not refused"
-    );
     let text = passes(harness, id);
     assert_ne!(text, before, "the move changes the source");
     let order = steps(harness, id);
@@ -693,25 +687,4 @@ fn diag06a_criterion_7() {
         "the line stays selectable"
     );
     let _ = empty_point(&harness, &id);
-}
-
-// Criterion 8 ----------------------------------------------------------------
-
-#[test]
-fn diag06a_criterion_8_an_if_with_statements_in_its_braces() {
-    let (_project, mut harness, id) = shop_30();
-    refused(&mut harness, &id, ("login", "__order", "paid"), NOT_YET);
-}
-
-#[test]
-fn diag06a_criterion_8_a_step_of_other_braces() {
-    let (_project, mut harness, id) = shop_30();
-    refused(&mut harness, &id, ("cart", "__order", "payment"), NOT_YET);
-    refused(
-        &mut harness,
-        &id,
-        ("payment", "__order", "address"),
-        NOT_YET,
-    );
-    refused(&mut harness, &id, ("paid", "__false", "address"), NOT_YET);
 }

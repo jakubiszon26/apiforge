@@ -590,6 +590,18 @@ impl Board<'_> {
         edit::place(self.graph, self.project, target, at).map_err(|error| error.to_string())
     }
 
+    /// *Move out of the branch* (DIAG-06d): the check, value, variable or
+    /// export `id` is written after the `if` whose braces hold it.
+    pub fn move_out_of_branch(&self, id: &str) -> Result<(Graph, Vec<String>), String> {
+        let braces = apiforge_core::chain::braces(self.graph);
+        let x = braces
+            .get(id)
+            .map(|(x, _)| *x)
+            .ok_or_else(|| edit::EditError::NodeNotFound.to_string())?;
+        edit::place(self.graph, self.project, id, edit::Place::After(x))
+            .map_err(|error| error.to_string())
+    }
+
     /// An *Export* passes values out of a component, so it is a sink: the
     /// left edge one gap right of the rightmost card or chip, when `x` is not
     /// already there (UX-21). Being right of everything on the board, it

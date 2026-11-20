@@ -874,6 +874,15 @@ impl ProjectSession {
         if *previous == model {
             return Ok(());
         }
+        // A move that changes no step's place, nor any statement's braces,
+        // changes nothing: the order of the statements is the text's, which
+        // it would leave as it is (DIAG-06d).
+        if moved.is_some()
+            && apiforge_script::semantic(&previous, &self.context)
+                == apiforge_script::semantic(&model, &self.context)
+        {
+            return Ok(());
+        }
         let text = self.documents[index].text().to_owned();
         self.install_model(index, model, origin, moved)?;
         let document = &mut self.documents[index];

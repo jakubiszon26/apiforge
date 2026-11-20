@@ -309,48 +309,29 @@ fn add_step_ids(session: &mut ProjectSession, id: &str, selected: &[String]) {
     }
 }
 
-/// The lines of `before` that `after` does not keep in order, and the lines
-/// of `after` that are new, by a longest common subsequence of lines.
-fn changed_lines<'t>(before: &'t str, after: &'t str) -> (Vec<&'t str>, Vec<&'t str>) {
-    let (a, b): (Vec<&str>, Vec<&str>) = (before.lines().collect(), after.lines().collect());
-    let mut table = vec![vec![0usize; b.len() + 1]; a.len() + 1];
-    for i in (0..a.len()).rev() {
-        for j in (0..b.len()).rev() {
-            table[i][j] = if a[i] == b[j] {
-                table[i + 1][j + 1] + 1
-            } else {
-                table[i + 1][j].max(table[i][j + 1])
-            };
-        }
-    }
-    let (mut i, mut j) = (0, 0);
-    let (mut removed, mut added) = (vec![], vec![]);
-    while i < a.len() && j < b.len() {
-        if a[i] == b[j] {
-            i += 1;
-            j += 1;
-        } else if table[i + 1][j] >= table[i][j + 1] {
-            removed.push(a[i]);
-            i += 1;
-        } else {
-            added.push(b[j]);
-            j += 1;
-        }
-    }
-    removed.extend(&a[i..]);
-    added.extend(&b[j..]);
-    (removed, added)
-}
-
 /// Criterion 2: the file after a move differs from the file before only by
-/// lines that stand in another place, the same lines in the same order;
-/// nothing is reformatted.
+/// lines that stand in another place; nothing is reformatted. Since DIAG-06d
+/// a move into other braces also changes the leading indentation of the
+/// moved lines, by the difference of depth, and nothing else: the lines are
+/// compared without it. Where they stand is checked by reading the text
+/// back as the document.
 fn only_moved(before: &str, after: &str, name: &str) {
-    let (removed, added) = changed_lines(before, after);
-    assert!(!removed.is_empty(), "{name}: the move changes the file");
+    let lines = |text: &str| -> Vec<String> {
+        // An `else` a move opens or empties is written as the writer
+        // writes it.
+        let mut lines: Vec<String> = text
+            .lines()
+            .map(|line| line.trim_start().to_owned())
+            .filter(|line| line != "} else {")
+            .collect();
+        lines.sort();
+        lines
+    };
+    assert_ne!(before, after, "{name}: the move changes the file");
     assert_eq!(
-        removed, added,
-        "{name}: only whole lines move\n--- before\n{before}\n--- after\n{after}"
+        lines(before),
+        lines(after),
+        "{name}: no line changes but its place and its indentation\n--- before\n{before}\n--- after\n{after}"
     );
 }
 

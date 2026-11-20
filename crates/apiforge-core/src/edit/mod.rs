@@ -123,11 +123,13 @@ pub enum EditError {
     /// and the step it stays below.
     #[error("{0}")]
     PlaceRefused(String),
-    /// A move of an `if` with its braces, or into other braces: DIAG-06d.
-    #[error(
-        "Moving a condition with its steps, or a step into another branch, is not possible yet."
-    )]
-    NotMovableYet,
+    /// A wire from a step's *Next* to a check, value, variable or export
+    /// (DIAG-06d): only steps are ordered.
+    #[error("Only steps are ordered. A check runs when what it reads exists.")]
+    OnlyStepsOrdered,
+    /// An `if` put after a statement of its own braces (DIAG-06d).
+    #[error("A condition cannot go into its own braces.")]
+    IntoOwnBraces,
     /// *Delete* on an ordering line (DIAG-06a): the line is the order of the
     /// written steps.
     #[error("The line is the order of the steps. Move or delete a step.")]
