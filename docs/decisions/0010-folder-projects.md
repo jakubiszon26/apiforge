@@ -39,7 +39,8 @@ Use camelCase JSON fields, strict versioned structures and relative paths with
 
 | Field | Type and meaning |
 | --- | --- |
-| `formatVersion` | Integer `1` |
+| `formatVersion` | Integer `1`, or `2` for a manifest that names its language (LANG-15) |
+| `languageVersion` | Only in `formatVersion: 2`, a positive integer: the `.afs` language the project's files are written in. Absent in `formatVersion: 1`, which is language 1 |
 | `id`, `name` | Stable project ID and display name |
 | `environment` | Existing public environment structure, excluding secret values |
 | `contracts` | Existing contract definitions |
@@ -67,6 +68,18 @@ contain no valid scenario; otherwise use existing scenario/component/contract
 counts and validation rules. Recovery has the existing bounded per-buffer rules
 and a 16 MiB total payload cap; exceeding it reports failure and retains memory,
 not a truncated success. Do not silently drop documents or revisions to fit limits.
+
+A build reads one language version, its own (LANG-15, [LANG-00 section
+2](../tickets/LANG-00.md#2-the-language-version-lang-15)). A new manifest is
+written for the build's language: `formatVersion: 1` without the field while
+that is language 1, `formatVersion: 2` with `languageVersion` from language 2
+on; an existing manifest is written back in the format it was read in. A
+project in a newer language is not opened: *This project is written in
+language 3; this build reads language 2. Update API Forge.* A project in an
+older language opens for reading and editing; `check` reports it at the
+manifest with `apiforge fix --folder <directory>`, and it does not run until
+the fix has raised it. A release before LANG-15 refuses `formatVersion: 2` as
+an unsupported format.
 
 An unsupported shared format is preserved without writes. Bad shared metadata is
 reported and requires explicit recovery before replacement. Technical file errors

@@ -1,4 +1,4 @@
-Reference version: 1 · grammar of ADR 0005 as of 2026-10-27
+Language version: 2 · grammar of ADR 0005 as of 2026-11-20
 
 # The .afs language
 
@@ -20,12 +20,15 @@ parser wins and the page has a defect.
 - A file holds exactly one `scenario` or one `component`.
 - Inside it, every **statement** has the form `handle = form`. The handle names
   the block; the form says what it does (a request, a check, a value, …).
-- **Line order means nothing.** A statement runs after the statements whose
-  values it uses and after those named in its `@after(…)` attribute. Write
-  statements in a readable order; the formatter keeps the order you wrote.
-  An edit on the board rewrites only the statements it changes and leaves
-  the rest of the file as you wrote it; a statement added from the board is
-  written directly after the step it follows, inside the same braces.
+- **Steps run in the order they are written.** A *step* is a statement that
+  does something or routes the flow: `start`, a request, a component call,
+  an `if`. The steps of a block (the scenario or component, a branch, the
+  cleanup) run top to bottom. Checks and values stand anywhere in their block
+  and run as soon as what they read exists. The formatter keeps the order you
+  wrote. An edit on the board rewrites only the statements it changes and
+  leaves the rest of the file as you wrote it; a statement added from the
+  board is written directly after the step it follows, inside the same
+  braces.
 - Whitespace and line breaks are insignificant outside strings. There is one
   canonical layout (two-space indentation, one statement per line, one
   attribute per line), and the formatter (`apiforge fmt`) writes it. The
@@ -45,6 +48,7 @@ it) and a quoted display name.
 scenario "Smoke test" {
   description "Checks that the shop answers."
   on_error continue
+  begin = start
   ping = GET "/products/123" {
     sample 200 { id: 123 }
   }
@@ -55,6 +59,7 @@ scenario "Smoke test" {
 ```afs
 component ping_shop "Ping the shop" {
   description "One request and its status."
+  begin = start
   ping = GET "/products/123" {
     sample 200 { id: 123 }
   }
@@ -66,8 +71,9 @@ component ping_shop "Ping the shop" {
 - `on_error stop` or `on_error continue` (scenarios only). With `stop`, the
   default, the first failed assertion, error or blocked step stops the main
   flow: the remaining steps are skipped and the cleanup still runs. With
-  `continue` every step that can still run does, and the run reports every
-  failure.
+  `continue` a step runs once the step before it has finished, whatever its
+  result, unless a value it reads does not exist, and the run reports every
+  failure ([When a step fails](#when-a-step-fails)).
 - The formatter writes the parts in this order: `description`, `on_error`,
   `param` lines, `input` lines, `action`, statements, `cleanup`. Write them in
   that order.
@@ -85,6 +91,7 @@ scenario "Parameters" {
   param productId = 123
   param "page size" = 20
   param filter = { category: "coffee", inStock: true }
+  begin = start
   page = GET "/products" {
     query { size: param["page size"], category: param.filter.category }
     sample 200 { items: [] }
@@ -103,6 +110,7 @@ component add_to_cart "Add to cart" {
   @optional
   input quantity: number = 1
   action productId
+  begin = start
   added = POST "/carts" {
     body { productId: param.productId, quantity: param.quantity }
     sample 201 { id: "c-1" }
@@ -127,41 +135,37 @@ component add_to_cart "Add to cart" {
 
 ## Start and ordering
 
-`begin = start` declares the start of the main flow. **When a `start`
-exists, a statement runs only if it follows the start**: through `@after`, or
-by using the value of a statement that does. Values those statements need are
-computed as well. Without a `start`, every statement runs. A file has at most
-one `start`.
+`begin = start` is the first step of the main flow: **a scenario or a
+component with a step has a `start`, and it is the first step written**. A
+file has at most one `start`. A cleanup and a branch need none: their braces
+place the first step.
 
-`@after(a, b)` writes ordering: the statement runs after `a` and `b` have run,
-without using their values. A statement that uses another's value is already
-ordered after it and needs no `@after`.
+After `start`, the steps of the flow run in the order they are written, each
+when the one before it has finished. A step written in a block always runs;
+to take a line out, comment it. Checks and values are not steps: each runs
+as soon as the values it reads exist, before the next step starts, wherever
+its line stands.
 
 ```afs
 scenario "Ordering" {
   begin = start
-  @after(begin)
   catalogue = GET "/products" {
     sample 200 { items: [] }
   }
-  @after(catalogue)
   health = HEAD "/health" {
     sample 200 {}
   }
-  @after(begin, health)
+  listed = assert catalogue.status == 200
   allowed = OPTIONS "/carts" {
     sample 204 {}
-  }
-  // Nothing orders this request after begin, so it never runs.
-  unused = GET "/unused" {
-    sample 200 {}
   }
 }
 ```
 
-`@after(check)` on an `if` orders a statement after the whole `if`;
-`@after(check.then)` and `@after(check.else)` order it after the condition,
-on one of its branches (see [Branches](#branches-if-and-else)).
+Here `catalogue`, `health` and `allowed` run in that order; `listed` runs
+right after `catalogue`, before `health`, although its line comes later. The
+step written after an `if` runs after the whole `if` (see
+[Branches](#branches-if-and-else)).
 
 ## Requests
 
@@ -173,6 +177,7 @@ fields. The methods are `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` and
 scenario "Requests" {
   description "Every request field."
   on_error continue
+  begin = start
   products = GET "/products" {
     headers { Accept: "application/json", "X-Trace": "reference" }
     query { limit: 10, sort: "price" }
@@ -356,20 +361,16 @@ right after the step that makes the value and read the variable instead:
 ```afs
 scenario "Saved value" {
   begin = start
-  @after(begin)
   cart = POST "/carts" {
     sample 201 { id: "c-1" }
   }
   var cartId = cart.body.id
-  @after(cart)
   items = GET "/carts/{{cartId}}/items" {
     sample 200 {}
   }
-  @after(items)
   coupon = POST "/carts/{{cartId}}/coupon" {
     sample 200 {}
   }
-  @after(coupon)
   checkout = POST "/checkout" {
     body { cart: cartId }
     sample 201 { id: "o-1" }
@@ -391,6 +392,7 @@ same edit itself. A variable is a step of its own in a run's results.
 ```afs
 scenario "Assertions" {
   param expected = 160
+  begin = start
   cart = GET "/carts/c-1" {
     sample 200 { id: "c-1", total: 160.004, items: [{ productId: 123 }], note: "" }
   }
@@ -451,6 +453,7 @@ The statements inside its braces run only on that branch.
 ```afs
 scenario "Branches" {
   param quantity = 2
+  begin = start
   cart = POST "/carts" {
     body { productId: 123, quantity: param.quantity }
     sample 201 { id: "c-1", total: 160 }
@@ -459,14 +462,12 @@ scenario "Branches" {
     receipt = GET "/carts/{{cart.body.id}}" {
       sample 200 { id: "c-1" }
     }
-    @after(receipt)
     items = GET "/carts/{{cart.body.id}}/items" {
       sample 200 { items: [] }
     }
   } else {
     failed = assert cart.status == 201
   }
-  @after(created)
   logout = POST "/logout" {
     sample 204 {}
   }
@@ -475,21 +476,14 @@ scenario "Branches" {
 
 - `else { … }` is optional. Statements in a branch may use values from
   outside it; their handles are unique in the whole file.
-- The braces place the first statement of a branch. A further statement of
-  the same braces writes `@after` with the statement it follows, here
-  `@after(receipt)`, and stays inside the braces: the window prints it there
-  and `apiforge fmt` keeps it there.
-- `@after(created)` runs a statement after the whole `if`: after the last
+- The statements of a branch are written inside its braces, and its steps
+  run there in the order written: here `receipt`, then `items`.
+- The step written after the `if` runs after the whole `if`: after the last
   step of the branch that was taken, here `items` when `then` is taken, or
   right after the condition when that branch holds no step, as `else` here.
-  When that last step failed with an error or was blocked, the statement
-  does not run, as after any such step. A statement inside the braces of
-  `created`, at any depth, cannot write `@after(created)`.
-- `@after(created.then)` orders a statement outside the braces after the
-  condition, on the `then` branch; `.else` on the other. It waits for the
-  condition only, not for the statements inside the branch. A statement whose
-  only ordering is one branch is printed inside that branch's braces by
-  `apiforge print`; a board edit leaves it where you wrote it.
+  It waits for that last step to finish, whatever its result: with
+  `on_error continue` it runs also when that step failed
+  ([When a step fails](#when-a-step-fails)).
 - `if` has the outputs `created.passed` and `created.value`, like `assert`.
 
 ## Cleanup
@@ -498,10 +492,11 @@ A scenario's `cleanup { … }` block runs after the main flow, whatever its
 outcome, and is meant to remove what the test created. Its statements may use
 values of the main flow; the main flow cannot use them. A cleanup step whose
 input never came into being (the request that would have created it did not
-run) is skipped.
+run) is skipped; the cleanup steps after it still run.
 
 ```afs
 scenario "Cleanup" {
+  begin = start
   cart = POST "/carts" {
     body { productId: 123, quantity: 1 }
     sample 201 { id: "c-1" }
@@ -515,8 +510,65 @@ scenario "Cleanup" {
 }
 ```
 
-`@after` in the cleanup names only cleanup statements. A `start` in the main
-flow does not govern the cleanup: every cleanup statement runs.
+The steps of the cleanup run in the order written, after the main flow,
+whatever happened in it; the cleanup needs no `start`.
+
+## When a step fails
+
+With `on_error stop`, the default, the first failed assertion, error or
+blocked step stops the main flow, and every step it did not reach is skipped.
+This section is about `on_error continue`, and about the cleanup, which runs
+whatever happened.
+
+```afs
+scenario "When a step fails" {
+  on_error continue
+  begin = start
+  pay = POST "/orders/o-1/pay" {
+    sample 500 { error: "declined", requestId: "r-7" }
+  }
+  paid = assert pay.status == 200
+  receipt = GET "/payments/{{pay.body.id}}" {
+    sample 200 { id: "p-1" }
+  }
+  trace = GET "/traces/{{pay.body.requestId}}" {
+    sample 200 { steps: [] }
+  }
+  ship = POST "/orders/o-1/ship" {
+    sample 202 {}
+  }
+}
+```
+
+Here `paid` fails, `receipt` errors because the answer has no `id`, and
+`trace` and `ship` run. The run is failed.
+
+- A step has **finished** when it passed, failed, errored or was blocked.
+  The next step waits for the one before it to finish, not for it to
+  succeed: a step that reads nothing from a failed step runs after it. A scenario that must not
+  go on uses `on_error stop` or an `if`.
+- A step that **reads a value that does not exist** is blocked and names
+  the statement that should have made it. A value exists when its statement
+  made it, whatever that statement's result: a request that got an answer
+  has its `status`, `headers` and `body`, also at 500; a request that got no
+  answer has none. Blocked passes on through values, not along the chain.
+- A **field the answer lacks**, `pay.body.id` above, is the reading step's
+  own error, *Missing value*. A check reads it as missing: `exists
+  pay.body.id` fails.
+- A **false `condition`** blocks the steps that read it; a step that only
+  follows it runs.
+- An **`if` that cannot decide** is blocked when its condition reads a
+  value that does not exist, and ends as an error when its condition
+  errors. Either way every statement in its braces, at any depth, is
+  blocked by it, and the statement after the whole `if` runs.
+  A branch that was not taken is skipped, which is not a failure and blocks
+  nothing.
+- A **component call** that fails inside ends as an error. An export it
+  computed before the failure exists and can be read; the others do not.
+- In the **cleanup** a step whose input does not exist, or whose field is
+  missing, is skipped, and the cleanup steps after it run. This holds also
+  for an input from a step on a branch that was not taken.
+- A run with a failed, errored or blocked step is failed.
 
 ## Exports
 
@@ -527,6 +579,7 @@ types.
 ```afs
 component product_price "Product price" {
   input productId: number
+  begin = start
   product = GET "/products/{{param.productId}}" {
     sample 200 { id: 123, price: 100, promotion: { active: true, price: 80 } }
   }
@@ -549,11 +602,9 @@ value.
 scenario "Component calls" {
   param productId = 123
   begin = start
-  @after(begin)
   pricing = product_price@1(productId: param.productId)
   saving = pricing.regular - pricing.price
   cheaper = assert saving > 0
-  @after(cheaper)
   status = ping_shop@2()
   answered = assert status == 200
 }
@@ -586,6 +637,7 @@ handle.
 
 ```afs
 scenario "Notes" {
+  begin = start
   // Shown as the block's note on the board.
   // A second line of the same note.
   @label("Load the catalogue")
@@ -634,7 +686,6 @@ component find_product "Find a product" {
   action productId
   begin = start
   // The product as the shop sells it.
-  @after(begin)
   response = GET "/products/{{param.productId}}" {
     headers { Accept: "application/json" }
     timeout 5s
@@ -658,9 +709,7 @@ scenario "Buy coffee" {
   param quantity = 2
   begin = start
   // Product details from the shared component.
-  @after(begin)
   product = find_product@1(productId: param.productId)
-  @after(product)
   @label("Create a cart")
   cart = POST "/carts" {
     headers { Authorization: "Bearer {{env.apiToken}}" }
@@ -729,7 +778,20 @@ messages you will meet most:
   var`**, **`Ordering must stay in its graph and branches need an IF`**: the
   form is in a place that does not allow it.
 - **`Graph contains a data/control cycle`**: two statements need each other,
-  through values or `@after`. Remove one direction.
+  or a step reads a value of a step written after it. Remove one direction or
+  move the step below the one it reads.
+- **`` `@after` is not part of the language ``**: a file written for API Forge
+  0.1.0, where `@after(x)` ordered a statement after `x`. The steps of a
+  block now run in the order they are written. When the file is written in
+  the order it ran, every such error carries a fix that deletes its line,
+  and applying them changes nothing in what runs. When it is not, no fix is
+  offered and one more error names the statement to move by hand (**`This
+  statement is not written where it runs today`**, **`This step runs nowhere
+  today`**); move or delete it, then delete the `@after` lines.
+- **`` A scenario with a step needs `start` ``**: the fix writes `begin = start`
+  (or `begin_2` when `begin` is taken) above the first statement. A
+  component needs no `start`: its body runs from its first step written. **`` `start` must be the first step ``**: move
+  the steps written above it below it.
 - **`The value's type does not match this input`** (warning): a value of one
   type fills an input of another, such as text into a number input.
 - **`This comment is not attached to a statement and will be dropped by

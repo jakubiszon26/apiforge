@@ -96,7 +96,9 @@ fn every_fixture_reopens_with_identical_models_and_published_revisions() {
                 project.id
             );
             assert!(!document.is_dirty());
-            assert_eq!(model(&session, &id), Document::Scenario(scenario.clone()));
+            // Written as the written language says it (LANG-13).
+            let written = as_written(&Document::Scenario(scenario.clone())).unwrap();
+            assert_eq!(model(&session, &id), written);
         }
         let mut published = session.context().components.clone();
         let mut expected = project.components.clone();
@@ -117,7 +119,11 @@ fn every_fixture_reopens_with_identical_models_and_published_revisions() {
                 .unwrap();
             assert_eq!(document.entry().base_revision, Some(latest.revision));
             assert_eq!(working.revision, latest.revision + 1);
-            let mut base = latest.clone();
+            let Document::Component(mut base) =
+                as_written(&Document::Component(latest.clone())).unwrap()
+            else {
+                panic!("a component");
+            };
             base.revision = working.revision;
             assert_eq!(working, &base, "identity and layout of the working copy");
         }
@@ -129,7 +135,12 @@ fn diagram_and_code_edits_survive_save_close_and_reopen() {
     let project = shop();
     let directory = tempfile::tempdir().unwrap();
     prepare_project(directory.path(), &project).unwrap();
-    let original = &project.scenarios[0];
+    let Document::Scenario(original) =
+        as_written(&Document::Scenario(project.scenarios[0].clone())).unwrap()
+    else {
+        panic!("a scenario");
+    };
+    let original = &original;
     let mut session = ProjectSession::open(directory.path()).unwrap();
     let id = scenario_document(&session, &original.id);
     let view = Origin(7);
@@ -244,7 +255,7 @@ fn saved_invalid_source_reopens_as_text_with_its_checkpoint_kept() {
     session.settle(&id).unwrap();
     assert_eq!(
         model(&session, &id),
-        Document::Scenario(project.scenarios[0].clone())
+        as_written(&Document::Scenario(project.scenarios[0].clone())).unwrap()
     );
 }
 

@@ -183,7 +183,7 @@ fn criterion_3_the_overview_describes_the_demo_shop() {
     assert_eq!(overview.server_version, env!("CARGO_PKG_VERSION"));
     // MCP-03 criterion 12: the version of the reference `language_reference`
     // serves (empty until MCP-03).
-    assert_eq!(overview.reference_version, "1");
+    assert_eq!(overview.reference_version, "2");
 }
 
 #[test]
@@ -557,7 +557,9 @@ const MANIFEST: &str = "apiforge.project.json";
 const DEMO_BASE_URL: &str = "http://127.0.0.1:4318/demo/shop";
 
 /// Every top-level step of the demo scenario, the cleanup's last.
-const DEMO_STEPS: [&str; 8] = [
+/// The demo shop's top-level steps; `begin` is the start LANG-13 writes.
+const DEMO_STEPS: [&str; 9] = [
+    "begin",
     "expected_price",
     "product",
     "field_inna_nazwa",
@@ -886,7 +888,7 @@ fn mcp03_criterion_2_the_errors_a_registration_would_meet() {
 fn mcp03_criterion_3_unpublished_revisions_unknown_handles_and_missing_variables_are_named() {
     let directory = checkout();
     let root = directory.path();
-    let text = "scenario \"Calls\" {\n  next = product@2(id: 123)\n  other = nosuch@1(id: 1)\n  missing = GET \"/x/{{env.MISSING}}\" {\n    sample 200 {}\n  }\n}\n";
+    let text = "scenario \"Calls\" {\n  begin = start\n  next = product@2(id: 123)\n  other = nosuch@1(id: 1)\n  missing = GET \"/x/{{env.MISSING}}\" {\n    sample 200 {}\n  }\n}\n";
     for path in [SCENARIO, "scenarios/calls.afs"] {
         let result = tools::check_text(root, path, text).unwrap();
         assert!(!result.valid, "{path}");
@@ -932,12 +934,13 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
     );
     assert!(report.report.is_none(), "compact by default");
     let steps = report.steps.as_deref().unwrap();
-    assert_eq!(report.step_count, 18);
-    assert_eq!(count(steps), 18, "as `apiforge run` prints 18 lines");
+    // The demo shop's steps and the start LANG-13 writes first.
+    assert_eq!(report.step_count, 19);
+    assert_eq!(count(steps), 19, "as `apiforge run` prints 19 lines");
     assert_eq!(handles(steps), DEMO_STEPS);
-    assert_eq!(steps[1].label.as_deref(), Some("Product"));
+    assert_eq!(steps[2].label.as_deref(), Some("Product"));
     assert_eq!(
-        handles(steps[1].steps.as_deref().unwrap()),
+        handles(steps[2].steps.as_deref().unwrap()),
         ["fetch_product", "product"],
         "a component's steps nested beneath it"
     );
@@ -946,7 +949,7 @@ fn mcp03_criterion_4_run_simulates_the_saved_scenario() {
             .iter()
             .all(|s| s.status == StepStatus::Passed)
     );
-    assert_eq!(steps[6].phase, Phase::Cleanup);
+    assert_eq!(steps[7].phase, Phase::Cleanup);
     assert_eq!(steps[0].phase, Phase::Main);
     assert_eq!(tree(root), before, "a simulation writes nothing");
     assert!(!root.join(".apiforge/local").exists());
@@ -1048,9 +1051,9 @@ fn mcp03_criterion_6_compact_by_default_and_the_full_report_on_request() {
     let report = full.report.unwrap();
     assert_eq!(report["status"], "passed");
     assert_eq!(report["mode"], "simulation");
-    assert_eq!(report["steps"].as_array().unwrap().len(), 8);
+    assert_eq!(report["steps"].as_array().unwrap().len(), 9);
     assert!(report["steps"][0]["outputs"].is_object());
-    assert_eq!(full.step_count, 18);
+    assert_eq!(full.step_count, 19);
 }
 
 #[test]
@@ -1061,7 +1064,7 @@ fn mcp03_criterion_6_a_result_over_two_mebibytes_is_refused_never_cut() {
     fs::write(
         root.join(SCENARIO),
         format!(
-            "scenario \"Big\" {{\n  big = GET \"/big\" {{\n    sample 200 [{strings}]\n  }}\n  a = big.body\n  b = big.body\n  c = big.body\n}}\n"
+            "scenario \"Big\" {{\n  begin = start\n  big = GET \"/big\" {{\n    sample 200 [{strings}]\n  }}\n  a = big.body\n  b = big.body\n  c = big.body\n}}\n"
         ),
     )
     .unwrap();
@@ -1149,7 +1152,7 @@ fn mcp03_criterion_9_the_shared_executor_returns_data_and_prints_nothing() {
     let outcome = executor::execute(request, None, CancellationToken::new(), DEADLINE).unwrap();
     assert_eq!(outcome.ended_by, EndedBy::Completed);
     assert_eq!(outcome.report.status, apiforge_core::run::RunStatus::Passed);
-    assert_eq!(outcome.report.steps.len(), 8);
+    assert_eq!(outcome.report.steps.len(), 9);
     assert!(outcome.interrupted_before.is_empty());
     assert!(!outcome.journal_unreadable);
 }
@@ -1196,7 +1199,7 @@ fn mcp03_criterion_10_cancelling_a_run_stops_it_and_runs_the_cleanup() {
         "{main:#?}"
     );
     let cleanup: Vec<_> = steps.iter().filter(|s| s.phase == Phase::Cleanup).collect();
-    assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
+    assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[7..]);
     assert!(
         cleanup.iter().all(|s| s.status != StepStatus::Cancelled),
         "the cleanup ran: {cleanup:#?}"
@@ -1288,9 +1291,10 @@ fn mcp03_criterion_12_the_language_reference_and_its_version() {
     let text = fs::read_to_string(file).unwrap();
     let served = tools::language_reference().unwrap();
     assert_eq!(served.text, text);
-    assert_eq!(served.version, "1");
-    assert!(text.starts_with("Reference version: 1 "));
-    assert_eq!(reference::version(), "1");
+    assert_eq!(served.version, "2");
+    // LANG-15 renamed the line: it names the language version.
+    assert!(text.starts_with("Language version: 2 "));
+    assert_eq!(reference::version(), "2");
     let directory = checkout();
     assert_eq!(
         tools::project_overview(directory.path())
@@ -2010,7 +2014,7 @@ fn mcp04_criterion_4_create_document_refuses_on_any_error() {
     fs::write(root.join(DRAFT), DRAFT_TEXT).unwrap();
     let product = fs::read_to_string(root.join(PRODUCT)).unwrap();
     let renamed = product.replacen("component product", "component other_product", 1);
-    let broken = "scenario \"Broken\" {\n  x = nosuch@1(id: 1)\n}\n";
+    let broken = "scenario \"Broken\" {\n  begin = start\n  x = nosuch@1(id: 1)\n}\n";
     let before = shared(root);
     let agent = agent(root);
     let cases = [
@@ -2090,8 +2094,8 @@ fn mcp04_criterion_4_create_document_refuses_on_any_error() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["severity"] == "error" && d["line"] == 2),
-        "an error on line 2"
+            .any(|d| d["severity"] == "error" && d["line"] == 3),
+        "an error on line 3, below `begin = start`"
     );
 }
 
@@ -3059,7 +3063,7 @@ fn mcp06_criterion_6_a_cancelled_or_timed_out_live_run() {
             .collect();
         assert_eq!(marked.len(), 1, "{} steps", steps.len());
         assert_eq!(marked[0].handle, "fetch_product");
-        assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[6..]);
+        assert_eq!(handles(&steps[steps.len() - 2..]), DEMO_STEPS[7..]);
         assert!(
             steps[steps.len() - 2..]
                 .iter()
@@ -4544,7 +4548,7 @@ const WRAPPER: &str = "components/wrapper.afs";
 const WRAPPER_TEXT: &str = "component wrapper \"Wrapper\" {\n  description \"A product fetched through its first revision.\"\n  @label(\"Product ID\")\n  input id: number = 123\n  @label(\"Fetched\")\n  fetched = product@1(id: param.id)\n  @label(\"Product\")\n  export product: object = fetched\n}\n";
 const WRAPPED: &str = "scenarios/wrapped.afs";
 /// Calls `wrapper@1` twice and `product@1`, which `wrapper@1` calls too.
-const WRAPPED_TEXT: &str = "scenario \"Wrapped\" {\n  first = wrapper@1(id: 123)\n  second = wrapper@1(id: 124)\n  direct = product@1(id: 123)\n}\n";
+const WRAPPED_TEXT: &str = "scenario \"Wrapped\" {\n  begin = start\n  first = wrapper@1(id: 123)\n  second = wrapper@1(id: 124)\n  direct = product@1(id: 123)\n}\n";
 
 /// `used` as (path, handle, revision, hash), in the order given.
 fn used(used: &[tools::UsedSource]) -> Vec<(String, String, u32, String)> {
@@ -4696,7 +4700,7 @@ fn mcp21_criterion_3_a_component_run_alone_does_not_use_itself() {
 fn mcp21_criterion_4_an_unresolved_call_adds_nothing() {
     let directory = checkout();
     let root = directory.path();
-    let text = "scenario \"Calls\" {\n  direct = product@1(id: 123)\n  later = product@9(id: 1)\n  other = nosuch@1(id: 1)\n}\n";
+    let text = "scenario \"Calls\" {\n  begin = start\n  direct = product@1(id: 123)\n  later = product@9(id: 1)\n  other = nosuch@1(id: 1)\n}\n";
     for path in [SCENARIO, "scenarios/calls.afs"] {
         let result = tools::check_text(root, path, text).unwrap();
         assert!(!result.valid, "{path}");
@@ -5083,20 +5087,16 @@ fn run04_criterion_7_an_agent_reads_stopped_on_every_step_not_reached() {
         root.join(SCENARIO),
         r#"scenario "A chain stopped by a check" {
   begin = start
-  @after(begin)
   a = GET "/a" {
     sample 200 { ok: true }
   }
   broken = assert a.body.ok == false
-  @after(a)
   b = GET "/b" {
     sample 200 {}
   }
-  @after(b)
   c = GET "/c" {
     sample 200 {}
   }
-  @after(c)
   d = GET "/d" {
     sample 200 {}
   }
@@ -5115,6 +5115,212 @@ fn run04_criterion_7_an_agent_reads_stopped_on_every_step_not_reached() {
             step["cause"],
             json!({ "kind": "stopped", "by": "broken" }),
             "{handle}"
+        );
+    }
+}
+
+#[path = "../../apiforge-project/tests/support/language.rs"]
+mod language;
+
+/// LANG-15 (#412): a project names its language version. The build reads
+/// `LANGUAGE_VERSION`; LANG-20 (#481) raises it to 2, and the tests of an
+/// older project wait for that.
+mod lang15 {
+    use super::language::{language_of, write_language};
+    use super::{
+        CancellationToken, ErrorCode, Kind, MANIFEST, PRODUCT, SCENARIO, Wrote, agent, arguments,
+        checkout, create_args, live, live_server, publish_args, simulate, tree, write_args,
+    };
+    use apiforge_mcp::{resources, tools};
+    use apiforge_script::LANGUAGE_VERSION;
+    use std::fs;
+
+    fn newer_sentence() -> String {
+        format!(
+            "This project is written in language {}; this build reads language {LANGUAGE_VERSION}. Update API Forge.",
+            LANGUAGE_VERSION + 1
+        )
+    }
+
+    /// Criterion 3: every tool that opens a project written in a newer
+    /// language refuses with the sentence that names both versions; no file
+    /// of the project changes, none is created.
+    #[test]
+    fn lang15_criterion_3_every_tool_refuses_a_newer_project() {
+        let directory = checkout();
+        let root = directory.path();
+        let product = fs::read_to_string(root.join(PRODUCT)).unwrap();
+        let hash = tools::read_source(root, PRODUCT)
+            .unwrap()
+            .source_sha256
+            .unwrap();
+        write_language(root, LANGUAGE_VERSION + 1);
+        let before = tree(root);
+        let session = agent(root);
+        let server = live_server(root, true, &[]);
+        let refusals: Vec<(&str, apiforge_mcp::ToolError)> = vec![
+            (
+                "project_overview",
+                tools::project_overview(root).unwrap_err(),
+            ),
+            (
+                "read_source",
+                tools::read_source(root, PRODUCT).unwrap_err(),
+            ),
+            ("check", tools::check(root, None).unwrap_err()),
+            (
+                "check of a file",
+                tools::check(root, Some(PRODUCT)).unwrap_err(),
+            ),
+            ("print", tools::print(root, PRODUCT).unwrap_err()),
+            (
+                "check_text",
+                tools::check_text(root, PRODUCT, &product).unwrap_err(),
+            ),
+            ("run", simulate(root, &arguments(SCENARIO)).unwrap_err()),
+            (
+                "live run",
+                server
+                    .run_tool(live(SCENARIO), CancellationToken::new())
+                    .unwrap_err(),
+            ),
+            ("resources list", resources::list(root).unwrap_err()),
+            (
+                "resources read",
+                resources::read(root, &format!("apiforge://source/{PRODUCT}")).unwrap_err(),
+            ),
+            (
+                "write_source",
+                session
+                    .write_source(&write_args(PRODUCT, &product, &hash))
+                    .unwrap_err(),
+            ),
+            (
+                "create_document",
+                session
+                    .create_document(&create_args(
+                        Kind::Scenario,
+                        "scenarios/new.afs",
+                        "scenario \"New\" {\n}\n",
+                    ))
+                    .unwrap_err(),
+            ),
+            (
+                "publish",
+                session.publish(&publish_args(PRODUCT, &hash)).unwrap_err(),
+            ),
+        ];
+        for (tool, error) in refusals {
+            assert_eq!(error.code, ErrorCode::ProjectUnreadable, "{tool}: {error}");
+            assert_eq!(error.message, newer_sentence(), "{tool}");
+            assert_eq!(error.wrote, Wrote::No, "{tool}");
+        }
+        assert!(!session.is_active(), "no tool took the project");
+        assert_eq!(tree(root), before, "no file of the project changed");
+    }
+
+    /// Criterion 6: the overview names the build's language and the
+    /// project's; `reference_version` keeps its name and reads the same
+    /// number as the build's language.
+    #[test]
+    fn lang15_criterion_6_overview() {
+        let directory = checkout();
+        let overview = tools::project_overview(directory.path()).unwrap();
+        assert_eq!(overview.language_version, LANGUAGE_VERSION);
+        assert_eq!(overview.project_language_version, LANGUAGE_VERSION);
+        assert_eq!(overview.reference_version, LANGUAGE_VERSION.to_string());
+        let schema = serde_json::to_value(schemars::schema_for!(tools::ProjectOverview)).unwrap();
+        for field in ["language_version", "project_language_version"] {
+            assert!(
+                schema["required"]
+                    .as_array()
+                    .is_some_and(|required| required.iter().any(|name| name == field)),
+                "{field} is in the overview's schema"
+            );
+        }
+    }
+
+    /// Criterion 4, from review: a run of an older project is refused for its
+    /// language before its source is checked, so a scenario that does not
+    /// parse in this build's language (the case before `apiforge fix`) gets
+    /// the sentence with the fix, not `invalid_text`.
+    #[test]
+    fn lang15_criterion_4_a_run_names_the_language_before_the_source() {
+        let directory = checkout();
+        let root = directory.path();
+        let older = LANGUAGE_VERSION - 1;
+        write_language(root, older);
+        fs::write(root.join(SCENARIO), "scenario \"Old\" { value = }\n").unwrap();
+        let both = format!(
+            "This project is written in language {older}; this build reads language {LANGUAGE_VERSION}."
+        );
+        for (mode, error) in [
+            (
+                "simulated",
+                simulate(root, &arguments(SCENARIO)).unwrap_err(),
+            ),
+            (
+                "live",
+                live_server(root, true, &[])
+                    .run_tool(live(SCENARIO), CancellationToken::new())
+                    .unwrap_err(),
+            ),
+        ] {
+            assert_eq!(error.code, ErrorCode::ProjectUnreadable, "{mode}: {error}");
+            assert!(error.message.starts_with(&both), "{mode}: {error}");
+            assert!(
+                error.message.contains("apiforge fix --folder"),
+                "{mode}: {error}"
+            );
+        }
+    }
+
+    /// Criterion 4: an older project opens; `check` carries the problem at
+    /// the manifest with both versions and the fix, `run` (simulated and
+    /// live) is refused with it and sends nothing, and a write still works.
+    #[test]
+    fn lang15_criterion_4_an_older_project_is_checked_and_does_not_run() {
+        let directory = checkout();
+        let root = directory.path();
+        let older = LANGUAGE_VERSION - 1;
+        write_language(root, older);
+        let both = format!(
+            "This project is written in language {older}; this build reads language {LANGUAGE_VERSION}."
+        );
+
+        let overview = tools::project_overview(root).unwrap();
+        assert_eq!(overview.project_language_version, older);
+
+        let checked = tools::check(root, None).unwrap();
+        assert!(!checked.valid);
+        let first = &checked.documents[0];
+        assert_eq!(first.path, MANIFEST);
+        assert!(!first.valid);
+        let message = &first.diagnostics[0].message;
+        assert!(message.starts_with(&both), "{message}");
+        assert!(message.contains("apiforge fix --folder"), "{message}");
+
+        for error in [
+            simulate(root, &arguments(SCENARIO)).unwrap_err(),
+            live_server(root, true, &[])
+                .run_tool(live(SCENARIO), CancellationToken::new())
+                .unwrap_err(),
+        ] {
+            assert!(error.message.starts_with(&both), "{error}");
+            assert!(error.message.contains("apiforge fix --folder"), "{error}");
+        }
+
+        let (text, hash, _) = super::read(root, PRODUCT);
+        let session = agent(root);
+        let written = session
+            .write_source(&write_args(PRODUCT, &format!("{text}\n"), &hash))
+            .unwrap();
+        assert!(written.wrote);
+        session.finish_editing();
+        assert_eq!(
+            language_of(root),
+            older,
+            "a write does not raise the language"
         );
     }
 }

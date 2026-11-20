@@ -1,6 +1,11 @@
-//! Dependency indexes and Start reachability of one graph, built once per execution.
+//! Dependency indexes, Start reachability and the braces of `if`s of one
+//! graph, built once per execution.
 
-use apiforge_core::{format::Graph, graph::dependency_index, model::NodeKind};
+use apiforge_core::{
+    format::Graph,
+    graph::dependency_index,
+    model::{Branch, NodeKind},
+};
 use indexmap::IndexSet;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -12,6 +17,8 @@ pub struct ExecutionPlan<'a> {
     /// Nodes on the active path from Start; `None` for a legacy graph without Start,
     /// where every root runs.
     pub reachable: Option<HashSet<&'a str>>,
+    /// The braces each statement stands in directly: the `if` and its branch.
+    pub braces: HashMap<&'a str, (&'a str, Branch)>,
 }
 
 impl<'a> ExecutionPlan<'a> {
@@ -25,6 +32,7 @@ impl<'a> ExecutionPlan<'a> {
         Self {
             dependencies,
             reachable,
+            braces: braces(graph),
         }
     }
 
@@ -42,6 +50,111 @@ impl<'a> ExecutionPlan<'a> {
             .as_ref()
             .is_none_or(|reachable| reachable.contains(node_id))
     }
+
+    /// The `if`s whose braces hold the node, the innermost first.
+    pub fn enclosing(&self, node_id: &str) -> impl Iterator<Item = (&'a str, Branch)> + '_ {
+        let mut current = self.braces.get(node_id).copied();
+        // A chain longer than the graph would be a cycle, which braces never form.
+        let mut left = self.braces.len();
+        std::iter::from_fn(move || {
+            let found = current.filter(|_| left > 0)?;
+            left -= 1;
+            current = self.braces.get(found.0).copied();
+            Some(found)
+        })
+    }
+}
+
+/// The braces each statement stands in, read from the ordering edges as the
+/// script crate's `branches` reads them: a statement stands in the braces of
+/// branch `b` of `x` when it follows `x.b` and everything else it follows
+/// stands in the same braces, at any depth.
+fn braces(graph: &Graph) -> HashMap<&str, (&str, Branch)> {
+    let ifs: HashSet<&str> = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::If)
+        .map(|node| node.id.as_str())
+        .collect();
+    let mut incoming: HashMap<&str, Vec<(&str, Option<Branch>)>> = HashMap::new();
+    for edge in &graph.edges {
+        incoming
+            .entry(edge.target.as_str())
+            .or_default()
+            .push((edge.source.as_str(), edge.branch));
+    }
+    let mut parents: HashMap<&str, (&str, Branch)> = HashMap::new();
+    let within = |parents: &HashMap<&str, (&str, Branch)>, id: &str, braces| {
+        let mut current = id;
+        for _ in 0..=graph.nodes.len() {
+            match parents.get(current) {
+                Some(&parent) if parent == braces => return true,
+                Some(&(source, _)) => current = source,
+                None => return false,
+            }
+        }
+        false
+    };
+    // Sources come first, so their braces are known when a target asks.
+    for id in topological(graph) {
+        let Some(edges) = incoming.get(id) else {
+            continue;
+        };
+        let parent = edges
+            .iter()
+            .filter_map(|&(source, branch)| Some((source, branch?)))
+            .filter(|(source, _)| ifs.contains(source))
+            .find(|&(braces, branch)| {
+                edges.iter().all(|&(source, other)| {
+                    (source, other) == (braces, Some(branch))
+                        || within(&parents, source, (braces, branch))
+                })
+            });
+        if let Some(parent) = parent {
+            parents.insert(id, parent);
+        }
+    }
+    parents
+}
+
+/// Nodes with every ordering source before its target, ties in document
+/// order. Nodes of a cycle are left out.
+fn topological(graph: &Graph) -> Vec<&str> {
+    let mut waiting: HashMap<&str, usize> = graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), 0))
+        .collect();
+    let mut targets: HashMap<&str, Vec<&str>> = HashMap::new();
+    for edge in &graph.edges {
+        if waiting.contains_key(edge.source.as_str())
+            && let Some(count) = waiting.get_mut(edge.target.as_str())
+        {
+            *count += 1;
+            targets
+                .entry(edge.source.as_str())
+                .or_default()
+                .push(edge.target.as_str());
+        }
+    }
+    let mut ready: VecDeque<&str> = graph
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .filter(|id| waiting[id] == 0)
+        .collect();
+    let mut order = Vec::with_capacity(graph.nodes.len());
+    while let Some(id) = ready.pop_front() {
+        order.push(id);
+        for &target in targets.get(id).into_iter().flatten() {
+            let count = waiting.get_mut(target).expect("a known target");
+            *count -= 1;
+            if *count == 0 {
+                ready.push_back(target);
+            }
+        }
+    }
+    order
 }
 
 /// Walks successors from Start. Pure value producers a reached node depends on are
@@ -85,6 +198,27 @@ fn reachable_from<'a>(
                     arguments.push(source);
                 }
             }
+        }
+    }
+    // Checks and values run when what they read exists, wherever they stand
+    // (LANG-13): one that reads nothing from a step, or only reached ones, is
+    // on the path too. A component's export of an input is one. Only data
+    // statements are added, so no request or call is enabled by it.
+    loop {
+        let before = reachable.len();
+        for node in &graph.nodes {
+            let id = node.id.as_str();
+            if node.kind.is_data()
+                && !reachable.contains(id)
+                && dependencies
+                    .get(id)
+                    .is_none_or(|sources| sources.iter().all(|source| reachable.contains(source)))
+            {
+                reachable.insert(id);
+            }
+        }
+        if reachable.len() == before {
+            break;
         }
     }
     reachable
@@ -200,6 +334,57 @@ mod tests {
             proxies: Vec::new(),
         };
         assert!(ExecutionPlan::new(&graph).is_reachable("consumer"));
+    }
+
+    fn branch(source: &str, target: &str, branch: Branch) -> OrderEdge {
+        OrderEdge {
+            branch: Some(branch),
+            ..edge(source, target)
+        }
+    }
+
+    #[test]
+    fn braces_are_read_from_branch_edges_at_any_depth() {
+        let graph = Graph {
+            nodes: vec![
+                node("x", NodeKind::If),
+                node("first", NodeKind::Request),
+                node("second", NodeKind::Request),
+                node("inner", NodeKind::If),
+                node("deep", NodeKind::Request),
+                node("other", NodeKind::Request),
+                node("outside", NodeKind::Request),
+                node("after", NodeKind::Request),
+            ],
+            edges: vec![
+                branch("x", "first", Branch::True),
+                branch("x", "second", Branch::True),
+                edge("first", "second"),
+                branch("x", "inner", Branch::True),
+                edge("second", "inner"),
+                branch("inner", "deep", Branch::False),
+                branch("x", "other", Branch::False),
+                // Follows `x.then` and a statement outside the braces: not in them.
+                branch("x", "outside", Branch::True),
+                edge("after", "outside"),
+                edge("deep", "after"),
+                branch("x", "after", Branch::False),
+            ],
+            proxies: Vec::new(),
+        };
+        let plan = ExecutionPlan::new(&graph);
+        let enclosing = |id: &str| plan.enclosing(id).collect::<Vec<_>>();
+        assert_eq!(enclosing("first"), [("x", Branch::True)]);
+        assert_eq!(enclosing("second"), [("x", Branch::True)]);
+        assert_eq!(enclosing("inner"), [("x", Branch::True)]);
+        assert_eq!(
+            enclosing("deep"),
+            [("inner", Branch::False), ("x", Branch::True)]
+        );
+        assert_eq!(enclosing("other"), [("x", Branch::False)]);
+        assert_eq!(enclosing("outside"), []);
+        assert_eq!(enclosing("after"), []);
+        assert_eq!(enclosing("x"), []);
     }
 
     #[test]
