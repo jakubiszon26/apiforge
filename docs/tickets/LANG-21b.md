@@ -8,7 +8,7 @@
 - Restated on 2026-11-20 after an independent review: where *Show*
   lands in a buffer that changed, what the count is of, a save that
   fails, a source that does not read, and the plan off the window's
-  thread. The size M holds because LANG-21a gives the plan as a call.
+  thread. The size M holds because LANG-20b gives the plan as a call.
 - Issue [#495](https://github.com/jakubiszon26/apiforge/issues/495) · LANG
   sprint · branch `feat/lang-21b-place-by-hand`
 - Analysis model: Fable 5.2 · Implementation model: —
@@ -76,13 +76,28 @@ two projects with blocked files (some convertible; none).
    case.
 4. The plan at a save is made off the window's thread: frames keep
    coming while it runs (the test holds the plan and steps the window),
-   whatever it takes. A plan is kept only when it is for what the window
-   still shows — the same session, project and source versions (the
-   identity `apiforge-project/src/analysis.rs` already gives an
-   analysis): one that arrives after a later save, a reload, a rename or
-   a delete of a source, another project, or after the update succeeded,
-   is dropped. Test: P `lang21b_criterion_4_*`, one per case.
-5. Accessible names of every *Show* are distinct (#235); the list is
+   whatever it takes. A plan is used only while it is for what the window
+   shows — the same session and project, the same source versions
+   **saved or not**, the same record (the identity
+   `apiforge-project/src/analysis.rs` gives an analysis, with the
+   record's fingerprint). That is checked twice: when the plan arrives,
+   and again at each *Show* and *Show the list*. A plan that no longer
+   holds — after a later save, an unsaved edit, a reload, a rename or a
+   delete of a source, a change of the record alone, another project, a
+   finished update — is dropped; the band then shows the count as *being
+   checked* until the next plan, never an old number as current.
+   Test: P `lang21b_criterion_4_*`, one per case; D for the unsaved edit
+   (twenty lines typed while the plan runs, then *Show*).
+5. The problem *Show* puts first belongs to the plan: it is listed once,
+   never beside the same statement's ordinary problem as a second row;
+   it goes when a later plan no longer has it (the statement was placed
+   and saved) and is replaced when a later plan has it at another line;
+   with the last one gone the file's Problems are its ordinary ones.
+   Test: D `lang21b_criterion_5_*`.
+6. When the count reaches none and the project can be finished, the band
+   is LANG-21a's with its button, which then offers *Finish the update*.
+   Test: D `lang21b_criterion_6`.
+7. Accessible names of every *Show* are distinct (#235); the list is
    reachable by keyboard. Test: `accessibility_tests`, D.
 
 ## Regression potential
