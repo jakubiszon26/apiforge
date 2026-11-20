@@ -808,7 +808,7 @@ impl Board<'_> {
         fragment: &edit::Fragment,
         selection: &[String],
         component: bool,
-    ) -> Result<Paste, String> {
+    ) -> Result<Edit, String> {
         let selected: Vec<&str> = selection.iter().map(String::as_str).collect();
         let after = edit::add_step_after(self.graph, &selected);
         self.landed(
@@ -824,7 +824,7 @@ impl Board<'_> {
         &self,
         selection: &[String],
         component: bool,
-    ) -> Result<Paste, String> {
+    ) -> Result<Edit, String> {
         let selected: HashSet<&str> = selection.iter().map(String::as_str).collect();
         self.landed(
             |target| edit::duplicate_statements(target, &selected),
@@ -838,7 +838,7 @@ impl Board<'_> {
         &self,
         paste: impl FnOnce(&edit::PasteTarget<'_>) -> Result<edit::Pasted, edit::EditError>,
         component: bool,
-    ) -> Result<Paste, String> {
+    ) -> Result<Edit, String> {
         let sibling: Vec<&Graph> = self.sibling.into_iter().collect();
         let target = edit::PasteTarget {
             graph: self.graph,
@@ -849,12 +849,9 @@ impl Board<'_> {
             component,
         };
         let pasted = paste(&target).map_err(|error| error.to_string())?;
-        Ok(Paste {
-            edit: Edit {
-                graph: self.land_clear(pasted.graph, &pasted.ids),
-                selection: Some(pasted.ids),
-            },
-            unresolved: pasted.unresolved,
+        Ok(Edit {
+            graph: self.land_clear(pasted.graph, &pasted.ids),
+            selection: Some(pasted.ids),
         })
     }
 

@@ -853,13 +853,13 @@ impl FolderApp {
         document_id: &str,
         model: &Document,
         cleanup: bool,
-        pasted: Option<Result<board_edit::Paste, String>>,
+        pasted: Option<Result<Edit, String>>,
     ) {
         let Some(pasted) = pasted else {
             return;
         };
-        let paste = match pasted {
-            Ok(paste) => paste,
+        let edit = match pasted {
+            Ok(edit) => edit,
             Err(message) => {
                 self.apply_edit(document_id, model, cleanup, Err(message));
                 return;
@@ -869,27 +869,13 @@ impl FolderApp {
         // accept losing unattached comments.
         self.pasted = Some(PastedOutcome {
             document_id: document_id.to_owned(),
-            ids: paste.edit.selection.clone().unwrap_or_default(),
-            summary: missing_summary(&paste.edit.graph, &paste.unresolved),
-            missing: paste
-                .unresolved
-                .iter()
-                .filter_map(|item| match &item.missing {
-                    edit::Missing::Step(step) => Some(canvas::MissingStep {
-                        node_id: item.node_id.clone(),
-                        input: item.input.clone(),
-                        path: item.path.clone(),
-                        step: step.clone(),
-                    }),
-                    edit::Missing::Input(_) => None,
-                })
-                .collect(),
+            ids: edit.selection.clone().unwrap_or_default(),
         });
         self.component_action(
             document_id,
             publication::Action::Model {
-                next: Box::new(with_graph(model, cleanup, paste.edit.graph)),
-                selection: paste.edit.selection,
+                next: Box::new(with_graph(model, cleanup, edit.graph)),
+                selection: edit.selection,
                 check: None,
                 moved: Vec::new(),
                 placed: true,
@@ -899,7 +885,7 @@ impl FolderApp {
 
     /// After an applied model edit that selects `selection`: when it is the
     /// last paste, brings the copies into view, as copies from another graph
-    /// keep their place, and reports what they lost.
+    /// keep their place.
     pub(super) fn pasted_applied(&mut self, document_id: &str, selection: &[String]) {
         let Some(pasted) = self
             .pasted
@@ -909,10 +895,6 @@ impl FolderApp {
         };
         if let Some(canvas) = self.canvases.get_mut(document_id) {
             canvas.show_pasted(pasted.ids);
-            canvas.mark_missing_steps(pasted.missing);
-        }
-        if let Some(summary) = pasted.summary {
-            self.notify(summary, false);
         }
     }
 
