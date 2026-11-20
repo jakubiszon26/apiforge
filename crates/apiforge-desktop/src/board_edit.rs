@@ -789,6 +789,75 @@ impl Board<'_> {
         })
     }
 
+    /// The folder window's *Copy* (DIAG-06f): the selected statements, a
+    /// selected `if` with everything in its braces; `None` when the
+    /// selection holds no statement.
+    pub fn copy_statements(&self, selection: &[String]) -> Option<edit::Fragment> {
+        let selected: HashSet<&str> = selection.iter().map(String::as_str).collect();
+        let fragment = edit::copy_statements(self.graph, self.reference, &selected);
+        (!fragment.graph.nodes.is_empty()).then_some(fragment)
+    }
+
+    /// The folder window's *Paste* (DIAG-06f): the fragment written after
+    /// the step *Add step* names for `selection`, in its braces, else last
+    /// on this board, or the board's sentence for what a pasted statement
+    /// would read that is not there. `component` names the document in
+    /// that sentence. The copies land clear of every card and chip.
+    pub fn paste_statements(
+        &self,
+        fragment: &edit::Fragment,
+        selection: &[String],
+        component: bool,
+    ) -> Result<Paste, String> {
+        let selected: Vec<&str> = selection.iter().map(String::as_str).collect();
+        let after = edit::add_step_after(self.graph, &selected);
+        self.landed(
+            |target| edit::paste_statements(target, fragment, after),
+            component,
+        )
+    }
+
+    /// The folder window's *Duplicate* (DIAG-06f): each copy written
+    /// directly after its original, in its braces, or the board's sentence
+    /// for what a copy would read that is not there.
+    pub fn duplicate_statements(
+        &self,
+        selection: &[String],
+        component: bool,
+    ) -> Result<Paste, String> {
+        let selected: HashSet<&str> = selection.iter().map(String::as_str).collect();
+        self.landed(
+            |target| edit::duplicate_statements(target, &selected),
+            component,
+        )
+    }
+
+    /// A paste or a duplicate on this board, its copies landed clear and
+    /// selected.
+    fn landed(
+        &self,
+        paste: impl FnOnce(&edit::PasteTarget<'_>) -> Result<edit::Pasted, edit::EditError>,
+        component: bool,
+    ) -> Result<Paste, String> {
+        let sibling: Vec<&Graph> = self.sibling.into_iter().collect();
+        let target = edit::PasteTarget {
+            graph: self.graph,
+            visible: &[self.reference],
+            reserved: &sibling,
+            parameters: Some(self.parameters),
+            project: self.project,
+            component,
+        };
+        let pasted = paste(&target).map_err(|error| error.to_string())?;
+        Ok(Paste {
+            edit: Edit {
+                graph: self.land_clear(pasted.graph, &pasted.ids),
+                selection: Some(pasted.ids),
+            },
+            unresolved: pasted.unresolved,
+        })
+    }
+
     /// Moves the blocks `ids` together, by the first offset that leaves each
     /// of their cards clear of every other card and chip: none, then one
     /// width of the group to the right, one height down, two to the right,

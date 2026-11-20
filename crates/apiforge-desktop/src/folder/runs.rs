@@ -730,6 +730,7 @@ impl FolderApp {
                             selection: None,
                             check: None,
                             moved: Vec::new(),
+                            placed: false,
                         },
                     );
                 }
@@ -784,6 +785,7 @@ impl FolderApp {
                                 checks,
                             })),
                             moved: Vec::new(),
+                            placed: false,
                         },
                     );
                 }

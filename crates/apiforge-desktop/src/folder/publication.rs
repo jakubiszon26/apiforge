@@ -14,6 +14,9 @@ pub(super) enum Action {
         /// move, written by moving their lines, or refused. Empty for any
         /// other edit.
         moved: Vec<String>,
+        /// A paste or a duplicate (DIAG-06f): the model holds the chain the
+        /// edit made, which is written as it is.
+        placed: bool,
     },
     History {
         undo: bool,
@@ -92,6 +95,11 @@ impl FolderApp {
             Action::Publish => unreachable!("publication is queued before borrowing the session"),
             Action::Model { next, moved, .. } if !moved.is_empty() => session
                 .apply_move(id, *next.clone(), moved, DIAGRAM)
+                .map(|()| None),
+            Action::Model {
+                next, placed: true, ..
+            } => session
+                .apply_pasted(id, *next.clone(), DIAGRAM)
                 .map(|()| None),
             Action::Model { next, .. } => session
                 .apply_model_edit(id, *next.clone(), DIAGRAM)

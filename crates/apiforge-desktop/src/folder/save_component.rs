@@ -940,6 +940,7 @@ impl FolderApp {
                         selection: Some(vec![call]),
                         check: None,
                         moved: Vec::new(),
+                        placed: false,
                     },
                 );
             }

@@ -156,6 +156,7 @@ fn pasted_into_cart_at(
 /// step “product”* in the diagnostic red; the notice bar says what it said
 /// before, and the input stays unconnected in the document.
 #[test]
+#[ignore = "DIAG-06f (#496): a paste that would leave a step reading what is not there is refused, so no paste leaves this marker; whether the marker goes waits for the owner"]
 fn ux39_criterion_1_the_marker_names_the_missing_step() {
     let (_project, mut harness, cart) = pasted_into_cart(WIDE);
     assert_eq!(notice(&harness), NOTICE, "the notice bar is unchanged");
@@ -203,6 +204,7 @@ fn ux39_criterion_1_the_marker_names_the_missing_step() {
 /// Criterion 2: wiring the input or giving it a value clears its marker, and
 /// so does a step named `product` appearing on the board.
 #[test]
+#[ignore = "DIAG-06f (#496): a paste that would leave a step reading what is not there is refused, so no paste leaves this marker; whether the marker goes waits for the owner"]
 fn ux39_criterion_2_wiring_or_the_step_clears_it() {
     // Wired, from the component's own *product* input: the only Product the
     // component has.
@@ -313,6 +315,7 @@ fn ux39_criterion_2_wiring_or_the_step_clears_it() {
 /// step; closing and reopening the document, or reopening the project in a
 /// new window, shows an ordinary unconnected input.
 #[test]
+#[ignore = "DIAG-06f (#496): a paste that would leave a step reading what is not there is refused, so no paste leaves this marker; whether the marker goes waits for the owner"]
 fn ux39_criterion_3_not_persisted() {
     let (project, mut harness, cart) = pasted_into_cart(WIDE);
     show(&mut harness, &cart, "active_promotion", 1.0);
@@ -358,6 +361,7 @@ fn ux39_criterion_3_not_persisted() {
 /// zoom: the input's line on a compact card, the input row's value on a full
 /// card, both in the diagnostic red.
 #[test]
+#[ignore = "DIAG-06f (#496): a paste that would leave a step reading what is not there is refused, so no paste leaves this marker; whether the marker goes waits for the owner"]
 fn ux39_criterion_4_both_densities() {
     let (_project, mut harness, cart) = pasted_into_cart(WIDE);
     assert!(
@@ -402,6 +406,7 @@ fn ux39_criterion_4_both_densities() {
 /// one slot read the missing step: *Cart item*'s `productId` field, pasted
 /// from the component into the scenario, which has no `product_id`.
 #[test]
+#[ignore = "DIAG-06f (#496): a paste that would leave a step reading what is not there is refused, so no paste leaves this marker; whether the marker goes waits for the owner"]
 fn ux39_a_check_and_a_nested_slot_are_marked() {
     let (_project, mut harness, cart) = pasted_into_cart(WIDE);
     let scenario = by_path(&harness, SCENARIO);

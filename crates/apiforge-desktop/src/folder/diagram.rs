@@ -340,6 +340,7 @@ impl FolderApp {
                         selection: Some(selection),
                         check: None,
                         moved: Vec::new(),
+                        placed: false,
                     },
                 );
             }
@@ -690,25 +691,29 @@ impl FolderApp {
                     .map(Into::into),
             ),
             // The clipboard belongs to the window, not to a board: what is
-            // copied pastes into any graph of any document (UX-34).
+            // copied pastes into any graph of any document (UX-34), an `if`
+            // with its braces, after the selected step (DIAG-06f).
             Command::Copy => {
-                if let Some(fragment) = board.copy(&selection) {
+                if let Some(fragment) = board.copy_statements(&selection) {
                     self.clipboard = Some(fragment);
                 }
                 None
             }
             Command::Paste => {
+                let component = matches!(model, Document::Component(_));
                 let pasted = self
                     .clipboard
                     .as_ref()
-                    .map(|fragment| board.paste(fragment));
+                    .map(|fragment| board.paste_statements(fragment, &selection, component));
                 self.apply_paste(document_id, model, cleanup, pasted);
                 None
             }
             Command::Duplicate => {
-                let pasted = board
-                    .copy(&selection)
-                    .map(|fragment| board.paste(&fragment));
+                let component = matches!(model, Document::Component(_));
+                let pasted = selection
+                    .iter()
+                    .any(|id| graph.nodes.iter().any(|node| &node.id == id))
+                    .then(|| board.duplicate_statements(&selection, component));
                 self.apply_paste(document_id, model, cleanup, pasted);
                 None
             }
@@ -840,9 +845,9 @@ impl FolderApp {
         })
     }
 
-    /// Applies a paste or a duplicate as one model edit, so one undo removes
-    /// it, brings the copies into view, and names what they read that this
-    /// board lacks: each such reference is left unconnected (UX-34).
+    /// Applies a paste or a duplicate as one model edit whose chain it made
+    /// (DIAG-06f), so one undo removes it, and brings the copies into view;
+    /// a refused one shows its sentence in the board's banner.
     fn apply_paste(
         &mut self,
         document_id: &str,
@@ -880,7 +885,16 @@ impl FolderApp {
                 })
                 .collect(),
         });
-        self.apply_edit(document_id, model, cleanup, Ok(paste.edit));
+        self.component_action(
+            document_id,
+            publication::Action::Model {
+                next: Box::new(with_graph(model, cleanup, paste.edit.graph)),
+                selection: paste.edit.selection,
+                check: None,
+                moved: Vec::new(),
+                placed: true,
+            },
+        );
     }
 
     /// After an applied model edit that selects `selection`: when it is the
@@ -919,6 +933,7 @@ impl FolderApp {
                     selection: edit.selection,
                     check: None,
                     moved: Vec::new(),
+                    placed: false,
                 },
             ),
             Err(message) => {
@@ -947,6 +962,7 @@ impl FolderApp {
                     selection: None,
                     check: None,
                     moved,
+                    placed: false,
                 },
             ),
             Err(message) => {
@@ -1132,6 +1148,7 @@ impl FolderApp {
                                 selection: Some(Vec::new()),
                                 check: None,
                                 moved: Vec::new(),
+                                placed: false,
                             },
                         ),
                         Err(error) => {

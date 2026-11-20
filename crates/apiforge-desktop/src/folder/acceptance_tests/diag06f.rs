@@ -163,12 +163,11 @@ fn diag06f_criterion_1_a_duplicate_runs_directly_after_its_original() {
     );
     let order = steps(&harness, &id);
     assert_eq!(position(&order, "cart_2"), position(&order, "cart") + 1);
-    assert_eq!(position(&order, "cart_view"), position(&order, "cart_2") + 1);
     assert_eq!(
-        selection(&harness, &id).len(),
-        2,
-        "the copies are selected"
+        position(&order, "cart_view"),
+        position(&order, "cart_2") + 1
     );
+    assert_eq!(selection(&harness, &id).len(), 2, "the copies are selected");
 }
 
 #[test]
@@ -186,8 +185,14 @@ fn diag06f_criterion_1_a_selection_across_yes_and_no() {
         Some(("paid".to_owned(), Branch::False))
     );
     let order = written(&harness, &id);
-    assert_eq!(position(&order, "receipt_2"), position(&order, "receipt_total") + 1);
-    assert_eq!(position(&order, "not_created_2"), position(&order, "not_created") + 1);
+    assert_eq!(
+        position(&order, "receipt_2"),
+        position(&order, "receipt_total") + 1
+    );
+    assert_eq!(
+        position(&order, "not_created_2"),
+        position(&order, "not_created") + 1
+    );
 }
 
 #[test]
@@ -230,7 +235,11 @@ fn diag06f_criterion_2_an_if_alone_is_copied_with_its_braces() {
         );
     }
     let order = steps(&harness, &id);
-    assert_eq!(order.last().map(String::as_str), Some("logout_2"), "{order:?}");
+    assert_eq!(
+        order.last().map(String::as_str),
+        Some("logout_2"),
+        "{order:?}"
+    );
     assert_eq!(position(&order, "paid_2"), position(&order, "logout") + 1);
 }
 
@@ -251,7 +260,10 @@ fn diag06f_criterion_2_steps_without_their_if_are_steps_of_the_place() {
     );
     let order = steps(&harness, &id);
     assert_eq!(position(&order, "payment_2"), position(&order, "order") + 1);
-    assert_eq!(position(&order, "receipt_2"), position(&order, "payment_2") + 1);
+    assert_eq!(
+        position(&order, "receipt_2"),
+        position(&order, "payment_2") + 1
+    );
     assert_eq!(position(&order, "paid"), position(&order, "receipt_2") + 1);
 }
 
@@ -267,7 +279,10 @@ fn diag06f_criterion_3_paste_after_the_selected_step_else_last() {
     paste(&mut harness);
     passes(&harness, &id);
     let order = steps(&harness, &id);
-    assert_eq!(position(&order, "cart_view_2"), position(&order, "address") + 1);
+    assert_eq!(
+        position(&order, "cart_view_2"),
+        position(&order, "address") + 1
+    );
     undo(&mut harness);
     // A check selected: after the step it is written under, and its checks.
     select(&mut harness, &id, &["checkout_total"]);
@@ -285,14 +300,25 @@ fn diag06f_criterion_3_paste_after_the_selected_step_else_last() {
     paste(&mut harness);
     passes(&harness, &id);
     let order = steps(&harness, &id);
-    assert_eq!(position(&order, "cart_view_2"), position(&order, "checkout") + 1);
+    assert_eq!(
+        position(&order, "cart_view_2"),
+        position(&order, "checkout") + 1
+    );
     undo(&mut harness);
     // Nothing selected: last in the main flow.
     app(&mut harness).selections.remove(&id);
     paste(&mut harness);
     passes(&harness, &id);
     let order = steps(&harness, &id);
-    assert_eq!(position(&order, "cart_view_2"), position(&order, "paid") + 1);
+    assert_eq!(
+        order.last().map(String::as_str),
+        Some("cart_view_2"),
+        "{order:?}"
+    );
+    assert_eq!(
+        written(&harness, &id).last().map(String::as_str),
+        Some("cart_view_2")
+    );
     assert_eq!(braces_of(&harness, &id, "cart_view_2"), None);
 }
 
@@ -318,7 +344,11 @@ fn refused(harness: &mut FolderHarness, id: &str, message: &str) {
     );
     assert_eq!(source_of(harness, id), before, "the source is unchanged");
     assert_eq!(graph(harness, id), board, "the model is unchanged");
-    assert_eq!(selection(harness, id), selected, "the selection is unchanged");
+    assert_eq!(
+        selection(harness, id),
+        selected,
+        "the selection is unchanged"
+    );
     assert_eq!(
         folder(harness)
             .session
@@ -364,7 +394,11 @@ fn diag06f_criterion_5_from_another_scenario() {
     // Copied with what it reads, it is pasted.
     app(&mut harness).activate_tab(&id);
     settle(&mut harness);
-    select(&mut harness, &id, &["cart", "cart_view"]);
+    select(
+        &mut harness,
+        &id,
+        &["catalogue", "first", "second", "cart", "cart_view"],
+    );
     copy(&mut harness);
     app(&mut harness).activate_tab(&other);
     settle(&mut harness);

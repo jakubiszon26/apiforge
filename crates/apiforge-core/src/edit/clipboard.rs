@@ -15,9 +15,15 @@
 //! directly after its original. A paste that would leave a statement reading
 //! what is not there is refused and changes nothing. The legacy window keeps
 //! [`copy_selection`], [`paste_selection`] and [`duplicate_selection`].
-use super::{EditError, unique_id};
+use super::{
+    EditError,
+    place::{Cycle, cycle_at, goes_with, index_after, inside},
+    unique_id,
+};
 use crate::{
+    chain::{Braces, braces, chain, is_step},
     format::{Binding, Graph, Node, OrderEdge, Position, Project},
+    graph::has_cycle,
     handle::{unique_handle, unique_label},
     model::{Branch, NodeKind},
     validation::output_exists,
@@ -328,8 +334,37 @@ pub fn duplicate_selection(
 /// copied as a plain statement, which a paste writes in the braces of the
 /// place. `reference` is read as by [`copy_selection`].
 pub fn copy_statements(graph: &Graph, reference: &Graph, selected: &HashSet<&str>) -> Fragment {
-    let _ = (graph, reference, selected);
-    todo!("DIAG-06f")
+    let written = braces(graph);
+    let taken: HashSet<&str> = graph
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .filter(|id| selected.contains(id) || selected.iter().any(|x| inside(&written, id, x)))
+        .collect();
+    fragment(graph, reference, &taken, &written)
+}
+
+/// The fragment of the statements `taken`, with the braces of those whose
+/// `if` is taken too.
+fn fragment(
+    graph: &Graph,
+    reference: &Graph,
+    taken: &HashSet<&str>,
+    written: &Braces<'_>,
+) -> Fragment {
+    let mut fragment = copy_selection(graph, reference, taken);
+    fragment.braces = fragment
+        .graph
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let &(x, branch) = written.get(node.id.as_str())?;
+            taken
+                .contains(x)
+                .then(|| (node.id.clone(), (x.to_owned(), branch)))
+        })
+        .collect();
+    fragment
 }
 
 /// The folder window's *Paste* (DIAG-06f): the copies of `fragment` written
@@ -350,8 +385,31 @@ pub fn paste_statements(
     fragment: &Fragment,
     after: Option<&str>,
 ) -> Result<Pasted, EditError> {
-    let _ = (target, fragment, after);
-    todo!("DIAG-06f")
+    let graph = target.graph;
+    let written = braces(graph);
+    let nodes: Vec<&Node> = graph.nodes.iter().collect();
+    let (index, place) = match after {
+        Some(anchor) => {
+            if !graph.nodes.iter().any(|node| node.id == anchor) {
+                return Err(EditError::NodeNotFound);
+            }
+            let place = written.get(anchor).copied();
+            (index_after(&nodes, &written, anchor, place), place)
+        }
+        None => (nodes.len(), None),
+    };
+    let landing = Landing {
+        index,
+        braces: place,
+        roots: fragment
+            .graph
+            .nodes
+            .iter()
+            .filter(|node| !fragment.braces.contains_key(&node.id))
+            .map(|node| node.id.as_str())
+            .collect(),
+    };
+    land(target, fragment, &[landing])
 }
 
 /// The folder window's *Duplicate* (DIAG-06f): the selection copied as by
@@ -365,8 +423,375 @@ pub fn duplicate_statements(
     target: &PasteTarget<'_>,
     selected: &HashSet<&str>,
 ) -> Result<Pasted, EditError> {
-    let _ = (target, selected);
-    todo!("DIAG-06f")
+    let graph = target.graph;
+    let written = braces(graph);
+    let chosen: Vec<&Node> = graph
+        .nodes
+        .iter()
+        .filter(|node| selected.contains(node.id.as_str()))
+        .collect();
+    let mut taken: HashSet<&str> = HashSet::new();
+    for node in &chosen {
+        taken.extend(goes_with(graph, &written, node).into_keys());
+    }
+    let reference = target.visible.first().copied().unwrap_or(graph);
+    let fragment = fragment(graph, reference, &taken, &written);
+    // The statements copied without their `if`, by the braces they stand
+    // in, each braces in the order it is first written.
+    let mut groups: Vec<(Option<Brace<'_>>, Vec<&str>)> = vec![];
+    for node in &fragment.graph.nodes {
+        if fragment.braces.contains_key(&node.id) {
+            continue;
+        }
+        let own = written.get(node.id.as_str()).copied();
+        match groups.iter_mut().find(|(braces, _)| *braces == own) {
+            Some((_, roots)) => roots.push(node.id.as_str()),
+            None => groups.push((own, vec![node.id.as_str()])),
+        }
+    }
+    let nodes: Vec<&Node> = graph.nodes.iter().collect();
+    let mut landings: Vec<Landing<'_>> = groups
+        .into_iter()
+        .map(|(own, roots)| {
+            let selected_here = |node: &&&Node| {
+                roots.contains(&node.id.as_str()) && selected.contains(node.id.as_str())
+            };
+            let step = chosen
+                .iter()
+                .filter(selected_here)
+                .rfind(|node| is_step(node.kind));
+            let index = match step {
+                Some(step) => index_after(&nodes, &written, &step.id, own),
+                None => chosen
+                    .iter()
+                    .rfind(selected_here)
+                    .and_then(|last| nodes.iter().position(|node| node.id == last.id))
+                    .map_or(nodes.len(), |position| position + 1),
+            };
+            Landing {
+                index,
+                braces: own,
+                roots,
+            }
+        })
+        .collect();
+    landings.sort_by_key(|landing| landing.index);
+    land(target, &fragment, &landings)
+}
+
+/// The braces a statement stands in: the `if` and its branch.
+type Brace<'a> = (&'a str, Branch);
+
+/// Where a part of a fragment is written: before the statement `index` of
+/// the target (after the last when it is their number), in `braces`, the
+/// copies of `roots` and of what their braces hold, in fragment order.
+struct Landing<'a> {
+    index: usize,
+    braces: Option<Brace<'a>>,
+    roots: Vec<&'a str>,
+}
+
+/// What a pasted statement would read that the target does not give.
+enum Lack {
+    /// No statement of that identity or handle.
+    Step(String),
+    /// A statement of that handle without that output.
+    Output(String, String),
+    /// A parameter or an input the target does not declare.
+    Parameter(String),
+}
+
+/// Writes the copies of `fragment` at their landings, one chain per braces,
+/// or refuses with the board's sentence.
+fn land(
+    target: &PasteTarget<'_>,
+    fragment: &Fragment,
+    landings: &[Landing<'_>],
+) -> Result<Pasted, EditError> {
+    let graph = target.graph;
+    let has_start = |graph: &Graph| graph.nodes.iter().any(|node| node.kind == NodeKind::Start);
+    if has_start(&fragment.graph) && has_start(graph) {
+        return Err(EditError::PasteSecondStart);
+    }
+    let mut mapping: HashMap<&str, String> = HashMap::new();
+    for node in &fragment.graph.nodes {
+        let id = unique_id("node", |id| {
+            graph.nodes.iter().any(|node| node.id == id)
+                || mapping.values().any(|taken| taken == id)
+        });
+        mapping.insert(&node.id, id);
+    }
+    let readable: Vec<&Node> = graph
+        .nodes
+        .iter()
+        .chain(target.visible.iter().flat_map(|graph| &graph.nodes))
+        .collect();
+    // The statement a reference outside the fragment reads in the target:
+    // the same one when it is there, otherwise one the code names the same
+    // way, with the output read.
+    let resolve = |node_id: &str, port: &str| -> Option<String> {
+        let reads = |node: &&&Node| output_exists(node, port, target.project);
+        let handle = fragment.sources.get(node_id);
+        readable
+            .iter()
+            .filter(reads)
+            .find(|node| node.id == node_id)
+            .or_else(|| {
+                let handle = handle?;
+                readable
+                    .iter()
+                    .filter(reads)
+                    .find(|node| &node.handle == handle)
+            })
+            .map(|node| node.id.clone())
+    };
+    let others = || {
+        graph
+            .nodes
+            .iter()
+            .chain(target.reserved.iter().flat_map(|graph| &graph.nodes))
+            .chain(target.visible.iter().flat_map(|graph| &graph.nodes))
+    };
+    let mut handles: HashSet<String> = others().map(|node| node.handle.clone()).collect();
+    let mut labels: HashSet<String> = others()
+        .map(|node| node.display_name().to_owned())
+        .collect();
+
+    let mut copies: Vec<Node> = Vec::with_capacity(fragment.graph.nodes.len());
+    let mut lacks: Vec<(&str, Lack)> = vec![];
+    for node in &fragment.graph.nodes {
+        let mut copy = node.clone();
+        copy.id = mapping[node.id.as_str()].clone();
+        copy.handle = unique_handle(&node.handle, |handle| handles.contains(handle));
+        handles.insert(copy.handle.clone());
+        if let Some(label) = &node.label {
+            copy.label = Some(unique_label(label, |label| labels.contains(label)));
+        }
+        labels.insert(copy.display_name().to_owned());
+        for (input, binding) in &node.inputs {
+            let remapped = binding.map_leaves(&mut |leaf, _| match leaf {
+                Binding::Reference {
+                    node_id,
+                    port,
+                    path,
+                } => {
+                    let source = mapping
+                        .get(node_id.as_str())
+                        .cloned()
+                        .or_else(|| resolve(node_id, port));
+                    match source {
+                        Some(source) => Some(Binding::reference(source, port, path)),
+                        None => {
+                            let name = fragment
+                                .sources
+                                .get(node_id)
+                                .map_or(node_id.as_str(), String::as_str);
+                            let named = readable
+                                .iter()
+                                .any(|node| node.id == *node_id || node.handle == name);
+                            lacks.push((
+                                &node.handle,
+                                if named {
+                                    Lack::Output(name.to_owned(), port.clone())
+                                } else {
+                                    Lack::Step(name.to_owned())
+                                },
+                            ));
+                            Some(leaf.clone())
+                        }
+                    }
+                }
+                Binding::Parameter { name, .. }
+                    if target
+                        .parameters
+                        .is_some_and(|parameters| !parameters.contains(name)) =>
+                {
+                    lacks.push((&node.handle, Lack::Parameter(name.clone())));
+                    Some(leaf.clone())
+                }
+                other => Some(other.clone()),
+            });
+            if let Some(remapped) = remapped {
+                copy.inputs.insert(input.clone(), remapped);
+            }
+        }
+        copies.push(copy);
+    }
+    if !lacks.is_empty() {
+        return Err(EditError::PasteRefused(refusal(&lacks, target.component)));
+    }
+
+    // The statements of the result in written order, with their braces.
+    let mut placed: HashMap<String, (String, Branch)> = braces(graph)
+        .into_iter()
+        .map(|(id, (x, branch))| (id.to_owned(), (x.to_owned(), branch)))
+        .collect();
+    // The statement copied without its `if` whose braces hold `id`.
+    fn root_of<'f>(fragment: &'f Fragment, id: &'f str) -> &'f str {
+        let mut current = id;
+        for _ in 0..=fragment.graph.nodes.len() {
+            match fragment.braces.get(current) {
+                Some((x, _)) => current = x,
+                None => break,
+            }
+        }
+        current
+    }
+    let mut at: HashMap<usize, Vec<&Node>> = HashMap::new();
+    for (node, copy) in fragment.graph.nodes.iter().zip(&copies) {
+        // A *Start* is written first, where rule 1 of the language wants it.
+        if copy.kind == NodeKind::Start {
+            at.entry(0).or_default().push(copy);
+            continue;
+        }
+        let root = root_of(fragment, &node.id);
+        let (index, own) = landings
+            .iter()
+            .find(|landing| landing.roots.contains(&root))
+            .map_or((graph.nodes.len(), None), |landing| {
+                (landing.index, landing.braces)
+            });
+        match fragment.braces.get(&node.id) {
+            Some((x, branch)) => {
+                placed.insert(copy.id.clone(), (mapping[x.as_str()].clone(), *branch));
+            }
+            None => {
+                if let Some((x, branch)) = own {
+                    placed.insert(copy.id.clone(), (x.to_owned(), branch));
+                }
+            }
+        }
+        at.entry(index).or_default().push(copy);
+    }
+    let mut ordered = graph.clone();
+    ordered.nodes = Vec::with_capacity(graph.nodes.len() + copies.len());
+    for index in 0..=graph.nodes.len() {
+        if let Some(landed) = at.get(&index) {
+            ordered
+                .nodes
+                .extend(landed.iter().map(|copy| (*copy).clone()));
+        }
+        if let Some(node) = graph.nodes.get(index) {
+            ordered.nodes.push(node.clone());
+        }
+    }
+    let placed: Braces<'_> = placed
+        .iter()
+        .map(|(id, (x, branch))| (id.as_str(), (x.as_str(), *branch)))
+        .collect();
+    let result = chain(&ordered, &placed);
+    if has_cycle(&result) {
+        let pasted: HashSet<&str> = copies.iter().map(|copy| copy.id.as_str()).collect();
+        let original: HashMap<&str, &str> = fragment
+            .graph
+            .nodes
+            .iter()
+            .zip(&copies)
+            .map(|(node, copy)| (copy.id.as_str(), node.handle.as_str()))
+            .collect();
+        let message = match cycle_at(&result, target.project, |node| {
+            pasted.contains(node.id.as_str())
+        }) {
+            Some(Cycle {
+                reader,
+                value,
+                below: Some(below),
+                ..
+            }) => format!(
+                "`{}` reads `{value}`, which runs after this place. Paste it below `{below}`.",
+                original[reader.id.as_str()]
+            ),
+            _ => EditError::ConnectionCycle.to_string(),
+        };
+        return Err(EditError::PasteRefused(message));
+    }
+    let ids = ordered
+        .nodes
+        .iter()
+        .filter(|node| mapping.values().any(|id| *id == node.id))
+        .map(|node| node.id.clone())
+        .collect();
+    Ok(Pasted {
+        graph: result,
+        ids,
+        unresolved: Vec::new(),
+    })
+}
+
+/// The board's sentence for a paste that would leave statements reading
+/// what is not there: the missing steps together, then each output, then
+/// the parameters, each reader and each name once, in fragment order.
+fn refusal(lacks: &[(&str, Lack)], component: bool) -> String {
+    let here = if component { "component" } else { "scenario" };
+    fn add<'a>(list: &mut Vec<&'a str>, item: &'a str) {
+        if !list.contains(&item) {
+            list.push(item);
+        }
+    }
+    let mut sentences = vec![];
+    let (mut readers, mut steps) = (vec![], vec![]);
+    for (reader, lack) in lacks {
+        if let Lack::Step(step) = lack {
+            add(&mut readers, reader);
+            add(&mut steps, step);
+        }
+    }
+    if !steps.is_empty() {
+        let verb = if readers.len() == 1 { "reads" } else { "read" };
+        let (is, them) = if steps.len() == 1 {
+            ("is", "it")
+        } else {
+            ("are", "them")
+        };
+        sentences.push(format!(
+            "{} {verb} {}, which {is} not in this {here}. Copy {them} too.",
+            listed(&readers),
+            listed(&steps)
+        ));
+    }
+    let mut outputs: Vec<String> = vec![];
+    for (reader, lack) in lacks {
+        if let Lack::Output(step, port) = lack {
+            let sentence = format!(
+                "`{reader}` reads `{step}.{port}`; `{step}` in this {here} has no `{port}`."
+            );
+            if !outputs.contains(&sentence) {
+                outputs.push(sentence);
+            }
+        }
+    }
+    sentences.extend(outputs);
+    let (mut readers, mut parameters) = (vec![], vec![]);
+    for (reader, lack) in lacks {
+        if let Lack::Parameter(name) = lack {
+            add(&mut readers, reader);
+            add(&mut parameters, name);
+        }
+    }
+    if !parameters.is_empty() {
+        let verb = if readers.len() == 1 { "reads" } else { "read" };
+        let parameters: Vec<String> = parameters
+            .iter()
+            .map(|name| format!("param.{name}"))
+            .collect();
+        let parameters: Vec<&str> = parameters.iter().map(String::as_str).collect();
+        sentences.push(format!(
+            "{} {verb} {}, which this {here} does not declare.",
+            listed(&readers),
+            listed(&parameters)
+        ));
+    }
+    sentences.join(" ")
+}
+
+/// `a`, `` `a` and `b` ``, `` `a`, `b` and `c` ``.
+fn listed(names: &[&str]) -> String {
+    let quoted: Vec<String> = names.iter().map(|name| format!("`{name}`")).collect();
+    match quoted.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 #[cfg(test)]

@@ -87,37 +87,7 @@ pub fn place(
         Place::First(x, branch) => Some((x, branch)),
     };
 
-    // What goes with it: an `if`'s braces at any depth, and the checks,
-    // values and variables written directly under it that read it and no
-    // other step.
-    let mut with: HashMap<&str, Vec<&str>> = graph
-        .nodes
-        .iter()
-        .filter(|node| node.id == step || inside(&written, &node.id, step))
-        .map(|node| (node.id.as_str(), vec![]))
-        .collect();
-    if is_step(node.kind) {
-        let end = graph
-            .nodes
-            .iter()
-            .enumerate()
-            .filter(|(_, node)| with.contains_key(node.id.as_str()))
-            .map(|(index, _)| index)
-            .max()
-            .expect("the step is in the graph");
-        let under: HashSet<&str> = graph.nodes[end + 1..]
-            .iter()
-            .take_while(|node| node.kind.is_data() && written.get(node.id.as_str()).copied() == own)
-            .filter(|node| follows_what_it_reads(node.kind))
-            .map(|node| node.id.as_str())
-            .collect();
-        taken_along(
-            graph,
-            &mut with,
-            |node| under.contains(node.id.as_str()),
-            &constants(graph),
-        );
-    }
+    let with = goes_with(graph, &written, node);
     let moving: Vec<&Node> = graph
         .nodes
         .iter()
@@ -149,28 +119,7 @@ pub fn place(
 
     // Where it goes among the rest.
     let at_index = match at {
-        Place::After(anchor) => {
-            let position = rest
-                .iter()
-                .position(|node| node.id == anchor)
-                .expect("the anchor stays");
-            let last_inside = rest
-                .iter()
-                .enumerate()
-                .filter(|(_, node)| inside(&written, &node.id, anchor))
-                .map(|(index, _)| index)
-                .max()
-                .unwrap_or(position)
-                .max(position);
-            let mut end = last_inside + 1;
-            while end < rest.len()
-                && rest[end].kind.is_data()
-                && written.get(rest[end].id.as_str()).copied() == target
-            {
-                end += 1;
-            }
-            end
-        }
+        Place::After(anchor) => index_after(&rest, &written, anchor, target),
         Place::First(x, branch) => match rest
             .iter()
             .position(|node| written.get(node.id.as_str()).copied() == Some((x, branch)))
@@ -211,9 +160,84 @@ pub fn place(
     Ok((result, moved))
 }
 
+/// What goes with the statement `node` when it is moved (DIAG-06a) or
+/// duplicated (DIAG-06f), each with what it goes with: an `if`'s braces at
+/// any depth, and for a step the checks, values and variables written
+/// directly under it that read it and no other step.
+pub(super) fn goes_with<'g>(
+    graph: &'g Graph,
+    written: &Braces<'g>,
+    node: &Node,
+) -> HashMap<&'g str, Vec<&'g str>> {
+    let step = node.id.as_str();
+    let own = written.get(step).copied();
+    let mut with: HashMap<&str, Vec<&str>> = graph
+        .nodes
+        .iter()
+        .filter(|node| node.id == step || inside(written, &node.id, step))
+        .map(|node| (node.id.as_str(), vec![]))
+        .collect();
+    if is_step(node.kind) {
+        let Some(end) = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| with.contains_key(node.id.as_str()))
+            .map(|(index, _)| index)
+            .max()
+        else {
+            return with;
+        };
+        let under: HashSet<&str> = graph.nodes[end + 1..]
+            .iter()
+            .take_while(|node| node.kind.is_data() && written.get(node.id.as_str()).copied() == own)
+            .filter(|node| follows_what_it_reads(node.kind))
+            .map(|node| node.id.as_str())
+            .collect();
+        taken_along(
+            graph,
+            &mut with,
+            |node| under.contains(node.id.as_str()),
+            &constants(graph),
+        );
+    }
+    with
+}
+
+/// The index in `nodes` directly after the statement `anchor`, the
+/// statements of its braces and the checks and values written under it in
+/// `braces`, the braces it stands in: where a step put after `anchor` is
+/// written.
+pub(super) fn index_after(
+    nodes: &[&Node],
+    written: &Braces<'_>,
+    anchor: &str,
+    braces: Option<(&str, Branch)>,
+) -> usize {
+    let Some(position) = nodes.iter().position(|node| node.id == anchor) else {
+        return nodes.len();
+    };
+    let last_inside = nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| inside(written, &node.id, anchor))
+        .map(|(index, _)| index)
+        .max()
+        .unwrap_or(position)
+        .max(position);
+    let mut end = last_inside + 1;
+    while end < nodes.len()
+        && nodes[end].kind.is_data()
+        && written.get(nodes[end].id.as_str()).copied() == braces
+    {
+        end += 1;
+    }
+    end
+}
+
 /// Whether the statement `id` stands in the braces of the `if` `x`, at any
 /// depth.
-fn inside(braces: &Braces<'_>, id: &str, x: &str) -> bool {
+pub(super) fn inside(braces: &Braces<'_>, id: &str, x: &str) -> bool {
     let mut current = id;
     for _ in 0..=braces.len() {
         match braces.get(current) {
@@ -269,6 +293,50 @@ fn constants(graph: &Graph) -> HashSet<&str> {
 /// place is never the reason. What an `if` reads cannot stand in its own
 /// braces (DIAG-06d).
 fn cycle(graph: &Graph, project: &Project) -> String {
+    match cycle_at(graph, project, |_| true) {
+        Some(Cycle {
+            reader,
+            value,
+            inside: true,
+            ..
+        }) => format!(
+            "`{}` reads `{value}`; it stays outside the braces of `{}`.",
+            reader.handle, reader.handle
+        ),
+        Some(Cycle {
+            reader,
+            value,
+            below: Some(below),
+            ..
+        }) => format!(
+            "`{}` reads `{value}`; it stays below `{below}`.",
+            reader.handle
+        ),
+        _ => EditError::ConnectionCycle.to_string(),
+    }
+}
+
+/// A statement of a graph with a cycle that reads something which depends
+/// on it.
+pub(super) struct Cycle<'g> {
+    pub reader: &'g Node,
+    /// What it reads, as the code writes it.
+    pub value: String,
+    /// The step what it reads comes from: itself, or the first step it is
+    /// computed from that depends on the reader.
+    pub below: Option<&'g str>,
+    /// What it reads stands in its own braces.
+    pub inside: bool,
+}
+
+/// The first statement `readers` accepts, steps first and then the others,
+/// each in written order, that reads something which depends on it, with
+/// the step that something comes from, or that stands in its own braces.
+pub(super) fn cycle_at<'g>(
+    graph: &'g Graph,
+    project: &Project,
+    readers: impl Fn(&Node) -> bool,
+) -> Option<Cycle<'g>> {
     let index = dependency_index(graph);
     let written = braces(graph);
     let handles: HashMap<&str, &Node> = graph
@@ -292,12 +360,13 @@ fn cycle(graph: &Graph, project: &Project) -> String {
         }
         false
     };
-    let readers = graph
+    let ordered = graph
         .nodes
         .iter()
         .filter(|node| is_step(node.kind))
-        .chain(graph.nodes.iter().filter(|node| !is_step(node.kind)));
-    for reader in readers {
+        .chain(graph.nodes.iter().filter(|node| !is_step(node.kind)))
+        .filter(|node| readers(node));
+    for reader in ordered {
         for binding in reader.inputs.values() {
             for reference in binding.references() {
                 let Some(read) = handles.get(reference.node_id) else {
@@ -331,22 +400,19 @@ fn cycle(graph: &Graph, project: &Project) -> String {
                     project,
                     &ValueRef::new(reference.node_id, reference.port, reference.path),
                 );
-                if inside(&written, &read.id, &reader.id) {
-                    return format!(
-                        "`{}` reads `{value}`; it stays outside the braces of `{}`.",
-                        reader.handle, reader.handle
-                    );
-                }
-                if let Some(below) = below {
-                    return format!(
-                        "`{}` reads `{value}`; it stays below `{below}`.",
-                        reader.handle
-                    );
+                let inside = inside(&written, &read.id, &reader.id);
+                if inside || below.is_some() {
+                    return Some(Cycle {
+                        reader,
+                        value,
+                        below,
+                        inside,
+                    });
                 }
             }
         }
     }
-    EditError::ConnectionCycle.to_string()
+    None
 }
 
 /// The step *Add step* on the board's bar puts a new step after: with a

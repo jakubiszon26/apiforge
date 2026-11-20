@@ -824,7 +824,7 @@ impl ProjectSession {
         model: Document,
         origin: Origin,
     ) -> Result<()> {
-        self.apply_edit(document_id, model, origin, None)
+        self.apply_edit(document_id, model, origin, Written::Rebuilt)
     }
 
     /// A move on the board (DIAG-06a): `model` is the document with a step
@@ -834,8 +834,7 @@ impl ProjectSession {
     /// [`Error::MoveNotWritten`] and never printed whole. One step of Undo.
     ///
     /// The model already holds the chain the move made, so LANG-13's rebuild
-    /// of the chain ([`kept_chain`]), which paste and duplicate still need
-    /// until DIAG-06f, is not applied to it.
+    /// of the chain ([`kept_chain`]) is not applied to it.
     pub fn apply_move(
         &mut self,
         document_id: &str,
@@ -843,7 +842,7 @@ impl ProjectSession {
         moved: &[String],
         origin: Origin,
     ) -> Result<()> {
-        self.apply_edit(document_id, model, origin, Some(moved))
+        self.apply_edit(document_id, model, origin, Written::Moved(moved))
     }
 
     /// A paste or a duplicate on the board (DIAG-06f): `model` is the
@@ -859,8 +858,7 @@ impl ProjectSession {
         model: Document,
         origin: Origin,
     ) -> Result<()> {
-        let _ = (document_id, model, origin);
-        todo!("DIAG-06f")
+        self.apply_edit(document_id, model, origin, Written::Placed)
     }
 
     fn apply_edit(
@@ -868,7 +866,7 @@ impl ProjectSession {
         document_id: &str,
         mut model: Document,
         origin: Origin,
-        moved: Option<&[String]>,
+        written: Written<'_>,
     ) -> Result<()> {
         let index = self.index(document_id)?;
         self.require_no_held_draft(document_id)?;
@@ -884,9 +882,14 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
-        let model = match moved {
-            Some(_) => model,
-            None => kept_chain(&previous, model),
+        let moved = match written {
+            Written::Moved(moved) => Some(moved),
+            Written::Rebuilt | Written::Placed => None,
+        };
+        let model = match written {
+            Written::Rebuilt => kept_chain(&previous, model),
+            Written::Placed => with_start(model),
+            Written::Moved(_) => model,
         };
         if *previous == model {
             return Ok(());
@@ -1569,6 +1572,30 @@ pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChang
         expected: FileState::of(&bytes),
         bytes: next,
     }])
+}
+
+/// How a board edit says the chain of the written language.
+#[derive(Clone, Copy)]
+enum Written<'a> {
+    /// The edit changed the graph only: the chain is rebuilt
+    /// ([`kept_chain`]).
+    Rebuilt,
+    /// A paste or a duplicate (DIAG-06f): the model holds the chain the edit
+    /// made, and its new statements are written where it writes them.
+    Placed,
+    /// A move (DIAG-06a): the model holds the chain the move made, and the
+    /// lines of the blocks it moved are moved.
+    Moved(&'a [String]),
+}
+
+/// `model` with a *Start* written first in a scenario's main flow that has
+/// a step and none, as rule 1 of the written language requires; what the
+/// edit wrote is kept.
+fn with_start(mut model: Document) -> Document {
+    if let Document::Scenario(scenario) = &mut model {
+        scenario.graph = apiforge_core::chain::with_start(&scenario.graph, &[&scenario.cleanup]);
+    }
+    model
 }
 
 /// A board edit keeps the chain of the written language (LANG-13): each
