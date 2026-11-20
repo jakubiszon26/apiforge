@@ -21,15 +21,12 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
     if store.read(std::slice::from_ref(&manifest_path))?.files[&manifest_path].is_some() {
         return Err(Error::AlreadyAProject);
     }
-    let mut manifest = ProjectManifest {
-        format_version: 1,
-        id: project.id.clone(),
-        name: project.name.clone(),
-        environment: project.environment.clone(),
-        contracts: project.contracts.clone(),
-        documents: Vec::new(),
-        revisions: Vec::new(),
-    };
+    let mut manifest = crate::language::new_manifest(
+        project.id.clone(),
+        project.name.clone(),
+        project.environment.clone(),
+        project.contracts.clone(),
+    );
     let mut context = base_project(&manifest);
     context.components = project.components.clone();
     let mut directories = Vec::new();

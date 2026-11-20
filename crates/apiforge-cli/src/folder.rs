@@ -94,6 +94,14 @@ fn execute(args: Args) -> Result<(), String> {
         return Ok(());
     }
     let mut valid = true;
+    // A project in an older language: said first, at its manifest (LANG-15).
+    if let Some(problem) = session.language_problem() {
+        eprintln!(
+            "{}:1:1: error: {problem}",
+            apiforge_storage::project::MANIFEST_PATH
+        );
+        valid = false;
+    }
     for document in session
         .documents()
         .iter()

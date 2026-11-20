@@ -6,6 +6,7 @@ mod analysis;
 mod context;
 mod document;
 mod git_rules;
+pub mod language;
 mod layout;
 mod migration;
 mod prepare;
@@ -111,6 +112,24 @@ pub enum Error {
     Migration(#[from] MigrationError),
     #[error("A legacy project cannot be written as a folder project: {0}")]
     Unrepresentable(&'static str),
+    /// The project's files are written in a language this build does not
+    /// read yet; nothing of it is opened (LANG-15).
+    #[error(
+        "This project is written in language {project}; this build reads language {build}. Update API Forge."
+    )]
+    NewerLanguage { project: u32, build: u32 },
+    /// The project's files are written in an older language: it opens for
+    /// reading and editing, `check` reports this and it does not run until
+    /// `apiforge fix` has raised it (LANG-15, LANG-20).
+    #[error(
+        "This project is written in language {project}; this build reads language {build}. Update it with apiforge fix --folder {} before it runs.",
+        language::argument(folder)
+    )]
+    OlderLanguage {
+        project: u32,
+        build: u32,
+        folder: std::path::PathBuf,
+    },
 }
 
 impl From<apiforge_storage::StorageError> for Error {

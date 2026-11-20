@@ -119,9 +119,14 @@ fn the_block(section: &str) -> String {
 
 #[test]
 fn the_reference_opens_with_its_version_line() {
+    // LANG-15, criterion 6: the line names the language this build reads.
     let first = REFERENCE.lines().next().unwrap_or_default();
+    let prefix = format!(
+        "Language version: {} · grammar of ADR 0005 as of ",
+        apiforge_script::LANGUAGE_VERSION
+    );
     let date = first
-        .strip_prefix("Reference version: 1 · grammar of ADR 0005 as of ")
+        .strip_prefix(prefix.as_str())
         .unwrap_or_else(|| panic!("unexpected first line: {first:?}"));
     let parts: Vec<_> = date.split('-').collect();
     let iso = parts.len() == 3
