@@ -282,6 +282,19 @@ impl ActionMenu {
                                     });
                             });
                         }
+                        // First, above the steps the menu adds, where the
+                        // menu of a card low on the board still shows it.
+                        if let Some(id) = &self.out_of_branch {
+                            let entry = ui
+                                .add(crate::widgets::action(Icon::ArrowLeft, MOVE_OUT).quiet())
+                                .on_hover_text(
+                                    "Write it after the condition's braces: it then runs whichever way the condition goes, when what it reads exists.",
+                                );
+                            if entry.clicked() {
+                                outcome = Outcome::Add(Command::MoveOutOfBranch(id.clone()));
+                            }
+                            ui.separator();
+                        }
                         let search = crate::widgets::named(
                             ui.add(
                                 crate::widgets::text_edit(&mut self.search)
@@ -357,18 +370,6 @@ impl ActionMenu {
                                     }
                                 }
                             });
-                        if let Some(id) = &self.out_of_branch {
-                            ui.add_space(4.0);
-                            ui.separator();
-                            let entry = ui
-                                .add(crate::widgets::action(Icon::ArrowLeft, MOVE_OUT).quiet())
-                                .on_hover_text(
-                                    "Write it after the condition's braces: it then runs whichever way the condition goes, when what it reads exists.",
-                                );
-                            if entry.clicked() {
-                                outcome = Outcome::Add(Command::MoveOutOfBranch(id.clone()));
-                            }
-                        }
                         if let Some(shared) = shared.filter(|_| self.source.is_none()) {
                             ui.add_space(4.0);
                             ui.separator();
