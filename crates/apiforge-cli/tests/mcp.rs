@@ -52,6 +52,10 @@
 //!
 //! MCP-21 (#207), criterion 5: `used` is described, in the outputSchema and
 //! in the tool descriptions, as the published revisions the document calls.
+//!
+//! REL-05 (#414), condition 1: every working scenario of `fixtures/` runs
+//! its steps in the same order through `apiforge run --json` and through
+//! the MCP tool `run`.
 use apiforge_project::{ProjectSession, prepare_project};
 use serde_json::{Value, json};
 use std::{
@@ -2972,5 +2976,172 @@ fn mcp23_criterion_5_values_match_the_output_schema_and_are_described() {
         "snapshot",
     ] {
         assert!(description.contains(words), "{words}: {description}");
+    }
+}
+
+// REL-05 (#414) --------------------------------------------------------------
+
+/// REL-05, condition 1: the simulated run of every working scenario of
+/// `fixtures/` lists the same steps in the same order through `apiforge run
+/// --folder --json` and through the MCP tool `run` of `apiforge mcp`. It
+/// lives here and not in `crates/apiforge-mcp/tests/acceptance.rs`, which
+/// the ticket names, because only this crate's tests can start the
+/// `apiforge` binary the comparison needs.
+mod rel05 {
+    use super::{Server, call, initialize, structured};
+    use serde_json::{Value, json};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        process::Command,
+    };
+
+    /// The registered scenario of the demo shop a single-file fixture
+    /// replaces, as `apiforge check`'s tests of the LAY fixtures do.
+    const SHOP_SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+
+    fn repository() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// Every working scenario of `fixtures/` written as a single file: the
+    /// scripts and the LAY references, which open in the demo shop.
+    fn single_file_scenarios() -> Vec<PathBuf> {
+        let mut found = Vec::new();
+        for directory in ["fixtures/scripts", "fixtures/scenarios/lay"] {
+            for entry in fs::read_dir(repository().join(directory)).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().is_some_and(|extension| extension == "afs")
+                    && fs::read_to_string(&path)
+                        .unwrap()
+                        .trim_start()
+                        .starts_with("scenario")
+                {
+                    found.push(path);
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    fn copy(from: &Path, to: &Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let path = entry.unwrap().path();
+            let target = to.join(path.file_name().unwrap());
+            if path.is_dir() {
+                copy(&path, &target);
+            } else {
+                fs::copy(&path, &target).unwrap();
+            }
+        }
+    }
+
+    /// `handle phase status`, a component's inner steps indented beneath
+    /// it, of the steps of the command line's JSON report.
+    fn command_line_steps(steps: &Value, depth: usize, lines: &mut Vec<String>) {
+        for step in steps.as_array().unwrap() {
+            lines.push(format!(
+                "{}{} {} {}",
+                "  ".repeat(depth),
+                step["handle"].as_str().unwrap(),
+                step["phase"].as_str().unwrap(),
+                step["status"].as_str().unwrap()
+            ));
+            if let Some(children) = step.get("children") {
+                command_line_steps(children, depth + 1, lines);
+            }
+        }
+    }
+
+    /// The same of the MCP tool's compact steps.
+    fn mcp_steps(steps: &Value, depth: usize, lines: &mut Vec<String>) {
+        for step in steps.as_array().unwrap() {
+            lines.push(format!(
+                "{}{} {} {}",
+                "  ".repeat(depth),
+                step["handle"].as_str().unwrap(),
+                step["phase"].as_str().unwrap(),
+                step["status"].as_str().unwrap()
+            ));
+            if let Some(children) = step.get("steps") {
+                mcp_steps(children, depth + 1, lines);
+            }
+        }
+    }
+
+    fn through_the_command_line(root: &Path, scenario: &str) -> Vec<String> {
+        let output = Command::new(env!("CARGO_BIN_EXE_apiforge"))
+            .args(["run", "--folder"])
+            .arg(root)
+            .args(["--scenario", scenario, "--json"])
+            .output()
+            .unwrap();
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|_| {
+            panic!(
+                "{scenario}: no JSON report; stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+        let mut lines = Vec::new();
+        command_line_steps(&report["steps"], 0, &mut lines);
+        lines
+    }
+
+    fn through_mcp(root: &Path, scenarios: &[&str]) -> Vec<Vec<String>> {
+        let mut server = Server::spawn(Some(root), root);
+        initialize(&mut server);
+        let mut runs = Vec::new();
+        for (id, scenario) in (2..).zip(scenarios) {
+            let response = call(&mut server, id, "run", json!({ "path": scenario }));
+            let report = structured(&response);
+            assert_eq!(report["live"], false, "{scenario}");
+            let mut lines = Vec::new();
+            mcp_steps(&report["steps"], 0, &mut lines);
+            runs.push(lines);
+        }
+        super::assert_clean_end(server);
+        runs
+    }
+
+    fn assert_agree(root: &Path, scenarios: &[&str], name: &str) -> usize {
+        let mcp = through_mcp(root, scenarios);
+        for (scenario, mcp) in scenarios.iter().zip(mcp) {
+            let command_line = through_the_command_line(root, scenario);
+            assert!(
+                command_line.len() > 1,
+                "{name} {scenario}: {command_line:?}"
+            );
+            assert_eq!(command_line, mcp, "{name} {scenario}");
+        }
+        scenarios.len()
+    }
+
+    #[test]
+    fn rel05_cli_and_mcp_agree_on_step_order() {
+        let mut compared = 0;
+        for fixture in single_file_scenarios() {
+            let directory = super::demo();
+            let root = directory.path();
+            fs::copy(&fixture, root.join(SHOP_SCENARIO)).unwrap();
+            let name = fixture.strip_prefix(repository()).unwrap().display();
+            compared += assert_agree(root, &[SHOP_SCENARIO], &name.to_string());
+        }
+        // The room booking is a folder project of its own.
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("rooms");
+        copy(&repository().join("fixtures/scenarios/lay/rooms"), &root);
+        compared += assert_agree(
+            &root,
+            &[
+                "scenarios/double-booking.afs",
+                "scenarios/double-booking-notice.afs",
+                "scenarios/booking-day.afs",
+            ],
+            "fixtures/scenarios/lay/rooms",
+        );
+        // Two scripts' scenario, seven LAY references and the three rooms.
+        assert_eq!(compared, 11, "every working scenario of fixtures/");
     }
 }
