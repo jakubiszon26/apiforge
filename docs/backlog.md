@@ -492,10 +492,12 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   in 0.2.0, and its mock-up), the sixteen questions of DIAG-06 (#391),
   the keys of DIAG-06b (#491), the three of DIAG-06e (#494), and LANG-20
   (#481): file by file, with a record.
-- Waiting for the owner: two questions on #481 that follow from that
-  last decision (a board edit in a source not yet converted; what the
-  window's update does when not every file can be converted), on which
-  LANG-20 and LANG-21a wait.
+- The two questions that followed from LANG-20's decision were answered
+  the same day (#481, both A): a board edit in a source not yet converted
+  is refused with *Update the project first* (LANG-20), and the window's
+  *Update the project* converts what it can, in one dialog with two parts
+  (LANG-21a). Nothing of the first half waits for the owner; LANG-20,
+  DIAG-06e, DIAG-06d and LANG-21b are with the independent review.
 - Beside the sprint: [#489](https://github.com/jakubiszon26/apiforge/issues/489), a Windows timing failure of one `mcp08b`
   test, rerun once and noted there until its cause is read.
 - After it: LANG-16 #413 (part B of LANG-00), then LANG-01 #127 with
