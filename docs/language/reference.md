@@ -406,7 +406,7 @@ scenario "Assertions" {
   typed = assert cart.body.total is "number"
   present = assert exists cart.body.note
   filled = assert nonempty cart.body.items
-  at_least = assert (cart.body.total >= 100) == true
+  at_least = assert cart.body.total >= 100
   valid = condition all {
     cart.status == 200,
     nonempty cart.body.items,
@@ -428,10 +428,12 @@ scenario "Assertions" {
 | `exists a` | `a` has a value; `null` is a value, a missing field is not |
 | `nonempty a` | `a` exists and is not `null`, `""`, `[]` or `{}` |
 
-- There is no `>=` or `<=` predicate. A check that is a plain expression
-  means `expr == true`, and the formatter writes it in full:
-  `assert a >= b` becomes `assert (a >= b) == true`, `assert flag` becomes
-  `assert flag == true`.
+- Any Boolean expression is a check: it means `expr == true`. There is no
+  `>=` or `<=` predicate, but `assert a >= b`, `assert x == 1 && y != 2` and
+  `assert !done` are written as they are, because each reads back as the
+  same check. A bare value is written in full: `assert flag` becomes
+  `assert flag == true`, which says what is expected. The long form
+  `assert (a >= b) == true` is read too and written as `assert a >= b`.
 - An operand that is itself a comparison is parenthesised:
   `assert (a == b) == true`.
 - An assertion has two outputs: `ok.passed` (boolean) and `ok.value` (the
@@ -448,7 +450,9 @@ scenario "Assertions" {
 ## Branches: if and else
 
 `if` checks one predicate, like `assert`, and chooses a branch. It never fails.
-The statements inside its braces run only on that branch.
+The statements inside its braces run only on that branch. Any Boolean
+expression is a check here too, and is written as typed:
+`if cart.status == 201 && cart.body.total > 0 {`.
 
 ```afs
 scenario "Branches" {

@@ -759,6 +759,9 @@ impl ProjectSession {
         document.conflict = None;
         document.diagnostics.clear();
         document.omitted_diagnostics = 0;
+        // The document now follows a text it was not edited to: no step of
+        // its history is installed over it (DIAG-06g).
+        document.history.clear();
         match observed {
             ObservedFile::Bytes(bytes) => {
                 document.saved = FileState::of(&bytes);
