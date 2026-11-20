@@ -113,7 +113,7 @@ impl ProjectSession {
                     let document = &mut self.documents[index];
                     document.layout_dirty = false;
                     document.fields.clear();
-                    document.history = Default::default();
+                    document.history.clear();
                     document.selection = TextSelection {
                         anchor: 0,
                         caret: 0,

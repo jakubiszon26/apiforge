@@ -10,7 +10,17 @@ pub const MANIFEST_PATH: &str = "apiforge.project.json";
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectManifest {
+    /// 1, or 2 for a manifest that names its language (LANG-15).
     pub format_version: u32,
+    /// The `.afs` language the project's files are written in: absent
+    /// exactly when `format_version` is 1, which is language 1. Storage keeps
+    /// the number; `apiforge-project` compares it with the build's.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub language_version: Option<u32>,
     pub id: String,
     pub name: String,
     pub environment: Environment,
@@ -49,6 +59,38 @@ pub struct RevisionEntry {
 }
 
 impl ProjectManifest {
+    /// A new, empty manifest for a build of `language`: `formatVersion: 1`
+    /// without the field for language 1, as every manifest before LANG-15,
+    /// and `formatVersion: 2` with `languageVersion` from language 2 on.
+    pub fn new(
+        language: u32,
+        id: String,
+        name: String,
+        environment: Environment,
+        contracts: Vec<Contract>,
+    ) -> Self {
+        let (format_version, language_version) = match language {
+            1 => (1, None),
+            language => (2, Some(language)),
+        };
+        Self {
+            format_version,
+            language_version,
+            id,
+            name,
+            environment,
+            contracts,
+            documents: Vec::new(),
+            revisions: Vec::new(),
+        }
+    }
+
+    /// The language the project's files are written in; 1 when the manifest
+    /// does not name one.
+    pub fn language(&self) -> u32 {
+        self.language_version.unwrap_or(1)
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         if bytes.len() > MAX_JSON_BYTES {
             return Err(ProjectError::Limit);
@@ -60,11 +102,12 @@ impl ProjectManifest {
         struct Version {
             format_version: u32,
         }
-        if apiforge_core::strict_json::from_slice::<Version>(bytes)
-            .map_err(|_| ProjectError::InvalidMetadata)?
-            .format_version
-            != 1
-        {
+        if !matches!(
+            apiforge_core::strict_json::from_slice::<Version>(bytes)
+                .map_err(|_| ProjectError::InvalidMetadata)?
+                .format_version,
+            1 | 2
+        ) {
             return Err(ProjectError::UnsupportedVersion);
         }
         let manifest: Self = apiforge_core::strict_json::from_slice(bytes)
@@ -86,10 +129,14 @@ impl ProjectManifest {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.format_version != 1 {
-            return Err(ProjectError::UnsupportedVersion);
-        }
         let invalid = || ProjectError::InvalidMetadata;
+        // Format 1 is language 1 and never names it; format 2 always does.
+        match (self.format_version, self.language_version) {
+            (1, None) => {}
+            (2, Some(language)) if language >= 1 => {}
+            (1 | 2, _) => return Err(invalid()),
+            _ => return Err(ProjectError::UnsupportedVersion),
+        }
         if !valid_id(&self.id)
             || self.name.encode_utf16().count() > 100_000
             || self.contracts.len() > 200
@@ -177,6 +224,13 @@ impl ProjectManifest {
         }
         Ok(())
     }
+}
+
+/// A field that is there holds a number: `null` is not an absent field.
+fn present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<u32>, D::Error> {
+    u32::deserialize(deserializer).map(Some)
 }
 
 pub(super) fn valid_id(id: &str) -> bool {

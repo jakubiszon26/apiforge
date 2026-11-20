@@ -24,6 +24,7 @@ const CHECK: f32 = 96.0;
 
 /// A request whose response a check reads, and a value nothing reads.
 const FRESH: &str = r#"scenario "Fresh" {
+  begin = start
   cart = POST "/cart" {
     body { items: 1 }
     sample 201 { id: "c-1" }
@@ -36,6 +37,7 @@ const FRESH: &str = r#"scenario "Fresh" {
 /// A component call and an `if` side by side, for the review: the two kinds
 /// no mock-up drew.
 const CALLS: &str = r#"scenario "Calls" {
+  begin = start
   catalogue = GET "/products" {
     sample 200 { items: [{ id: 123, price: 100 }] }
   }
@@ -270,6 +272,7 @@ fn lay21_criterion_4_the_tray_reaches_hidden_ports() {
     assert!(target.x < card.left(), "Actual value is left of the card");
     move_to(&mut harness, near, target);
     release(&mut harness, target);
+    super::lay16::wire_directly(&mut harness);
     match binding_of(&harness, &check.handle, "actual") {
         Some(Binding::Reference { node_id, port, .. }) => {
             assert_eq!(node_id, id_of(&harness, "cart"));

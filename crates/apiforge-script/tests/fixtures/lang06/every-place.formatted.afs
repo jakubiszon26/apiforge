@@ -1,0 +1,48 @@
+// Before the first line.
+scenario "Every place" {
+  // Above the description.
+  description "A comment at every place it can stand."
+  // Beside a parameter.
+  param count = 1
+  // Between the lines of the head.
+  param size = 2
+  // Directly above start: its note.
+  // Beside start: joins its note.
+  begin = start
+  // Free, between two statements.
+
+  list = GET "/items" {
+    // Between the lines of a request's block.
+    // Beside a line of the block.
+    query { page: 1 }
+    // Inside the body's object.
+    body { size: 2 }
+    // At the end of the request's block.
+  }
+  // Inside a value's object.
+
+  total = { count: 1, items: [] }
+  ready = condition all {
+    // Above a check.
+    list.status == 200,
+    // Beside a check.
+    total.count > 0,
+  }
+  found = if list.status == 200 {
+    // At the top of a branch.
+
+    item = GET "/items/1"
+    // At the end of a branch.
+  } else {
+    missing = assert list.status == 404
+    // At the end of the else branch.
+  }
+  cleanup {
+    // At the top of the cleanup.
+
+    done = POST "/done"
+    // At the end of the cleanup.
+  }
+  // At the end of the file's braces.
+}
+// After the last brace.

@@ -428,7 +428,7 @@ impl ApiforgeServer {
     }
 
     #[tool(
-        description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project (holder: none, window, another_process or this server’s agent_session; holder_details: role/client/since or null), hands_over_on_write (a window advertises a valid endpoint: a write may request hand-over, without connecting during overview or promising a grant), whether live requests are allowed (live_requests: allowed true or false with its source; null while a window holding the project decides: the overview never connects, and the window's live setting is read when a live run starts), and the version of the language reference. Reads the saved project; writes nothing.",
+        description = "What the API Forge project contains: name, base URL, environment variable and secret names, contracts, every document (kind, registered path, handle, base revision, source_sha256), the published component revisions, the project generation, who holds the project (holder: none, window, another_process or this server’s agent_session; holder_details: role/client/since or null), hands_over_on_write (a window advertises a valid endpoint: a write may request hand-over, without connecting during overview or promising a grant), whether live requests are allowed (live_requests: allowed true or false with its source; null while a window holding the project decides: the overview never connects, and the window's live setting is read when a live run starts), the .afs language this server reads (language_version) and the one the project is written in (project_language_version), and the version of the language reference. Reads the saved project; writes nothing.",
         output_schema = schema_for_output::<tools::ProjectOverview>(),
         annotations(title = "Project overview", read_only_hint = true)
     )]
@@ -463,7 +463,7 @@ impl ApiforgeServer {
     }
 
     #[tool(
-        description = "Diagnostics of the saved source of every document, or of one registered path: file, line, column, severity, message and suggested fix. A project with errors is reported, not refused. Beyond 1 000 diagnostics per document, `omitted` counts the rest. Writes nothing.",
+        description = "Diagnostics of the saved source of every document, or of one registered path: file, line, column, severity, message and suggested fix. A project with errors is reported, not refused; a project written in an older language is reported first, at apiforge.project.json, with the command that fixes it. Beyond 1 000 diagnostics per document, `omitted` counts the rest. Writes nothing.",
         output_schema = schema_for_output::<tools::CheckResult>(),
         annotations(title = "Check", read_only_hint = true)
     )]

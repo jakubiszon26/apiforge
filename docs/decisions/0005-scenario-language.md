@@ -5,6 +5,24 @@
 - Scope: new crate `apiforge-script`, `apiforge-cli`, the desktop code panel
 - Plan: [scenario code and canvas](../roadmap.md)
 
+Amended 2026-11-20 by LANG-13 ([#386](https://github.com/jakubiszon26/apiforge/issues/386);
+the owner's decisions in [LANG-00](../tickets/LANG-00.md#4-after-against-the-order-of-the-lines)
+and [FLOW-00](../tickets/FLOW-00.md)): a folder source is written in the
+*written language* — the steps of a block run in the order they are written,
+a flow with a step has a `start`, and `@after` is no longer part of the
+language. A published revision and the legacy workspace keep the *stored
+spelling* described below; see [Ordering](#statements) and
+[The written language](#the-written-language).
+
+Amended 2026-11-20 by LANG-05 ([#142](https://github.com/jakubiszon26/apiforge/issues/142);
+the owner's decision A in [LANG-05](../tickets/LANG-05.md)): any Boolean
+expression is a check, and one that is a comparison or a logical operation
+(`>=`, `<=`, `&&`, `||` or `!` at its top) is written as the author wrote it,
+without `== true`; see [Checks](#checks). The short form is the written
+language's: a published revision and the legacy workspace keep the stored
+spelling and write every such check in full, `(a >= b) == true`, so a
+revision prints back to the bytes it was published with.
+
 Stage II amendment (implemented for explicit folder mode; P7 startup activation pending):
 [ADR 0010](0010-folder-projects.md) makes `.afs` the durable definition and requires
 explicit component-call revisions in folder projects. This decision's language,
@@ -132,16 +150,47 @@ checks, a call of a component handle is an instance, `export` is an Export, and 
 other expression is a Value. `var` is allowed only on Values. Lowering reports any
 other use as an error.
 
-**Ordering.** `@after(a, b)` writes ordering edges from `a` and `b`, and
+**Ordering, stored spelling** (a published revision, the legacy workspace).
+`@after(a, b)` writes ordering edges from `a` and `b`, and
 `@after(check.then)` writes a branch edge. Statements inside an `if` block receive
 the branch edge from that `if` without an attribute. Line order means nothing. The
 printer orders statements topologically, keeping the document's node order among
 independent statements. A node is printed inside an `if` block exactly when its
 only incoming ordering edge is a branch edge of that `if`.
 
-**Start.** `begin = start` is an ordinary statement. As on the board, when a Start
-exists only blocks reachable from it run ([ADR 0003](0003-start-reachability.md)).
-Without Start, every root runs.
+**Start, stored spelling.** `begin = start` is an ordinary statement. As on the
+board, when a Start exists only blocks reachable from it run
+([ADR 0003](0003-start-reachability.md)). Without Start, every root runs.
+
+### The written language
+
+Since LANG-13 a folder source is read in the written language; the grammar
+above holds without `@after`, which is an error with a fix.
+
+1. **A flow with a step has a `start`**, and it is the first step written. A
+   *step* is `start`, a request, a component call or an `if`; everything else
+   is a data statement. The body of a scenario and of a component are flows;
+   a branch and the cleanup are not: their braces place the first step.
+2. **The order written is the order of the steps.** Lowering gives every step
+   an ordering edge from the step written before it in the same braces; after
+   an `if` the edges come from the ends of its branches (the last step of each,
+   or the branch itself when it holds none). Every statement in braces keeps the
+   branch edge of its braces. A check or value gets no ordering edge and runs
+   when what it reads exists.
+3. **No step stands outside the flow**: a step written in a block runs.
+4. **The document stays a graph of ordering edges**, as the board draws it;
+   nothing is added to the model and no list of steps is stored. The printer
+   writes the steps of each block in the order of its chain and no `@after`; a
+   document that is not such a chain does not read back as itself and is not
+   printable. A model that was not written in this language (a demo, a legacy
+   workspace) is first written as one chain per block in the order its steps
+   run (`apiforge_core::chain::chained`), with a `start` where a flow lacks one;
+   one with a step that runs nowhere is refused.
+5. **The fix** of a file written for 0.1.0 deletes its `@after` lines and writes
+   a missing `begin = start`, and nothing else, when the file is written in the
+   order it runs today: the stored reading of the same text, written as a chain,
+   has exactly the edges of the written reading. Otherwise it changes nothing
+   and names the statement to place by hand.
 
 ### Expressions
 
@@ -205,10 +254,15 @@ output port, the following segments are the path into it, so `first.price` reads
 NotEquals, `>` Greater, `<` Less, `~= … within t` Approximately with tolerance,
 `contains`, `is` Type, `exists`, `nonempty`. `condition … with expr` sets the data
 the condition passes on (its `value` input). A check that is a bare expression
-means `expr == true`. The printer writes it in that full form, so `assert a >= b`
-prints as `assert (a >= b) == true`. Inside a check, an operand that is itself a
-comparison is parenthesised. Condition entry *n* lowers to inputs `actual<n>` and
-`expected<n>`.
+means `expr == true`. The printer writes it short when the expression is a
+comparison or a logical operation that, written alone, reads back as the same
+check (`>=`, `<=`, `&&`, `||` or `!` at its top): `assert a >= b` and
+`if x == 1 && y != 2 {` print as written, and `assert (a >= b) == true` prints
+as `assert a >= b`. A bare value keeps the full form, `assert flag == true`,
+because `assert flag` alone does not say what is expected. Inside a check, an
+operand that is itself a comparison is parenthesised, so `(a == b) == true`, a
+check of its own, prints as it is. Condition entry *n* lowers to inputs
+`actual<n>` and `expected<n>`.
 
 ### Requests
 
@@ -359,7 +413,9 @@ Diagnostics never quote secret values.
 - One formatter means no style debates and stable diffs. User formatting is not
   preserved; comments survive only as notes.
 - Everything the board can express is expressible in text and vice versa,
-  including ordering, branches and Start. Layout is the only exception.
+  including ordering, branches and Start. Layout is the only exception. Since
+  LANG-13 the board's ordering is a chain per block; until DIAG-06 an ordering
+  wire drawn or deleted between existing steps changes nothing.
 - The language reference for users and MCP,
   [`docs/language/reference.md`](../language/reference.md), is written and
   maintained by hand (amended 2026-10-27, MCP-02; it was to be generated from

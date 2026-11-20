@@ -237,11 +237,7 @@ pub fn wire_label_clear(
     text: &str,
     others: &[Vec<Pos2>],
 ) -> Option<Rect> {
-    let clear = |rect: Rect| {
-        others
-            .iter()
-            .all(|line| !super::after::crosses(line, rect.expand(1.0)))
-    };
+    let clear = |rect: Rect| others.iter().all(|line| !crosses(line, rect.expand(1.0)));
     let (rect, galley) = (0..=16)
         .map(|step| {
             let away = (step as f32 / 2.0).ceil() / 20.0;
@@ -256,6 +252,61 @@ pub fn wire_label_clear(
         .or_else(|| label_at(painter, routed, camera, text, 0.5))?;
     draw_label(painter, rect, galley);
     Some(rect)
+}
+
+/// Whether the polyline `line` passes through `rect`.
+pub fn crosses(line: &[Pos2], rect: Rect) -> bool {
+    line.windows(2)
+        .any(|pair| segment_crosses(pair[0], pair[1], rect))
+}
+
+/// Whether the segment from `a` to `b` meets `rect` (Liang–Barsky).
+fn segment_crosses(a: Pos2, b: Pos2, rect: Rect) -> bool {
+    let delta = b - a;
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    for (p, q) in [
+        (-delta.x, a.x - rect.left()),
+        (delta.x, rect.right() - a.x),
+        (-delta.y, a.y - rect.top()),
+        (delta.y, rect.bottom() - a.y),
+    ] {
+        if p.abs() < f32::EPSILON {
+            if q < 0.0 {
+                return false;
+            }
+        } else {
+            let t = q / p;
+            if p < 0.0 {
+                low = low.max(t);
+            } else {
+                high = high.min(t);
+            }
+            if low > high {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Half a step's badge on screen at 100 % and its least (LAY-07), and the
+/// room left of it a chip keeps clear of, the free space and the length of
+/// the arrow LAY-24 drew there at 100 % and its shortest: a chip stands
+/// where it stood when the arrow was drawn (LAY-45).
+const BADGE_HALF: f32 = 10.0;
+const BADGE_HALF_LEAST: f32 = 7.5;
+const BADGE_CLEAR: f32 = 2.0;
+const BADGE_ROOM: f32 = 22.0;
+const BADGE_ROOM_LEAST: f32 = 14.0;
+
+/// A card's top-left corner on screen at `zoom`, where its badge stands,
+/// with the room left of it: what a chip moved up from its socket keeps
+/// clear of (LAY-37).
+pub fn badge_corner(card: Rect, zoom: f32) -> Rect {
+    let half = (BADGE_HALF * zoom).max(BADGE_HALF_LEAST);
+    let left = half + BADGE_CLEAR + (BADGE_ROOM * zoom).max(BADGE_ROOM_LEAST);
+    let corner = card.left_top();
+    Rect::from_min_max(corner - vec2(left, half), corner + vec2(half, half))
 }
 
 /// A wire's label laid out at `fraction` of its length, on screen.
@@ -299,43 +350,6 @@ fn label_at(
 fn draw_label(painter: &Painter, rect: Rect, galley: std::sync::Arc<egui::Galley>) {
     painter.rect_filled(rect, 3.0, theme::WHITE.gamma_multiply(0.9));
     painter.galley(rect.min + vec2(3.0, 1.0), galley, theme::MUTED);
-}
-
-/// A continuation mark (LAY-06): a muted pill right of the last card of a
-/// row, naming the step the engine reaches next. Its text keeps a legible
-/// size at any zoom, so at a small zoom the pill grows past the mark's box
-/// on the board, into the free space right of the row, up to 160 px.
-pub fn continuation_mark(painter: &Painter, mark: &super::shape::Mark, camera: Camera) {
-    /// The widest the pill grows on screen, and the space around its text.
-    const WIDEST: f32 = 160.0;
-    const PADDING: f32 = 6.0;
-    let rect = camera.rect(mark.rect);
-    let font = FontId::proportional((12.0 * camera.zoom).max(LINE_MIN));
-    let mut job = egui::text::LayoutJob::simple_singleline(mark.text.clone(), font, theme::MUTED);
-    job.wrap = egui::text::TextWrapping::truncate_at_width(WIDEST - 2.0 * PADDING);
-    let galley = painter.layout_job(job);
-    let pill = Rect::from_min_size(
-        rect.min,
-        vec2(
-            rect.width().max(galley.size().x + 2.0 * PADDING),
-            rect.height().max(galley.size().y + 4.0),
-        ),
-    );
-    painter.rect(
-        pill,
-        pill.height() / 2.0,
-        theme::WHITE,
-        Stroke::new(1.0, theme::BORDER),
-        StrokeKind::Inside,
-    );
-    painter.galley(
-        pos2(
-            pill.left() + PADDING,
-            pill.center().y - galley.size().y / 2.0,
-        ),
-        galley,
-        theme::MUTED,
-    );
 }
 
 /// The smallest text a card writes on screen, in points, by what it says
@@ -2290,14 +2304,11 @@ pub fn mode_line_text(graph: &Graph) -> &'static str {
     }
 }
 
-/// The steps summary of the board's header row, e.g. "6 steps  ·  All steps".
+/// The steps summary of the board's header row, e.g. "6 steps". Since
+/// LANG-13 every scenario with a step runs from its *Start*, so the summary
+/// no longer says where the steps run from (owner, 2026-11-20, #386).
 pub fn steps_summary(graph: &Graph) -> String {
-    let starts = graph.nodes.iter().any(|node| node.kind == NodeKind::Start);
-    format!(
-        "{} steps  ·  {}",
-        graph.nodes.len(),
-        if starts { "From Start" } else { "All steps" }
-    )
+    format!("{} steps", graph.nodes.len())
 }
 
 /// The font of the steps summary.

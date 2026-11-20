@@ -3,7 +3,10 @@
 //! immutable published revisions and checkpoints that keep every identity,
 //! position and proxy. Migration builds on this; it never touches originals.
 use crate::{Error, Result, analysis::identity_base, context::base_project};
-use apiforge_core::format::{Component, Project};
+use apiforge_core::{
+    chain::{chained, with_start},
+    format::{Component, Graph, Project},
+};
 use apiforge_script::Document;
 use apiforge_storage::project::{
     DiagramFile, DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, MANIFEST_PATH,
@@ -18,15 +21,12 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
     if store.read(std::slice::from_ref(&manifest_path))?.files[&manifest_path].is_some() {
         return Err(Error::AlreadyAProject);
     }
-    let mut manifest = ProjectManifest {
-        format_version: 1,
-        id: project.id.clone(),
-        name: project.name.clone(),
-        environment: project.environment.clone(),
-        contracts: project.contracts.clone(),
-        documents: Vec::new(),
-        revisions: Vec::new(),
-    };
+    let mut manifest = crate::language::new_manifest(
+        project.id.clone(),
+        project.name.clone(),
+        project.environment.clone(),
+        project.contracts.clone(),
+    );
     let mut context = base_project(&manifest);
     context.components = project.components.clone();
     let mut directories = Vec::new();
@@ -36,7 +36,7 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
 
     for scenario in &project.scenarios {
         let path = unique_path("scenarios", &slug(&scenario.name, "scenario"), &mut used)?;
-        let document = Document::Scenario(scenario.clone());
+        let document = as_written(&Document::Scenario(scenario.clone()))?;
         let text = print(&context, &document)?;
         let entry = DocumentEntry {
             document_id: uuid::Uuid::new_v4().to_string(),
@@ -73,7 +73,8 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
             directories.push(directory);
         }
         let document = Document::Component((*component).clone());
-        let text = print(&context, &document)?;
+        let text =
+            apiforge_script::print_revision(&context, component).map_err(|_| Error::Unprintable)?;
         records.push(DiagramRecord::capture(
             DocumentKey::Revision {
                 component_id: component.id.clone(),
@@ -105,8 +106,12 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
             &slug(&component.handle, "component"),
             &mut used,
         )?;
-        let text = print(&context, &Document::Component((*component).clone()))?;
-        let mut model = (*component).clone();
+        let Document::Component(mut model) =
+            as_written(&Document::Component((*component).clone()))?
+        else {
+            unreachable!("a component stays a component");
+        };
+        let text = print(&context, &Document::Component(model.clone()))?;
         model.revision += 1;
         let entry = DocumentEntry {
             document_id: uuid::Uuid::new_v4().to_string(),
@@ -162,6 +167,29 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
     changes.extend(crate::git_rules::lf_attributes(&store)?);
     store.commit(changes)?;
     Ok(manifest)
+}
+
+/// A model written as a source for the first time, in the written language
+/// (LANG-13): each graph as one chain in the order its steps run today, and a
+/// `start` first where a scenario's main flow with a step has none (a
+/// component needs none). A step that runs
+/// nowhere, or an ordering that is not a chain with `if`s, cannot be written
+/// without changing what runs, and is refused as unprintable.
+pub fn as_written(document: &Document) -> Result<Document> {
+    let written = |graph: &Graph| chained(graph).map_err(|_| Error::Unprintable);
+    Ok(match document {
+        Document::Scenario(scenario) => {
+            let mut scenario = scenario.clone();
+            scenario.cleanup = written(&scenario.cleanup)?;
+            scenario.graph = with_start(&written(&scenario.graph)?, &[&scenario.cleanup]);
+            Document::Scenario(scenario)
+        }
+        Document::Component(component) => {
+            let mut component = component.clone();
+            component.graph = written(&component.graph)?;
+            Document::Component(component)
+        }
+    })
 }
 
 fn print(context: &Project, document: &Document) -> Result<String> {

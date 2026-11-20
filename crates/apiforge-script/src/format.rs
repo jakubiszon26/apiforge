@@ -2,6 +2,7 @@ use crate::{
     ast::*,
     parser::{parse, precedence},
 };
+use std::collections::HashMap;
 
 pub fn format(source: &str) -> Result<String, Vec<Diagnostic>> {
     format_tree(&parse(source))
@@ -11,7 +12,9 @@ pub fn format_tree(tree: &SyntaxTree) -> Result<String, Vec<Diagnostic>> {
     if tree.has_errors() || tree.file.is_none() {
         return Err(tree.diagnostics.clone());
     }
-    let formatted = print_file(tree.file.as_ref().unwrap());
+    let mut writer = Writer::new(&tree.source, &tree.comments, true);
+    writer.file(tree.file.as_ref().unwrap());
+    let formatted = writer.out;
     if formatted.len() > crate::MAX_SOURCE_BYTES {
         let mut diagnostics = tree.diagnostics.clone();
         diagnostics.push(Diagnostic::error(
@@ -42,22 +45,24 @@ fn key(name: &str) -> String {
     }
 }
 
-pub(crate) fn print_file(file: &File) -> String {
-    let mut out = opening(&file.kind);
-    out.push('\n');
-    for (_, text) in head(file) {
-        for text in text.lines() {
-            line(&mut out, 1, text);
-        }
-    }
-    statements(&mut out, &file.statements, 1);
-    if let Some(cleanup) = &file.cleanup {
-        line(&mut out, 1, "cleanup {");
-        statements(&mut out, cleanup, 2);
-        line(&mut out, 1, "}");
-    }
-    out.push_str("}\n");
-    out
+/// How a check that is one Boolean expression is written (LANG-05).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Checks {
+    /// The written language: a compound check as the author wrote it.
+    Short,
+    /// The stored spelling of a published revision and of the legacy
+    /// workspace: every plain expression in full, `expr == true`, as 0.1.0
+    /// wrote it, so a revision prints back to its own bytes.
+    Full,
+}
+
+/// `file` in the canonical layout, as `print` writes it, with checks
+/// written as `checks` says.
+pub(crate) fn print_file_with(file: &File, checks: Checks) -> String {
+    let mut writer = Writer::new("", &[], true);
+    writer.checks = checks;
+    writer.file(file);
+    writer.out
 }
 
 /// The first line of a file, up to its opening brace.
@@ -72,6 +77,12 @@ pub(crate) fn opening(kind: &FileKind) -> String {
 /// each with its text at depth 0: `description`, `on_error`, `param` lines,
 /// `input` lines with their attributes, `action`.
 pub(crate) fn head(file: &File) -> Vec<(Item, String)> {
+    head_in(file, false)
+}
+
+/// As [`head`], the attributes of each `input` in the canonical order when
+/// `canonical` is set.
+fn head_in(file: &File, canonical: bool) -> Vec<(Item, String)> {
     let mut parts = vec![];
     if let Some(description) = &file.description {
         parts.push((
@@ -90,7 +101,7 @@ pub(crate) fn head(file: &File) -> Vec<(Item, String)> {
     }
     for input in &file.inputs {
         let mut out = String::new();
-        attributes(&mut out, &input.attributes, 0);
+        attributes(&mut out, &input.attributes, 0, canonical.then_some(true));
         let default = input
             .default
             .as_ref()
@@ -126,7 +137,30 @@ fn line(out: &mut String, depth: usize, text: &str) {
     out.push('\n');
 }
 
-fn attributes(out: &mut String, attributes: &[Attribute], depth: usize) {
+/// The canonical place of an attribute among a statement's, or among an
+/// `input`'s when `input` is set (KTLO-37): the order `print` builds them in,
+/// `@label` first and `@note` after it. One the language does not know goes
+/// last. `fmt` and `print` write attributes in this order; a board edit keeps
+/// the order its author wrote.
+pub(crate) fn attribute_rank(name: &str, input: bool) -> usize {
+    const STATEMENT: &[&str] = &["label", "note", "contract", "after", "config", "inputs"];
+    const INPUT: &[&str] = &[
+        "label", "contract", "required", "optional", "exposed", "hidden",
+    ];
+    let order = if input { INPUT } else { STATEMENT };
+    order
+        .iter()
+        .position(|known| *known == name)
+        .unwrap_or(order.len())
+}
+
+/// Writes `attributes` at `depth`: in the canonical order of an `input`'s
+/// (`Some(true)`) or a statement's (`Some(false)`), or as given.
+fn attributes(out: &mut String, attributes: &[Attribute], depth: usize, canonical: Option<bool>) {
+    let mut attributes: Vec<&Attribute> = attributes.iter().collect();
+    if let Some(input) = canonical {
+        attributes.sort_by_key(|attribute| attribute_rank(&attribute.name, input));
+    }
     for attribute in attributes {
         let arguments = if attribute.arguments.is_empty() {
             String::new()
@@ -145,97 +179,251 @@ fn attributes(out: &mut String, attributes: &[Attribute], depth: usize) {
     }
 }
 
+/// `nodes` written at `depth`, each with its note and attributes, in the
+/// order of the attributes given.
 pub(crate) fn statements(out: &mut String, nodes: &[Statement], depth: usize) {
-    for node in nodes {
-        if let Some(note) = &node.note {
-            for note in note.split('\n') {
-                line(out, depth, &format!("// {note}"));
+    let mut writer = Writer::new("", &[], false);
+    writer.out = std::mem::take(out);
+    writer.statements(nodes, depth);
+    *out = writer.out;
+}
+
+/// Writes a file's lines, with the free comments of its source at their
+/// places (LANG-06).
+struct Writer<'a> {
+    out: String,
+    source: &'a str,
+    /// The free comments, in source order.
+    comments: &'a [Comment],
+    /// The last comment of each place, by its index in `comments`.
+    last: HashMap<Place, usize>,
+    /// The first comment not written yet.
+    next: usize,
+    /// Whether attributes are written in the canonical order.
+    canonical: bool,
+    /// How a check that is one Boolean expression is written (LANG-05).
+    checks: Checks,
+}
+
+impl<'a> Writer<'a> {
+    fn new(source: &'a str, comments: &'a [Comment], canonical: bool) -> Self {
+        let last = comments
+            .iter()
+            .enumerate()
+            .map(|(index, comment)| (comment.place, index))
+            .collect();
+        Self {
+            out: String::new(),
+            source,
+            comments,
+            last,
+            next: 0,
+            canonical,
+            checks: Checks::Short,
+        }
+    }
+
+    /// Writes the comments of `place` at `depth`, with any written before
+    /// them in the source that are still to be written, so that free
+    /// comments keep their order when Format moves what they stand at (a
+    /// part of the head written after a statement). Whether it wrote any.
+    fn comments(&mut self, place: Place, depth: usize) -> bool {
+        let Some(&last) = self.last.get(&place) else {
+            return false;
+        };
+        if last < self.next {
+            return false;
+        }
+        for comment in &self.comments[self.next..=last] {
+            let text = self.source[comment.range.clone()].trim_end();
+            line(&mut self.out, depth, text);
+        }
+        self.next = last + 1;
+        true
+    }
+
+    fn file(&mut self, file: &File) {
+        self.comments(Place::Top, 0);
+        self.out.push_str(&opening(&file.kind));
+        self.out.push('\n');
+        let start = |wanted: &Item| {
+            file.items
+                .iter()
+                .find(|(item, _)| item == wanted)
+                .map(|(_, range)| range.start)
+        };
+        for (item, text) in head_in(file, self.canonical) {
+            if let Some(start) = start(&item) {
+                self.comments(Place::Head(start), 1);
+            }
+            for text in text.lines() {
+                line(&mut self.out, 1, text);
             }
         }
-        attributes(out, &node.attributes, depth);
-        let handle = &node.handle;
-        let prefix = if node.variable {
-            format!("var {handle} = ")
-        } else {
-            format!("{handle} = ")
-        };
-        match &node.form {
-            Form::Start => line(out, depth, &format!("{prefix}start")),
-            Form::Value(value) => line(out, depth, &format!("{prefix}{}", expression(value))),
-            Form::Export { value_type, value } => line(
-                out,
+        self.statements(&file.statements, 1);
+        if let Some(cleanup) = &file.cleanup {
+            if let Some(start) = start(&Item::Cleanup) {
+                self.comments(Place::Head(start), 1);
+            }
+            line(&mut self.out, 1, "cleanup {");
+            self.statements(cleanup, 2);
+            self.comments(Place::End(Braces::Cleanup), 2);
+            line(&mut self.out, 1, "}");
+        }
+        self.comments(Place::End(Braces::File), 1);
+        self.out.push_str("}\n");
+        self.comments(Place::Bottom, 0);
+        // Every comment has a place written above; none is ever lost.
+        for comment in &self.comments[self.next.min(self.comments.len())..] {
+            line(
+                &mut self.out,
+                0,
+                self.source[comment.range.clone()].trim_end(),
+            );
+        }
+        self.next = self.comments.len();
+    }
+
+    fn statements(&mut self, nodes: &[Statement], depth: usize) {
+        for node in nodes {
+            let start = node.range.start;
+            if self.comments(Place::Statement(start), depth) {
+                self.out.push('\n');
+            }
+            if let Some(note) = &node.note {
+                for note in note.split('\n') {
+                    line(&mut self.out, depth, &format!("// {note}"));
+                }
+            }
+            attributes(
+                &mut self.out,
+                &node.attributes,
                 depth,
-                &format!("export {handle}: {value_type} = {}", expression(value)),
-            ),
-            Form::Assert(check) => {
-                line(out, depth, &format!("{prefix}assert {}", check_text(check)))
-            }
-            Form::If {
-                check,
-                then,
-                otherwise,
-            } => {
-                line(out, depth, &format!("{prefix}if {} {{", check_text(check)));
-                statements(out, then, depth + 1);
-                if let Some(otherwise) = otherwise {
-                    line(out, depth, "} else {");
-                    statements(out, otherwise, depth + 1);
-                }
-                line(out, depth, "}");
-            }
-            Form::Condition {
-                mode,
-                checks,
-                value,
-            } => {
-                line(out, depth, &format!("{prefix}condition {mode} {{"));
-                for check in checks {
-                    line(out, depth + 1, &format!("{},", check_text(check)));
-                }
-                line(
-                    out,
+                self.canonical.then_some(false),
+            );
+            let handle = &node.handle;
+            let prefix = if node.variable {
+                format!("var {handle} = ")
+            } else {
+                format!("{handle} = ")
+            };
+            match &node.form {
+                Form::Start => line(&mut self.out, depth, &format!("{prefix}start")),
+                Form::Value(value) => line(
+                    &mut self.out,
                     depth,
-                    &value.as_ref().map_or_else(
-                        || "}".into(),
-                        |value| format!("}} with {}", expression(value)),
-                    ),
-                );
-            }
-            Form::Request { method, url, items } => {
-                let start = format!("{prefix}{method} {}", expression(url));
-                if items.is_empty() {
-                    line(out, depth, &start);
-                    continue;
+                    &format!("{prefix}{}", expression(value)),
+                ),
+                Form::Export { value_type, value } => line(
+                    &mut self.out,
+                    depth,
+                    &format!("export {handle}: {value_type} = {}", expression(value)),
+                ),
+                Form::Assert(check) => line(
+                    &mut self.out,
+                    depth,
+                    &format!("{prefix}assert {}", check_text(check, self.checks)),
+                ),
+                Form::If {
+                    check,
+                    then,
+                    otherwise,
+                } => {
+                    line(
+                        &mut self.out,
+                        depth,
+                        &format!("{prefix}if {} {{", check_text(check, self.checks)),
+                    );
+                    self.statements(then, depth + 1);
+                    self.comments(Place::End(Braces::Then(start)), depth + 1);
+                    if let Some(otherwise) = otherwise {
+                        line(&mut self.out, depth, "} else {");
+                        self.statements(otherwise, depth + 1);
+                        self.comments(Place::End(Braces::Else(start)), depth + 1);
+                    }
+                    line(&mut self.out, depth, "}");
                 }
-                line(out, depth, &format!("{start} {{"));
-                for item in items {
-                    let text = match item {
-                        RequestItem::Argument { name, value } => {
-                            format!("argument {} = {}", key(name), expression(value))
-                        }
-                        RequestItem::Headers(value) => format!("headers {}", expression(value)),
-                        RequestItem::Query(value) => format!("query {}", expression(value)),
-                        RequestItem::Body { text, value } => format!(
-                            "body {}{}",
-                            if *text { "text " } else { "" },
-                            expression(value)
+                Form::Condition {
+                    mode,
+                    checks,
+                    value,
+                } => {
+                    line(
+                        &mut self.out,
+                        depth,
+                        &format!("{prefix}condition {mode} {{"),
+                    );
+                    for (index, check) in checks.iter().enumerate() {
+                        self.comments(
+                            Place::Line {
+                                statement: start,
+                                index,
+                            },
+                            depth + 1,
+                        );
+                        line(
+                            &mut self.out,
+                            depth + 1,
+                            &format!("{},", check_text(check, self.checks)),
+                        );
+                    }
+                    self.comments(Place::End(Braces::Lines(start)), depth + 1);
+                    line(
+                        &mut self.out,
+                        depth,
+                        &value.as_ref().map_or_else(
+                            || "}".into(),
+                            |value| format!("}} with {}", expression(value)),
                         ),
-                        RequestItem::Timeout { milliseconds } => {
-                            if milliseconds % 1000.0 == 0.0 {
-                                format!("timeout {}s", milliseconds / 1000.0)
-                            } else {
-                                format!("timeout {milliseconds}ms")
-                            }
-                        }
-                        RequestItem::Contract(name) => format!("contract {}", quote(name)),
-                        RequestItem::Sample { status, value } => {
-                            format!("sample {status} {}", expression(value))
-                        }
-                    };
-                    line(out, depth + 1, &text);
+                    );
                 }
-                line(out, depth, "}");
+                Form::Request { method, url, items } => {
+                    let first = format!("{prefix}{method} {}", expression(url));
+                    if items.is_empty() {
+                        line(&mut self.out, depth, &first);
+                        continue;
+                    }
+                    line(&mut self.out, depth, &format!("{first} {{"));
+                    for (index, item) in items.iter().enumerate() {
+                        self.comments(
+                            Place::Line {
+                                statement: start,
+                                index,
+                            },
+                            depth + 1,
+                        );
+                        line(&mut self.out, depth + 1, &request_item(item));
+                    }
+                    self.comments(Place::End(Braces::Lines(start)), depth + 1);
+                    line(&mut self.out, depth, "}");
+                }
             }
+        }
+    }
+}
+
+fn request_item(item: &RequestItem) -> String {
+    match item {
+        RequestItem::Argument { name, value } => {
+            format!("argument {} = {}", key(name), expression(value))
+        }
+        RequestItem::Headers(value) => format!("headers {}", expression(value)),
+        RequestItem::Query(value) => format!("query {}", expression(value)),
+        RequestItem::Body { text, value } => format!(
+            "body {}{}",
+            if *text { "text " } else { "" },
+            expression(value)
+        ),
+        RequestItem::Timeout { milliseconds } => {
+            if milliseconds % 1000.0 == 0.0 {
+                format!("timeout {}s", milliseconds / 1000.0)
+            } else {
+                format!("timeout {milliseconds}ms")
+            }
+        }
+        RequestItem::Contract(name) => format!("contract {}", quote(name)),
+        RequestItem::Sample { status, value } => {
+            format!("sample {status} {}", expression(value))
         }
     }
 }
@@ -249,9 +437,44 @@ fn check_operand(value: &Expr) -> String {
     }
 }
 
-fn check_text(check: &Check) -> String {
+/// The expression of `check` when it may be written alone (LANG-05): the check
+/// is `expr == true` and `expr` is a comparison or a logical operation that,
+/// written without `== true`, reads back as this same check. Those are `>=`,
+/// `<=`, `&&`, `||` and `!` at its top. A bare value keeps `== true`, and so
+/// does an expression whose own operator is a predicate (`(a == b) == true`).
+fn written_alone(check: &Check) -> Option<&Expr> {
+    if check.predicate != "=="
+        || check.tolerance.is_some()
+        || !check
+            .expected
+            .as_ref()
+            .is_some_and(|e| matches!(e.kind, ExprKind::Literal(serde_json::Value::Bool(true))))
+    {
+        return None;
+    }
+    let mut actual = &check.actual;
+    while let ExprKind::Group(inner) = &actual.kind {
+        actual = inner;
+    }
+    match &actual.kind {
+        ExprKind::Not(_) => Some(actual),
+        ExprKind::Binary { operator, .. }
+            if matches!(operator.as_str(), ">=" | "<=" | "&&" | "||") =>
+        {
+            Some(actual)
+        }
+        _ => None,
+    }
+}
+
+fn check_text(check: &Check, checks: Checks) -> String {
     if matches!(check.predicate.as_str(), "exists" | "nonempty") {
         return format!("{} {}", check.predicate, expression(&check.actual));
+    }
+    if checks == Checks::Short
+        && let Some(alone) = written_alone(check)
+    {
+        return expression(alone);
     }
     let expected = check
         .expected

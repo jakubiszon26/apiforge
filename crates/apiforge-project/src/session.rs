@@ -2,7 +2,8 @@ use crate::{
     Error, Result,
     analysis::{self, Analysis, AnalysisInput, AnalysisTicket, Restored, Target},
     context,
-    document::{AnalysisState, DocumentSession, Unavailable},
+    document::{AnalysisState, DocumentSession, Step, Unavailable},
+    language,
     layout::{FixedPlacer, Placer},
 };
 use apiforge_core::format::Project;
@@ -311,6 +312,9 @@ impl ProjectSession {
         &mut self,
         document_id: &str,
     ) -> Result<apiforge_storage::project::LastValidSnapshot> {
+        if let Some(problem) = self.language_problem() {
+            return Err(problem);
+        }
         self.require_no_held_draft(document_id)?;
         self.require_current_registry()?;
         self.settle(document_id)?;
@@ -394,6 +398,7 @@ impl ProjectSession {
         snapshot: ProjectSnapshot,
         too_large: &HashSet<ProjectPath>,
     ) -> Result<Self> {
+        language::refuse_newer(&manifest)?;
         let diagram_path = ProjectPath::new(DIAGRAM_PATH)?;
         let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
         let diagram = match snapshot.files.get(&diagram_path).and_then(Option::as_deref) {
@@ -465,6 +470,12 @@ impl ProjectSession {
     }
     pub fn epoch(&self) -> u64 {
         self.epoch
+    }
+    /// The problem of a project written in an older language than this
+    /// build's (LANG-15): `check` reports it, and a run is refused with it
+    /// until `apiforge fix` has raised the project's language.
+    pub fn language_problem(&self) -> Option<Error> {
+        language::older(&self.manifest, self.store.root())
     }
     pub fn manifest(&self) -> &ProjectManifest {
         &self.manifest
@@ -654,7 +665,7 @@ impl ProjectSession {
         document.model_source = None;
         document.layout_dirty = false;
         document.fields.clear();
-        document.history = Default::default();
+        document.history.clear();
         let version = document.source_version;
         self.emit(
             origin,
@@ -718,8 +729,10 @@ impl ProjectSession {
         }
     }
 
-    /// Installs a result only when its whole ticket is current. A valid model
-    /// replaces the previous one as a single model-history step.
+    /// Installs a result only when its whole ticket is current. A valid
+    /// result whose text differs from the text the history stands at is one
+    /// step of the history, whether or not the model changed (DIAG-06g): a
+    /// comment or a blank line typed in Code is undone as itself.
     pub fn apply_analysis(&mut self, analysis: Analysis) -> Result<()> {
         let index = self.index(&analysis.ticket.document_id)?;
         if analysis.ticket != self.ticket(index)
@@ -738,10 +751,15 @@ impl ProjectSession {
             Some((model, _)) => {
                 document.analysis = AnalysisState::Valid;
                 document.model_source = Some(document.text().to_owned());
+                let present = document.history.present.replace(document.text().to_owned());
+                if let (Some(text), Some(previous)) = (present, &document.model)
+                    && text != document.text()
+                {
+                    let model = previous.clone();
+                    document.history.record(Step { text, model });
+                }
                 if document.model.as_deref() != Some(&model) {
-                    if let Some(previous) = document.model.replace(Arc::new(model)) {
-                        document.history.record(previous);
-                    }
+                    document.model = Some(Arc::new(model));
                     self.emit(
                         Origin::SESSION,
                         Some(&analysis.ticket.document_id),
@@ -820,11 +838,18 @@ impl ProjectSession {
             .model
             .clone()
             .ok_or(Error::ModelLocked)?;
+        let model = kept_chain(&previous, model);
         if *previous == model {
             return Ok(());
         }
+        let text = self.documents[index].text().to_owned();
         self.install_model(index, model, origin)?;
-        self.documents[index].history.record(previous);
+        let document = &mut self.documents[index];
+        document.history.record(Step {
+            text,
+            model: previous,
+        });
+        document.history.present = Some(document.text().to_owned());
         Ok(())
     }
 
@@ -836,29 +861,40 @@ impl ProjectSession {
         self.step_history(document_id, origin, false)
     }
 
+    /// Steps the history back or forward: the step's text is installed
+    /// exactly as it was, with the model read from it (DIAG-06g). A Code edit
+    /// not yet settled is settled first, so that it is a step of its own and
+    /// is what the Undo takes back.
     fn step_history(&mut self, document_id: &str, origin: Origin, undo: bool) -> Result<bool> {
         let index = self.index(document_id)?;
+        if self.documents[index].unavailable.is_none()
+            && self.documents[index].conflict.is_none()
+            && self.documents[index].analysis == AnalysisState::Pending
+        {
+            self.analyse_now(index)?;
+        }
         if !self.documents[index].accepts_model_edits() {
             return Err(Error::ModelLocked);
         }
         let history = &mut self.documents[index].history;
-        let Some(model) = (if undo {
+        let Some(step) = (if undo {
             history.undo.pop()
         } else {
             history.redo.pop()
         }) else {
             return Ok(false);
         };
-        let current = self.documents[index]
-            .model
-            .clone()
-            .ok_or(Error::ModelLocked)?;
-        if let Err(error) = self.install_model(index, (*model).clone(), origin) {
+        let document = &self.documents[index];
+        let current = Step {
+            text: document.text().to_owned(),
+            model: document.model.clone().ok_or(Error::ModelLocked)?,
+        };
+        if let Err(error) = self.install_step(index, &step, origin) {
             let history = &mut self.documents[index].history;
             if undo {
-                history.undo.push(model);
+                history.undo.push(step);
             } else {
-                history.redo.push(model);
+                history.redo.push(step);
             }
             return Err(error);
         }
@@ -870,6 +906,54 @@ impl ProjectSession {
             history.undo.push(current);
         }
         Ok(true)
+    }
+
+    /// Installs a step of the history: its text byte for byte, and the model
+    /// read from that text with the step's identities and positions
+    /// (KTLO-26). A text that no longer reads as valid in the project's
+    /// current context is refused and nothing changes.
+    fn install_step(&mut self, index: usize, step: &Step, origin: Origin) -> Result<()> {
+        let target = self.target(&self.documents[index].entry);
+        let (diagnostics, omitted, model) = analysis::derive_counted(
+            &target,
+            &step.text,
+            &self.context,
+            Some(&step.model),
+            None,
+            self.placer.as_ref(),
+        );
+        let (model, _) = model.ok_or(Error::InvalidModel)?;
+        let document = &mut self.documents[index];
+        let document_id = document.entry.document_id.clone();
+        document.model = Some(Arc::new(model));
+        document.model_source = Some(step.text.clone());
+        document.history.present = Some(step.text.clone());
+        document.diagnostics = diagnostics;
+        document.omitted_diagnostics = omitted;
+        if document.text() == step.text {
+            document.layout_dirty = true;
+        } else {
+            document.set_text(step.text.clone());
+            document.source_version += 1;
+            let version = document.source_version;
+            self.emit(
+                origin,
+                Some(&document_id),
+                EventKind::SourceChanged {
+                    source_version: version,
+                },
+            );
+        }
+        self.seal_valid(index);
+        let version = self.documents[index].source_version;
+        self.emit(
+            origin,
+            Some(&document_id),
+            EventKind::ModelChanged {
+                source_version: version,
+            },
+        );
+        Ok(())
     }
 
     fn install_model(&mut self, index: usize, model: Document, origin: Origin) -> Result<()> {
@@ -1232,6 +1316,11 @@ impl ProjectSession {
             kind: entry.kind,
             entity_id: entry.entity_id.clone(),
             revision: working_revision(&self.manifest, entry),
+            stored: false,
+            older: crate::language::support(
+                self.manifest.language(),
+                crate::language::LANGUAGE_VERSION,
+            ) == crate::language::Support::Older,
         }
     }
 
@@ -1263,19 +1352,16 @@ impl ProjectSession {
 }
 
 fn empty_manifest(name: &str) -> ProjectManifest {
-    ProjectManifest {
-        format_version: 1,
-        id: uuid::Uuid::new_v4().to_string(),
-        name: name.into(),
-        environment: apiforge_core::format::Environment {
+    language::new_manifest(
+        uuid::Uuid::new_v4().to_string(),
+        name.into(),
+        apiforge_core::format::Environment {
             base_url: String::new(),
             variables: Default::default(),
             secret_names: Vec::new(),
         },
-        contracts: Vec::new(),
-        documents: Vec::new(),
-        revisions: Vec::new(),
-    }
+        Vec::new(),
+    )
 }
 
 /// A working component carries the revision its next publication would get.
@@ -1358,10 +1444,24 @@ fn load_tolerating_large_sources(
     Ok((manifest, snapshot, too_large))
 }
 
+/// Whether `root` has a manifest. One of a project written in a newer
+/// language is refused here, before a store opens for writing (LANG-15);
+/// one that cannot be read is the load's to report.
 fn has_manifest(root: &Path) -> Result<bool> {
     let probe = ProjectStore::open_read_only(root)?;
     let path = ProjectPath::new(MANIFEST_PATH)?;
-    Ok(probe.read(std::slice::from_ref(&path))?.files[&path].is_some())
+    let Some(bytes) = probe
+        .read(std::slice::from_ref(&path))?
+        .files
+        .remove(&path)
+        .flatten()
+    else {
+        return Ok(false);
+    };
+    if let Ok(manifest) = ProjectManifest::from_bytes(&bytes) {
+        language::refuse_newer(&manifest)?;
+    }
+    Ok(true)
 }
 
 /// Keeps local session data out of Git: appends the rule to an existing
@@ -1395,4 +1495,24 @@ pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChang
         expected: FileState::of(&bytes),
         bytes: next,
     }])
+}
+
+/// A board edit keeps the chain of the written language (LANG-13): each
+/// graph of the edited model is rebuilt by [`apiforge_core::chain::edited`],
+/// and the first step placed in a scenario's main flow without a *Start*
+/// gets one written above it, as rule 1 and the fix of a file require. A
+/// component needs no *Start*.
+fn kept_chain(previous: &Document, mut model: Document) -> Document {
+    use apiforge_core::chain::{edited, with_start};
+    match (previous, &mut model) {
+        (Document::Scenario(before), Document::Scenario(after)) => {
+            after.cleanup = edited(&before.cleanup, &after.cleanup);
+            after.graph = with_start(&edited(&before.graph, &after.graph), &[&after.cleanup]);
+        }
+        (Document::Component(before), Document::Component(after)) => {
+            after.graph = edited(&before.graph, &after.graph);
+        }
+        _ => {}
+    }
+    model
 }

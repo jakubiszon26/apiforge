@@ -638,10 +638,11 @@ fn lay26_criterion_6_the_rule_is_the_boards() {
 #[test]
 fn lay26_criterion_7_errors_come_first() {
     let broken = fixture("far-value").replacen(
-        "  @after(cart)\n",
-        "  broken = unknown_step.value\n  @after(cart)\n",
+        "  quantity = PATCH",
+        "  broken = unknown_step.value\n  quantity = PATCH",
         1,
     );
+    assert_ne!(broken, fixture("far-value"), "the error is written");
     let (_project, harness, id) = in_code(&broken, WIDE);
     let all = diagnostics(&harness, &id);
     assert!(
@@ -650,20 +651,47 @@ fn lay26_criterion_7_errors_come_first() {
     );
     assert!(warnings(&harness, &id).is_empty(), "no far read beside it");
 
-    // 990 comments that belong to no statement, then fifteen far reads: the
-    // list keeps a thousand. The window's own session analyses it, without
-    // drawing a thousand rows, which a debug build on a slow runner cannot
-    // settle in time.
-    let mut full = fixture("far-value");
-    for index in 0..990 {
-        full.push_str(&format!("// note {index}\n"));
+    // 990 warnings, then fifteen far reads: the list keeps a thousand. A
+    // free comment gives no warning since LANG-06 and a scenario cannot hold
+    // 990 other warnings within the graph's limits, so the 990 come from the
+    // host before the window's far reads, as warnings of the source would.
+    // The window's own session analyses it, without drawing a thousand rows,
+    // which a debug build on a slow runner cannot settle in time.
+    use apiforge_project::Placer;
+    struct Crowded(super::super::placement::CardPlacer);
+    impl Placer for Crowded {
+        fn place(
+            &self,
+            document: &mut apiforge_script::Document,
+            fresh: &[String],
+            context: &Project,
+        ) {
+            self.0.place(document, fresh, context);
+        }
+        fn arrange(&self, document: &mut apiforge_script::Document, context: &Project) -> bool {
+            self.0.arrange(document, context)
+        }
+        fn advise(
+            &self,
+            tree: &apiforge_script::SyntaxTree,
+            document: &apiforge_script::Document,
+            context: &Project,
+        ) -> Vec<Diagnostic> {
+            let filler = (0..990).map(|_| Diagnostic {
+                severity: Severity::Warning,
+                ..Diagnostic::error(0..0, "A warning before the far reads")
+            });
+            filler
+                .chain(self.0.advise(tree, document, context))
+                .collect()
+        }
     }
     let project = crate::testing::shop_project();
-    fs::write(project.path().join(SCENARIO), &full).unwrap();
+    fs::write(project.path().join(SCENARIO), fixture("far-value")).unwrap();
     fs::remove_file(project.path().join(DIAGRAM)).unwrap();
-    let placer = super::super::placement::CardPlacer::new(
+    let placer = Crowded(super::super::placement::CardPlacer::new(
         super::super::placement::DensityHandle::new(crate::canvas::CardDensity::Full),
-    );
+    ));
     let session =
         apiforge_project::ProjectSession::open_with(project.path(), Arc::new(placer)).unwrap();
     let document = session

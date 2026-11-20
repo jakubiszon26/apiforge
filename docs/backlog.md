@@ -470,20 +470,38 @@ been paused since 2026-11-17, except what LAY needed (RUN-03 #389, DIAG-07
 #392, LANG-14 #390). The plan, the order and the decisions
 are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
 
-- To the 0.2.0 release, in merge order: FIX-01 #454 (a REQ ticket, first
-  because its scenario is a case for the fix), RUN-01 #126, LANG-15 #412
-  (ships with `LANGUAGE_VERSION = 1`), LANG-13 #386; then side by side
-  LANG-20 [#481](https://github.com/jakubiszon26/apiforge/issues/481) (split from LANG-13 on 2026-11-20: `apiforge fix
-  --folder`, the MCP tool `fix`, the manifest raised, `LANGUAGE_VERSION =
-  2`), DIAG-06 #391 and LANG-06 #143 with KTLO-37 #211; then LANG-05 #142;
-  then REL-05 #414. The first four are being implemented on 2026-11-20.
-  About 110 owner minutes without DIAG-06. LANG-12 #385 is closed as
-  replaced by LANG-13.
-- Waiting for the owner (`decision-needed`): DIAG-06 #391, whose mock-up
-  and twelve questions are on the issue with the proposed order LAY-45 →
-  DIAG-06a → DIAG-06b → LAY-13; LANG-05 #142, which changes the canonical
-  form of a check; LANG-21 [#482](https://github.com/jakubiszon26/apiforge/issues/482), a candidate — the window offers
-  *Update the project* for a project in the older language.
+- Merged on 2026-11-20: FIX-01 #454 (#485), RUN-01 #126 (#487), LANG-15
+  #412 (#486), and beside the sprint #474, #476 (plans and process) and
+  #484 (CI).
+- To the 0.2.0 release. After four independent reviews of the ticket
+  files on 2026-11-20 the tickets around the project update, the
+  board's edits and the window's offer were split so that each is `S` or
+  `M` and each shared rule has one owner; the table is in
+  [sprints/lang.md](sprints/lang.md#after-the-reviews-of-2026-11-20-the-tickets-as-split).
+  In merge order: LANG-13 #386 (pull request #488; it also makes the
+  build read language 2); then side by side LANG-06 #143 with KTLO-37
+  #211, LANG-05 #142, LAY-45 [#468](https://github.com/jakubiszon26/apiforge/issues/468), LANG-20a [#481](https://github.com/jakubiszon26/apiforge/issues/481) (the record of
+  converted sources), LANG-20e [#500](https://github.com/jakubiszon26/apiforge/issues/500) (the store's read set) and
+  DIAG-06g [#502](https://github.com/jakubiszon26/apiforge/issues/502) (Undo restores the file); then DIAG-06e [#494](https://github.com/jakubiszon26/apiforge/issues/494)
+  (delete), LANG-20d [#499](https://github.com/jakubiszon26/apiforge/issues/499) (sources come and go) and LANG-20b
+  [#497](https://github.com/jakubiszon26/apiforge/issues/497) (`apiforge fix`); then LANG-20f [#501](https://github.com/jakubiszon26/apiforge/issues/501), LANG-20c [#498](https://github.com/jakubiszon26/apiforge/issues/498)
+  and DIAG-06a #391; then LANG-21a [#482](https://github.com/jakubiszon26/apiforge/issues/482) (the window offers *Update
+  the project*) and DIAG-06d [#493](https://github.com/jakubiszon26/apiforge/issues/493); then DIAG-06c [#490](https://github.com/jakubiszon26/apiforge/issues/490) and
+  DIAG-06f [#496](https://github.com/jakubiszon26/apiforge/issues/496); then REL-05 #414. Not conditions of the release:
+  DIAG-06b [#491](https://github.com/jakubiszon26/apiforge/issues/491) and LANG-21b [#495](https://github.com/jakubiszon26/apiforge/issues/495). About 330 owner minutes
+  ahead; the owner kept the whole scope on 2026-11-20. LANG-12 #385 is
+  closed as replaced by LANG-13; LAY-13 #297 (bands) comes after 0.2.0.
+- Decided by the owner on 2026-11-20 and recorded on the issues: the two
+  questions of LANG-13 (#386), LANG-05 (#142), LANG-21 (#482: in 0.2.0,
+  its mock-up, the window converts what it can and takes a file that is
+  ready as written), the sixteen questions of DIAG-06 (#391), the keys
+  of DIAG-06b (#491), delete, paste and duplicate (#494, #496), and the
+  project update (#481: file by file, with a record; a board edit in a
+  source not yet converted is refused; #499: a restore converts when it
+  can). Nothing of the first half waits for a decision; the split
+  tickets are labelled as the independent review rules on each.
+- Beside the sprint: [#489](https://github.com/jakubiszon26/apiforge/issues/489), a Windows timing failure of one `mcp08b`
+  test, rerun once and noted there until its cause is read.
 - After it: LANG-16 #413 (part B of LANG-00), then LANG-01 #127 with
   LANG-09 #353, LANG-08 #352 with LANG-07 #212 and LANG-17, LANG-02 #129
   with LANG-04 #132 and LANG-19, LANG-18, LANG-03 #131.
@@ -495,8 +513,6 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   an invented name, one check for several fields (with LANG-02 #129 and
   LANG-04 #132). Their format questions return to the owner with the
   analyses.
-- FIX-01 [#454](https://github.com/jakubiszon26/apiforge/issues/454), the reference scenario of that shape, can be taken
-  before LANG-13: its sixteen `@after` lines are a case for the fix.
 
 ## Next sprint: REQ (not started)
 
@@ -507,9 +523,10 @@ panel, a response folded behind clicks, and no view whose unit is one
 request. The findings, causes, mock-ups and decisions are in
 [`docs/sprints/req.md`](sprints/req.md); the issues carry `sprint:req`.
 It follows LANG part A and is designed for the written-order chain of
-LANG-13. Four of its tickets do not depend on the language and are ready
-now (FIX-01, then DIAG-02 and REP-08, then REP-07); they wait for the
-owner to open the sprint or to pull them forward.
+LANG-13. FIX-01 merged on 2026-11-20 (#485), ahead of the sprint, as a
+case for LANG-13's fix. Three more of its tickets do not depend on the
+language and are ready now (DIAG-02 and REP-08, then REP-07); they wait
+for the owner to open the sprint or to pull them forward.
 
 Capacity: **235** owner review minutes over the 12 tickets decided on
 2026-11-19, and about **75** more for the four proposals the owner
@@ -535,9 +552,9 @@ criteria:
 
 | Issue | Ticket | Estimate · risk | State |
 | --- | --- | --- | --- |
-| [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 A reference scenario of independent negative requests (`labels`) | S · 5 | `ready:opus` |
-| [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 A check reads the same everywhere and says what it compares | M · 15 · `visible UI`, `removal` | `ready:opus` · after FIX-01 |
-| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` · after FIX-01 |
+| [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 A reference scenario of independent negative requests (`labels`) | S · 5 | merged in #485 (2026-11-20) |
+| [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 A check reads the same everywhere and says what it compares | M · 15 · `visible UI`, `removal` | `ready:opus`; not open together with LAY-45, DIAG-06a or DIAG-06c (`canvas/`) |
+| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` |
 | [#381](https://github.com/jakubiszon26/apiforge/issues/381) | REP-07 Run results: a request with its checks under it | M · 25 · `visible UI`, `default` | `ready:opus` · after DIAG-02 and REP-08 |
 | [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 The Steps view and the request beside its response: captures and decisions | S · 30 · `visible UI`, `default` | the planning model's; after LANG-13 |
 | [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01 Diagram → Steps | M · 30 · `visible UI` | waits for REQ-00's captures |

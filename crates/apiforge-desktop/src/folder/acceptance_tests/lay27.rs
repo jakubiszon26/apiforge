@@ -267,7 +267,7 @@ struct Seen {
 /// Criterion 7, on every card in view below 45 %: a card that writes its
 /// name and whose pill has no room writes the numbers, whole and muted (red
 /// where a check failed), at least 9 px high, at the right end of the name's
-/// row, over no badge, chip, count, arrow, mark or port; the name keeps 22 px
+/// row, over no badge, chip, count, mark or port; the name keeps 22 px
 /// before its ellipsis, or the list loses numbers from its end and ends with
 /// `…`, the first kept. A pill reads the numbers before the words, or alone
 /// when the text is wider than the card. A card that writes no name gets
@@ -288,9 +288,6 @@ fn assert_numbers_below_45(harness: &FolderHarness, context: &str) -> Seen {
     }
     for count in board.debug_counts() {
         obstacles.push(("a count".to_owned(), board.debug_to_screen(count.world)));
-    }
-    for arrow in board.debug_arrows() {
-        obstacles.push((format!("the arrow into {}", arrow.target), arrow.rect));
     }
     for mark in board.debug_var_marks() {
         obstacles.push(("a + var mark".to_owned(), mark.rect));

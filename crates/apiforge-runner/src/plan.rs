@@ -200,6 +200,27 @@ fn reachable_from<'a>(
             }
         }
     }
+    // Checks and values run when what they read exists, wherever they stand
+    // (LANG-13): one that reads nothing from a step, or only reached ones, is
+    // on the path too. A component's export of an input is one. Only data
+    // statements are added, so no request or call is enabled by it.
+    loop {
+        let before = reachable.len();
+        for node in &graph.nodes {
+            let id = node.id.as_str();
+            if node.kind.is_data()
+                && !reachable.contains(id)
+                && dependencies
+                    .get(id)
+                    .is_none_or(|sources| sources.iter().all(|source| reachable.contains(source)))
+            {
+                reachable.insert(id);
+            }
+        }
+        if reachable.len() == before {
+            break;
+        }
+    }
     reachable
 }
 

@@ -6,7 +6,6 @@ component Lookup "Look up a product" {
   input "other key": string = "default"
   action productId
   begin = start
-  @after(begin)
   response = GET "/products/{{param.productId}}" {
     timeout 5s
     sample 200 { id: "p-1", name: "Example" }

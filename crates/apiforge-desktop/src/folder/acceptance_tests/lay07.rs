@@ -348,17 +348,20 @@ fn lay07_criterion_3_the_running_step_is_marked_apart_from_the_selection() {
 fn lay07_criterion_4_stale_results_are_told_from_current_ones() {
     let (_project, mut harness, gate) = open(&fixture("shop-30"), WIDE, false);
     simulate(&mut harness, &gate);
-    show(&mut harness, "cart_view", 0.6);
+    show(&mut harness, "address", 0.6);
     let before = result_line(&harness, "address");
     assert!(before.text.starts_with("HTTP 200"), "{before:?}");
 
     run_until_started(&mut harness, &gate, "cart_view");
-    // Reached: this run's result, in its own colour.
+    // Reached: this run's result, in its own colour. Since LANG-13 `address`
+    // follows `cart_view`, so the board is brought to each card in turn.
+    show(&mut harness, "cart", 0.6);
     let cart = result_line(&harness, "cart");
     assert!(cart.text.starts_with("HTTP 201"), "{cart:?}");
     assert_eq!(cart.color, theme::SUCCESS);
     assert_eq!(badge(&harness, "cart").state, BadgeState::Order);
     // Not reached: the previous run's result, muted and marked.
+    show(&mut harness, "address", 0.6);
     let address = result_line(&harness, "address");
     assert_eq!(
         address.text,
@@ -369,7 +372,7 @@ fn lay07_criterion_4_stale_results_are_told_from_current_ones() {
     assert_eq!(badge(&harness, "address").state, BadgeState::Pending);
 
     finish(&mut harness, &gate);
-    show(&mut harness, "cart_view", 0.6);
+    show(&mut harness, "address", 0.6);
     let after = result_line(&harness, "address");
     assert!(after.text.starts_with("HTTP 200"), "{after:?}");
     assert_eq!(after.color, theme::SUCCESS, "current again");
