@@ -48,9 +48,10 @@ Only the command or an agent's `fix` converts the project.
   tabs says so on every tab and in every mode and carries *Update the
   project*.
 - New (question 2, and question 2 = A on #481): the button writes
-  nothing. It makes LANG-20's plan and opens one dialog with two parts:
-  **what will change**, per file, and **what is left to place by hand**,
-  per file with its statements; either part is absent when it is empty.
+  nothing. It makes LANG-20b's plan and opens one dialog with up to
+  three parts: **what will change**, per file; **what is left to do by
+  hand**, per file with its statements; and **already updated, with
+  errors**. A part is absent when it is empty.
   Its button reads *Update N files* and converts those; *Finish the
   update* when nothing is left to convert and every file is updated; no
   button when neither applies.
@@ -95,7 +96,7 @@ Only the command or an agent's `fix` converts the project.
 Approved on #482: views 1, 2, 3a, 3b, 4a, 4b and 5 at 960 × 540 and
 1600 × 1000 (`docs/qa/2026-11-20/LANG-21/` on the branch
 `mock/lang-21-update-project`, `b3b9410`). View 1b was not chosen. Views
-3a and 4a are built as the two parts of one dialog (question 2 = A on
+3a and 4a are built as parts of one dialog (question 2 = A on
 #481); the band's third state, *being updated*, has no view. The pull
 request shows release captures of every view, of the two-part dialog on
 the partly convertible project and of that band, for acceptance.
@@ -160,7 +161,10 @@ blocked.
 5. With unsaved work the dialog names what is unsaved first — files and
    settings — and its button reads *Save all and update* (or *Save all
    and finish*). It runs the window's **Save all as it is today** (which
-   goes on after a file that fails) and then LANG-20f's update after a
+   goes on after a file that fails; `save_all_then` in
+   `folder/saving.rs` answers only yes or no today — this ticket makes it
+   hand on what the session's save reports for each path, which is
+   LANG-20f's) and then LANG-20f's update after a
    save, to which it hands what the save wrote:
    the plan is made again from the disk and committed only when it would
    write exactly what the dialog showed; the settings just saved are in
@@ -205,7 +209,7 @@ blocked.
    banner with the same button beside it.
    Tests: P `lang21_criterion_9_*`, D `lang21_criterion_9_*`.
 10. Accessible names of the band in its three states and of the dialog's
-   two parts are distinct (#235); everything is reachable by keyboard.
+   parts are distinct (#235); everything is reachable by keyboard.
    Test: `accessibility_tests`, D `lang21_criterion_10`.
 
 ## Which plan the window shows
