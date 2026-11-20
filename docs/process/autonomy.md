@@ -22,6 +22,15 @@ below holds; an agent that finds one does not hold stops and escalates.
 A ticket with `decision-needed`, with an open question in its analysis, or
 whose criteria say "probably" is never labelled.
 
+A ticket with a `format` flag that the planning model labels because the
+owner's decision covers it is first read by a second model that did not
+write it — the ticket file against the code, for what the criteria miss —
+and the label's comment on the issue names that review and what it
+changed. Introduced on 2026-11-20: the review of the LANG tickets after
+they were labelled found a rule the runner did not follow, a requirement
+that contradicted an earlier decision, and a conversion that could not be
+resumed.
+
 ## Picking a ticket
 
 Told to pick a ticket and work, the agent:
