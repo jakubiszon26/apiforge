@@ -458,7 +458,11 @@ fn lang20_criterion_4_an_unreadable_source_is_named_under_its_heading() {
         block(&root);
         match unreadable {
             "missing" => fs::remove_file(root.join(BOOKING_DAY)).unwrap(),
-            "syntax" => write(&root, BOOKING_DAY, "scenario \"Broken\" {\n  first = GET\n"),
+            "syntax" => write(
+                &root,
+                BOOKING_DAY,
+                "scenario \"Broken\" {\n  first = GET ]\n}\n",
+            ),
             _ => {
                 let mut text = read(&root, BOOKING_DAY);
                 text.push_str(&format!("// {}\n", "x".repeat(1024 * 1024)));
@@ -619,7 +623,8 @@ fn lang20_criterion_8_a_held_project_is_refused_as_apply_is() {
         let output = fix(&root);
         assert_eq!(output.status.code(), Some(1), "{}", both(&output));
         assert!(stderr(&output).contains(HELD), "{}", stderr(&output));
-        write(&root, "replacement.afs", &read(&root, DOUBLE_BOOKING));
+        let replacement = root.with_file_name("replacement.afs");
+        fs::write(&replacement, read(&root, DOUBLE_BOOKING)).unwrap();
         let apply = apiforge(
             &[
                 "apply",
@@ -627,7 +632,7 @@ fn lang20_criterion_8_a_held_project_is_refused_as_apply_is() {
                 "{root}",
                 "--file",
                 DOUBLE_BOOKING,
-                &root.join("replacement.afs").display().to_string(),
+                &replacement.display().to_string(),
             ],
             &root,
         );
