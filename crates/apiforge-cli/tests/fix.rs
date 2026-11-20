@@ -55,7 +55,8 @@ fn project() -> (tempfile::TempDir, PathBuf) {
     (directory, root)
 }
 
-/// Every file under `root`, local data included.
+/// Every file under `root`, local data included; the writer's lock file by
+/// its length, since Windows cannot read a held lock file.
 fn tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     fn walk(root: &Path, directory: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>) {
         for entry in fs::read_dir(directory).unwrap() {
@@ -64,7 +65,12 @@ fn tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
                 walk(root, &path, files);
             } else {
                 let relative = path.strip_prefix(root).unwrap().to_owned();
-                files.insert(relative, fs::read(&path).unwrap());
+                let bytes = if path.file_name() == Some("project.lock".as_ref()) {
+                    fs::metadata(&path).unwrap().len().to_le_bytes().to_vec()
+                } else {
+                    fs::read(&path).unwrap()
+                };
+                files.insert(relative, bytes);
             }
         }
     }
