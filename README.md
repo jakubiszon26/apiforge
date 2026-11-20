@@ -240,11 +240,9 @@ version 2. The release notes on GitHub list the merged pull requests.
   board cross each other more often than before: 147 times with checks
   folded and 192 with checks drawn, until
   [LAY-47 (#506)](https://github.com/jakubiszon26/apiforge/issues/506).
-- Two layout tests are ignored for tickets outside this release: a routing
+- One layout test is ignored for a ticket outside this release: a routing
   that fails about one run in five
-  ([LAY-36, #419](https://github.com/jakubiszon26/apiforge/issues/419)),
-  and two chips a pixel too wide, which waits for an owner's decision
-  (LAY-39).
+  ([LAY-36, #419](https://github.com/jakubiszon26/apiforge/issues/419)).
 
 ## Documentation
 
