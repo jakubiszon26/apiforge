@@ -44,6 +44,11 @@ Numbered, each one testable by a person at the window or by a test.
 ## Not in scope
 What this ticket deliberately leaves out, and which ticket takes it.
 
+## Proposals beyond the request
+The planning model's [own proposals](#the-planning-models-own-proposals),
+one row each: problem solved · size and risk · trade-offs · where it would
+go. Or "none". A ticket of size S may leave the section out.
+
 ## Technical appendix (optional)
 Crates and files touched, reuse of existing code, open technical questions.
 The owner is not expected to read this section.
@@ -75,6 +80,19 @@ one-ticket analysis is the first commit of the ticket's own pull request.
 An analysis that stops at a decision the owner has not yet taken leaves the
 draft open with the `decision-needed` label on the issue; the branch waits,
 nothing else is started on it.
+
+## A rule several tickets share has one owner
+
+When several tickets depend on one rule — what a conversion may write
+and under which reading, where a step may be placed, what a deletion
+takes with it — the rule is written in **one** ticket, which the others
+name and call; no second ticket restates it in its own words. That
+ticket is analysed and reviewed first, by the model that writes it and
+by a second one ([autonomy](autonomy.md#what-makes-a-ticket-ready)),
+before the tickets around it are written. Introduced on 2026-11-20: the
+LANG tickets for updating a project each described the same plan and
+commit, differently; three rounds of review found the defects on the
+seams between them, not inside any one.
 
 ## Mock-ups
 
@@ -132,6 +150,34 @@ The question is one paragraph: the decision, the recommendation, the
 consequence of each option for the person at the window. Technical reasoning
 goes below the fold.
 
+## The planning model's own proposals
+
+The owner is not the only source of features. An analysis answers what was
+raised; it also asks what the person was trying to get done and whether
+something else would get it done better. The analysis of the owner's run
+of 2026-11-19 placed ten findings about views and proposed nothing of its
+own, while the scenario in front of it repeated one request sixteen times:
+a table of cases would save more than any view, and the owner had to name
+it.
+
+An analysis of a sprint, of the owner's findings or of a ticket above `S`
+therefore ends with a section of the planning model's proposals beyond the
+points raised — a feature, an optimisation, or a simplification that
+removes the need for the thing asked. Each says in a row:
+
+- the problem it solves, in terms of the owner's time or mistakes;
+- its size and risk flags, by [estimation](estimation.md);
+- its trade-offs, including what it makes unnecessary and what it costs
+  elsewhere;
+- where it would go: the current sprint, a named later one, or "later".
+
+The strongest become candidate issues, labelled `decision-needed`, whose
+status line says they are proposed and not decided. A proposal is never
+scheduled, labelled `ready:*` or built without the owner's decision, and it
+does not widen the ticket under analysis. An analysis that finds nothing
+worth proposing says so in one line; a one-ticket analysis of size `S` may
+leave the section out.
+
 ## Analysis checklist
 
 Before asking for approval:
@@ -145,5 +191,9 @@ Before asking for approval:
 - [ ] The estimate follows [estimation](estimation.md) and an `L` is split.
 - [ ] Every stop condition was checked and the owner's decisions are recorded
       in the ticket.
+- [ ] The planning model's [own proposals](#the-planning-models-own-proposals)
+      are in the analysis, or it says there are none, and the strongest are
+      candidate issues (a one-ticket analysis of size `S` may leave them
+      out).
 - [ ] The analysis was written by the model the [process](README.md#which-model-does-what)
       assigns to it.

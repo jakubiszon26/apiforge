@@ -370,6 +370,12 @@ pub struct Compact {
 }
 
 pub const COMPACT_HEADER: f32 = 40.0;
+/// The title line of a card (LAY-45), where the sockets of its order sit on
+/// its sides: within the header row of a compact card and of a full one
+/// alike, so that the line between two neighbours of a row, *Start* and a
+/// compact card among them, is level; and a socket's gap above the highest
+/// data socket of a compact card's side, a line's gap (46 px).
+const TITLE_LINE: f32 = 26.0;
 pub const COMPACT_ROW: f32 = 24.0;
 const COMPACT_SUBTITLE: f32 = 22.0;
 const COMPACT_RESULT: f32 = 26.0;
@@ -682,7 +688,8 @@ impl Card {
     /// deepest row containing it), or of the ordering input for [`ORDER_PORT`].
     pub fn input_anchor(&self, name: &str, path: &[String]) -> Option<Pos2> {
         if name == ORDER_PORT {
-            return (self.kind != NodeKind::Start).then(|| self.origin + vec2(WIDTH / 2.0, 0.0));
+            return (self.kind != NodeKind::Start)
+                .then(|| self.origin + vec2(0.0, self.title_line()));
         }
         let index = self
             .inputs
@@ -714,6 +721,9 @@ impl Card {
     /// Anchor of a data output or a control pseudo-port; `None` for an output
     /// a compact card does not show.
     pub fn output_anchor(&self, name: &str) -> Option<Pos2> {
+        if name == ORDER_PORT && self.controls.iter().any(|(port, _)| *port == ORDER_PORT) {
+            return Some(self.origin + vec2(WIDTH, self.title_line()));
+        }
         if let Some(compact) = &self.compact {
             if let Some(index) = self.controls.iter().position(|(port, _)| *port == name) {
                 return Some(self.origin + vec2(self.control_x(index), compact.height));
@@ -728,6 +738,12 @@ impl Card {
         }
         let index = self.outputs.iter().position(|row| row.name == name)?;
         Some(self.origin + vec2(WIDTH, self.output_y(index)))
+    }
+
+    /// The height of the card's title line from its origin, where the
+    /// sockets of its order sit on its sides (LAY-45).
+    pub fn title_line(&self) -> f32 {
+        TITLE_LINE
     }
 
     /// Where a control socket sits across the card's bottom edge: the middle

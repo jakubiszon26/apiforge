@@ -152,13 +152,16 @@ fn lay01_criterion_4_the_guide_names_the_command_beside_the_benchmark() {
 /// Since LAY-06 each scenario is measured as the desktop tidies it, at the
 /// compact and the full density, with its checks collapsed and expanded;
 /// since LAY-23 `fan-out` is one of them, and each is measured once more at
-/// the compact density with chips.
+/// the compact density with chips; since FIX-01 `labels` is one of them.
 #[test]
 fn lay01_criterion_6_the_fixtures_are_measured() {
     let rows = table(report(), "scenario");
     let mut names: Vec<&str> = rows.iter().map(|row| row["scenario"].as_str()).collect();
     names.dedup();
-    assert_eq!(names, ["order-flow", "shop-30", "shop-50", "fan-out"]);
+    assert_eq!(
+        names,
+        ["order-flow", "shop-30", "shop-50", "fan-out", "labels"]
+    );
     for name in names {
         let mut variants: Vec<(&str, &str, &str)> = rows
             .iter()
@@ -187,7 +190,7 @@ fn lay01_criterion_6_the_fixtures_are_measured() {
     }
     let mut steps: Vec<f64> = rows.iter().map(|row| number(row, "steps")).collect();
     steps.dedup();
-    assert_eq!(steps, [14.0, 30.0, 56.0, 26.0]);
+    assert_eq!(steps, [14.0, 30.0, 56.0, 26.0, 50.0]);
     for row in &rows {
         for column in [
             "wires",
@@ -217,7 +220,7 @@ fn lay01_criterion_6_the_fixtures_are_measured() {
 #[test]
 fn lay03_criterion_3_no_reference_board_is_packed() {
     let rows = table(report(), "scenario");
-    assert_eq!(rows.len(), 24);
+    assert_eq!(rows.len(), 30);
     for row in &rows {
         assert_eq!(number(row, "packed"), 0.0, "{row:?}");
         assert_eq!(number(row, "incomplete"), 0.0, "{row:?}");
@@ -238,7 +241,7 @@ fn lay03_criterion_3_no_reference_board_is_packed() {
 #[test]
 fn lay31_criterion_7_quality_measures_the_groups() {
     let rows = table(report(), "scenario");
-    assert_eq!(rows.len(), 24);
+    assert_eq!(rows.len(), 30);
     for row in &rows {
         assert!(number(row, "hung") >= 0.0, "{row:?}");
         assert!(number(row, "intruders") >= 0.0, "{row:?}");
@@ -249,4 +252,27 @@ fn lay31_criterion_7_quality_measures_the_groups() {
             assert_eq!(number(row, "gap_worst"), 24.0, "{row:?}");
         }
     }
+}
+
+/// LAY-45 criterion 8: `quality` prints the crossings of every reference
+/// board by kind, data lines with each other and the chain of steps with a
+/// data line, and the chain is drawn in both modes: a board with every wire
+/// shows crossings of the chain where data lines pass through its rows.
+#[test]
+fn lay45_criterion_8_quality_prints_the_two_kinds_of_crossing() {
+    let rows = table(report(), "scenario");
+    assert_eq!(rows.len(), 30);
+    for row in &rows {
+        assert!(number(row, "data_data") >= 0.0, "{row:?}");
+        assert!(number(row, "chain_data") >= 0.0, "{row:?}");
+        assert!(
+            number(row, "data_data") + number(row, "chain_data") <= number(row, "crossings"),
+            "{row:?}"
+        );
+    }
+    assert!(
+        rows.iter()
+            .any(|row| row["drawn"] == "all" && number(row, "chain_data") > 0.0),
+        "the chain crosses data lines somewhere"
+    );
 }

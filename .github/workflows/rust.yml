@@ -1,19 +1,26 @@
 name: CI
 
-# #407: a pull request runs Linux once; Windows runs on a push to main, on a
-# pull request labelled `ci:windows`, and by hand (workflow_dispatch).
+# #407, #483: a pull request runs Linux once; a push to main runs Linux. Windows
+# runs on a pull request labelled `ci:windows`, by hand (workflow_dispatch, both
+# systems), and each night on main when something other than documentation
+# changed since main's last green Windows run. release.yml tests Windows on
+# every release tag.
 on:
   push:
     branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+  schedule:
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 # A newer commit on the same pull request cancels the older run; main's runs
 # all finish. Adding any label other than `ci:windows` gets a group of its own,
-# so it cancels nothing, and its job is skipped below.
+# so it cancels nothing, and its job is skipped below. The nightly and manual
+# runs get groups of their own, so they never wait for a push run of the same
+# commit.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}${{ github.event.action == 'labeled' && github.event.label.name != 'ci:windows' && format('-{0}', github.run_id) || '' }}
+  group: ci-${{ github.event.pull_request.number || format('{0}-{1}', github.sha, github.event_name) }}${{ github.event.action == 'labeled' && github.event.label.name != 'ci:windows' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Minimal read-only permissions for repository contents
@@ -24,9 +31,61 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # #483: the nightly run tests Windows only when a path outside the
+  # documentation changed since the last run of this workflow on main whose
+  # Windows job succeeded (or when there is none).
+  windows-needed:
+    name: Windows needed tonight
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compare with the last green Windows run of main
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=""
+          for run in $(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/rust.yml/runs?branch=main&status=success&per_page=50" --jq '.workflow_runs[].id'); do
+            green=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run}/jobs" \
+              --jq '[.jobs[] | select(.name == "Build & Test (windows-2022)" and .conclusion == "success")] | if length > 0 then "ok" else "" end')
+            if [ "$green" = ok ]; then
+              last=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run}" --jq .head_sha)
+              break
+            fi
+          done
+          if [ -z "$last" ] || ! git cat-file -e "${last}^{commit}" 2>/dev/null; then
+            echo "No green Windows run of main found; Windows runs."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$last" HEAD -- . ':(exclude)docs/**' ':(exclude)*.md' ':(exclude)**/*.md' | head -20)
+          if [ -n "$changed" ]; then
+            echo "Changed since ${last} (last green Windows run of main):"
+            printf '%s\n' "$changed"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only documentation changed since ${last}; Windows is skipped tonight."
+            echo "::notice::Windows skipped: only documentation changed since ${last}"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-test:
     name: Build & Test (${{ matrix.os }})
-    if: github.event.action != 'labeled' || github.event.label.name == 'ci:windows'
+    needs: windows-needed
+    if: >-
+      !cancelled() && needs.windows-needed.result != 'failure' &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:windows') &&
+      (github.event_name != 'schedule' || needs.windows-needed.outputs.run == 'true')
     runs-on: ${{ matrix.os }}
     # #450: Windows needs 31–45 minutes (the desktop unit tests alone take
     # about 20); 60 leaves room without hiding a hung run for long.
@@ -34,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'ci:windows') && '["ubuntu-24.04"]' || '["ubuntu-24.04", "windows-2022"]') }}
+        os: ${{ fromJSON((github.event_name == 'schedule' && '["windows-2022"]') || (github.event_name == 'workflow_dispatch' && '["ubuntu-24.04", "windows-2022"]') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:windows') && '["ubuntu-24.04", "windows-2022"]') || '["ubuntu-24.04"]') }}
     env:
       BINARY_PATH: ${{ matrix.os == 'windows-2022' && 'target/release/apiforge-desktop.exe' || 'target/release/apiforge-desktop' }}
 

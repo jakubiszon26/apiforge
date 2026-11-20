@@ -64,11 +64,14 @@ pub fn run_live(
     secrets: IndexMap<String, String>,
     before: &mut dyn FnMut(&[JournalRun], bool),
 ) -> Result<RunOutcome, String> {
-    // A scenario that is not there asks no window for anything.
-    select(
-        &ProjectSession::open_saved_read_only(folder).map_err(|error| error.to_string())?,
-        scenario,
-    )?;
+    // A scenario that is not there, or a project in an older language
+    // (LANG-15), asks no window for anything.
+    let saved = ProjectSession::open_saved_read_only(folder).map_err(|error| error.to_string())?;
+    if let Some(problem) = saved.language_problem() {
+        return Err(problem.to_string());
+    }
+    select(&saved, scenario)?;
+    drop(saved);
     let mut hold = Hold::take(folder)?;
     let mut session = ProjectSession::from_store_saved(hold.store().clone())
         .map_err(|error| error.to_string())?;

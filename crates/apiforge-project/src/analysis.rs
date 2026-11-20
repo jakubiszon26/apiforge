@@ -27,6 +27,14 @@ pub(crate) struct Target {
     pub kind: DocumentKind,
     pub entity_id: String,
     pub revision: u32,
+    /// A published revision, read in its stored spelling (`@after` included)
+    /// so that it runs as it was published; a working source is read in the
+    /// written language (LANG-13).
+    pub stored: bool,
+    /// The project is still in an older language (LANG-13, A5): the
+    /// `@after` and `start` errors are shown without their fix, because the
+    /// unit of conversion is the project (`apiforge fix`, LANG-20).
+    pub older: bool,
 }
 
 #[derive(Clone)]
@@ -133,13 +141,27 @@ pub(crate) fn derive_counted(
         Document::Component(component) => Some(component),
         Document::Scenario(_) => None,
     };
-    let lower_context = LowerContext::folder(context);
+    let lower_context = if target.stored {
+        LowerContext::folder(context).stored()
+    } else {
+        LowerContext::folder(context)
+    };
     let lower_context = match pinned {
         Some(component) => lower_context.with_component(component),
         None => lower_context,
     };
     let lowered = apiforge_script::lower(&tree, &lower_context);
     let mut diagnostics = lowered.diagnostics.clone();
+    if target.older {
+        for diagnostic in &mut diagnostics {
+            if matches!(
+                diagnostic.message.as_str(),
+                apiforge_script::AFTER_REMOVED | apiforge_script::START_MISSING
+            ) {
+                diagnostic.fix = None;
+            }
+        }
+    }
     let mut omitted = lowered.omitted_diagnostics;
     if lowered.has_errors() {
         return (diagnostics, omitted, None);
@@ -148,7 +170,10 @@ pub(crate) fn derive_counted(
         return (diagnostics, omitted, None);
     };
     if kind(&document) != target.kind {
-        // A project-level error is never the one the limit drops.
+        // A project-level error is never the one the limit drops. No text
+        // fills the list here today (LANG-06, #143): lowering errors return
+        // above, and type warnings are at most 2 per block, 200 blocks a
+        // graph; a new cheap warning brings back a session test of this.
         apiforge_script::push_error(
             &mut diagnostics,
             &mut omitted,

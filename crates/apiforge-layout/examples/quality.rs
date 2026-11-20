@@ -13,8 +13,8 @@
 //! `support/boards.txt`: each at the compact and the full density, with its checks
 //! collapsed and expanded, every card at the size the board draws it and every wire
 //! between the ports the board gives the router (LAY-06), and at the compact density
-//! once more with LAY-23's chips, whose wires the router is not given, nor the `@after`
-//! rails into the next step that LAY-24 draws as an arrow at the step. The desktop's acceptance
+//! once more with LAY-23's chips, whose wires the router is not given; the chain of
+//! steps is drawn in both modes (LAY-45). The desktop's acceptance
 //! test `lay06_criterion_10_quality_on_real_card_sizes` writes that file and fails
 //! when it is out of date. The numbers are deterministic. `--dump` prints one
 //! generated board's rectangles and routes, for reading a case by hand.
@@ -25,10 +25,12 @@
 //! The columns:
 //!
 //! - `drawn`: which wires the board draws, `all` or `chips` at the readers of a
-//!   value three or more steps read (LAY-23) and arrows for the rails into the next
-//!   step (LAY-24);
+//!   value three or more steps read (LAY-23);
 //! - `wires`, `crossings` (the router's bridges), `bends`, `straight` (wires without
 //!   a bend), `incomplete` (routes that found no way around the cards);
+//! - `data_data`, `chain_data` (reference boards): the crossings of two data
+//!   lines, and of a line of the chain of steps with a data line (LAY-45),
+//!   the two kinds the owner's measures of 2026-11-20 keep apart;
 //! - `close`: pairs of parallel segments of different wires within 8 px of each
 //!   other for at least 20 px; `coincident`: the same within 0.5 px, counted there
 //!   and not under `close`;
@@ -65,7 +67,7 @@
 mod support;
 
 use apiforge_layout::{
-    Block, Edge, GAP, Graph, Point, Port, Rect, Route, Routing, Side, Size, Wire, groups,
+    Block, Edge, GAP, Graph, Point, Port, Rect, Route, Routing, Side, Size, Wire, crossing, groups,
     layers_of, packed_outside_groups, route, route_grouped, tidy,
 };
 use std::{fmt::Write, process::ExitCode};
@@ -269,7 +271,13 @@ fn boards(text: &str) -> Result<Vec<Tidied>, String> {
                     Ok(Port::new(block, side, number(words.next())?))
                 };
                 let from = port(&mut words)?;
-                board.wires.push(Wire::new(from, port(&mut words)?));
+                let wire = Wire::new(from, port(&mut words)?);
+                // A line of the chain of steps (LAY-45).
+                board.wires.push(match words.next() {
+                    Some("chain") => wire.chained(),
+                    None => wire,
+                    Some(other) => return Err(format!("not a wire's ending: {other}")),
+                });
             }
             other => return Err(format!("not a board line: {other}")),
         }
@@ -553,7 +561,7 @@ fn reference_table(text: &mut String, routing: &Routing) -> Result<(), String> {
     let _ = writeln!(
         text,
         "\nreference scenarios, tidied by the desktop, at the sizes it draws\n\n\
-         scenario   density checks    drawn steps cards wires crossings  bends straight  close coincident incomplete packed width height fit_1600 fit_960 chips card_hits chip_hits clearance hung gap_mean gap_worst intruders"
+         scenario   density checks    drawn steps cards wires crossings data_data chain_data  bends straight  close coincident incomplete packed width height fit_1600 fit_960 chips card_hits chip_hits clearance hung gap_mean gap_worst intruders"
     );
     for board in boards(BOARDS)? {
         let rectangles: Vec<Rect> = board.cards.iter().chain(&board.chips).copied().collect();
@@ -577,9 +585,10 @@ fn reference_table(text: &mut String, routing: &Routing) -> Result<(), String> {
         let bottom = everything.iter().map(|r| r.max.y).fold(f32::MIN, f32::max);
         let (width, height) = (right - left, bottom - top);
         let (card_hits, chip_hits) = collisions(&board.cards, &board.chips);
+        let (data_data, chain_data) = kinds(&laid.routes, &board.wires);
         let _ = writeln!(
             text,
-            "{:<10} {:<7} {:<9} {:<5} {:>5} {:>5} {:>5} {:>9} {:>6} {:>8} {:>6} {:>10} {:>10} {:>6} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9} {hung:>4} {gap_mean:>8.1} {gap_worst:>9.1} {intruders:>9}",
+            "{:<10} {:<7} {:<9} {:<5} {:>5} {:>5} {:>5} {:>9} {data_data:>9} {chain_data:>10} {:>6} {:>8} {:>6} {:>10} {:>10} {:>6} {width:>5.0} {height:>6.0} {:>8.3} {:>7.3} {:>5} {card_hits:>9} {chip_hits:>9} {:>9} {hung:>4} {gap_mean:>8.1} {gap_worst:>9.1} {intruders:>9}",
             board.name,
             board.density,
             board.checks,
@@ -601,6 +610,32 @@ fn reference_table(text: &mut String, routing: &Routing) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// The crossings of a board by kind (LAY-45): of two data lines, and of a
+/// line of the chain of steps with a data line. A branch of an `if`, which
+/// leaves its card from the top or the bottom edge, is neither.
+fn kinds(routes: &[Route], wires: &[Wire]) -> (usize, usize) {
+    let data = |wire: &Wire| !wire.chain && !matches!(wire.from.side, Side::Top | Side::Bottom);
+    let (mut both, mut chained) = (0, 0);
+    for (index, a) in routes.iter().enumerate() {
+        for (b, other) in routes.iter().zip(wires).skip(index + 1) {
+            let (first, second) = (&wires[index], other);
+            let kind = if data(first) && data(second) {
+                &mut both
+            } else if (first.chain && data(second)) || (data(first) && second.chain) {
+                &mut chained
+            } else {
+                continue;
+            };
+            for (a1, a2) in a.segments() {
+                for (b1, b2) in b.segments() {
+                    *kind += usize::from(crossing(a1, a2, b1, b2).is_some());
+                }
+            }
+        }
+    }
+    (both, chained)
 }
 
 fn dump(seed: u64, count: usize) -> String {
@@ -768,14 +803,20 @@ mod tests {
         let boards = boards(BOARDS).expect("the board file reads");
         assert_eq!(
             boards.len(),
-            24,
-            "four scenarios, two densities, two states, and chips at the compact density"
+            30,
+            "five scenarios, two densities, two states, and chips at the compact density"
         );
         for board in &boards {
+            assert!(!board.cards.is_empty(), "{}", board.name);
+            // With chips the router is given none of the lines of `labels`,
+            // whose requests read no step (FIX-01).
             assert!(
-                !board.cards.is_empty() && !board.wires.is_empty(),
-                "{}",
-                board.name
+                !board.wires.is_empty() || (board.name == "labels" && board.drawn == "chips"),
+                "{} {} {} {}",
+                board.name,
+                board.density,
+                board.checks,
+                board.drawn
             );
             for wire in &board.wires {
                 let blocks = board.cards.len() + board.chips.len();

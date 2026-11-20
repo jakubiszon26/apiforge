@@ -5,8 +5,9 @@
 - Date: 2026-10-23; amended 2026-11-03 (UX-28, the spline style withdrawn),
   2026-11-12 (LAY-06, shape D and the rail), 2026-11-15 (LAY-03, the gap
   between lines), 2026-11-16 (LAY-28, the order of lines in a corridor;
-  LAY-29, no line under its own card) and 2026-11-17 (LAY-31, a step and
-  its checks are one group)
+  LAY-29, no line under its own card), 2026-11-17 (LAY-31, a step and
+  its checks are one group) and 2026-11-20 (LAY-45, the chain side to
+  side)
 - Scope: new crate `apiforge-layout`, the desktop board
 - Plan: [scenario code and canvas](../roadmap.md)
 
@@ -145,16 +146,26 @@ spine and satellites:
 3. **Rows.** A row is as tall as its tallest stack, at the heights the board
    draws its cards; the next row starts 96 px lower. Folded checks keep
    their places, so showing them moves nothing.
-4. **The rail.** An ordering wire leaves the top of its source, above its
-   control socket, and enters the top of its target, so it runs on the rail
-   above the row instead of through the gap between two cards where the data
-   wires run; `@after` and branch wires are dashed, as every ordering wire
-   is. A wire into a card hung right under its source still leaves from the
-   socket at the bottom. The router routes wires between two top ports
-   first, so a data wire coming down into the row crosses a rail once.
-5. **Continuation mark.** The last spine card of a row carries a mark,
-   `↳ <next step>`, naming the first card of the row below. It is drawn under
-   the wires and is no obstacle to them.
+4. **The rail.** A branch of an `if` leaves the top of the `if`, above its
+   *Yes* or *No* socket, so it runs on the rail above the row instead of
+   through the gap between two cards where the data wires run; ordering
+   wires are dashed. A branch into a card hung right under the `if` still
+   leaves from the socket at the bottom. The router routes wires between
+   two top ports first, so a data wire coming down into the row crosses a
+   rail once. *Amended by LAY-45 (2026-11-20, the owner's decisions of
+   2026-11-19, question 12 = A, and of 2026-11-20 on #391, question 2 = A):*
+   the chain of steps runs side to side. A step's order leaves a socket on
+   its right edge and enters the next step's socket on its left edge, both
+   on the title line (26 px under the card's top), in both *Wires* modes:
+   between neighbours of a row a straight line, and from the last card of a
+   row one line through the row gap into the first card of the next row.
+   The router routes the lines of the chain with the rails, first, so that
+   this line takes the row gap; a data line crosses the chain at a right
+   angle and draws the bridge, the chain none. A branch enters its target
+   at that socket on the left too.
+5. **Continuation mark.** Withdrawn by LAY-45: the line to the next row
+   says what the mark said. The arrow at a step's badge that LAY-24 drew in
+   place of a rail into the next step in *Chips* went with it.
 
 Tidy up of a selection, and the board of the workspace window, keep the
 layered layout above. Tidy up ends with the camera fitted to the board.
@@ -180,7 +191,8 @@ spacing of shape D.
    only where the window holds no other route; a wall instead of a price
    would need a second search for that case. The stub end of every port is
    kept free of lines running into it. Nudging is gone.
-3. **Order.** Rails first, then the shorter wires first (the longer first
+3. **Order.** Rails and the lines of the chain first (LAY-45), then the
+   shorter wires first (the longer first
    before): a wire between neighbours has one good route. On the reference
    boards this gives a third fewer crossings than the longer first.
 4. **Tidy up makes the room.** Shape D's gaps are 100 px between columns,

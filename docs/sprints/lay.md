@@ -4,7 +4,7 @@
   after seeing round 3 and the four proofs of round 4
   ([4.8](#48-round-4-the-four-proofs-measured)); the answers are in
   [5.1](#51-decisions-taken-2026-11-05). The sprint is LAY in the
-  [backlog](../backlog.md#sprint-lay-in-progress-since-2026-11-05): issues
+  [backlog](../backlog.md#sprint-lay-2026-11-05-to-2026-11-19-closed): issues
   LAY-01..19 with their ticket files under `docs/tickets/`. The order of
   work and four tickets were revised by the mid-sprint review of 2026-11-10
   ([section 11](#11-mid-sprint-review-2026-11-10)), which adds LAY-21 and
@@ -1450,6 +1450,32 @@ scenarios (check → step), and *Start* cannot fan out.
 - The far-reader warning and LAY-35, which share one rule.
 - The three room scenarios themselves, rewritten without `@after` by the
   language's fix; then the task of LAY-12 once more.
+
+### 13.7 Closed (2026-11-19)
+
+The owner ran build `1d11f07` on a scenario of their own instead of the
+room-booking task: sixteen requests to one endpoint, each with one to four
+checks, none reading another. The run is the acceptance
+([#296](https://github.com/jakubiszon26/apiforge/issues/296), decision
+13 = A): the hard condition of 13.1 holds — no line lost, no data taken
+for order, no connection that needed several clicks. The sprint never
+measured a board of this shape; it is now the reference scenario `labels`
+(FIX-01, [#454](https://github.com/jakubiszon26/apiforge/issues/454)).
+
+Three findings were about the board and joined LAY-2, each decided on a
+first-round mock-up ([`docs/qa/2026-11-19/owner-run/`](../qa/2026-11-19/owner-run/)):
+
+| Finding | Cause | Ticket |
+| --- | --- | --- |
+| Under step 5 the checks are numbered 6 and then 21 | A check that reads two steps is counted under both, and the first step that shows its own checks takes the card (`canvas/mod.rs`, `fold`) | LAY-43 [#466](https://github.com/jakubiszon26/apiforge/issues/466), decision 10 = A |
+| With checks folded the rows stand 540 to 775 px apart; Fit is 36 % | Tidy up keeps every folded check's place (`board_edit.rs`, `tidy_in_rows`), and since 13.3 checks are folded by default | LAY-44 [#467](https://github.com/jakubiszon26/apiforge/issues/467), decision 11 = A |
+| With *All wires* an ordering line starts on a card's top edge and turns back between two cards of its row | Rule 4 of shape D; the half of LAY-29 withdrawn for the *Start* fan, which a plain chain keeps after LANG-13 | LAY-45 [#468](https://github.com/jakubiszon26/apiforge/issues/468), decision 12 = A |
+
+Found while reproducing: LAY-46
+([#469](https://github.com/jakubiszon26/apiforge/issues/469)). The other
+findings of the run are not the board's and are the
+[REQ sprint](req.md). The [retrospective](../retrospectives/2026-11-20-lay.md)
+was written on 2026-11-20, the day the owner started LANG.
 
 ## Technical appendix
 

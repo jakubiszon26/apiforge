@@ -1,4 +1,4 @@
-//! Editing operations of the board: connections, clipboard, component
+//! Editing operations of the board: connections, deletion, clipboard, component
 //! extraction, response field pickers and project export.
 //!
 //! Every operation borrows its inputs and returns new values, so the editor can keep
@@ -8,6 +8,7 @@
 mod clipboard;
 mod component;
 mod connect;
+mod delete;
 mod extract;
 mod fold;
 mod inputs;
@@ -26,6 +27,9 @@ pub use component::{
     initialize_inputs, initialize_outputs, materialize_component, validate_draft,
 };
 pub use connect::{connect, remove_connections};
+pub use delete::{
+    Braced, Deletion, Read, Reader, apply_deletion, delete_preview, delete_statements,
+};
 pub use extract::{
     Extraction, Replaced, branch_leaves, extraction_component, propose_extraction,
     replace_with_call, replace_with_call_unconnecting, template_readers, unkept_outputs,
@@ -108,6 +112,10 @@ pub enum EditError {
         "An IF/ELSE branch leaves the selection. Select the steps of the branch as well, or leave the IF/ELSE out."
     )]
     BranchLeavesSelection,
+    /// A delete refused on the board (DIAG-06e): *Start* with steps after
+    /// it, or statements that stay and read what would go, by name.
+    #[error("{0}")]
+    DeleteRefused(String),
     #[error("{0}")]
     InvalidProject(#[from] ImportError),
 }

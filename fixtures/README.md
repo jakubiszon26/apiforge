@@ -12,12 +12,17 @@
 ## Reference scenarios
 
 `scenarios/lay/` holds `order-flow` (14 steps), `shop-30` (30), `shop-50`
-(56) and `fan-out` (26), which the [LAY tickets](../docs/sprints/lay.md) measure
-and test against. `fan-out` is shaped like a board where a component call gives
+(56), `fan-out` (26) and `labels` (50), which the
+[LAY tickets](../docs/sprints/lay.md) measure and test against. `fan-out` is shaped like a board where a component call gives
 two values that almost every later request reads (LAY-23); it has no cleanup.
 `far-value` (23) is the same board with no variable, its cart and session
 values read directly by far steps, and `far-value-saved` (26) the same with
-those values saved in variables (LAY-25).
+those values saved in variables (LAY-25). `labels` is shaped like a
+validation test: sixteen requests to one endpoint of a fictional parcel API,
+each followed by one to four checks, and no request reads another (FIX-01). It
+calls no component and has no cleanup; `crates/apiforge-runner/tests/fix01.rs`
+lowers it in a folder project of its own, and the desktop's tests open it
+through `labels_board` of `src/testing.rs`.
 A step is a node of the scenario's main graph: the start, every request, value,
 component, check and condition, a branch and both of its arms. The `cleanup`
 block is a second graph, counted apart (two steps in each of the other three).
