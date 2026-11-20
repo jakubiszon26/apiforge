@@ -2,7 +2,7 @@ use crate::{
     Error, Result,
     analysis::{self, Analysis, AnalysisInput, AnalysisTicket, Restored, Target},
     context,
-    document::{AnalysisState, DocumentSession, Unavailable},
+    document::{AnalysisState, DocumentSession, Step, Unavailable},
     language,
     layout::{FixedPlacer, Placer},
 };
@@ -665,7 +665,7 @@ impl ProjectSession {
         document.model_source = None;
         document.layout_dirty = false;
         document.fields.clear();
-        document.history = Default::default();
+        document.history.clear();
         let version = document.source_version;
         self.emit(
             origin,
@@ -729,8 +729,10 @@ impl ProjectSession {
         }
     }
 
-    /// Installs a result only when its whole ticket is current. A valid model
-    /// replaces the previous one as a single model-history step.
+    /// Installs a result only when its whole ticket is current. A valid
+    /// result whose text differs from the text the history stands at is one
+    /// step of the history, whether or not the model changed (DIAG-06g): a
+    /// comment or a blank line typed in Code is undone as itself.
     pub fn apply_analysis(&mut self, analysis: Analysis) -> Result<()> {
         let index = self.index(&analysis.ticket.document_id)?;
         if analysis.ticket != self.ticket(index)
@@ -749,10 +751,15 @@ impl ProjectSession {
             Some((model, _)) => {
                 document.analysis = AnalysisState::Valid;
                 document.model_source = Some(document.text().to_owned());
+                let present = document.history.present.replace(document.text().to_owned());
+                if let (Some(text), Some(previous)) = (present, &document.model)
+                    && text != document.text()
+                {
+                    let model = previous.clone();
+                    document.history.record(Step { text, model });
+                }
                 if document.model.as_deref() != Some(&model) {
-                    if let Some(previous) = document.model.replace(Arc::new(model)) {
-                        document.history.record(previous);
-                    }
+                    document.model = Some(Arc::new(model));
                     self.emit(
                         Origin::SESSION,
                         Some(&analysis.ticket.document_id),
@@ -835,8 +842,14 @@ impl ProjectSession {
         if *previous == model {
             return Ok(());
         }
+        let text = self.documents[index].text().to_owned();
         self.install_model(index, model, origin)?;
-        self.documents[index].history.record(previous);
+        let document = &mut self.documents[index];
+        document.history.record(Step {
+            text,
+            model: previous,
+        });
+        document.history.present = Some(document.text().to_owned());
         Ok(())
     }
 
@@ -848,29 +861,40 @@ impl ProjectSession {
         self.step_history(document_id, origin, false)
     }
 
+    /// Steps the history back or forward: the step's text is installed
+    /// exactly as it was, with the model read from it (DIAG-06g). A Code edit
+    /// not yet settled is settled first, so that it is a step of its own and
+    /// is what the Undo takes back.
     fn step_history(&mut self, document_id: &str, origin: Origin, undo: bool) -> Result<bool> {
         let index = self.index(document_id)?;
+        if self.documents[index].unavailable.is_none()
+            && self.documents[index].conflict.is_none()
+            && self.documents[index].analysis == AnalysisState::Pending
+        {
+            self.analyse_now(index)?;
+        }
         if !self.documents[index].accepts_model_edits() {
             return Err(Error::ModelLocked);
         }
         let history = &mut self.documents[index].history;
-        let Some(model) = (if undo {
+        let Some(step) = (if undo {
             history.undo.pop()
         } else {
             history.redo.pop()
         }) else {
             return Ok(false);
         };
-        let current = self.documents[index]
-            .model
-            .clone()
-            .ok_or(Error::ModelLocked)?;
-        if let Err(error) = self.install_model(index, (*model).clone(), origin) {
+        let document = &self.documents[index];
+        let current = Step {
+            text: document.text().to_owned(),
+            model: document.model.clone().ok_or(Error::ModelLocked)?,
+        };
+        if let Err(error) = self.install_step(index, &step, origin) {
             let history = &mut self.documents[index].history;
             if undo {
-                history.undo.push(model);
+                history.undo.push(step);
             } else {
-                history.redo.push(model);
+                history.redo.push(step);
             }
             return Err(error);
         }
@@ -882,6 +906,54 @@ impl ProjectSession {
             history.undo.push(current);
         }
         Ok(true)
+    }
+
+    /// Installs a step of the history: its text byte for byte, and the model
+    /// read from that text with the step's identities and positions
+    /// (KTLO-26). A text that no longer reads as valid in the project's
+    /// current context is refused and nothing changes.
+    fn install_step(&mut self, index: usize, step: &Step, origin: Origin) -> Result<()> {
+        let target = self.target(&self.documents[index].entry);
+        let (diagnostics, omitted, model) = analysis::derive_counted(
+            &target,
+            &step.text,
+            &self.context,
+            Some(&step.model),
+            None,
+            self.placer.as_ref(),
+        );
+        let (model, _) = model.ok_or(Error::InvalidModel)?;
+        let document = &mut self.documents[index];
+        let document_id = document.entry.document_id.clone();
+        document.model = Some(Arc::new(model));
+        document.model_source = Some(step.text.clone());
+        document.history.present = Some(step.text.clone());
+        document.diagnostics = diagnostics;
+        document.omitted_diagnostics = omitted;
+        if document.text() == step.text {
+            document.layout_dirty = true;
+        } else {
+            document.set_text(step.text.clone());
+            document.source_version += 1;
+            let version = document.source_version;
+            self.emit(
+                origin,
+                Some(&document_id),
+                EventKind::SourceChanged {
+                    source_version: version,
+                },
+            );
+        }
+        self.seal_valid(index);
+        let version = self.documents[index].source_version;
+        self.emit(
+            origin,
+            Some(&document_id),
+            EventKind::ModelChanged {
+                source_version: version,
+            },
+        );
+        Ok(())
     }
 
     fn install_model(&mut self, index: usize, model: Document, origin: Origin) -> Result<()> {

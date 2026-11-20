@@ -147,7 +147,14 @@ impl ProjectSession {
                     // Source edits can arrive while an older pending source is
                     // being analysed/saved. Its sealed model is a useful older
                     // preview, never a current model for the newer source.
-                    if live.model == before.model && !context_changed {
+                    // Taken only while the live document settled nothing of
+                    // its own: a step it recorded meanwhile, even one that
+                    // left the model as it was, stays (DIAG-06g).
+                    if live.model == before.model
+                        && live.history.generation == before.history.generation
+                        && live.history.present == before.history.present
+                        && !context_changed
+                    {
                         live.model = after.model.clone();
                         live.model_source = after.model_source.clone();
                         live.valid_snapshot = after.valid_snapshot.clone();
