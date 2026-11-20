@@ -46,6 +46,15 @@ them when settings were saved.
    manifest it writes is built from the manifest it read, so settings
    the save wrote are kept.
 
+## What a save reports
+
+The session's save (`ProjectSession::save`, and the save of all) returns
+today that it succeeded. This ticket makes it return, for each path it
+wrote — sources, text files, the manifest when settings were saved — the
+fingerprint it wrote, and for each path that failed, that it failed. The
+window's *Save all* hands that on (LANG-21a changes
+`folder/saving.rs`); nothing else about saving changes.
+
 ## Acceptance criteria
 
 Tests in `crates/apiforge-project/tests/lang20f.rs`, on LANG-20a's
@@ -64,9 +73,12 @@ language-1 `rooms` and its blocked variant.
 4. A saved buffer that changes what is blocked, or adds an error to a
    listed source: nothing is converted, the new plan is returned.
    Test: `lang20f_criterion_4_*`.
-5. A save that reported a failure for any path: the function is not
+5. The save's report: one buffer, several, settings alone, and a save
+   where one path fails — each path is reported once with what was
+   written or that it failed. Test: `lang20f_criterion_5_*`.
+6. A save that reported a failure for any path: the function is not
    called by the window (LANG-21a); called so, it refuses.
-   Test: `lang20f_criterion_5`.
+   Test: `lang20f_criterion_6`.
 
 ## Regression potential
 
@@ -80,4 +92,4 @@ Saving (the window's *Save all*, LANG-21a). The plan and the commit
 
 ## Technical appendix
 
-`apiforge-project/src/language.rs`.
+`apiforge-project/src/language.rs`, `session.rs` (what a save returns).
