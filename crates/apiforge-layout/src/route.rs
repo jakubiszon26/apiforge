@@ -511,6 +511,25 @@ pub fn route_grouped(
         routes = board;
     }
     bridges(&mut routes, wires, cards);
+    // A line routed among lines that stay is drawn over them: it draws the
+    // bridge where it crosses one (LAY-45: a data line brought back over
+    // the chain of steps).
+    for route in &mut routes {
+        let mut over: Vec<Bridge> = Vec::new();
+        for (a1, a2) in route.segments() {
+            for other in fixed.iter().filter(|other| other.complete) {
+                for (b1, b2) in other.segments() {
+                    if let Some(at) = intersection(a1, a2, b1, b2) {
+                        over.push(Bridge {
+                            at,
+                            horizontal: (a1.y - a2.y).abs() < 0.01,
+                        });
+                    }
+                }
+            }
+        }
+        route.bridges.extend(over);
+    }
     routes
 }
 

@@ -1,5 +1,4 @@
-//! Shape D (LAY-06): what Tidy up makes of a whole board, and the marks the
-//! board draws on it.
+//! Shape D (LAY-06): what Tidy up makes of a whole board.
 //!
 //! The spine is the steps a person follows: *Start*, requests, component
 //! calls and `if`s, in the order the engine reaches them, left to right in
@@ -18,7 +17,6 @@ use apiforge_core::{
     graph::{check_subjects, dependency_index, sequence},
     model::NodeKind,
 };
-use eframe::egui::{Rect, pos2, vec2};
 use std::collections::HashMap;
 
 /// Whether a step of this kind stands on the spine.
@@ -147,77 +145,4 @@ pub fn hung_under(cards: &[Card], groups: &[usize], source: usize, reader: usize
         && groups.get(source) == groups.get(reader)
         && !on_spine(to.kind)
         && to.rect().top() >= from.rect().bottom()
-}
-
-/// The continuation marks of a board: each spine step at the end of a row
-/// with the spine step the engine reaches next, which starts the row below.
-/// A pair is a row break when the next step stands left of the first and
-/// below it, which is how Tidy up wraps the spine; on any other board the
-/// pairs still name the next step wherever it went. Cards not drawn, such
-/// as folded checks, are not on the spine anyway.
-pub fn continuations(graph: &Graph, cards: &[Card]) -> Vec<(String, String)> {
-    let card = |id: &str| cards.iter().find(|card| card.id == id);
-    let spine: Vec<&Card> = sequence(graph)
-        .into_iter()
-        .filter_map(card)
-        .filter(|card| on_spine(card.kind))
-        .collect();
-    spine
-        .windows(2)
-        .filter(|pair| {
-            let (last, next) = (pair[0].rect(), pair[1].rect());
-            next.right() <= last.left() && next.top() >= last.bottom()
-        })
-        .map(|pair| (pair[0].id.clone(), pair[1].id.clone()))
-        .collect()
-}
-
-/// The free space between the last card of a row and its continuation
-/// mark, the mark's height and its widest.
-const MARK_GAP: f32 = 8.0;
-const MARK_HEIGHT: f32 = 24.0;
-const MARK_WIDTH: f32 = 120.0;
-
-/// A continuation mark (LAY-06): beside the last spine card of a row, the
-/// name of the step the engine reaches next, which starts the row below.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Mark {
-    /// The node id of the card at the end of the row.
-    pub last: String,
-    /// The node id of the next step in order.
-    pub next: String,
-    /// Where the mark is, in board coordinates: right of the last card,
-    /// level with its header, never wider than the gap the board leaves.
-    pub rect: Rect,
-    pub text: String,
-}
-
-/// Whether the board draws the marks. LAY-45 (#468, question 2 = A) draws
-/// the line to the next row instead; the feasibility measurement of its
-/// gate turns them off here.
-const DRAWN: bool = false;
-
-/// The marks of a board, one per pair of [`continuations`].
-pub fn marks(graph: &Graph, cards: &[Card]) -> Vec<Mark> {
-    if !DRAWN {
-        return Vec::new();
-    }
-    let card = |id: &str| cards.iter().find(|card| card.id == id);
-    continuations(graph, cards)
-        .into_iter()
-        .filter_map(|(last, next)| {
-            let at = card(&last)?.rect();
-            let text = format!("↳ {}", card(&next)?.name);
-            let width = (8.0 * text.chars().count() as f32 + 24.0).clamp(64.0, MARK_WIDTH);
-            Some(Mark {
-                rect: Rect::from_min_size(
-                    pos2(at.right() + MARK_GAP, at.top() + 20.0),
-                    vec2(width, MARK_HEIGHT),
-                ),
-                last,
-                next,
-                text,
-            })
-        })
-        .collect()
 }

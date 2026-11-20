@@ -370,10 +370,12 @@ pub struct Compact {
 }
 
 pub const COMPACT_HEADER: f32 = 40.0;
-/// The title line of a compact card and of a full one (LAY-45): the middle
-/// of the icon beside the name.
-const COMPACT_TITLE_LINE: f32 = 21.0;
-const TITLE_LINE: f32 = 30.0;
+/// The title line of a card (LAY-45), where the sockets of its order sit on
+/// its sides: within the header row of a compact card and of a full one
+/// alike, so that the line between two neighbours of a row, *Start* and a
+/// compact card among them, is level; and a socket's gap above the highest
+/// data socket of a compact card's side, a line's gap (46 px).
+const TITLE_LINE: f32 = 26.0;
 pub const COMPACT_ROW: f32 = 24.0;
 const COMPACT_SUBTITLE: f32 = 22.0;
 const COMPACT_RESULT: f32 = 26.0;
@@ -739,14 +741,9 @@ impl Card {
     }
 
     /// The height of the card's title line from its origin, where the
-    /// sockets of its order sit on its sides (LAY-45): the middle of the
-    /// block's icon beside the name.
+    /// sockets of its order sit on its sides (LAY-45).
     pub fn title_line(&self) -> f32 {
-        if self.compact.is_some() {
-            COMPACT_TITLE_LINE
-        } else {
-            TITLE_LINE
-        }
+        TITLE_LINE
     }
 
     /// Where a control socket sits across the card's bottom edge: the middle
