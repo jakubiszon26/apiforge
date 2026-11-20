@@ -20,7 +20,8 @@ and a build that says so when a project is in the other language.
 ## What it carries
 
 RUN-03 (#389), LANG-14 (#390), DIAG-07 (#392), LAY-34 (#396) — merged;
-RUN-01 (#126), LANG-15 (#412), LANG-13 (#386), LANG-20 (#481), DIAG-06 (#391),
+RUN-01 (#126), LANG-15 (#412), LANG-13 (#386), LANG-20 (#481), LAY-45
+(#468), DIAG-06 (#391),
 LANG-06 with KTLO-37 (#143, #211); LANG-05 (#142) if its decision is
 taken in time, otherwise the next release. No release is cut between
 them.
@@ -42,19 +43,24 @@ Not applicable.
 Each is checked on the release candidate's commit and recorded in the
 pull request's QA section.
 
-1. Every `.afs` of the repository passes `check`, prints unchanged, and
+1. Every **working source** of the repository — `fixtures/scripts`,
+   `fixtures/scenarios` and the `afs` examples of `README.md` and
+   `docs/language/`; not the published revisions under
+   `.apiforge/revisions/`, not the language-1 texts kept as test data
+   (`tests/fixtures/lang1/`, `rooms-language-1/`), not the evidence under
+   `docs/qa/` — passes `check`, prints unchanged, and
    its simulated run lists its steps in the same order through the command
    line and the MCP server. Test: LANG-13's `lang13_criterion_11_*`, and a
    new `rel05_cli_and_mcp_agree_on_step_order`
    (`crates/apiforge-mcp/tests/acceptance.rs`) over every fixture.
-2. The fix was applied to every scenario, fixture and example of the
-   repository (LANG-13, criterion 11) and to the owner's test projects;
+2. The fix was applied to every working source of the repository
+   (LANG-13, criterion 11) and to the owner's test projects;
    for each the order of steps before and after is the same. QA step, the
    owner's: `apiforge fix --folder` on each of their projects with the
    release candidate, then a simulated run; only "done, n projects" is
    recorded here — nothing of those projects enters the repository.
 3. The fix keeps every comment of a file it changes. Test: LANG-20's
-   `lang20_criterion_5_*`.
+   `lang20_criterion_7_*`.
 4. A project of language 1 in 0.2.0 and a project of language 2 in 0.1.0
    are each refused with a message that says why. Tests: LANG-15's
    `lang15_criterion_3_*`, `_4_*`, `_5_*`. QA step: the released 0.1.0
