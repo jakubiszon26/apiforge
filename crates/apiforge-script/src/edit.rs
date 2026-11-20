@@ -17,7 +17,7 @@
 //! document, is printed whole, as before.
 use crate::{
     ast::*,
-    format::{head, opening, statements},
+    format::{attribute_rank, head, opening, statements},
     lexer::{Token, TokenKind},
     lower::Document,
     parse,
@@ -133,10 +133,12 @@ impl<'d> Side<'d> {
         Some(statement)
     }
 
-    /// What `node` owns in `key`'s braces: its text without its note and
-    /// without the statements inside its own braces, an `if` up to its `{`.
-    fn own(&self, node: &Node, cleanup: bool, key: Key<'_>) -> Option<String> {
+    /// What `node` owns in `key`'s braces, spelled as `author` writes it:
+    /// its text without its note and without the statements inside its own
+    /// braces, an `if` up to its `{`.
+    fn own(&self, node: &Node, cleanup: bool, key: Key<'_>, author: &Statement) -> Option<String> {
         let mut statement = self.written(node, cleanup, key)?;
+        spelled(&mut statement, author);
         statement.note = None;
         let branch = if let Form::If {
             then, otherwise, ..
@@ -467,8 +469,8 @@ impl<'s, 'd> Edit<'s, 'd> {
         for (id, statement, key) in kept {
             let (old, cleanup) = self.old.nodes[id];
             let (new, _) = self.new.nodes[id];
-            let was = self.old.own(old, cleanup, key)?;
-            let is = self.new.own(new, cleanup, key)?;
+            let was = self.old.own(old, cleanup, key, statement)?;
+            let is = self.new.own(new, cleanup, key, statement)?;
             let indent = self.indent_at(statement.range.start);
             if was != is {
                 let end = match &statement.form {
@@ -480,7 +482,10 @@ impl<'s, 'd> Edit<'s, 'd> {
                     is.replace('\n', &format!("\n{indent}")),
                 );
             }
-            if old.note != new.note {
+            // A note its author wrote as `@note` is rewritten with the
+            // statement, in that attribute.
+            let attribute = statement.attributes.iter().any(|a| a.name == "note");
+            if old.note != new.note && !attribute {
                 let comments = self.new.written(new, cleanup, key)?.note;
                 let note = comments.as_ref().map_or_else(String::new, |note| {
                     note.split('\n')
@@ -666,6 +671,41 @@ impl<'s, 'd> Edit<'s, 'd> {
             _ => range,
         }
     }
+}
+
+/// `statement` as `author` spells it (KTLO-37): a note the author wrote as
+/// `@note` stays that attribute, and the attributes keep the author's order;
+/// one the author did not write goes before the first whose canonical place
+/// is after its own.
+fn spelled(statement: &mut Statement, author: &Statement) {
+    let written: Vec<&str> = author.attributes.iter().map(|a| a.name.as_str()).collect();
+    if written.contains(&"note")
+        && !statement.attributes.iter().any(|a| a.name == "note")
+        && let Some(note) = statement.note.take()
+    {
+        statement.attributes.push(Attribute {
+            name: "note".into(),
+            arguments: vec![Expr {
+                kind: ExprKind::Literal(note.into()),
+                range: 0..0,
+            }],
+            range: 0..0,
+        });
+    }
+    let (mut ordered, rest): (Vec<Attribute>, Vec<Attribute>) =
+        std::mem::take(&mut statement.attributes)
+            .into_iter()
+            .partition(|a| written.contains(&a.name.as_str()));
+    ordered.sort_by_key(|a| written.iter().position(|name| *name == a.name));
+    for attribute in rest {
+        let rank = attribute_rank(&attribute.name, false);
+        let at = ordered
+            .iter()
+            .position(|a| attribute_rank(&a.name, false) > rank)
+            .unwrap_or(ordered.len());
+        ordered.insert(at, attribute);
+    }
+    statement.attributes = ordered;
 }
 
 /// `text`, lines printed at depth 0, indented by `indent`.

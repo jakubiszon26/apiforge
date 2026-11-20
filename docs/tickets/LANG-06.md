@@ -15,7 +15,7 @@
   comment can stand is named (criterion 1), and criterion 5 asks for the
   same order, not the same text. It shares `apiforge-script/src/edit.rs`
   with DIAG-06 (#391) and merges before it. Size raised to M.
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Goal
 

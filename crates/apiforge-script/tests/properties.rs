@@ -119,7 +119,8 @@ fn ten_thousand_generated_expressions_with_free_comments_format_once() {
         let mut commented = String::new();
         let mut from = 0;
         for (index, token) in tokens.iter().enumerate() {
-            if matches!(&expr[token.range.clone()], "[" | "{" | ",") && random(&mut state) % 2 == 0
+            if matches!(&expr[token.range.clone()], "[" | "{" | ",")
+                && random(&mut state).is_multiple_of(2)
             {
                 commented.push_str(&expr[from..token.range.end]);
                 commented.push_str(&format!(" // c{index}\n"));

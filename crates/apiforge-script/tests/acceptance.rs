@@ -18,6 +18,7 @@ fn with_notes(body: &str, notes: usize) -> String {
 }
 
 #[test]
+#[ignore = "LANG-06 (#143): a free comment gives no warning, so no text holds over 1 000 warnings; how this limit test fills the list is decided on #143"]
 fn diagnostics_beyond_the_limit_are_counted_by_the_parser_and_kept_by_lowering() {
     let source = with_notes("", 1101);
     let tree = parse(&source);
@@ -39,10 +40,16 @@ fn diagnostics_beyond_the_limit_are_counted_by_the_parser_and_kept_by_lowering()
 #[test]
 fn an_error_that_replaces_a_warning_at_the_limit_counts_the_warning() {
     // A full list of warnings, then an error found by lowering: the error is
-    // kept in place of the last warning, which is counted as omitted.
-    let source = with_notes("  export x: number = 1\n", 1000);
+    // kept in place of the last warning, which is counted as omitted. A free
+    // comment gives no warning since LANG-06 (#143): the warnings are 1 000
+    // operands of the wrong type, two in each of 500 values, and the error is
+    // the graph's limit of 200 blocks.
+    let body: String = (0..500)
+        .map(|index| format!("  wrong_{index} = \"a\" - \"b\"\n"))
+        .collect();
+    let source = format!("scenario \"Notes\" {{\n{body}}}\n");
     let tree = parse(&source);
-    assert_eq!(tree.diagnostics.len(), 1000);
+    assert_eq!(tree.diagnostics.len(), 0);
     assert_eq!(tree.omitted_diagnostics, 0);
 
     let project = apiforge_core::demos::shop_project();

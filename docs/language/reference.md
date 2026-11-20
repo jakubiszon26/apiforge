@@ -628,15 +628,25 @@ scenario "Component calls" {
 `//` starts a comment that runs to the end of the line. Comment lines directly
 above a statement, with no blank line between, become that block's **note**
 on the board; a comment at the end of a statement's line joins the note too,
-and the formatter moves it above. Any other comment (above an `input`, after a
-blank line, at the end of the file) produces a warning and is **dropped** when
-the file is formatted, printed or published.
+and the formatter moves it above.
+
+Any other comment is a **free comment**: above an `input`, after a blank
+line, inside a request's braces, at the top or the end of the file.
+
+Format keeps every comment. A free comment stays at its place, with one
+blank line under it when a statement follows, so that it does not become
+that statement's note. One inside something Format writes on one line (an
+object, a list, a check) goes on its own line directly above that line. A file the
+window prints whole from the board, and a published revision, have no place
+for a free comment: the window and `publish` ask before they drop one.
 
 `@label("…")` gives a block the display name the board shows instead of its
 handle.
 
 ```afs
 scenario "Notes" {
+  // Before the first step: a free comment.
+
   begin = start
   // Shown as the block's note on the board.
   // A second line of the same note.
@@ -644,10 +654,18 @@ scenario "Notes" {
   products = GET "/products" {
     sample 200 { items: [] }
   }
+  @label("Check")
+  @note(" Kept exactly, with its leading space.")
+  checked = assert products.status == 200
 }
 ```
 
-A note goes above the statement's attributes, as here.
+A note goes above the statement's attributes, as here. Format writes a
+statement's attributes in one order, `@label`, `@note`, `@config`, `@inputs`,
+and an `input`'s in the order
+`@label`, `@contract`, `@required` or `@optional`, `@exposed` or `@hidden`.
+The language reads them in any order, a board edit keeps the order you
+wrote, and Format keeps a note you wrote as `@note`.
 
 ## What cannot be expressed
 
@@ -659,8 +677,8 @@ The text holds everything a run uses. It deliberately does not hold:
   change keeps its place.
 - **Identities**: block and component ids never appear. A block is its handle;
   a component is its handle and revision.
-- **Formatting**: there is one canonical layout, and comments survive only as
-  notes.
+- **Formatting**: there is one canonical layout. Format keeps every comment;
+  only a note reaches the board.
 - **Environment and secret values**: a file names them (`env.apiToken`); the
   project holds them.
 - Loops, user-defined functions, imports, or more than one scenario per file.
@@ -794,9 +812,6 @@ messages you will meet most:
   the steps written above it below it.
 - **`The value's type does not match this input`** (warning): a value of one
   type fills an input of another, such as text into a number input.
-- **`This comment is not attached to a statement and will be dropped by
-  formatting`** (warning): move the comment directly above a statement, or
-  accept losing it.
 
 When you work through the API Forge MCP server, its tools answer with codes as
 well:
