@@ -42,7 +42,7 @@ mod workbench;
 
 use crate::icons::Icon;
 use crate::{
-    board_edit::{self, Board, Edit},
+    board_edit::{Board, Edit},
     canvas::{self, Canvas, Command},
     code, dialogs,
     inspector::{self, Inspector},
@@ -123,6 +123,14 @@ const LIBRARY_RAIL_WIDTH: f32 = 36.0;
 /// cannot shadow one.
 const TEXT_TAB: &str = "text:";
 
+/// A delete the person confirmed, as the question showed it (DIAG-06e).
+#[derive(PartialEq, Eq)]
+struct ConfirmedDelete {
+    ids: Vec<String>,
+    question: String,
+    gone: Vec<String>,
+}
+
 enum Prompt {
     Working {
         ticket: u64,
@@ -182,6 +190,16 @@ enum Prompt {
         preview: Box<DeletePreview>,
         paths: Vec<String>,
         error: Option<String>,
+    },
+    /// Deleting an `if` with statements in its braces asks once (DIAG-06e).
+    DeleteStatements {
+        document_id: String,
+        cleanup: bool,
+        ids: Vec<String>,
+        wires: Vec<String>,
+        question: String,
+        /// What the question was asked about: the statements that go.
+        gone: Vec<String>,
     },
     Import {
         rows: Vec<ImportRow>,
@@ -371,6 +389,11 @@ pub struct FolderApp {
     tabs_offset: f32,
     tabs_width: f32,
     prompt: Option<Prompt>,
+    /// The delete the person has just confirmed, for the one delete that
+    /// follows (DIAG-06e): the selection, and the question with the
+    /// statements it named. A delete that would now take anything else, or
+    /// ask anything else, asks again.
+    confirmed_delete: Option<ConfirmedDelete>,
     close_error: Option<String>,
     /// Set by a decision in the close dialog; the window closes next frame.
     close_requested: bool,
@@ -429,15 +452,10 @@ pub struct FolderApp {
     marks_shown: Option<(String, Vec<usize>, Option<Duration>)>,
 }
 
-/// What a paste shows once its edit is applied: its copies, and what they
-/// read that the board lacks (UX-34).
+/// What a paste shows once its edit is applied: its copies (UX-34).
 struct PastedOutcome {
     document_id: String,
     ids: Vec<String>,
-    summary: Option<String>,
-    /// The inputs left unconnected for a missing step, marked on their cards
-    /// (UX-39).
-    missing: Vec<canvas::MissingStep>,
 }
 
 /// The statement found under the caret, for one source version.
@@ -581,6 +599,7 @@ impl FolderApp {
             tabs_offset: 0.0,
             tabs_width: 0.0,
             prompt: None,
+            confirmed_delete: None,
             close_error: None,
             close_requested: false,
             preferences: Preferences::default(),
@@ -2124,50 +2143,6 @@ fn sibling_of(model: &Document, cleanup: bool) -> Option<&Graph> {
         }),
         Document::Component(_) => None,
     }
-}
-
-/// What a paste left unconnected, one sentence per step or input the board
-/// lacks (UX-34): `Missing step “product”: the input of Active promotion
-/// that read it is left unconnected.`
-fn missing_summary(graph: &Graph, unresolved: &[edit::Unresolved]) -> Option<String> {
-    // Per missing item: the blocks that lost it, and how many of their
-    // inputs did.
-    type Lost<'a> = (Vec<&'a str>, Vec<(&'a str, &'a str)>);
-    let mut lost: std::collections::BTreeMap<&edit::Missing, Lost<'_>> = Default::default();
-    for item in unresolved {
-        let block = graph
-            .nodes
-            .iter()
-            .find(|node| node.id == item.node_id)
-            .map_or(item.node_id.as_str(), |node| node.display_name());
-        let (blocks, inputs) = lost.entry(&item.missing).or_default();
-        if !blocks.contains(&block) {
-            blocks.push(block);
-        }
-        let input = (item.node_id.as_str(), item.input.as_str());
-        if !inputs.contains(&input) {
-            inputs.push(input);
-        }
-    }
-    let sentences: Vec<String> = lost
-        .iter()
-        .map(|(missing, (blocks, inputs))| {
-            let (kind, name) = match missing {
-                edit::Missing::Step(handle) => ("step", handle),
-                edit::Missing::Input(name) => ("input", name),
-            };
-            let (inputs, that) = if inputs.len() == 1 {
-                ("the input", "that read it is")
-            } else {
-                ("the inputs", "that read it are")
-            };
-            format!(
-                "Missing {kind} “{name}”: {inputs} of {} {that} left unconnected.",
-                blocks.join(", ")
-            )
-        })
-        .collect();
-    (!sentences.is_empty()).then(|| sentences.join(" "))
 }
 
 fn with_graph(model: &Document, cleanup: bool, graph: Graph) -> Document {

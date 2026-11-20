@@ -166,7 +166,15 @@ fn selecting_a_step_with_the_inspector_open_changes_nothing() {
         ("fixtures/scenarios/lay/shop-30.afs", 30),
         ("docs/qa/2026-10-26/LAY/order-flow.afs", 14),
     ] {
-        assert_selection_changes_nothing(&fixture(name), name, steps);
+        // The copy under `docs/qa/` is QA evidence written for 0.1.0: it is
+        // opened with its fix applied, as a click on its errors does (LANG-13).
+        let demo = apiforge_core::demos::shop_project();
+        let source = apiforge_script::fix_source(
+            &fixture(name),
+            &apiforge_script::LowerContext::folder(&demo),
+        );
+        assert_eq!(source.refused, None, "{name}");
+        assert_selection_changes_nothing(&source.text, name, steps);
     }
 }
 

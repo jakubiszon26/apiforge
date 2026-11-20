@@ -238,7 +238,7 @@ fn prepare(request: &Request<'_>) -> Vec<Prepared> {
             let target = request.cards.get(wire.target)?;
             let end = target.input_anchor(&wire.input, &wire.operand_path)?;
             let (source, start, source_rect) = match &wire.start {
-                Start::Output { card, port } if wire.control => {
+                Start::Output { card, port } if wire.control && wire.branch.is_some() => {
                     let source = request.cards.get(*card)?;
                     (*card, rail_anchor(source, port, target)?, source.rect())
                 }
@@ -255,12 +255,19 @@ fn prepare(request: &Request<'_>) -> Vec<Prepared> {
                     )
                 }
             };
+            let routed = layout::Wire::new(
+                port_at(source, start, source_rect),
+                port_at(wire.target, end, target.rect()),
+            );
             Some(Prepared {
                 id: wire.id.clone(),
-                wire: layout::Wire::new(
-                    port_at(source, start, source_rect),
-                    port_at(wire.target, end, target.rect()),
-                ),
+                // A line of the chain of steps, from the right of one step
+                // to the left of the next (LAY-45).
+                wire: if wire.control && wire.branch.is_none() {
+                    routed.chained()
+                } else {
+                    routed
+                },
                 start,
                 end,
                 control: wire.control,
@@ -270,11 +277,12 @@ fn prepare(request: &Request<'_>) -> Vec<Prepared> {
         .collect()
 }
 
-/// Where an ordering wire leaves its source (LAY-06): from the top edge,
-/// above its control socket, so that it rises to the rail above the row and
-/// runs there instead of through the gap between two cards where the data
-/// wires run. A wire to a card hung right under the source still leaves
-/// from the socket at the bottom: it only drops into that card.
+/// Where a branch leaves its `if` (LAY-06): from the top edge, above its
+/// socket, so that it rises to the rail above the row and runs there
+/// instead of through the gap between two cards where the data wires run.
+/// A branch to a card hung right under the `if` still leaves from the
+/// socket at the bottom: it only drops into that card. The chain of steps
+/// leaves from the socket on the right at the title line (LAY-45).
 fn rail_anchor(source: &Card, port: &str, target: &Card) -> Option<Pos2> {
     let below = source.output_anchor(port)?;
     let (from, to) = (source.rect(), target.rect());

@@ -4,7 +4,6 @@ scenario "Checkout" {
   param quantity = 2
   begin = start
   // Retrieve available products.
-  @after(begin)
   products = GET "/products" {
     headers { Accept: "application/json" }
     query { limit: 10 }
@@ -14,7 +13,6 @@ scenario "Checkout" {
   status_ok = assert products.status == 200
   var first = products.body.items[0]
   total = first.price * param.quantity
-  @after(status_ok)
   @label("Place an order")
   order = POST "/orders" {
     body { productId: first.id, quantity: param.quantity, total: total }

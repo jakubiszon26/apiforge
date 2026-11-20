@@ -1,4 +1,4 @@
-//! Editing operations of the board: connections, clipboard, component
+//! Editing operations of the board: connections, deletion, clipboard, component
 //! extraction, response field pickers and project export.
 //!
 //! Every operation borrows its inputs and returns new values, so the editor can keep
@@ -8,24 +8,29 @@
 mod clipboard;
 mod component;
 mod connect;
+mod delete;
 mod extract;
 mod fold;
 mod inputs;
 mod inspect;
 mod nodes;
+mod place;
 mod proxies;
 mod shared;
 mod storage;
 
 pub use clipboard::{
     Fragment, Missing, PASTE_OFFSET, PasteTarget, Pasted, Unresolved, copy_selection,
-    duplicate_selection, paste_selection,
+    copy_statements, duplicate_selection, duplicate_statements, paste_selection, paste_statements,
 };
 pub use component::{
     ComponentDraft, DraftError, DraftSection, InputRow, InputTarget, OutputRow, add_component,
     initialize_inputs, initialize_outputs, materialize_component, validate_draft,
 };
 pub use connect::{connect, remove_connections};
+pub use delete::{
+    Braced, Deletion, Read, Reader, apply_deletion, delete_preview, delete_statements,
+};
 pub use extract::{
     Extraction, Replaced, branch_leaves, extraction_component, propose_extraction,
     replace_with_call, replace_with_call_unconnecting, template_readers, unkept_outputs,
@@ -43,6 +48,7 @@ pub use nodes::{
     AddedNode, AssignedVariable, OutputRef, add_check, add_node, assign_response_variable,
     field_assertion,
 };
+pub use place::{Place, add_step_after, place};
 pub use proxies::{
     add_proxy, move_proxies, proxy_binding, proxy_source, prune_proxies, remove_proxies,
 };
@@ -108,6 +114,30 @@ pub enum EditError {
         "An IF/ELSE branch leaves the selection. Select the steps of the branch as well, or leave the IF/ELSE out."
     )]
     BranchLeavesSelection,
+    /// A delete refused on the board (DIAG-06e): *Start* with steps after
+    /// it, or statements that stay and read what would go, by name.
+    #[error("{0}")]
+    DeleteRefused(String),
+    /// A move refused on the board (DIAG-06a): the result would have a
+    /// cycle through ordering and values. Names the reader, what it reads
+    /// and the step it stays below.
+    #[error("{0}")]
+    PlaceRefused(String),
+    /// A paste or a duplicate refused on the board (DIAG-06f): a statement
+    /// would read what is not there, by name.
+    #[error("{0}")]
+    PasteRefused(String),
+    /// A wire from a step's *Next* to a check, value, variable or export
+    /// (DIAG-06d): only steps are ordered.
+    #[error("Only steps are ordered. A check runs when what it reads exists.")]
+    OnlyStepsOrdered,
+    /// An `if` put after a statement of its own braces (DIAG-06d).
+    #[error("A condition cannot go into its own braces.")]
+    IntoOwnBraces,
+    /// *Delete* on an ordering line (DIAG-06a): the line is the order of the
+    /// written steps.
+    #[error("The line is the order of the steps. Move or delete a step.")]
+    OrderLine,
     #[error("{0}")]
     InvalidProject(#[from] ImportError),
 }

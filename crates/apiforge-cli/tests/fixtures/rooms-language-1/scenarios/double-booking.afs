@@ -1,0 +1,41 @@
+scenario "Double booking is refused" {
+  description "A room booked for a time cannot be booked again for the same time."
+  begin = start
+  @after(begin)
+  token = sign_in@1(user: "tester")
+  rooms = GET "/rooms" {
+    headers { Authorization: "Bearer {{token}}" }
+    query { floor: 2 }
+    sample 200 { items: [{ id: "room-a", name: "Room A", seats: 8, status: "open" }, { id: "room-b", name: "Room B", seats: 6, status: "maintenance" }] }
+  }
+  slot = { start: "2026-12-01T10:00:00Z", end: "2026-12-01T11:00:00Z" }
+  first = POST "/bookings" {
+    headers { Authorization: "Bearer {{token}}" }
+    body { roomId: rooms.body.items[0].id, start: slot.start, end: slot.end }
+    sample 201 { id: "bk-1", roomId: "room-a", start: "2026-12-01T10:00:00Z", end: "2026-12-01T11:00:00Z" }
+  }
+  booked = if first.status == 201 {
+    second = POST "/bookings" {
+      headers { Authorization: "Bearer {{token}}" }
+      body { roomId: rooms.body.items[1].id, start: slot.start, end: slot.end }
+      sample 409 { error: { code: "room_unavailable", message: "The room is closed for maintenance." } }
+    }
+    refused = assert second.status == 409
+    @after(refused)
+    calendar = GET "/rooms/{{rooms.body.items[0].id}}/bookings" {
+      headers { Authorization: "Bearer {{token}}" }
+      query { from: slot.start, to: slot.end }
+      sample 200 { items: [{ id: "bk-1", start: "2026-12-01T10:00:00Z", end: "2026-12-01T11:00:00Z" }] }
+    }
+    one_booking = assert calendar.body.items[0].id == first.body.id
+  } else {
+    not_booked = assert first.status == 201
+  }
+  cleanup {
+    cancelled = DELETE "/bookings/{{first.body.id}}" {
+      headers { Authorization: "Bearer {{token}}" }
+      sample 204 {}
+    }
+    gone = assert cancelled.status == 204
+  }
+}

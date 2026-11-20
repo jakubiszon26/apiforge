@@ -138,6 +138,7 @@ fn lay29_criterion_3_the_window_draws_no_line_under_its_own_card() {
         ("shop-30", WireMode::Chips),
         ("shop-30", WireMode::All),
         ("fan-out", WireMode::All),
+        ("labels", WireMode::All),
     ] {
         let (_project, mut harness, id) = tidied(&fixture(name), WIDE, false, mode);
         let label = format!("{name}, {mode:?}");

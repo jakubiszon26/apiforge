@@ -46,6 +46,25 @@ pub struct ActionMenu {
     focus_search: bool,
     /// Operator groups open in the popup's Operators section.
     open_groups: Vec<OperatorGroup>,
+    /// Opened by *Add step* on the board's bar: a step it adds goes after
+    /// the selection (DIAG-06a).
+    bar: bool,
+    /// Opened on a check, value, variable or export in a branch: the menu
+    /// offers *Move out of the branch* for it (DIAG-06d).
+    pub out_of_branch: Option<String>,
+}
+
+/// The entry that writes a check of a branch after its `if` (DIAG-06d).
+pub const MOVE_OUT: &str = "Move out of the branch";
+
+/// Whether `id` is a check, value, variable or export that stands in the
+/// braces of an `if`.
+pub fn in_a_branch(graph: &Graph, id: &str) -> bool {
+    graph
+        .nodes
+        .iter()
+        .any(|node| node.id == id && node.kind.is_data())
+        && apiforge_core::chain::braces(graph).contains_key(id)
 }
 
 /// The output a card's menu starts from: control flow for Start and IF, otherwise
@@ -78,6 +97,17 @@ impl ActionMenu {
             search: String::new(),
             focus_search: true,
             open_groups: library::default_open_groups(),
+            bar: false,
+            out_of_branch: None,
+        }
+    }
+
+    /// The menu of *Add step* on the board's bar: what it adds goes after
+    /// the selection, not last (DIAG-06a).
+    pub fn bar(screen: Pos2, world: Pos2) -> Self {
+        Self {
+            bar: true,
+            ..Self::new(screen, world, None)
         }
     }
 
@@ -252,6 +282,19 @@ impl ActionMenu {
                                     });
                             });
                         }
+                        // First, above the steps the menu adds, where the
+                        // menu of a card low on the board still shows it.
+                        if let Some(id) = &self.out_of_branch {
+                            let entry = ui
+                                .add(crate::widgets::action(Icon::ArrowLeft, MOVE_OUT).quiet())
+                                .on_hover_text(
+                                    "Write it after the condition's braces: it then runs whichever way the condition goes, when what it reads exists.",
+                                );
+                            if entry.clicked() {
+                                outcome = Outcome::Add(Command::MoveOutOfBranch(id.clone()));
+                            }
+                            ui.separator();
+                        }
                         let search = crate::widgets::named(
                             ui.add(
                                 crate::widgets::text_edit(&mut self.search)
@@ -294,11 +337,19 @@ impl ActionMenu {
                                                 y: node.position.y + 20.0,
                                             },
                                         );
-                                        outcome = Outcome::Add(Command::AddNode {
-                                            block: action.block,
-                                            component: action.component.clone(),
-                                            position,
-                                            source: self.source.clone(),
+                                        outcome = Outcome::Add(if self.bar {
+                                            Command::AddStep {
+                                                block: action.block,
+                                                component: action.component.clone(),
+                                                position,
+                                            }
+                                        } else {
+                                            Command::AddNode {
+                                                block: action.block,
+                                                component: action.component.clone(),
+                                                position,
+                                                source: self.source.clone(),
+                                            }
                                         });
                                     }
                                 }

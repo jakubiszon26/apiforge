@@ -129,7 +129,6 @@ scenario "Checkout" {
   param quantity = 2
 
   begin = start
-  @after(begin)
   products = GET "/products" {
     headers { Accept: "application/json" }
     query { limit: 10 }
@@ -142,7 +141,6 @@ scenario "Checkout" {
 
   cart = AddToCart(product: first, qty: param.quantity)
 
-  @after(status_ok)
   order = POST "/orders" {
     body { productId: first.id, cartId: cart.id, total: total }
   }
@@ -159,8 +157,9 @@ scenario "Checkout" {
 }
 ```
 
-The form of each `handle = …` statement decides the block kind. Ordering edges
-use `@after(…)` or `if` blocks, and Start is an ordinary statement, so everything
+The form of each `handle = …` statement decides the block kind. The steps of a
+block run in the order they are written (LANG-13; the plan first wrote ordering
+as `@after(…)`), `if` blocks branch, and Start is the first step, so everything
 the board can express has a text form. `//` comments above a statement become the
 block's note.
 

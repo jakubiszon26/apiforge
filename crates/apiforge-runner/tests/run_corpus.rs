@@ -86,6 +86,59 @@ const STEP_DIVERGENCES: &[(&str, &str, &str, &str)] = &[
         "request",
         r#"{"method": "GET", "url": "https://api.example.test/v1/items/:id", "headers": {}}"#,
     ),
+    // RUN-01, ADR 0015 rule 1: under `on_error continue` an ordering edge waits for
+    // its source to have finished, whatever its result. `join` follows the
+    // errored `broken` and reads nothing from it, so it runs.
+    ("merge-error", "join", "status", r#""passed""#),
+    (
+        "merge-error",
+        "join",
+        "request",
+        r#"{"method": "GET", "url": "https://api.example.test/v1/join", "headers": {}}"#,
+    ),
+    (
+        "merge-error",
+        "join",
+        "outputs",
+        r#"{"body": {"ok": true}, "status": 200, "headers": {}, "duration": 0}"#,
+    ),
+    // RUN-01, ADR 0015 rule 7: an export a component call computed before it
+    // failed exists, so `next`, which reads it, runs in the main flow too.
+    ("components", "next", "status", r#""passed""#),
+    ("components", "next", "inputs", r#"{"value": "new"}"#),
+    ("components", "next", "outputs", r#"{"value": "new"}"#),
+    // RUN-01, ADR 0015 rules 1 and 4: a false Data condition guards the steps
+    // that read it; `read` only follows `gate` and reads nothing from it, so it
+    // runs. The cleanup's `uses-blocked`, which reads `read.body`, then runs too
+    // and fails on its own: it is a GET with a body.
+    ("cleanup-rules", "read", "status", r#""passed""#),
+    (
+        "cleanup-rules",
+        "read",
+        "request",
+        r#"{"method": "GET", "url": "https://api.example.test/v1/read", "headers": {}}"#,
+    ),
+    (
+        "cleanup-rules",
+        "read",
+        "outputs",
+        r#"{"body": {"ok": true}, "status": 200, "headers": {}, "duration": 0}"#,
+    ),
+    ("cleanup-rules", "uses-blocked", "status", r#""error""#),
+    ("cleanup-with-start", "read", "status", r#""passed""#),
+    (
+        "cleanup-with-start",
+        "read",
+        "request",
+        r#"{"method": "GET", "url": "https://api.example.test/v1/read", "headers": {}}"#,
+    ),
+    (
+        "cleanup-with-start",
+        "read",
+        "outputs",
+        r#"{"body": {"ok": true}, "status": 200, "headers": {}, "duration": 0}"#,
+    ),
+    ("cleanup-with-start", "uses-blocked", "status", r#""error""#),
 ];
 
 /// Fixtures the recording ran but the runner rejects before running, with the reason.

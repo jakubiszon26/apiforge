@@ -271,9 +271,6 @@ pub enum RowValue {
     /// A literal shown but edited in the inspector.
     Summary(String),
     Missing,
-    /// An input a paste left unconnected because the step it read, named
-    /// here, is missing from the board (UX-39): session state, never written.
-    MissingStep(String),
     Optional,
 }
 
@@ -309,6 +306,14 @@ pub struct Card {
     pub outputs: Vec<OutputRow>,
     /// Control outputs: pseudo-port and label.
     pub controls: Vec<(&'static str, &'static str)>,
+    /// The socket of the card's *Next* on its right edge at the title line
+    /// (LAY-45): a step's, and an `if`'s own on a board that moves
+    /// statements across braces (DIAG-06c). A check, value, variable or
+    /// export on such a board has none.
+    pub chain_out: bool,
+    /// Whether the control buttons under the card are drawn and take a
+    /// click: not a check's *Next* on a board that moves statements.
+    pub buttons: bool,
     pub origin: Pos2,
     /// The compact box of a request at the compact density (LAY-16).
     pub compact: Option<Compact>,
@@ -370,6 +375,12 @@ pub struct Compact {
 }
 
 pub const COMPACT_HEADER: f32 = 40.0;
+/// The title line of a card (LAY-45), where the sockets of its order sit on
+/// its sides: within the header row of a compact card and of a full one
+/// alike, so that the line between two neighbours of a row, *Start* and a
+/// compact card among them, is level; and a socket's gap above the highest
+/// data socket of a compact card's side, a line's gap (46 px).
+const TITLE_LINE: f32 = 26.0;
 pub const COMPACT_ROW: f32 = 24.0;
 const COMPACT_SUBTITLE: f32 = 22.0;
 const COMPACT_RESULT: f32 = 26.0;
@@ -535,44 +546,11 @@ impl Card {
             inputs,
             outputs,
             controls,
+            chain_out: node.kind != NodeKind::If,
+            buttons: true,
             origin: pos2(node.position.x as f32, node.position.y as f32),
             compact: None,
             overview: None,
-        }
-    }
-
-    /// Marks the slot `path` of the input `input` (empty for the whole
-    /// input) as reading the missing step `step` (UX-39): that row's value on
-    /// a full card; on a compact card the input's line, or a value's or a
-    /// check's one line, where the plain line was. A slot that has a value
-    /// keeps it.
-    pub fn mark_missing_step(&mut self, input: &str, path: &[String], step: &str) {
-        let slot = self.inputs.iter().position(|row| {
-            row.name == input
-                && row.path == path
-                && matches!(row.value, RowValue::Missing | RowValue::Optional)
-        });
-        if let Some(index) = slot {
-            self.inputs[index].value = RowValue::MissingStep(step.to_owned());
-        }
-        let label = slot
-            .or_else(|| self.inputs.iter().position(|row| row.name == input))
-            .map_or(input, |index| self.inputs[index].label.as_str());
-        let text = format!("{label} · Missing step “{step}”");
-        let whole = self
-            .inputs
-            .iter()
-            .position(|row| row.name == input && row.path.is_empty());
-        if let Some(compact) = &mut self.compact
-            && let Some(line) = compact.rows.iter_mut().find(|line| match line.role {
-                CompactRole::Input(index) => Some(index) == whole,
-                CompactRole::Line => true,
-                _ => false,
-            })
-        {
-            line.text.clone_from(&text);
-            line.full_text = text;
-            line.missing = true;
         }
     }
 
@@ -682,7 +660,8 @@ impl Card {
     /// deepest row containing it), or of the ordering input for [`ORDER_PORT`].
     pub fn input_anchor(&self, name: &str, path: &[String]) -> Option<Pos2> {
         if name == ORDER_PORT {
-            return (self.kind != NodeKind::Start).then(|| self.origin + vec2(WIDTH / 2.0, 0.0));
+            return (self.kind != NodeKind::Start)
+                .then(|| self.origin + vec2(0.0, self.title_line()));
         }
         let index = self
             .inputs
@@ -714,6 +693,11 @@ impl Card {
     /// Anchor of a data output or a control pseudo-port; `None` for an output
     /// a compact card does not show.
     pub fn output_anchor(&self, name: &str) -> Option<Pos2> {
+        if name == ORDER_PORT {
+            return self
+                .chain_out
+                .then(|| self.origin + vec2(WIDTH, self.title_line()));
+        }
         if let Some(compact) = &self.compact {
             if let Some(index) = self.controls.iter().position(|(port, _)| *port == name) {
                 return Some(self.origin + vec2(self.control_x(index), compact.height));
@@ -728,6 +712,27 @@ impl Card {
         }
         let index = self.outputs.iter().position(|row| row.name == name)?;
         Some(self.origin + vec2(WIDTH, self.output_y(index)))
+    }
+
+    /// The ports of the order the card has a socket out of: *Yes* and *No*
+    /// of an `if`, and *Next* where it has one.
+    pub fn order_outputs(&self) -> Vec<&'static str> {
+        let mut ports: Vec<&'static str> = self
+            .controls
+            .iter()
+            .map(|(port, _)| *port)
+            .filter(|port| *port != ORDER_PORT || self.chain_out)
+            .collect();
+        if self.chain_out && !ports.contains(&ORDER_PORT) {
+            ports.push(ORDER_PORT);
+        }
+        ports
+    }
+
+    /// The height of the card's title line from its origin, where the
+    /// sockets of its order sit on its sides (LAY-45).
+    pub fn title_line(&self) -> f32 {
+        TITLE_LINE
     }
 
     /// Where a control socket sits across the card's bottom edge: the middle

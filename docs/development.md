@@ -199,13 +199,26 @@ an ADR.
 
 ## Continuous integration
 
-A pull request runs the workflow on Linux once; a newer commit cancels the
-older run. Windows runs on every push to `main`, on a pull request labelled
-`ci:windows` and by hand (*Run workflow*) ([#407](https://github.com/jakubiszon26/apiforge/issues/407)).
-Add `ci:windows` to a pull request that changes processes or IPC, files and
-paths, `build.rs`, packaging or anything else Windows-specific. A red Windows
-run on `main` gets a fix ticket before further merges; `release.yml` still
-builds and tests Windows for every release.
+The workflow runs on Linux and on Windows as follows
+([#407](https://github.com/jakubiszon26/apiforge/issues/407),
+[#483](https://github.com/jakubiszon26/apiforge/issues/483)):
+
+| When | What runs |
+| --- | --- |
+| An ordinary pull request: the parser, checks, card layout | Linux; a newer commit cancels the older run |
+| A pull request that touches files, locks, paths, processes or IPC, window start, native dependencies, `build.rs` or packaging | Linux and Windows before merge: add the label `ci:windows` |
+| A push to `main` | Linux |
+| Each night (02:00 UTC) on the newest `main` | Windows, when anything outside the documentation changed since `main`'s last green Windows run; otherwise the run says it skipped |
+| By hand (*Run workflow*) | Linux and Windows |
+| A release tag | `release.yml` builds and tests Windows on that exact commit before publishing |
+
+In the LANG sprint, for example, the fix that rewrites a project's files and
+the manifest's language version take `ci:windows`; a syntax-only change does
+not.
+
+After an ordinary merge the next ticket starts at once: nobody waits for a run
+of `main` that is still in progress. A red run of `main`, Linux or the nightly
+Windows, gets a fix ticket before further merges.
 
 The workflow runs these steps on both systems: formatting, clippy, tests, the scenario
 examples and workspace check, a release build and `--check` with the release binary.
@@ -366,7 +379,12 @@ cargo run -p apiforge-cli --locked -- check --folder /path/to/project
 cargo run -p apiforge-cli --locked -- print --folder /path/to/project --file scenarios/main.afs
 cargo run -p apiforge-cli --locked -- apply --folder /path/to/project --file scenarios/main.afs incoming.afs
 cargo run -p apiforge-cli --locked -- run --folder /path/to/project --scenario scenarios/main.afs --json
+cargo run -p apiforge-cli --locked -- fix --folder /path/to/project [--check]
 ```
+
+`fix` converts a project written for 0.1.0 to language 2 in one commit, or
+writes nothing and lists what to change by hand
+([Projects written for 0.1.0](folder-projects.md#projects-written-for-010)).
 
 `check` optionally selects one registered source with `--file`. Besides the
 diagnostics MCP's `check` returns, it warns, as the Code view does, at each place
@@ -483,7 +501,7 @@ opens the saved project read-only for each call and writes nothing, not even
 
 | Tool | Input | Result |
 | --- | --- | --- |
-| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed`, `null` while a holding window's live setting decides at run time, and its `source`), `interrupted_runs`, server version, `reference_version` |
+| `project_overview` | — | name, base URL, environment variable names, secret names, contracts, documents (kind, path, handle, base revision, `source_sha256`, `unavailable`), published revisions with `source_sha256`, `generation`, `holder`, `holder_details`, `hands_over_on_write`, `live_requests` (`allowed`, `null` while a holding window's live setting decides at run time, and its `source`), `interrupted_runs`, server version, `reference_version`, `language_version` (the language the server reads) and `project_language_version` (the one the project is written in, LANG-15) |
 | `language_reference` | — | the `.afs` reference for models (`docs/language/reference.md`, embedded in the binary) and its `version` |
 | `read_source` | `path` | the saved text, `source_sha256`, `generation`, `valid`, `unavailable`, diagnostics, `omitted` |
 | `check` | `path`? | per document: path, `source_sha256`, `valid`, `unavailable`, diagnostics, `omitted`; a project with errors is reported, not refused |
@@ -886,7 +904,8 @@ unregistered path is `resource_not_found` with `data.code`
   `path_rejected`, `path_exists`, `handle_exists`, `recovery_required`,
   `too_large`, `result_too_large`, `run_in_progress`, `cancelled`,
   `timed_out`, `unknown_outcome`. The read tools use `not_a_project`,
-  `project_unreadable` (any other storage failure, with its message),
+  `project_unreadable` (any other storage failure, and a project in a
+  language the server does not read or run, LANG-15, with its message),
   `recovery_required` (an interrupted transaction), `unknown_document`
   (`details.registered_paths`), `invalid_text` (`details.diagnostics`),
   `invalid_inputs`, `live_disabled`, `run_in_progress`, `too_large`,

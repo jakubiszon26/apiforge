@@ -22,6 +22,16 @@ fn wire(from: (usize, Side, f32), to: (usize, Side, f32)) -> Wire {
     )
 }
 
+/// A wire line of the board file that ends in `chain` is a line of the
+/// chain of steps (LAY-45).
+fn chained(wire: Wire, words: &[&str]) -> Wire {
+    if words.get(7) == Some(&"chain") {
+        wire.chained()
+    } else {
+        wire
+    }
+}
+
 /// Routes the board and holds it to the rule and to ADR 0006.
 fn routed(cards: &[Rect], wires: &[Wire]) -> Vec<Route> {
     routed_with(cards, wires, 0)
@@ -92,9 +102,12 @@ fn board(text: &str) -> (Vec<Rect>, Vec<Wire>) {
         let number = |index: usize| -> f32 { words[index].parse().expect("a number") };
         match words.first().copied() {
             Some("card") => cards.push(card(number(1), number(2), number(3), number(4))),
-            Some("wire") => wires.push(wire(
-                (number(1) as usize, side(words[2]), number(3)),
-                (number(4) as usize, side(words[5]), number(6)),
+            Some("wire") => wires.push(chained(
+                wire(
+                    (number(1) as usize, side(words[2]), number(3)),
+                    (number(4) as usize, side(words[5]), number(6)),
+                ),
+                &words,
             )),
             _ => {}
         }

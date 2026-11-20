@@ -140,20 +140,16 @@ fn assert_outside_only_when_outside(steps: &[StepResult]) {
 
 const CHAIN: &str = r#"scenario "A chain stopped by a check" {
   begin = start
-  @after(begin)
   a = GET "/a" {
     sample 200 { ok: true }
   }
   broken = assert a.body.ok == false
-  @after(a)
   b = GET "/b" {
     sample 200 {}
   }
-  @after(b)
   c = GET "/c" {
     sample 200 {}
   }
-  @after(c)
   d = GET "/d" {
     sample 200 {}
   }
@@ -213,7 +209,6 @@ async fn run04_criterion_2_shop_30_keeps_the_branch_not_taken_outside() {
 
 const ARM_NOT_TAKEN: &str = r#"scenario "A chain in the arm not taken" {
   begin = start
-  @after(begin)
   first = GET "/a" {
     sample 200 {}
   }
@@ -226,7 +221,6 @@ const ARM_NOT_TAKEN: &str = r#"scenario "A chain in the arm not taken" {
     no = GET "/no" {
       sample 200 {}
     }
-    @after(no)
     no_more = GET "/no-more" {
       sample 200 {}
     }
@@ -251,16 +245,13 @@ async fn run04_criterion_2_a_chain_in_the_arm_not_taken_stays_outside() {
 
 const COMPONENT: &str = r#"component chain_flow "Chain flow" {
   begin = start
-  @after(begin)
   cart = POST "/carts" {
     sample 201 { id: "c-1" }
   }
   created = assert cart.status == 200
-  @after(cart)
   paid = POST "/payments" {
     sample 201 {}
   }
-  @after(paid)
   confirmed = GET "/payments/p-1" {
     sample 200 {}
   }
@@ -271,13 +262,10 @@ const COMPONENT: &str = r#"component chain_flow "Chain flow" {
 const CALLER: &str = r#"scenario "Calls the chain flow" {
   on_error stop
   begin = start
-  @after(begin)
   flow = chain_flow@1()
-  @after(flow)
   next = GET "/next" {
     sample 200 {}
   }
-  @after(next)
   last = GET "/last" {
     sample 200 {}
   }
@@ -319,11 +307,9 @@ fn value_before_start(name: &str, value: &str) -> String {
         r#"scenario "A value before Start" {{
   {name} = {value}
   begin = start
-  @after(begin)
   first = GET "/a" {{
     sample 200 {{}}
   }}
-  @after(first)
   second = GET "/b" {{
     query {{ limit: {name} }}
     sample 200 {{}}
@@ -381,8 +367,9 @@ async fn run04_criterion_5_start_runs_before_a_value() {
 /// value before a ready step.
 #[tokio::test]
 async fn run04_criterion_5_a_graph_without_start_keeps_its_order() {
-    let (project, scenario) = scenario(
-        r#"scenario "Without Start" {
+    // Since LANG-13 (#386) only a published revision has no *Start*: it
+    // is read in its stored spelling.
+    let text = r#"scenario "Without Start" {
   first = GET "/a" {
     sample 200 {}
   }
@@ -394,8 +381,14 @@ async fn run04_criterion_5_a_graph_without_start_keeps_its_order() {
     tidy = 10
   }
 }
-"#,
-    );
+"#;
+    let mut project = shop_project();
+    let result = lower(&parse(text), &LowerContext::folder(&project).stored());
+    assert!(!result.has_errors(), "{:#?}", result.diagnostics);
+    let Some(Document::Scenario(scenario)) = result.document else {
+        panic!("not a scenario");
+    };
+    project.scenarios.push(scenario.clone());
     let run = simulate(project, &scenario).await;
     assert_eq!(run.status, RunStatus::Passed, "{run:#?}");
     assert_eq!(handles(&run.steps, Phase::Main), ["limit", "first"]);

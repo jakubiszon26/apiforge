@@ -125,6 +125,17 @@ Graphical undo/redo projects source and resets obsolete text history/completions
 Do not clear model history merely because the explorer or another document gained
 focus. Explicit document replacement/reload establishes a new history baseline.
 
+Amended by DIAG-06g (#502, owner's decision of 2026-11-20): a step of the
+document's history holds the exact text with the model read from it, and Undo
+or Redo installs that text byte for byte rather than projecting the model into
+the current text, so free comments, blank lines and attribute order come back.
+Every settled analysis that finds the text changed is one step, whether or not
+the model changed; a layout change is a step with the same text. A Code edit
+not yet settled when Undo is pressed is settled first and is the step undone;
+text that does not analyse is never a step. Following a foreign write,
+resolving a conflict, reverting and reloading clear the history, so no kept
+text is installed over a file the document no longer follows.
+
 Clean/valid source may be reprinted after a graphical semantic change. Restore
 caret/selection by stable node/statement where possible; never reprint pending,
 invalid or conflicted text. A graphical edit changes source and dirty state,

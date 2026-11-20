@@ -496,12 +496,11 @@ fn lay10_criterion_6_a_check_rings_its_subjects() {
             "{handle} rings in the check colour"
         );
     }
-    // `address` waits for the check: an ordering relation, not a subject.
-    let address = canvas(&harness)
-        .debug_ring(&id_of(&harness, "address"))
-        .expect("address is ringed");
-    assert_ne!(address, check_colour(), "address is not a subject");
-    assert_ne!(address, theme::ACCENT, "nor the selection");
+    // `address` is no subject. Since LANG-13 it follows the step before it,
+    // not the check, so no ordering relation rings it either.
+    let address = canvas(&harness).debug_ring(&id_of(&harness, "address"));
+    assert_ne!(address, Some(check_colour()), "address is not a subject");
+    assert_ne!(address, Some(theme::ACCENT), "nor the selection");
 }
 
 /// The views of the owner's acceptance: `shop-30` tidied with its checks

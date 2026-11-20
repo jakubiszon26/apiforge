@@ -7,11 +7,28 @@
   written by the order of its lines, the manifest carries the language
   version under `formatVersion: 2`, a project in the older language runs
   only after the fix.
-- **Not started, and paused by the owner on 2026-11-17.** Finishing LAY
-  comes first. The sprint starts after LAY closes, its acceptance (LAY-12,
-  #296) and its retrospective. Until then nothing of LANG is designed or
-  implemented except the rows of [Beside LAY](#beside-lay) marked *now*,
-  and no ticket of this plan carries a `ready:*` label.
+- **Started by the owner on 2026-11-20.** It had been paused since
+  2026-11-17 until LAY closed; LAY closed on 2026-11-19 (#296) and the
+  owner confirmed the same day that part A, to 0.2.0, runs first and the
+  [REQ sprint](req.md) after it. The start did not wait for the LAY
+  [retrospective](../retrospectives/2026-11-20-lay.md), written the same
+  day. The first half runs in the order below; which of its tickets may be
+  taken unattended is on the issues (`ready:*`), not here. RUN-01, LANG-15,
+  LANG-13 and FIX-01 (#454, a ticket of REQ whose scenario is a case for
+  the fix) were taken on 2026-11-20, each on its own branch with its
+  ticket file as the first commit; three of them merged the same day
+  ([First half](#first-half--to-020)). What each works in, the rulings on
+  an independent review of the ticket files and the order since are
+  recorded on #411 ([the first plan](https://github.com/jakubiszon26/apiforge/issues/411#issuecomment-7025097154),
+  [its revision](https://github.com/jakubiszon26/apiforge/issues/411#issuecomment-7033966949)).
+- **Three proposals accepted into scope on 2026-11-20**, for the second
+  half: LANG-17 (#470) a table of cases, or a request based on another;
+  LANG-18 (#471) headers and authorization shared by a scenario; LANG-19
+  (#472) a check without an invented name and one check for several
+  fields. Accepted means analysed and planned, not a design approved: each
+  is `format`, and its questions return to the owner with its analysis.
+  They come from the reference scenario `labels` (FIX-01, #454), whose
+  sixteen `@after` lines are also a case for LANG-13's fix.
 - Analysis model: Fable 5.2.
 - Inputs: [FLOW-00](../tickets/FLOW-00.md), [LANG-00](../tickets/LANG-00.md),
   [LAY section 12](lay.md#12-after-the-checkpoint-2026-11-16), every open
@@ -56,27 +73,55 @@ spelling with every other `@after`.
 
 ## First half — to 0.2.0
 
-Paused until the sprint starts.
+In progress since 2026-11-20. **Merged that day:** FIX-01 (#485), RUN-01
+(#487), LANG-15 (#486); beside them #474 and #476 (plans and process) and
+#484 (CI). LANG-13 is pull request #488.
+
+Merge order from here: LANG-13 → LANG-06, LANG-05, LAY-45 and LANG-20 side
+by side → DIAG-06a → DIAG-06d → DIAG-06c and DIAG-06e side by side →
+LANG-21a (after LANG-20) → REL-05; DIAG-06b and LANG-21b follow and are
+not conditions of the release.
 
 | Order | Ticket | Size | Needs | Files |
 | --- | --- | --- | --- | --- |
-| 1 | RUN-01 #126 the chain goes on after an error; only a missing value blocks | M · 20 · `default` | LANG-00 approved; #409 merged (same file) | `apiforge-runner/src/engine.rs`, `apiforge-core/src/run.rs`, `fixtures/runs`, `reference.md` (*on_error*) |
-| 1 | LANG-15 #412 the language version | S–M · 20 · `format` | decided | `apiforge-storage/src/project/schema.rs`, `apiforge-project`, `apiforge-cli`, `apiforge-mcp` (`project_overview`, refusals), `reference.md` (first line) |
-| 2 | LANG-13 #386 the steps of a block run in the order written; `@after` leaves the language; the fix and `apiforge fix` | M · 30 · `format` | LANG-14, LAY-34 and LAY-12 merged; LANG-15 (the fix raises the version). It changes lowering, printing and validation, not the document model | `apiforge-script` `lower.rs`, `print.rs`; `apiforge-core/src/validation.rs`; `apiforge-cli`; `reference.md`; every `.afs` under `fixtures/` and `docs/` |
-| 2 | DIAG-06 #391 the board keeps the chain | from the mock-up · `visible UI` | mock-up approved; DIAG-07 (#392) merged | `apiforge-core/src/edit/nodes.rs`, `apiforge-desktop/src/canvas/` |
-| 4 | LANG-06 #143 with KTLO-37 #211 Format keeps free comments; one attribute order | S · 15 · `format` | LANG-13 merged (same writer) | `apiforge-script` `format.rs`, `parser.rs`, `print.rs`; `reference.md` |
-| 4 | LANG-05 #142 the window prints a compound `if` condition as written | S · 10 · `format` | LANG-13 merged | `apiforge-script` `print.rs` |
-| 5 | REL-05 #414 release 0.2.0 | — | all above | release notes |
+| done | RUN-01 #126 the chain goes on after an error; only a missing value blocks | M · 20 · `default` | merged in #487 | runner, ADR 0015 |
+| done | LANG-15 #412 the language version in the manifest; the two refusals | M · 20 · `format` | merged in #486, with `LANGUAGE_VERSION = 1` | storage, project, command line, MCP |
+| 1 | LANG-13 #386 the steps of a block run in the order written; `@after` leaves the language; the fix of one file; **the build reads language 2** | M, upper end · 30 · `format` | pull request #488; amended on 2026-11-20 (a component needs no `start`; a check that reads no step runs; the constant and the run refusal moved here from LANG-20) | `apiforge-script`, `apiforge-core` (`graph.rs`, `validation.rs`), `apiforge-project`, `apiforge-runner/src/plan.rs`, every test source with `@after`, `fixtures/scenarios`, `fixtures/scripts`, `reference.md`, ADR 0003 and 0005 |
+| 2 | LANG-20 #481 `apiforge fix --folder` updates a project **file by file, with a record** of the files done (`.apiforge/language-update.json`, kept by Git; the owner's decision of 2026-11-20, not the planning model's recommendation); `--check`, `--as-written`; the MCP tool `fix` | M · 20 · `format` | redesigned 2026-11-20; its two further questions answered that day (both A: a board edit in a source not yet converted is refused; the window converts what it can); waits for the independent review; then LANG-13 merged | `apiforge-cli`, `apiforge-mcp`, `apiforge-project/src/language.rs`, `apiforge-storage` (the record) |
+| 2 | LANG-06 #143 with KTLO-37 #211 Format loses no comment, wherever it stands; one attribute order | M · 15 · `format` | LANG-13 merged | `apiforge-script` `parser.rs`, `ast.rs`, `format.rs`, `print.rs`, `edit.rs`; `reference.md` |
+| 2 | LANG-05 #142 a check that is a comparison or a logical operation is written as typed; a bare value keeps `== true` | S · 10 · `format` | decided 2026-11-20 (A); LANG-13 merged; beside LANG-06, the second merges `main` first | `apiforge-script` `print.rs`, `format.rs`; `reference.md`, ADR 0005 |
+| 2 | LAY-45 #468 the chain is drawn side to side, sockets on the cards' sides in both *Wires* modes; the badge arrow and the row-end mark go | M · 20 · `visible UI`, `removal` | moved here from LAY-2 by the owner on 2026-11-20; LANG-13 merged; brings `shop-30` with every wire back to 76 and 116 crossings | `apiforge-desktop/src/canvas/`, layout measurements |
+| 3 | DIAG-06a #391 a step is placed and moved inside its braces: a wire to an existing step moves it with its checks, refused against a value read; *Add step* after the selected step; one placement contract; the legacy window untouched | M · 20 · `default`, `visible UI` | LANG-13, LANG-06 (`edit.rs`) and LAY-45 merged | `apiforge-core/src/edit`, `apiforge-script/src/edit.rs`, `apiforge-project/src/session.rs`, desktop |
+| 4 | DIAG-06d #493 a step moves with an `if`'s braces and across braces; a check into and out of a branch; deleting an `if` asks once | M · 20 · `default`, `visible UI` | DIAG-06a merged | the same files |
+| 5 | DIAG-06c #490 the board shows and takes the chain: the `if`'s own *Next*, the caption while carrying, a block lands on the nearest line, the row makes room | M · 20 · `visible UI`, `default` | LAY-45, DIAG-06a and DIAG-06d merged | `apiforge-desktop/src/canvas/`, `dnd.rs`, `library.rs` |
+| 5 | DIAG-06e #494 deleting a step that is read is refused; *Duplicate* directly after its original, *Paste* after the selected step; a paste that would read what is not there is refused | M · 15 · `default`, `visible UI` | decided 2026-11-20 (three answers, A); waits for the independent review; DIAG-06a merged | `apiforge-core/src/edit`, `board_edit.rs` |
+| 6 | LANG-21a #482 the window offers *Update the project*: a check first, then the update | M · 20 · `visible UI` | decided 2026-11-20 (in 0.2.0; nine answers on the mock-up); restated for the window's answer on #481 (one dialog, two parts; the band *being updated: n of m files*); LANG-20 merged | `apiforge-desktop/src/folder/`, `apiforge-project/src/language.rs` |
+| 7 | LANG-21b #495 the list of statements to place by hand leads to each one; the count follows each save | M · 15 · `visible UI` | LANG-21a merged; not a condition of 0.2.0 | `apiforge-desktop/src/folder/` |
+| 7 | DIAG-06b #491 a refusal shown while carrying; a notice after a delete; `+` on a line; *Move earlier* and *Move later* (Alt+↑, Alt+↓) | M · 15 · `visible UI` | DIAG-06c merged; not a condition of 0.2.0 | `apiforge-desktop/src/canvas/`, `folder/notices.rs` |
+| 8 | REL-05 #414 release 0.2.0 | S · 15 | all above except DIAG-06b and LANG-21b | release notes |
+| — | LAY-13 #297 branch bands | — | after 0.2.0 (DIAG-06 question 6 = A) | — |
 
-**Side by side.** Rows with the same order number touch different crates:
-RUN-01 (runner) beside LANG-15 (storage, command line, MCP); LANG-13
-(script, validation) beside DIAG-06 (edit, desktop). `reference.md` is
-touched by five tickets in different sections; each merges `main` before
-its last push. LANG-13 changes every fixture, so nothing else that reads
-`fixtures/scenarios` is open when it lands — that is why it waits for
-LAY-12.
+**Side by side.** Rows with the same order number touch different files:
+LANG-20 (command line, MCP, `language.rs`), LANG-06 and LANG-05 (the
+script crate's writer, in different functions), LAY-45 (`canvas/`).
+DIAG-06a follows LANG-06 because both edit `apiforge-script/src/edit.rs`,
+and LAY-45 because the gestures are tested against the sockets' final
+place; DIAG-06d and DIAG-06e add cases to DIAG-06a's one operation.
+DIAG-06c (`canvas/`) and DIAG-06e (`edit`) run side by side. DIAG-02
+(#145, REQ) is not open together with LAY-45 or a DIAG-06 ticket that
+works in `canvas/`. `reference.md` is touched in different
+sections; each ticket merges `main` before its last push.
 
-**Owner minutes**, without DIAG-06 and the mock-up: about 95.
+**Owner minutes** still ahead on 2026-11-20: about 270 (LANG-13 30,
+LANG-20 20, LANG-06 15, LANG-05 10, LAY-45 20, DIAG-06a 20, DIAG-06d 20,
+DIAG-06c 20, DIAG-06e 15, LANG-21a 20, LANG-21b 15, DIAG-06b 15, REL-05
+15, and the acceptance captures). The first half grew that day from six
+tickets to fourteen: two independent reviews of the ticket files found
+four of them to be larger than estimated, and they were split.
+
+**Open beside the sprint:** #489, a Windows timing failure of
+`mcp08b::take_back_waits_for_the_agents_run_and_its_cleanup` on #486's
+first attempt; rerun once and noted there until its cause is read.
 
 ### Exit criteria of the first half
 
@@ -96,15 +141,98 @@ They are REL-05's release conditions:
 - [ ] The reference describes language 2 only; ADR 0003, ADR 0005 and
       ADR 0010 are amended by the tickets that change them.
 
+### After the reviews and the cut of 2026-11-20
+
+Four independent reviews of the ticket files on 2026-11-20 found the
+tickets around the project update, the board's edits and the window's
+offer larger than estimated, and their shared rules owned by nobody;
+they were split so that each is `S` or `M` and each shared rule has one
+owner. The same evening **the owner cut the project update to one
+ticket**: before 0.2.0 nobody uses the application, so one command that
+converts a project whole is enough. **This table replaces the rows of
+LANG-20, LANG-21 and DIAG-06 in the table above**; the other rows stand.
+Which tickets may be taken unattended is on the issues.
+
+Merged on 2026-11-20 and after: LANG-13 (#488), LANG-20e (#504, the
+store's read set), LANG-05 (#505), DIAG-06g (#507, Undo restores the
+file), LANG-06 with KTLO-37 (#508), LAY-45 (#509), DIAG-06e (#510, the
+delete).
+
+| Ticket | Owns | Size | After |
+| --- | --- | --- | --- |
+| LANG-20 #481 | `apiforge fix --folder`: a whole project in one commit, or nothing and a list of what to do by hand; `--check` | M · 15 · `format` | one independent review |
+| DIAG-06a #391 | a step is placed and moved inside its braces; the one placement rule | M · 20 · `default`, `visible UI` | — |
+| DIAG-06d #493 | a step moves with an `if`'s braces and across braces | M · 20 · `default`, `visible UI` | DIAG-06a |
+| DIAG-06c #490 | the board shows and takes the chain | M · 20 · `visible UI`, `default` | DIAG-06d |
+| DIAG-06f #496 | paste and duplicate land in the chain and keep what they read; an `if` is copied with its braces | M · 15 · `default`, `visible UI` | DIAG-06d |
+| DIAG-06b #491 | feedback while carrying, the notice after a delete, `+` on a line, *Move earlier* and *Move later* | M · 15 · `visible UI` | DIAG-06c; not a condition of 0.2.0 |
+| REL-05 #414 | release 0.2.0 | S · 15 | all above except DIAG-06b |
+
+Merge order: LANG-20 beside DIAG-06a → DIAG-06d → DIAG-06c and DIAG-06f
+→ REL-05. About 120 owner minutes ahead.
+
+**Cut from 0.2.0 by the owner on 2026-11-20, in the backlog, to be taken
+only if users appear:** LANG-20b #497 (converting in guarded steps),
+LANG-20c #498 (the MCP tool `fix`), LANG-20d #499 (the record when
+sources come and go; the refusal of a board edit in an old source),
+LANG-20f #501 (the update after a save), LANG-21a #482 and LANG-21b #495
+(the window's *Update the project*). Their ticket files stay on their
+branches as reviewed. With them go the decisions of the same day that
+only they built: converting file by file with a record (#481), the
+window's dialog and *This file is ready as written* (#482), a restore
+that converts (#499). What a language-1 project shows in the window and
+to an agent is what LANG-15 and LANG-13 built: its errors without a
+per-line fix, and a run refused with the sentence that names the
+command.
+
+Owner decisions of 2026-11-20 that stand, each recorded on its issue:
+a project is converted whole, by one command, or not at all (#481);
+deleting a step that is read is refused, *Duplicate* lands after its
+original, a paste that would read what is not there is refused (#494);
+an `if` is copied with its braces (#496); the chain is drawn side to
+side and its crossings are measured as three measures (#468); a corridor
+for a value many steps read is LAY-47 (#506), LAY-2, after 0.2.0.
+
+### Notes for the retrospective
+
+Recorded as they came up, for the sprint's review
+([retrospective](../process/retrospective.md)):
+
+- **A limit was proposed without a measurement.** LAY-45 was given the
+  condition "`shop-30` with every wire back to 76 and 116 crossings";
+  its feasibility gate showed that no drawing of the chain could reach
+  it (52 and 77 of them are data against data). The rule is now in
+  [estimation](../process/estimation.md#a-limit-comes-with-its-measurement).
+- **The reviews split tickets and nobody asked whether the scope was
+  still worth it.** The project update grew from one ticket to eight
+  over four rounds of review, each round finding real defects on the
+  seams and each answered by another split. With no user before 0.2.0, a
+  migration that needed a record, a state between two languages and a
+  window flow should have raised the question "should this be cut?" at
+  the second round, from the planning model, before the owner had to ask
+  it. A review that finds a ticket to be `L` twice is a signal about the
+  scope, not only about the split.
+- **A ticket was given a number that was taken.** The corridor for data
+  lines was filed as LAY-46 while LAY-46 was #469; a review of the plan
+  found it and it became LAY-47. Before an ID is written anywhere:
+  `gh issue list --state all --search "<ID> in:title"` and `git grep
+  <ID> -- docs`.
+- Three readings of approved text were wrong and were caught by an
+  independent review after the tickets were labelled (a `start` for a
+  component; a check that reads no step; a conversion that could not be
+  resumed). The review now comes before the label
+  ([autonomy](../process/autonomy.md#what-makes-a-ticket-ready)).
+
 ## Second half — the language grows
 
 | Order | Ticket | Note |
 | --- | --- | --- |
 | 1 | LANG-16 #413 part B: the corpus of 15–20 scenarios, then blocks, loops, block results, scopes; mock-up of a block on the board | Analysis; decides the shape of everything below |
 | 2 | LANG-01 #127 with LANG-09 #353 a missing field is a failure, not an error; a value from whichever branch ran | One analysis: both ask for the same thing, a value that may be absent and a way to say what stands in for it |
-| 3 | LANG-08 #352 with LANG-07 #212 repeat for every element; repeat until a state holds | One block shape, two conditions for going round again; RUN-02 (#130, a test over a table) is read with them |
-| 4 | LANG-02 #129 with LANG-04 #132 every, some, map, filter in checks; a partial match in a collection | A partial match is "some element where…"; one analysis |
-| 5 | LANG-03 #131 text functions, comparison without case | S, additive, the pattern of LANG-10 |
+| 3 | LANG-08 #352 with LANG-07 #212 repeat for every element; repeat until a state holds; **LANG-17 #470** a table of cases, or a request based on another | One block shape, two conditions for going round again; RUN-02 (#130, a test over a table) is read with them. A table of cases may be that loop over a list of rows or a form of its own: the analysis says which, and LANG-16's corpus includes `labels` so that it can |
+| 4 | LANG-02 #129 with LANG-04 #132 every, some, map, filter in checks; a partial match in a collection; **LANG-19 #472** a check without a name, one check for several fields | A partial match is "some element where…"; one check for several fields is a partial match of a whole body; one analysis |
+| 5 | **LANG-18 #471** headers and authorization shared by a scenario | Its own analysis: where they are written, how a request leaves one out, precedence with a component (HTTP-02 #133). REQ-03 keeps headers per request until then |
+| 6 | LANG-03 #131 text functions, comparison without case | S, additive, the pattern of LANG-10 |
 | — | DIAG-05 #374 | As scheduled in LAY section 12.3 |
 
 After LANG, as the owner scheduled: EDIT-01 (#358), CLI-01 (#359), EDIT-02
@@ -135,11 +263,18 @@ Exit criteria of the second half are written by LANG-16.
 | Breaking changes allowed in 0.x; no several versions, no migration framework | the owner, 2026-11-16; [LANG-00](../tickets/LANG-00.md) |
 | A board edit keeps what the author wrote | #396, #211 |
 | A chain is written by the order of its lines (replaces FLOW-00's decisions 2 and 8 and consequence 1); `formatVersion: 2` with `languageVersion`; an older project runs only after the fix | [LANG-00](../tickets/LANG-00.md#owner-decisions-2026-11-16) |
+| 2026-11-20, LANG-13: `shop-30` with every wire gets a new baseline, which LAY-45 brings back to 76 and 116; the header's summary is `N steps`. Planning rulings of the day: a component needs no `start`; a check that reads no step runs; a refused file is converted by hand so that what runs stays the same; the build reads language 2 from LANG-13 on | [#386](https://github.com/jakubiszon26/apiforge/issues/386) (the ticket file is on the branch of pull request #488 until it merges) |
+| 2026-11-20, LANG-05: the short form of a check is canonical for a comparison or a logical operation; a bare value keeps `== true` | #142 |
+| 2026-11-20, LANG-21: the window offers the update in 0.2.0; nine answers on its mock-up (the band, a check before writing, *Save all and update*, the list with *Show*, the count follows each save) | #482 |
+| 2026-11-20, DIAG-06: sixteen answers on its mock-up, all the recommended option; split into DIAG-06a, DIAG-06c and DIAG-06b; LAY-45 moves into this sprint before them; bands (LAY-13) after 0.2.0; the keys of *Move earlier* and *Move later* are Alt+↑ and Alt+↓ | #391, #490, #491, #468 |
+| 2026-11-20, LANG-20: a project is converted **file by file, with a record** kept by Git of the sources already converted; the project is in two languages for a while and nothing runs until the manifest is raised. The owner's choice against the recommended "whole or not at all"; it adds a file to what a project keeps | #481 |
+| 2026-11-20, DIAG-06e: deleting a step that another reads is refused, naming the readers; *Duplicate* lands directly after its original and *Paste* after the selected step; a pasted reference that finds its step is kept, otherwise the paste is refused | #494 |
+| 2026-11-20: two independent reviews of the ticket files; every finding accepted; DIAG-06a split into DIAG-06a, DIAG-06d and DIAG-06e, LANG-21 into LANG-21a and LANG-21b | #411, #391, #482 |
 
 ADRs the first half amends: [0003](../decisions/0003-start-reachability.md)
 (a flow with a step has a start; a step outside the flow is an error),
 [0005](../decisions/0005-scenario-language.md) (ordering, the braces rule,
 what line order means, the three text operations),
 [0010](../decisions/0010-folder-projects.md) (the manifest's language
-version). No ADR states what a blocked step blocks; RUN-01 records its
-rules in the one it finds closest, or in a new one.
+version). What a blocked step blocks is [ADR 0015](../decisions/0015-run-after-an-error.md),
+written by RUN-01.

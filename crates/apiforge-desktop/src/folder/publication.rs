@@ -10,6 +10,13 @@ pub(super) enum Action {
         /// A check added from the document's run results, counted once the
         /// edit applies: at once, or after the comment prompt (UX-35).
         check: Option<Box<runs::PendingCheck>>,
+        /// The blocks a move on the board moved (DIAG-06a): the edit is a
+        /// move, written by moving their lines, or refused. Empty for any
+        /// other edit.
+        moved: Vec<String>,
+        /// A paste or a duplicate (DIAG-06f): the model holds the chain the
+        /// edit made, which is written as it is.
+        placed: bool,
     },
     History {
         undo: bool,
@@ -86,6 +93,14 @@ impl FolderApp {
         };
         let result = match &action {
             Action::Publish => unreachable!("publication is queued before borrowing the session"),
+            Action::Model { next, moved, .. } if !moved.is_empty() => session
+                .apply_move(id, *next.clone(), moved, DIAGRAM)
+                .map(|()| None),
+            Action::Model {
+                next, placed: true, ..
+            } => session
+                .apply_pasted(id, *next.clone(), DIAGRAM)
+                .map(|()| None),
             Action::Model { next, .. } => session
                 .apply_model_edit(id, *next.clone(), DIAGRAM)
                 .map(|()| None),

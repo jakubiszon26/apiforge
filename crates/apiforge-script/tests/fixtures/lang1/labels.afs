@@ -1,0 +1,158 @@
+scenario "Label validation" {
+  description "A fictional parcel API refuses a label: without a token (403), for a weight out of range (422), for an unknown parcel (404) and for a bad postcode or service (422). No request reads another. Simulation only."
+  on_error continue
+  param parcel_id = "pc-001"
+  param missing_parcel_id = "pc-missing"
+  param unknown_service = "night-owl"
+  param service_with_digits = "exp4ess"
+  param foreign_service = "other-carrier-24"
+  param bad_postcode = "postcode is not valid"
+  param bad_service = "no such service"
+  param bad_name = "name is not valid"
+  begin = start
+  @label("No token")
+  @after(begin)
+  no_token = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json" }
+    body { weight: 2, postcode: "00-950", service: "standard" }
+    sample 403 { error: { code: "token_missing", message: "Sign in to print a label." } }
+  }
+  no_token_status = assert no_token.status == 403
+  no_token_code = assert no_token.body.error.code == "token_missing"
+  no_token_text = assert no_token.body.error.message == "Sign in to print a label."
+  @label("Weight 31 kg")
+  @after(no_token)
+  weight_31 = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 31, postcode: "00-950", service: "standard" }
+    sample 422 { error: { code: "out_of_range", field: "weight", message: "Weight must be at most 30 kg." } }
+  }
+  weight_31_status = assert weight_31.status == 422
+  weight_31_code = assert weight_31.body.error.code == "out_of_range"
+  weight_31_field = assert weight_31.body.error.field == "weight"
+  weight_31_text = assert weight_31.body.error.message == "Weight must be at most 30 kg."
+  @label("Weight 0 kg")
+  @after(weight_31)
+  weight_0 = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 0, postcode: "00-950", service: "standard" }
+    sample 422 { error: { code: "out_of_range", field: "weight", message: "Weight must be more than 0 kg." } }
+  }
+  weight_0_status = assert weight_0.status == 422
+  weight_0_code = assert weight_0.body.error.code == "out_of_range"
+  weight_0_field = assert weight_0.body.error.field == "weight"
+  weight_0_text = assert weight_0.body.error.message == "Weight must be more than 0 kg."
+  @label("Unknown parcel")
+  @after(weight_0)
+  no_parcel = POST "https://parcels.example.test/parcels/{{param.missing_parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "00-950", service: "standard" }
+    sample 404 { error: { code: "parcel_not_found", message: "No such parcel." } }
+  }
+  no_parcel_status = assert no_parcel.status == 404
+  no_parcel_code = assert no_parcel.body.error.code == "parcel_not_found"
+  no_parcel_text = assert no_parcel.body.error.message == "No such parcel."
+  @label("Postcode of symbols only")
+  @after(no_parcel)
+  postcode_symbols = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "!@#$%", service: "standard" }
+    sample 422 { error: { code: "postcode_invalid", field: "postcode", message: "The postcode is not valid." } }
+  }
+  postcode_symbols_status = assert postcode_symbols.status == 422
+  postcode_symbols_text = assert postcode_symbols.body.error.message contains param.bad_postcode
+  @label("Postcode: one digit left")
+  @after(postcode_symbols)
+  postcode_one_digit = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "1-!@#", service: "standard" }
+    sample 422 { error: { code: "postcode_invalid", field: "postcode", message: "The postcode is not valid." } }
+  }
+  postcode_one_digit_status = assert postcode_one_digit.status == 422
+  postcode_one_digit_text = assert postcode_one_digit.body.error.message contains param.bad_postcode
+  @label("One-character postcode")
+  @after(postcode_one_digit)
+  postcode_short = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "1", service: "standard" }
+    sample 422 { error: { code: "postcode_invalid", field: "postcode", message: "The postcode is not valid." } }
+  }
+  postcode_short_status = assert postcode_short.status == 422
+  @label("Postcode of spaces")
+  @after(postcode_short)
+  postcode_spaces = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "   ", service: "standard" }
+    sample 422 { error: { code: "postcode_invalid", field: "postcode", message: "The postcode is not valid." } }
+  }
+  postcode_spaces_status = assert postcode_spaces.status == 422
+  @label("Empty postcode")
+  @after(postcode_spaces)
+  postcode_empty = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "", service: "standard" }
+    sample 422 { error: { code: "postcode_required", field: "postcode", message: "A postcode is required." } }
+  }
+  postcode_empty_status = assert postcode_empty.status == 422
+  @label("Postcode null")
+  @after(postcode_empty)
+  postcode_null = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: null, service: "standard" }
+    sample 422 { error: { code: "postcode_required", field: "postcode", message: "A postcode is required." } }
+  }
+  postcode_null_status = assert postcode_null.status == 422
+  @label("No postcode field")
+  @after(postcode_null)
+  postcode_missing = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, service: "standard" }
+    sample 422 { error: { code: "postcode_required", field: "postcode", message: "A postcode is required." } }
+  }
+  postcode_missing_status = assert postcode_missing.status == 422
+  @label("Unknown service")
+  @after(postcode_missing)
+  service_unknown = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "00-950", service: param.unknown_service }
+    sample 422 { error: { code: "service_unknown", field: "service", message: "This carrier has no such service." } }
+  }
+  service_unknown_status = assert service_unknown.status == 422
+  service_unknown_text = assert service_unknown.body.error.message contains param.bad_service
+  @label("Service with digits")
+  @after(service_unknown)
+  service_digits = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "00-950", service: param.service_with_digits }
+    sample 422 { error: { code: "service_invalid", field: "service", message: "The service name is not valid." } }
+  }
+  service_digits_status = assert service_digits.status == 422
+  service_digits_text = assert service_digits.body.error.message contains param.bad_name
+  @label("Service of another carrier")
+  @after(service_digits)
+  service_foreign = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "00-950", service: param.foreign_service }
+    sample 422 { error: { code: "service_unknown", field: "service", message: "This carrier has no such service." } }
+  }
+  service_foreign_status = assert service_foreign.status == 422
+  service_foreign_text = assert service_foreign.body.error.message contains param.bad_service
+  @label("Empty service")
+  @after(service_foreign)
+  service_empty = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "00-950", service: "" }
+    sample 422 { error: { code: "service_required", field: "service", message: "A service is required." } }
+  }
+  service_empty_status = assert service_empty.status == 422
+  service_empty_text = assert service_empty.body.error.message == "A service is required."
+  @label("Service null")
+  @after(service_empty)
+  service_null = POST "https://parcels.example.test/parcels/{{param.parcel_id}}/labels" {
+    headers { "Content-Type": "application/json", Authorization: "Bearer sample-token" }
+    body { weight: 2, postcode: "00-950", service: null }
+    sample 422 { error: { code: "service_required", field: "service", message: "A service is required." } }
+  }
+  service_null_status = assert service_null.status == 422
+  service_null_text = assert service_null.body.error.message == "A service is required."
+}
