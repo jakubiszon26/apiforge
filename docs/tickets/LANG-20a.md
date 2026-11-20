@@ -1,8 +1,7 @@
 # LANG-20a: A project being updated: the record of converted sources, and what a build does with it
 
 - Size: M · Owner review: 20 min · Risk: `format` (a new file in a
-  project; the manifest's two version fields), `default` (a board edit in
-  an old source is refused)
+  project; the manifest's two version fields)
 - State: **Decided; waits for the independent review of this version
   before it is labelled.** The owner's decisions of 2026-11-20 on
   [#481](https://github.com/jakubiszon26/apiforge/issues/481): a project
@@ -11,6 +10,11 @@
   **Split the same day** after two independent reviews: this ticket is
   the record and what every part of the build does while it exists; the
   conversion itself is LANG-20b (#497); the MCP tool is LANG-20c (#498).
+  **Narrowed again** after the review's second pass: creating, deleting,
+  restoring and renaming a source, and the refusal of a board edit in an
+  old source, are LANG-20d (#499). The build's language is already 2:
+  LANG-13 raised the constant and enabled LANG-15's tests; nothing of
+  that is left to this family.
   Then ready after LANG-13 (#386) has merged.
 - Issue [#481](https://github.com/jakubiszon26/apiforge/issues/481) · LANG
   sprint, first half · branch `feat/lang-20-project-fix`
@@ -75,10 +79,8 @@ yet, and that an old source is not rewritten by accident.
   version*) instead of running converted files with the old meaning,
   where their steps would be skipped without a word. A record beside any
   other manifest is an error naming both.
-- **Who writes it.** LANG-20b's conversion; and this build, when it
-  creates a new source in a language-1 project — the source is written in
-  language 2 and listed in the same commit (creating the record and
-  raising the manifest if there was none).
+- **Who writes it.** LANG-20b's conversion, and LANG-20d when a source
+  is created, deleted, restored or renamed. This ticket only reads it.
 - **Another target.** A record whose `toLanguage` is not this build's
   language: the project opens for reading, nothing is read through the
   record, and the project's problem names the version that began the
@@ -94,11 +96,6 @@ yet, and that an old source is not rewritten by accident.
   versions, `updating` and the sources left. In a converted source the
   `@after` and `start` errors carry their fix (it is a language-2
   source); in one not converted they do not (LANG-13, A5).
-- New (question 1 = A): in a project of the older language — with or
-  without a record — a source that is not converted cannot be edited on
-  the board. The board shows it; adding, wiring, moving a step, deleting
-  and the Inspector's fields are refused with *Update the project first.*
-  Its text can be edited in Code; a card can still be moved.
 - New: when the record changes on disk — by the command, by an agent, by
   Git — an open window follows: the count, which sources carry fixes and
   which can be edited on the board.
@@ -119,7 +116,7 @@ Tests in `crates/apiforge-storage/tests/acceptance.rs` (T),
 The projects are written by the tests: a language-1 copy of `rooms`
 (kept under `crates/apiforge-project/tests/fixtures/rooms-language-1/`)
 with a record that lists some of its sources, whose texts the test has
-converted with LANG-13's `fix_source`; and a language-1 copy of `labels`.
+converted with LANG-13's `fix_source`.
 
 1. The record is read and written in the format above, sorted, one entry
    per line; unknown fields, another `formatVersion`, a duplicate or
@@ -140,19 +137,8 @@ converted with LANG-13's `fix_source`; and a language-1 copy of `labels`.
    MCP and in the window, and sends nothing; `project_overview` returns
    `updating: true`, both versions and the sources left.
    Tests: C, M, D `lang20a_criterion_4_*`.
-5. A source this build creates in a language-1 project (the window's
-   *New scenario*, MCP `create_document`) is written in language 2 and
-   listed in the same commit; when there was no record, the record and
-   the manifest's raise come in that commit too.
-   Tests: P `lang20a_criterion_5_*`.
-6. In a language-1 project, with or without a record, a board edit in a
-   source the record does not list is refused with *Update the project
-   first.* and changes neither the document nor the file: adding a
-   block, wiring, moving a card's step, deleting, an Inspector change —
-   in the window and through a session's model edit. Moving a card and a
-   text edit in Code work. The same edits work in a listed source and in
-   a language-2 project. Tests: P `lang20a_criterion_6_*`, D
-   `lang20a_criterion_6_*` (on `labels` in language 1).
+5. (Moved to LANG-20d.)
+6. (Moved to LANG-20d.)
 7. A change of the record alone on disk — no source and no manifest byte
    changes — reaches an open session: the sources' languages, their
    fixes, the board permission and the overview's count follow without a
@@ -171,7 +157,6 @@ converted with LANG-13's `fix_source`; and a language-1 copy of `labels`.
 | --- | --- |
 | Every language-2 and every plain language-1 project: no record, nothing changes | the whole suite; criterion 2's negative cases |
 | LANG-15: `formatVersion: 2` with `languageVersion: 1` | LANG-15's criterion 1 accepts it; criteria 2–4 here give it its meaning |
-| An old source rewritten in the new language by a board edit | criterion 6 |
 | The session's external-change detection (it watches the manifest, the documents, the diagram and the revisions today) | criterion 7; `external` tests unchanged |
 | Git: a listed source brought back to an old text | with `@after` it shows its errors; **without** `@after` it cannot be told apart and is read as language 2 — the one case the record does not cover, said in `docs/folder-projects.md` |
 
@@ -187,9 +172,7 @@ converted with LANG-13's `fix_source`; and a language-1 copy of `labels`.
   the store lists it among the kept files.
 - `apiforge-project/src/`: `language.rs` (a project's state: language 1,
   being updated, language 2, and a source's language), `session.rs` (the
-  record read at open and with each external change; the refusal of
-  criterion 6 where a model edit is installed; criterion 5 where a
-  document is created), `analysis.rs`, `external.rs`, `execution.rs`.
+  record read at open and with each external change), `analysis.rs`, `external.rs`, `execution.rs`.
 - `apiforge-cli/src/{folder,run}.rs`, `apiforge-mcp/src/tools.rs` (the
   overview), `apiforge-desktop` only where the two sentences are shown.
 - `docs/tickets/LANG-00.md`, ADR 0010, `docs/folder-projects.md`.
