@@ -6,7 +6,7 @@
   Split from LANG-20b on 2026-11-20. After LANG-13 (#386) only.
 - Issue [#500](https://github.com/jakubiszon26/apiforge/issues/500) · LANG
   sprint, first half · branch `feat/lang-20e-store-read-set`
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Goal
 
