@@ -11,6 +11,13 @@
   count that follows each save (answers 5 and 9) are LANG-21b (#495).
   Amended by the same review: what the check reads, what *Save all*
   cannot save, and a check that has gone stale.
+- **To be amended** when question 2 on #481 is answered: the owner
+  chose on 2026-11-20 that a project is converted file by file, with a
+  record (LANG-20). A project can then be partly updated, which the
+  approved views do not show: the dialog of view 3a (what will change)
+  and the list of view 4a (what is left) can both apply at once, and the
+  band has a third state, *being updated: n of m files*. Criteria 2–5
+  are restated for the answer; until then this ticket is not taken.
 - Issue [#482](https://github.com/jakubiszon26/apiforge/issues/482) · LANG
   sprint, first half · branch `feat/lang-21-update-the-project`
 - Analysis model: Fable 5.2 · Implementation model: —
