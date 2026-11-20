@@ -978,3 +978,22 @@ fn lang13_review_the_fixed_text_passes_the_check() {
         written(&project, &fixed.text);
     }
 }
+
+/// What the fix writes must not have an error its text did not have. The
+/// missing `start` hides the check of the whole graph, so a data cycle in
+/// the cleanup shows only once the start is written: the fix is refused,
+/// the text is left as it is, and the error it would reveal is named.
+#[test]
+fn lang13_review_a_fix_that_would_reveal_an_error_is_refused() {
+    let project = project();
+    let text = "scenario \"X\" {\n  a = GET \"/a\"\n  cleanup {\n    x = y\n    y = x\n  }\n}\n";
+    let lowered = lower(&parse(text), &LowerContext::folder(&project));
+    let found = errors(&lowered.diagnostics);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(found[0].message, START_MISSING);
+    assert!(found[0].fix.is_some(), "the start alone would be fixed");
+    let fixed = fix_source(text, &LowerContext::folder(&project));
+    assert_eq!(fixed.text, text);
+    let refused = fixed.refused.expect("refused");
+    assert_eq!(refused.message, "Graph contains a data/control cycle");
+}
