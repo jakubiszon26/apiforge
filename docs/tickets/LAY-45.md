@@ -3,7 +3,8 @@
 - Size: M · Owner review: 20 min · Risk: `visible UI`, `removal` (the
   arrow at the badge and the mark at a row's end go)
 - State: **Approved, ready for implementation after LANG-13 (#386) has
-  merged.** Owner decisions: 2026-11-19, question 12 = A (the chain is
+  merged.** Amended on 2026-11-20 after an independent review: saved
+  positions do not move; a feasibility gate comes first. Owner decisions: 2026-11-19, question 12 = A (the chain is
   drawn side to side; to the next row one line through the row gap);
   2026-11-20, DIAG-06 quiz on #391, question 1 = A (its own ticket, in the
   LANG sprint, before DIAG-06) and question 2 = A (order sockets on the
@@ -46,7 +47,11 @@ turns back and goes down between two cards of the row it left.
   `after …` text on hover, and the mark at a row's end that names the
   next step. The line says both.
 - Unchanged: the lines out of *Yes* and *No* of an `if` and their
-  sockets; data wires and chips; where Tidy up puts the cards.
+  sockets; data wires and chips; the order and the columns Tidy up gives
+  the cards. Changed: Tidy up leaves the room between two rows that the
+  line between them needs. A card's saved position never moves by this
+  ticket: a board laid out before it shows the new lines in the gaps it
+  has until *Tidy up* is pressed.
 - Migrated, default: nothing. Nothing is saved; it is drawing.
 
 ## Mock-up
@@ -69,10 +74,13 @@ unless said, on `labels`, `shop-30` and `rooms/booking-day`, after Tidy up.
 2. Between two neighbours of a row the line is one straight segment. No
    ordering line passes between two cards of one row.
    Test: `lay45_criterion_2_*`.
-3. The line to the next row lies in the row gap, at least 20 px from every
-   card and from every other line along its run (the owner's rule of
-   2026-11-15); a row gap grows when it must. Test: `lay45_criterion_3_*`;
-   `packed` is 0 on every reference board (`apiforge-layout` `quality`).
+3. After *Tidy up*, the line to the next row lies in the row gap, at
+   least 20 px from every card and from every other line along its run
+   (the owner's rule of 2026-11-15); Tidy up's row gap grows by what that
+   needs and no more. On a board that was not tidied since, the line is
+   routed in the gap there is, as any line between hand-placed cards is.
+   Test: `lay45_criterion_3_*`; `packed` is 0 on every reference board
+   (`apiforge-layout` `quality`).
 4. The lines out of *Yes* and *No* keep their sockets and their look.
    Test: `lay45_criterion_4_*`; the branch tests of `lay06` unchanged.
 5. The arrow at the badge and the mark at a row's end are gone in both
@@ -101,6 +109,16 @@ unless said, on `labels`, `shop-30` and `rooms/booking-day`, after Tidy up.
     every reference board is not smaller than before by more than 0.02.
     Test: `lay45_criterion_10_*`.
 
+## Feasibility first
+
+The first commit after the acceptance tests is the measurement, not the
+drawing: the reference boards routed side to side, with the `quality`
+table for crossings (criterion 8), `packed` (criterion 3) and the fit
+zoom (criterion 10). If the three cannot hold together — `shop-30` with
+every wire at 76 and 116, 20 px in the row gap, the fit within 0.02 — the
+ticket stops there and reports the table on #468; the planning model then
+splits it or returns to the owner. The size M stands on that gate.
+
 ## Regression potential
 
 | What can break | Covered by |
@@ -117,12 +135,13 @@ unless said, on `labels`, `shop-30` and `rooms/booking-day`, after Tidy up.
 - Any gesture: a second wire, a move, a drop on a line — DIAG-06 (#391).
 - Branch bands and how an `if` joins the chain (DIAG-06 question 6,
   LAY-13 #297).
-- Where Tidy up puts cards and rows.
+- The order and the columns Tidy up gives the cards; reflowing a board
+  after an edit (DIAG-06c).
 
 ## Technical appendix
 
 `crates/apiforge-desktop/src/canvas/routing.rs` (where an ordering wire
-leaves and enters), `layout.rs` (the sockets of a card's sides),
+leaves and enters), `board_edit.rs` (Tidy up's row gap), `layout.rs` (the sockets of a card's sides),
 `shape.rs` (`marks` goes), `after.rs` (goes), `mod.rs`, `paint.rs`;
 `crates/apiforge-layout/src/route.rs` only if a side port needs a rule the
 router lacks; `examples/quality.rs` and `support/boards.txt` written
