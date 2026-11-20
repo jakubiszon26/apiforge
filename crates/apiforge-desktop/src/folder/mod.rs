@@ -123,6 +123,14 @@ const LIBRARY_RAIL_WIDTH: f32 = 36.0;
 /// cannot shadow one.
 const TEXT_TAB: &str = "text:";
 
+/// A delete the person confirmed, as the question showed it (DIAG-06e).
+#[derive(PartialEq, Eq)]
+struct ConfirmedDelete {
+    ids: Vec<String>,
+    question: String,
+    gone: Vec<String>,
+}
+
 enum Prompt {
     Working {
         ticket: u64,
@@ -190,6 +198,8 @@ enum Prompt {
         ids: Vec<String>,
         wires: Vec<String>,
         question: String,
+        /// What the question was asked about: the statements that go.
+        gone: Vec<String>,
     },
     Import {
         rows: Vec<ImportRow>,
@@ -379,9 +389,11 @@ pub struct FolderApp {
     tabs_offset: f32,
     tabs_width: f32,
     prompt: Option<Prompt>,
-    /// The blocks whose delete the person has just confirmed, for the one
-    /// delete that follows (DIAG-06e).
-    confirmed_delete: Option<Vec<String>>,
+    /// The delete the person has just confirmed, for the one delete that
+    /// follows (DIAG-06e): the selection, and the question with the
+    /// statements it named. A delete that would now take anything else, or
+    /// ask anything else, asks again.
+    confirmed_delete: Option<ConfirmedDelete>,
     close_error: Option<String>,
     /// Set by a decision in the close dialog; the window closes next frame.
     close_requested: bool,
