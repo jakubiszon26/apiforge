@@ -1734,7 +1734,7 @@ pub fn card(
         }
         if full {
             Icon::Plus.paint(&clipped, action.shrink(5.0 * z), theme::MUTED);
-            for (index, (port, text)) in card.controls.iter().enumerate() {
+            for (index, (port, text)) in card.controls.iter().enumerate().filter(|_| card.buttons) {
                 let button = camera.rect(card.control_button(index));
                 let color = match *port {
                     apiforge_core::graph::TRUE_PORT => theme::BRANCH_YES,
@@ -1786,7 +1786,7 @@ pub fn card(
             socket(&edge, camera.to_screen(anchor), false, z);
         }
     }
-    for (port, _) in &card.controls {
+    for port in card.order_outputs() {
         if let Some(anchor) = card.output_anchor(port) {
             socket(&edge, camera.to_screen(anchor), true, z);
         }
@@ -1973,7 +1973,7 @@ pub fn compact_card(
         let text = if full { &row.full_text } else { &row.text };
         if row.role == CompactRole::Branches {
             // *Yes* and *No* over their sockets on the bottom edge.
-            for (index, (port, text)) in card.controls.iter().enumerate() {
+            for (index, (port, text)) in card.controls.iter().enumerate().filter(|_| card.buttons) {
                 if !legible {
                     continue;
                 }
@@ -2136,7 +2136,7 @@ pub fn compact_card(
             socket(&edge, camera.to_screen(anchor), false, z);
         }
     }
-    for (port, _) in &card.controls {
+    for port in card.order_outputs() {
         if let Some(anchor) = card.output_anchor(port) {
             socket(&edge, camera.to_screen(anchor), true, z);
         }

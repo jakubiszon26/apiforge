@@ -280,13 +280,55 @@ fn carry_block(harness: &mut FolderHarness, id: &str, block: Block, to: Pos2) ->
     board(harness, id).debug_drop_mark().cloned()
 }
 
-/// A point on screen 20 px above the middle of the drawn line.
+/// A point on screen on the drawn line, clear of the cards and of every
+/// other line.
 fn near_line(harness: &FolderHarness, id: &str, source: &str, target: &str) -> Pos2 {
     let line = chain_line(harness, id, source, target).expect("the line is drawn");
-    let a = screen(harness, id, line.points[0]);
-    let b = screen(harness, id, *line.points.last().unwrap());
-    let middle = a + (b - a) * 0.5;
-    pos2(middle.x, middle.y - 20.0)
+    super::lay14::point_on(harness, id, &line.id)
+}
+
+/// A point of the board in view more than 80 px from every line of the
+/// order and clear of the cards.
+fn far_point(harness: &FolderHarness, id: &str) -> Pos2 {
+    let canvas = board(harness, id);
+    let inside = canvas.debug_board().shrink(20.0);
+    let lines: Vec<Vec<Pos2>> = canvas
+        .debug_wires()
+        .iter()
+        .filter(|wire| wire.dashed)
+        .map(|wire| {
+            wire.points
+                .iter()
+                .map(|at| screen(harness, id, *at))
+                .collect()
+        })
+        .collect();
+    let cards: Vec<Rect> = canvas.debug_cards().iter().map(|(_, rect)| *rect).collect();
+    let far = |at: Pos2| {
+        lines.iter().all(|points| {
+            points.windows(2).all(|pair| {
+                let along = pair[1] - pair[0];
+                let t = if along.length_sq() <= f32::EPSILON {
+                    0.0
+                } else {
+                    ((at - pair[0]).dot(along) / along.length_sq()).clamp(0.0, 1.0)
+                };
+                (pair[0] + along * t).distance(at) > 80.0
+            })
+        }) && cards.iter().all(|rect| !rect.expand(20.0).contains(at))
+    };
+    let mut y = inside.top();
+    while y < inside.bottom() {
+        let mut x = inside.left();
+        while x < inside.right() {
+            if far(pos2(x, y)) {
+                return pos2(x, y);
+            }
+            x += 10.0;
+        }
+        y += 10.0;
+    }
+    panic!("the board has a place far from every line");
 }
 
 fn diag06c_criterion_4_near_a_line_at(size: egui::Vec2) {
@@ -348,7 +390,7 @@ fn diag06c_criterion_4_near_a_line_in_a_branch() {
 fn diag06c_criterion_4_far_from_every_line() {
     let (_project, mut harness, id) = booking_day();
     let before = graph(&harness, &id);
-    let to = empty_point(&harness, &id);
+    let to = far_point(&harness, &id);
     let mark = carry_block(&mut harness, &id, Block::Request, to);
     assert_eq!(
         mark,
@@ -439,6 +481,7 @@ fn after_the_place(board_graph: &Graph, from: &str) -> Vec<String> {
 /// board after the edit. A card is moved by hand before the place
 /// (`early`) and after it (`late`) first.
 fn makes_room(
+    view: &[&str],
     edit: impl FnOnce(&mut FolderHarness, &str),
     from: impl Fn(&Graph) -> String,
     early: &str,
@@ -462,6 +505,15 @@ fn makes_room(
             .unwrap();
         app(&mut harness).active_board_command(crate::canvas::Command::Move(vec![moved]));
         settle(&mut harness);
+    }
+    // The cards a gesture is made between in view first; the whole board
+    // for an add, whose new card the board keeps in view (UX-18).
+    if view.is_empty() {
+        choose(&mut harness, "Fit the view");
+        settle(&mut harness);
+        harness.step();
+    } else {
+        show(&mut harness, &id, view);
     }
     let before = graph(&harness, &id);
     let camera = board(&harness, &id).debug_camera();
@@ -517,6 +569,7 @@ fn added(after: &Graph) -> String {
 #[test]
 fn diag06c_criterion_5_an_add() {
     makes_room(
+        &[],
         |harness, id| {
             let first = id_of(&graph(harness, id), "first");
             app(harness).active_board_command(crate::canvas::Command::AddNode {
@@ -540,6 +593,7 @@ fn wire_move(harness: &mut FolderHarness, id: &str, anchor: &str, step: &str) {
 #[test]
 fn diag06c_criterion_5_a_move_later() {
     makes_room(
+        &["invite", "hold"],
         |harness, id| wire_move(harness, id, "invite", "hold"),
         |after| id_of(after, "invite"),
         "rooms",
@@ -550,6 +604,7 @@ fn diag06c_criterion_5_a_move_later() {
 #[test]
 fn diag06c_criterion_5_a_move_earlier() {
     makes_room(
+        &["first", "invite"],
         |harness, id| wire_move(harness, id, "first", "invite"),
         |after| id_of(after, "invite"),
         "rooms",
@@ -560,6 +615,7 @@ fn diag06c_criterion_5_a_move_earlier() {
 #[test]
 fn diag06c_criterion_5_an_if_moved() {
     makes_room(
+        &["first", "booked"],
         |harness, id| wire_move(harness, id, "first", "booked"),
         |after| id_of(after, "booked"),
         "rooms",

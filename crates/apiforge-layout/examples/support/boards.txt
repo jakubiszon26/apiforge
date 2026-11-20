@@ -708,8 +708,7 @@ wire 12 right 26 13 left 26 chain
 wire 13 right 26 15 left 26 chain
 wire 15 right 26 16 left 26 chain
 wire 16 top 70 17 left 26
-wire 17 right 26 18 left 26 chain
-wire 16 top 210 18 left 26
+wire 16 right 26 18 left 26 chain
 wire 18 right 26 21 left 26 chain
 wire 21 right 26 22 left 26 chain
 wire 22 right 26 23 left 26 chain
@@ -722,8 +721,7 @@ wire 26 right 26 27 left 26 chain
 wire 24 top 70 28 left 26
 wire 27 right 26 28 left 26 chain
 wire 24 bottom 210 29 left 26
-wire 28 right 26 30 left 26 chain
-wire 29 right 26 30 left 26 chain
+wire 24 right 26 30 left 26 chain
 wire 30 right 26 31 left 26 chain
 wire 31 right 26 32 left 26 chain
 wire 32 right 26 33 left 26 chain
@@ -860,8 +858,7 @@ wire 24 right 26 25 left 26 chain
 wire 25 top 70 26 left 26
 wire 25 top 70 27 left 26
 wire 25 top 210 28 left 26
-wire 26 right 26 29 left 26 chain
-wire 25 top 210 29 left 26
+wire 25 right 26 29 left 26 chain
 wire 29 right 26 32 left 26 chain
 wire 32 right 26 33 left 26 chain
 wire 33 right 26 35 left 26 chain
@@ -876,8 +873,7 @@ wire 37 top 70 42 left 26
 wire 41 right 26 42 left 26 chain
 wire 37 top 210 43 left 26
 wire 37 bottom 210 44 left 26
-wire 42 right 26 45 left 26 chain
-wire 44 right 26 45 left 26 chain
+wire 37 right 26 45 left 26 chain
 wire 45 right 26 47 left 26 chain
 wire 47 right 26 49 left 26 chain
 wire 49 right 26 51 left 26 chain
@@ -1021,8 +1017,7 @@ wire 12 right 26 13 left 26 chain
 wire 13 right 26 15 left 26 chain
 wire 15 right 26 16 left 26 chain
 wire 16 top 70 17 left 26
-wire 17 right 26 18 left 26 chain
-wire 16 top 210 18 left 26
+wire 16 right 26 18 left 26 chain
 wire 18 right 26 21 left 26 chain
 wire 21 right 26 22 left 26 chain
 wire 22 right 26 23 left 26 chain
@@ -1035,8 +1030,7 @@ wire 26 right 26 27 left 26 chain
 wire 24 top 70 28 left 26
 wire 27 right 26 28 left 26 chain
 wire 24 bottom 210 29 left 26
-wire 28 right 26 30 left 26 chain
-wire 29 right 26 30 left 26 chain
+wire 24 right 26 30 left 26 chain
 wire 30 right 26 31 left 26 chain
 wire 31 right 26 32 left 26 chain
 wire 32 right 26 33 left 26 chain
@@ -1173,8 +1167,7 @@ wire 24 right 26 25 left 26 chain
 wire 25 top 70 26 left 26
 wire 25 top 70 27 left 26
 wire 25 top 210 28 left 26
-wire 26 right 26 29 left 26 chain
-wire 25 top 210 29 left 26
+wire 25 right 26 29 left 26 chain
 wire 29 right 26 32 left 26 chain
 wire 32 right 26 33 left 26 chain
 wire 33 right 26 35 left 26 chain
@@ -1189,8 +1182,7 @@ wire 37 top 70 42 left 26
 wire 41 right 26 42 left 26 chain
 wire 37 top 210 43 left 26
 wire 37 bottom 210 44 left 26
-wire 42 right 26 45 left 26 chain
-wire 44 right 26 45 left 26 chain
+wire 37 right 26 45 left 26 chain
 wire 45 right 26 47 left 26 chain
 wire 47 right 26 49 left 26 chain
 wire 49 right 26 51 left 26 chain
@@ -1334,8 +1326,7 @@ wire 12 right 26 13 left 26 chain
 wire 13 right 26 15 left 26 chain
 wire 15 right 26 16 left 26 chain
 wire 16 top 70 17 left 26
-wire 17 right 26 18 left 26 chain
-wire 16 top 210 18 left 26
+wire 16 right 26 18 left 26 chain
 wire 18 right 26 21 left 26 chain
 wire 21 right 26 22 left 26 chain
 wire 22 right 26 23 left 26 chain
@@ -1348,8 +1339,7 @@ wire 26 right 26 27 left 26 chain
 wire 24 top 70 28 left 26
 wire 27 right 26 28 left 26 chain
 wire 24 bottom 210 29 left 26
-wire 28 right 26 30 left 26 chain
-wire 29 right 26 30 left 26 chain
+wire 24 right 26 30 left 26 chain
 wire 30 right 26 31 left 26 chain
 wire 31 right 26 32 left 26 chain
 wire 32 right 26 33 left 26 chain
@@ -1432,8 +1422,7 @@ wire 24 right 26 25 left 26 chain
 wire 25 top 70 26 left 26
 wire 25 top 70 27 left 26
 wire 25 top 210 28 left 26
-wire 26 right 26 29 left 26 chain
-wire 25 top 210 29 left 26
+wire 25 right 26 29 left 26 chain
 wire 29 right 26 32 left 26 chain
 wire 32 right 26 33 left 26 chain
 wire 33 right 26 35 left 26 chain
@@ -1448,8 +1437,7 @@ wire 37 top 70 42 left 26
 wire 41 right 26 42 left 26 chain
 wire 37 top 210 43 left 26
 wire 37 bottom 210 44 left 26
-wire 42 right 26 45 left 26 chain
-wire 44 right 26 45 left 26 chain
+wire 37 right 26 45 left 26 chain
 wire 45 right 26 47 left 26 chain
 wire 47 right 26 49 left 26 chain
 wire 49 right 26 51 left 26 chain

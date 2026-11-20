@@ -778,7 +778,12 @@ fn lay45_criterion_8_three_measures_of_crossings() {
                 let (data, chained, kept) = measures(&harness, &id, &label);
                 errln!("LAY-45 {label}: data×data {data}, chain×data {chained}, gap {kept}");
                 let (most, _, _) = before(name, wires, expanded);
-                if !HELD.contains(&(name, wires, expanded)) {
+                if let Some(recorded) = recorded_again(name, wires, expanded) {
+                    assert!(
+                        data <= recorded,
+                        "{label}: {data} data crossings, {recorded} recorded by DIAG-06c"
+                    );
+                } else if !HELD.contains(&(name, wires, expanded)) {
                     assert!(
                         data <= most,
                         "{label}: {data} data crossings, {most} before"
@@ -801,6 +806,26 @@ const HELD: [(&str, WireMode, bool); 2] = [
     ("fan-out", WireMode::All, true),
     ("shop-50", WireMode::All, false),
 ];
+
+/// The figures recorded again by DIAG-06c (#490) when the join lines after
+/// an `if` went and one line leaves the `if`'s own *Next* instead: on
+/// `shop-50` with every wire its data lines cross each other 147 times with
+/// checks folded (140 before, 142 without ordering lines) and 192 with
+/// checks drawn (189 before, 178 without ordering lines). Every other
+/// reference board keeps its figures. A board of this list keeps to its
+/// figure here.
+const RECORDED_AGAIN: [(&str, WireMode, bool, usize); 2] = [
+    ("shop-50", WireMode::All, false, 147),
+    ("shop-50", WireMode::All, true, 192),
+];
+
+/// The figure DIAG-06c recorded for the board, if any.
+fn recorded_again(name: &str, wires: WireMode, expanded: bool) -> Option<usize> {
+    RECORDED_AGAIN
+        .iter()
+        .find(|row| row.0 == name && row.1 == wires && row.2 == expanded)
+        .map(|row| row.3)
+}
 
 /// The crossings of the data lines with each other on the board as the
 /// router is given it, with every ordering line taken out: the lines of the
@@ -860,7 +885,12 @@ fn lay45_criterion_8_data_lines_against_the_board_without_order() {
                 errln!(
                     "LAY-45 {label}: data×data {data}, without ordering lines {alone}, before {was}"
                 );
-                if HELD.contains(&(name, wires, expanded)) {
+                if let Some(recorded) = recorded_again(name, wires, expanded) {
+                    assert!(
+                        data <= recorded,
+                        "{label}: {data} data crossings, {recorded} recorded by DIAG-06c"
+                    );
+                } else if HELD.contains(&(name, wires, expanded)) {
                     assert!(
                         data <= alone,
                         "{label}: {data} data crossings, {alone} without ordering lines"
