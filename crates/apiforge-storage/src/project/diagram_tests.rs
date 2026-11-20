@@ -232,7 +232,7 @@ fn malformed_and_future_diagram_files_are_reported_without_accepting_partial_rec
 #[test]
 fn captured_checkpoints_describe_only_their_exact_source_context_and_semantics() {
     let (mut project, _) = fixture();
-    let scenario = project.scenarios.remove(0);
+    let scenario = crate::project::cache::tests::written(&project.scenarios.remove(0));
     let source = apiforge_script::print_folder_document(
         &project,
         &apiforge_script::Document::Scenario(scenario.clone()),

@@ -2,8 +2,9 @@
 
 - State: **decided on first-round mock-ups** by the owner's quiz of
   2026-11-19; not started. It follows LANG part A (0.2.0), which the
-  owner started on 2026-11-20. Four tickets are ready and do not depend on
-  the language (FIX-01, DIAG-02, REP-08, REP-07); the rest wait for the
+  owner started on 2026-11-20. FIX-01 merged that day (#485). Three
+  tickets are ready and do not depend on the language (DIAG-02, REP-08,
+  REP-07); the rest wait for the
   design-review captures of REQ-00. Four proposals of the planning model
   were accepted into scope on 2026-11-20 and are to be analysed (REQ-07 to
   REQ-10, [section 5](#5-proposals-of-the-planning-model)).
@@ -91,9 +92,9 @@ built before or after LANG-13 unchanged.
 
 | Order | Issue | Ticket | Estimate · risk | Depends on |
 | --- | --- | --- | --- | --- |
-| 1 | [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 the reference scenario `labels` | S · 5 | — |
-| 2 | [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 a check reads the same everywhere | M · 15 · `visible UI`, `removal` | FIX-01 |
-| 2 | [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 a value opens expanded; Tree \| JSON | S · 15 · `visible UI`, `default` | FIX-01 |
+| 1 | [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 the reference scenario `labels` | S · 5 | merged in #485 |
+| 2 | [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 a check reads the same everywhere | M · 15 · `visible UI`, `removal` | FIX-01 (merged) |
+| 2 | [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 a value opens expanded; Tree \| JSON | S · 15 · `visible UI`, `default` | FIX-01 (merged) |
 | 3 | [#381](https://github.com/jakubiszon26/apiforge/issues/381) | REP-07 a request with its checks under it | M · 25 · `visible UI`, `default` | DIAG-02 (the text), REP-08 (the same file) |
 | 4 | [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 captures and decisions | S · 30 · `visible UI`, `default` | LANG-13 merged |
 | 5 | [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01 Diagram → Steps | M · 30 · `visible UI` | REQ-00, DIAG-02, REP-07 |

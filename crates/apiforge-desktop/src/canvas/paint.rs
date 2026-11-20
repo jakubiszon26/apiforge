@@ -2290,14 +2290,11 @@ pub fn mode_line_text(graph: &Graph) -> &'static str {
     }
 }
 
-/// The steps summary of the board's header row, e.g. "6 steps  ·  All steps".
+/// The steps summary of the board's header row, e.g. "6 steps". Since
+/// LANG-13 every scenario with a step runs from its *Start*, so the summary
+/// no longer says where the steps run from (owner, 2026-11-20, #386).
 pub fn steps_summary(graph: &Graph) -> String {
-    let starts = graph.nodes.iter().any(|node| node.kind == NodeKind::Start);
-    format!(
-        "{} steps  ·  {}",
-        graph.nodes.len(),
-        if starts { "From Start" } else { "All steps" }
-    )
+    format!("{} steps", graph.nodes.len())
 }
 
 /// The font of the steps summary.

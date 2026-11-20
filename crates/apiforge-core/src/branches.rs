@@ -1,7 +1,7 @@
 //! The braces a statement stands in and where an `if` ends, read from the
-//! ordering edges of one graph. Lowering and printing share this reading, so
-//! `@after(x)` lowers to exactly the edges the window prints back as
-//! `@after(x)`.
+//! ordering edges of one graph. Lowering, printing and the chain of the
+//! written language ([`crate::graph::chain`]) share this reading, so a source
+//! lowers to exactly the edges the window prints back.
 //!
 //! A statement stands in the braces of branch `b` of `x` when it follows
 //! `x.b` and everything else it follows stands in the same braces, at any
@@ -10,22 +10,22 @@
 //! `if` among the last steps ends where its own branches end. An edge from an
 //! `if` without a branch, which only lowering produces before it replaces it,
 //! reads as following the whole `if`.
-use apiforge_core::{
+use crate::{
     format::Graph,
     model::{Branch, NodeKind},
 };
 use std::collections::{HashMap, VecDeque};
 
 /// What a statement follows: a statement, or a branch of an `if`.
-pub(crate) type Source<'g> = (&'g str, Option<Branch>);
+pub type Source<'g> = (&'g str, Option<Branch>);
 
-pub(crate) struct Branches<'g> {
+pub struct Branches<'g> {
     parents: HashMap<&'g str, (&'g str, Branch)>,
     ends: HashMap<&'g str, Vec<Source<'g>>>,
 }
 
 impl<'g> Branches<'g> {
-    pub(crate) fn new(graph: &'g Graph) -> Self {
+    pub fn new(graph: &'g Graph) -> Self {
         let kinds: HashMap<&str, NodeKind> = graph
             .nodes
             .iter()
@@ -133,19 +133,19 @@ impl<'g> Branches<'g> {
     }
 
     /// The braces a statement stands in.
-    pub(crate) fn parent(&self, id: &str) -> Option<(&'g str, Branch)> {
+    pub fn parent(&self, id: &str) -> Option<(&'g str, Branch)> {
         self.parents.get(id).copied()
     }
 
     /// Where the `if` ends: what `@after(id)` follows.
-    pub(crate) fn ends(&self, id: &str) -> Option<&[Source<'g>]> {
+    pub fn ends(&self, id: &str) -> Option<&[Source<'g>]> {
         self.ends.get(id).map(Vec::as_slice)
     }
 
     /// `sources` with the end of every `if` they contain whole written as the
     /// `if`, `(x, None)`, at the place of its first end. The larger end goes
     /// first, so an `if` ending in another is written as the outer one.
-    pub(crate) fn shorten(&self, mut sources: Vec<Source<'g>>) -> Vec<Source<'g>> {
+    pub fn shorten(&self, mut sources: Vec<Source<'g>>) -> Vec<Source<'g>> {
         let mut whole: Vec<(&str, &[Source<'g>])> = self
             .ends
             .iter()

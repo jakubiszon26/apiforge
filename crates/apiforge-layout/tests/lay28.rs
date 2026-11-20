@@ -305,9 +305,13 @@ fn lay28_criterion_3_the_reference_boards_cross_less() {
     // run inside it, 24 px apart, where they cross each other and the lines
     // into the cards under them (75, 105 and 90 before), and the boards
     // with chips have no line inside a group at all.
+    // LANG-13 (#386) writes shop-30's ordering wires step to step, never from
+    // a check, and puts `refund` and `logout` in `paid`'s braces: with every
+    // wire drawn its baseline is 93 and 143 (owner, 2026-11-20). LAY-45
+    // (#468) carries the criterion to get back to 76 and 116.
     for (name, most) in [
-        ("shop-30 compact collapsed 30 all", 76),
-        ("shop-30 compact expanded 30 all", 116),
+        ("shop-30 compact collapsed 30 all", 93),
+        ("shop-30 compact expanded 30 all", 143),
         ("shop-30 compact expanded 30 chips", 10),
         ("fan-out compact expanded 26 chips", 5),
         ("shop-50 compact expanded 56 chips", 26),

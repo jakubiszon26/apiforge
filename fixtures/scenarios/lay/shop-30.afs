@@ -1,7 +1,6 @@
 scenario "Shop 30" {
   description "LAY reference: a shop flow of thirty steps, from login to refund."
   begin = start
-  @after(begin)
   login = POST "/login" {
     body { user: "demo", password: "demo" }
     sample 200 { token: "t-1", userId: "u-1" }
@@ -34,13 +33,11 @@ scenario "Shop 30" {
     cart_view.status == 200,
     nonempty cart_view.body.items,
   } with cart_view.body
-  @after(cart_total)
   address = PUT "/cart/{{cart.body.id}}/address" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     body { street: "Main 1", city: "Gdansk" }
     sample 200 { ok: true }
   }
-  @after(address)
   checkout = POST "/checkout" {
     headers { Authorization: "Bearer {{login.body.token}}" }
     body { cartId: valid_cart.value.id, total: expected_total }
@@ -65,19 +62,17 @@ scenario "Shop 30" {
       sample 200 { id: "r-1", total: 172.5 }
     }
     receipt_total = assert receipt.body.total ~= cart.body.total within 0.01
+    refund = POST "/orders/{{order.body.id}}/refund" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      sample 200 { refunded: true, amount: 172.5 }
+    }
+    refund_amount = assert refund.body.amount ~= expected_total within 0.01
+    logout = POST "/logout" {
+      headers { Authorization: "Bearer {{login.body.token}}" }
+      sample 204 {}
+    }
   } else {
     not_created = assert false == true
-  }
-  @after(paid.then)
-  refund = POST "/orders/{{order.body.id}}/refund" {
-    headers { Authorization: "Bearer {{login.body.token}}" }
-    sample 200 { refunded: true, amount: 172.5 }
-  }
-  refund_amount = assert refund.body.amount ~= expected_total within 0.01
-  @after(refund_amount)
-  logout = POST "/logout" {
-    headers { Authorization: "Bearer {{login.body.token}}" }
-    sample 204 {}
   }
   cleanup {
     removed = DELETE "/cart/{{cart.body.id}}" {

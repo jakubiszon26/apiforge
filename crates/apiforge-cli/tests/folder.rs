@@ -382,9 +382,9 @@ mod mcp15 {
     const KEEP_EDITING: &str = "the person chose to keep editing";
     const WSL: &str = "Windows/WSL";
     /// A scenario that passes against the demo API, with a cleanup.
-    const PASSES: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const PASSES: &str = "scenario \"MCP-15 live\" {\n  begin = start\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
     /// The same against a product the demo API does not have: it fails.
-    const FAILS: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const FAILS: &str = "scenario \"MCP-15 live\" {\n  begin = start\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
 
     /// The demo shop, its base URL `base_url` and its scenario `scenario`.
     fn shop(base_url: &str, scenario: &str) -> tempfile::TempDir {
@@ -919,10 +919,11 @@ mod mcp15 {
     fn mcp15_criterion_10_the_messages_in_order() {
         let api = api();
         // MCP-10: the end says how many steps ran and the first that did
-        // not pass: the assertion of `FAILS` (step 2, `ok`, no label).
+        // not pass: the assertion of `FAILS` (step 3 after `begin`, `ok`, no
+        // label; LANG-13 writes the start).
         for (scenario, code, state, failed) in [
             (PASSES, 0, RunState::Passed, None),
-            (FAILS, 1, RunState::Failed, Some((2, "ok"))),
+            (FAILS, 1, RunState::Failed, Some((3, "ok"))),
         ] {
             let directory = shop(&api.base_url(), scenario);
             let root = directory.path();
@@ -950,7 +951,7 @@ mod mcp15 {
                         path: SCENARIO.into(),
                         mode: RunMode::Live,
                         state,
-                        step_count: Some(3),
+                        step_count: Some(4),
                         step: failed.map(|(step, _)| step),
                         label: failed.map(|(_, label)| label.to_owned()),
                     },
@@ -1212,6 +1213,7 @@ mod issue430 {
     /// The example of `docs/language/reference.md` § Branches.
     const TEXT: &str = r#"scenario "Branches" {
   param quantity = 2
+  begin = start
   cart = POST "/carts" {
     body { productId: 123, quantity: param.quantity }
     sample 201 { id: "c-1", total: 160 }
@@ -1220,14 +1222,12 @@ mod issue430 {
     receipt = GET "/carts/{{cart.body.id}}" {
       sample 200 { id: "c-1" }
     }
-    @after(receipt)
     items = GET "/carts/{{cart.body.id}}/items" {
       sample 200 { items: [] }
     }
   } else {
     failed = assert cart.status == 201
   }
-  @after(created)
   logout = POST "/logout" {
     sample 204 {}
   }
@@ -1391,7 +1391,6 @@ mod lang15 {
     /// first line is for the manifest, with both versions and the fix; `run`
     /// is refused with that sentence and sends nothing; `apply` saves.
     #[test]
-    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
     fn lang15_criterion_4_an_older_project_is_checked_and_does_not_run() {
         let directory = shop();
         let root = directory.path();
