@@ -19,9 +19,8 @@ fn fixture(name: &str) -> String {
 }
 
 /// `shop-30` on the board of the demo shop, in the form the window writes
-/// (its own text writes `refund` after the whole `if`, which the window
-/// writes inside the branch, and leaves out `on_error`), tidied up and saved.
-fn opened(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+/// (its own text leaves out `on_error`), tidied up and saved.
+pub(super) fn opened(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
     let project = crate::testing::shop_project();
     fs::write(project.path().join(SCENARIO), fixture("shop-30")).unwrap();
     fs::remove_file(project.path().join(DIAGRAM)).unwrap();
@@ -50,12 +49,12 @@ fn opened(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
     (project, harness, id)
 }
 
-fn graph(harness: &FolderHarness, id: &str) -> Graph {
+pub(super) fn graph(harness: &FolderHarness, id: &str) -> Graph {
     let snapshot = folder(harness).snapshot(id).unwrap();
     graph_of(snapshot.model.as_ref().unwrap(), false).clone()
 }
 
-fn id_of(graph: &Graph, handle: &str) -> String {
+pub(super) fn id_of(graph: &Graph, handle: &str) -> String {
     graph
         .nodes
         .iter()
@@ -65,14 +64,14 @@ fn id_of(graph: &Graph, handle: &str) -> String {
         .clone()
 }
 
-fn handle_of<'a>(graph: &'a Graph, id: &str) -> &'a str {
+pub(super) fn handle_of<'a>(graph: &'a Graph, id: &str) -> &'a str {
     graph.nodes.iter().find(|node| node.id == id).map_or_else(
         || panic!("a step the run reports is on the board"),
         |node| node.handle.as_str(),
     )
 }
 
-fn board<'a>(harness: &'a FolderHarness, id: &str) -> &'a crate::canvas::Canvas {
+pub(super) fn board<'a>(harness: &'a FolderHarness, id: &str) -> &'a crate::canvas::Canvas {
     folder(harness)
         .canvases
         .get(id)
@@ -80,7 +79,7 @@ fn board<'a>(harness: &'a FolderHarness, id: &str) -> &'a crate::canvas::Canvas 
 }
 
 /// A point of the empty board in view: no card, chip or count within 40 px.
-fn empty_point(harness: &FolderHarness, id: &str) -> Pos2 {
+pub(super) fn empty_point(harness: &FolderHarness, id: &str) -> Pos2 {
     let canvas = board(harness, id);
     let focus = canvas.debug_focus().shrink(20.0);
     let cards: Vec<Rect> = canvas.debug_cards().iter().map(|(_, rect)| *rect).collect();
@@ -111,14 +110,14 @@ fn empty_point(harness: &FolderHarness, id: &str) -> Pos2 {
 }
 
 /// The line on which `prefix` starts a statement.
-fn line_of(text: &str, prefix: &str) -> usize {
+pub(super) fn line_of(text: &str, prefix: &str) -> usize {
     text.lines()
         .position(|line| line.trim_start().starts_with(prefix))
         .unwrap_or_else(|| panic!("`{prefix}` is written:\n{text}"))
 }
 
-/// Criteria 1, 2 and 5 through the board: the new request is written with
-/// `@after(cart)` after `cart`'s checks and before `cart_view`, the simulated
+/// Criteria 1, 2 and 5 through the board: the new request is written after
+/// `cart`'s checks and before `cart_view`, the simulated
 /// run executes it next after `cart`, and undo restores the file byte for
 /// byte.
 #[test]
@@ -172,12 +171,9 @@ fn diag07_a_request_added_from_carts_next_runs_after_cart() {
     let handle = added.handle.clone();
     let text = source_of(&harness, &id);
     let at = line_of(&text, &format!("{handle} = "));
-    assert_eq!(
-        text.lines().nth(at - 1).map(str::trim),
-        Some("@after(cart)"),
-        "{text}"
-    );
-    assert!(line_of(&text, "cart_total = ") < at - 1, "{text}");
+    // Since LANG-13 its place in the text is its place in the chain.
+    assert!(!text.contains("@after"), "{text}");
+    assert!(line_of(&text, "cart_total = ") < at, "{text}");
     assert!(at < line_of(&text, "cart_view = "), "{text}");
 
     // Criterion 1: the simulated run executes it next after cart.

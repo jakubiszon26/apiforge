@@ -54,10 +54,18 @@ fn reference(name: &str) -> (Vec<Rect>, Vec<Wire>) {
                 Point::new(number(1), number(2)),
                 Size::new(number(3), number(4)),
             )),
-            Some("wire") => wires.push(Wire::new(
-                Port::new(number(1) as usize, side(words[2]), number(3)),
-                Port::new(number(4) as usize, side(words[5]), number(6)),
-            )),
+            Some("wire") => {
+                let wire = Wire::new(
+                    Port::new(number(1) as usize, side(words[2]), number(3)),
+                    Port::new(number(4) as usize, side(words[5]), number(6)),
+                );
+                // A line of the chain of steps (LAY-45).
+                wires.push(if words.get(7) == Some(&"chain") {
+                    wire.chained()
+                } else {
+                    wire
+                });
+            }
             _ => {}
         }
     }

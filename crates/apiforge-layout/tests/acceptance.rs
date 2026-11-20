@@ -253,3 +253,26 @@ fn lay31_criterion_7_quality_measures_the_groups() {
         }
     }
 }
+
+/// LAY-45 criterion 8: `quality` prints the crossings of every reference
+/// board by kind, data lines with each other and the chain of steps with a
+/// data line, and the chain is drawn in both modes: a board with every wire
+/// shows crossings of the chain where data lines pass through its rows.
+#[test]
+fn lay45_criterion_8_quality_prints_the_two_kinds_of_crossing() {
+    let rows = table(report(), "scenario");
+    assert_eq!(rows.len(), 30);
+    for row in &rows {
+        assert!(number(row, "data_data") >= 0.0, "{row:?}");
+        assert!(number(row, "chain_data") >= 0.0, "{row:?}");
+        assert!(
+            number(row, "data_data") + number(row, "chain_data") <= number(row, "crossings"),
+            "{row:?}"
+        );
+    }
+    assert!(
+        rows.iter()
+            .any(|row| row["drawn"] == "all" && number(row, "chain_data") > 0.0),
+        "the chain crosses data lines somewhere"
+    );
+}

@@ -61,8 +61,15 @@ fn issue349_criterion_2_a_card_grows_by_what_its_sockets_take() {
     let mut grown = [0; 4];
     for name in ["shop-30", "fan-out"] {
         let (_project, harness, id) = tidied(name, WIDE, true, WireMode::All);
-        let (routes, _) = drawn(&harness, &id);
         let canvas = super::lay28::board(&harness, &id);
+        // The data lines: since LAY-45 a branch of an `if` enters a card at
+        // its order socket on the left, which is no input.
+        let routes: Vec<Vec<egui::Pos2>> = canvas
+            .debug_wires()
+            .iter()
+            .filter(|wire| !wire.dashed && !wire.points.is_empty())
+            .map(|wire| wire.points.clone())
+            .collect();
         for node in graph(&harness, &id).nodes {
             let base = match node.kind {
                 NodeKind::Value => VALUE,
@@ -74,7 +81,7 @@ fn issue349_criterion_2_a_card_grows_by_what_its_sockets_take() {
             let wired = routes
                 .iter()
                 .filter(|route| {
-                    let end = route.points[route.points.len() - 1];
+                    let end = route[route.len() - 1];
                     (end.x - world.left()).abs() < 0.5
                         && end.y > world.top()
                         && end.y < world.bottom()

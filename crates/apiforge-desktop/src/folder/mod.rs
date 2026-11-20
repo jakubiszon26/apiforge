@@ -123,6 +123,14 @@ const LIBRARY_RAIL_WIDTH: f32 = 36.0;
 /// cannot shadow one.
 const TEXT_TAB: &str = "text:";
 
+/// A delete the person confirmed, as the question showed it (DIAG-06e).
+#[derive(PartialEq, Eq)]
+struct ConfirmedDelete {
+    ids: Vec<String>,
+    question: String,
+    gone: Vec<String>,
+}
+
 enum Prompt {
     Working {
         ticket: u64,
@@ -182,6 +190,16 @@ enum Prompt {
         preview: Box<DeletePreview>,
         paths: Vec<String>,
         error: Option<String>,
+    },
+    /// Deleting an `if` with statements in its braces asks once (DIAG-06e).
+    DeleteStatements {
+        document_id: String,
+        cleanup: bool,
+        ids: Vec<String>,
+        wires: Vec<String>,
+        question: String,
+        /// What the question was asked about: the statements that go.
+        gone: Vec<String>,
     },
     Import {
         rows: Vec<ImportRow>,
@@ -371,6 +389,11 @@ pub struct FolderApp {
     tabs_offset: f32,
     tabs_width: f32,
     prompt: Option<Prompt>,
+    /// The delete the person has just confirmed, for the one delete that
+    /// follows (DIAG-06e): the selection, and the question with the
+    /// statements it named. A delete that would now take anything else, or
+    /// ask anything else, asks again.
+    confirmed_delete: Option<ConfirmedDelete>,
     close_error: Option<String>,
     /// Set by a decision in the close dialog; the window closes next frame.
     close_requested: bool,
@@ -581,6 +604,7 @@ impl FolderApp {
             tabs_offset: 0.0,
             tabs_width: 0.0,
             prompt: None,
+            confirmed_delete: None,
             close_error: None,
             close_requested: false,
             preferences: Preferences::default(),

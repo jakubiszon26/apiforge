@@ -663,8 +663,17 @@ impl AgentSession {
         // A folder without a project gets no `.apiforge/local` from a write.
         let probe = ProjectStore::open_read_only(&self.folder).map_err(storage)?;
         let manifest = ProjectPath::new(MANIFEST_PATH).map_err(storage)?;
-        if read(&probe, std::slice::from_ref(&manifest))?.files[&manifest].is_none() {
+        let Some(bytes) = read(&probe, std::slice::from_ref(&manifest))?
+            .files
+            .remove(&manifest)
+            .flatten()
+        else {
             return Err(tools::storage_error(apiforge_project::Error::NotAProject));
+        };
+        // A project in a newer language is refused before the lock is taken
+        // (LANG-15); a manifest that cannot be read is the load's to report.
+        if let Ok(manifest) = apiforge_project::ProjectManifest::from_bytes(&bytes) {
+            apiforge_project::language::refuse_newer(&manifest).map_err(tools::storage_error)?;
         }
         if self.yielded.swap(false, Ordering::AcqRel) {
             // The person took the project back: the free lock is the
@@ -969,24 +978,21 @@ fn publish_failed(
     }
 }
 
-/// The comments of a settled document's text that canonical printing would
-/// drop, with their positions, in source order.
+/// The free comments of a settled document's text, which printing the
+/// revision from its document drops (LANG-06), with their positions, in
+/// source order.
 fn unattached(document: &apiforge_project::DocumentSession) -> Vec<serde_json::Value> {
-    let found: Vec<_> = document
-        .diagnostics()
-        .iter()
-        .filter(|diagnostic| diagnostic.message == apiforge_script::UNATTACHED_COMMENT)
-        .cloned()
-        .collect();
-    let (positioned, _) = tools::positioned(document.text(), &found, 0);
-    found
-        .iter()
-        .zip(positioned)
-        .map(|(diagnostic, position)| {
+    let text = document.text();
+    let lines = crate::positions::Lines::new(text);
+    apiforge_script::free_comments(text)
+        .into_iter()
+        .take(apiforge_script::MAX_DIAGNOSTICS)
+        .map(|range| {
+            let (line, column) = lines.position(range.start);
             json!({
-                "line": position.line,
-                "column": position.column,
-                "text": document.text().get(diagnostic.range.clone()).unwrap_or_default(),
+                "line": line,
+                "column": column,
+                "text": text.get(range).unwrap_or_default(),
             })
         })
         .collect()

@@ -253,13 +253,10 @@ fn assert_failed(mode: RunMode, run: &RunResult) {
 const CRITERION_1: &str = r#"scenario "RUN-01 criterion 1" {
   on_error continue
   begin = start
-  @after(begin)
   a = GET "{down}/a"
-  @after(a)
   b = GET "/b/{{a.body.id}}" {
     sample 200 { ok: true }
   }
-  @after(b)
   c = GET "/c" {
     sample 200 { ok: true }
   }
@@ -290,19 +287,15 @@ async fn run01_criterion_1_blocked_travels_through_values_only() {
 const CRITERION_2: &str = r#"scenario "RUN-01 criterion 2" {
   on_error continue
   begin = start
-  @after(begin)
   a = GET "/a" {
     sample 500 { error: "boom", requestId: "r-1" }
   }
-  @after(a)
   b = GET "/orders/{{a.body.id}}" {
     sample 200 { ok: true }
   }
-  @after(b)
   trace = GET "/trace/{{a.body.requestId}}" {
     sample 200 { ok: true }
   }
-  @after(trace)
   c = GET "/c" {
     sample 200 { ok: true }
   }
@@ -351,10 +344,8 @@ async fn run01_criterion_2_an_answer_has_its_outputs_at_any_status() {
 const CRITERION_3: &str = r#"scenario "RUN-01 criterion 3" {
   on_error continue
   begin = start
-  @after(begin)
   a = GET "{down}/a"
   a_answered = assert a.status == 200
-  @after(a)
   b = GET "/b" {
     sample 200 { count: 1 }
   }
@@ -386,17 +377,14 @@ async fn run01_criterion_3_checks_follow_their_values() {
 const CRITERION_4_ERROR: &str = r#"scenario "RUN-01 criterion 4, an error in a branch" {
   on_error continue
   begin = start
-  @after(begin)
   probe = GET "/probe" {
     sample 200 { go: true }
   }
   decide = if probe.body.go == true {
     first = GET "{down}/first"
-    @after(first)
     second = GET "/second" {
       sample 200 { id: 2 }
     }
-    @after(second)
     reads_first = GET "/reads/{{first.body.id}}" {
       sample 200 { ok: true }
     }
@@ -405,7 +393,6 @@ const CRITERION_4_ERROR: &str = r#"scenario "RUN-01 criterion 4, an error in a b
       sample 200 { ok: true }
     }
   }
-  @after(decide)
   after_if = GET "/after" {
     sample 200 { ok: true }
   }
@@ -414,7 +401,6 @@ const CRITERION_4_ERROR: &str = r#"scenario "RUN-01 criterion 4, an error in a b
       sample 200 { ok: true }
     }
   }
-  @after(later)
   last = GET "/last" {
     sample 200 { ok: true }
   }
@@ -471,17 +457,14 @@ async fn run01_criterion_4_an_error_inside_a_branch() {
 const CRITERION_4_UNDECIDED: &str = r#"scenario "RUN-01 criterion 4, an if that cannot decide" {
   on_error continue
   begin = start
-  @after(begin)
   probe = GET "/probe" {
     sample 200 { go: true }
   }
-  @after(probe)
   a = GET "{down}/a"
   decide = if a.body.go == true {
     yes = GET "/yes" {
       sample 200 { ok: true }
     }
-    @after(yes)
     nested = if probe.status == 200 {
       deep = GET "/deep" {
         sample 200 { ok: true }
@@ -491,7 +474,6 @@ const CRITERION_4_UNDECIDED: &str = r#"scenario "RUN-01 criterion 4, an if that 
   } else {
     noted = assert probe.status == 200
   }
-  @after(decide)
   after_if = GET "/after" {
     sample 200 { ok: true }
   }
@@ -500,7 +482,6 @@ const CRITERION_4_UNDECIDED: &str = r#"scenario "RUN-01 criterion 4, an if that 
       sample 200 { ok: true }
     }
   }
-  @after(undecided)
   last = GET "/last" {
     sample 200 { ok: true }
   }
@@ -547,7 +528,6 @@ const MAKER: &str = r#"component run01_maker "RUN-01 maker" {
     sample 201 { id: "m-1" }
   }
   export id: string = made.body.id
-  @after(made)
   broken = GET "{down}/broken"
   export detail: string = broken.body.detail
 }
@@ -556,7 +536,6 @@ const MAKER: &str = r#"component run01_maker "RUN-01 maker" {
 const CRITERION_5: &str = r#"scenario "RUN-01 criterion 5" {
   on_error continue
   begin = start
-  @after(begin)
   maker = run01_maker@1()
   uses_id = GET "/use/{{maker.id}}" {
     sample 200 { ok: true }
@@ -602,17 +581,14 @@ async fn run01_criterion_5_exports_computed_before_the_failure() {
 const CRITERION_6: &str = r#"scenario "RUN-01 criterion 6" {
   on_error continue
   begin = start
-  @after(begin)
   a = GET "{down}/a"
   cleanup {
     tidy = DELETE "/tidy" {
       sample 200 { ok: true }
     }
-    @after(tidy)
     tidy2 = DELETE "/tidy/{{a.body.id}}" {
       sample 200 { ok: true }
     }
-    @after(tidy2)
     tidy3 = DELETE "/tidy3" {
       sample 200 { ok: true }
     }
@@ -661,7 +637,6 @@ async fn run01_criterion_6_cleanup_goes_on_after_a_skipped_step() {
 const CLEANUP_AFTER_A_BRANCH_NOT_TAKEN: &str = r#"scenario "RUN-01 cleanup after a branch not taken" {
   on_error continue
   begin = start
-  @after(begin)
   probe = GET "/probe" {
     sample 200 { go: false }
   }
@@ -674,7 +649,6 @@ const CLEANUP_AFTER_A_BRANCH_NOT_TAKEN: &str = r#"scenario "RUN-01 cleanup after
     tidy = DELETE "/made/{{made.body.id}}" {
       sample 200 { ok: true }
     }
-    @after(tidy)
     tidy2 = DELETE "/tidy2" {
       sample 200 { ok: true }
     }

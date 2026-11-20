@@ -169,9 +169,10 @@ MCP server do the same thing because they call the same function.
   canonical one, Format normalises to it, an edit leaves the author's order
   alone, and the reference shows it. Which order is decided with section 4:
   without `@after` only `@label`, `@contract` and `@note` are left.
-- **The fix is small on purpose.** It writes each file whole or not at all
-  and raises the version last. No transaction over the project, no undo
-  beyond the editor's and Git: cut, by the owner's frame.
+- **The fix is small on purpose.** A project is converted in one commit
+  of the project store, whole or not at all; no state between the two
+  languages; no record, no window flow, no rollback (Git). Amended by
+  LANG-20 after the owner's decision of 2026-11-20.
 
 Not verified: whether publication can keep the author's text instead of
 printing from the model (it decides whether a free comment reaches a
@@ -449,11 +450,13 @@ Confirmed by the owner on 2026-11-17, all four as proposed.
    read; only a missing value that a step needs blocks it.
 2. A request that answered without the field read stays an *error* at the
    reading step, not a *blocked* (rule 5).
-3. Cut from the 0.2.0 conditions: a reversible or transactional migration,
-   tests on project files gathered from 0.1.0 users, and reading several
-   language versions. Kept: the version is detected and the message names
-   both versions; the fix writes a file whole or not at all and raises the
-   version as its last write; the fix keeps comments.
+3. A project is converted in one commit of the project store, whole or
+   not at all; no state between the two languages; no record, no window
+   flow, no rollback (Git) (amended by LANG-20, owner's decision of
+   2026-11-20). Cut from the 0.2.0 conditions: tests on project files
+   gathered from 0.1.0 users, and reading several language versions. Kept:
+   the version is detected and the message names both versions; the fix
+   keeps comments.
 4. One canonical attribute order for `print` and `fmt` (KTLO-37). The
    parser does not require that order, and an ordinary edit on the board
    keeps the author's order: its difference stays as small as the edit.

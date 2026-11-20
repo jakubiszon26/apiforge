@@ -1,7 +1,8 @@
 # ADR 0011: Folder storage transactions and deliberate recovery
 
 - Status: accepted for Stage II; P1 storage implemented and fault-tested on Linux; native Windows durability unverified
-- Date: 2026-10-24; amended 2026-11-02 (MCP-19, the replacement primitive on Windows)
+- Date: 2026-10-24; amended 2026-11-02 (MCP-19, the replacement primitive on Windows),
+  2026-11-20 (LANG-20e, a commit's read set)
 - Scope: `apiforge-storage`, folder loader, migration and run-journal integration
 - Plan: [Stage II](../stage-ii-code-workspace.md)
 - Related: [format](0010-folder-projects.md), [sessions](0012-project-sessions.md)
@@ -120,6 +121,22 @@ half a transaction. New semantic edits may enter memory while a save is in fligh
 acknowledge only the saved source version, leaving newer text dirty. A queued save
 is planned against the current committed generation when it starts, not an older
 generation captured by the UI.
+
+Amended by LANG-20e ([#500](https://github.com/jakubiszon26/apiforge/issues/500),
+2026-11-20): a commit takes, beside its changes, a **read set**: the paths its
+caller read and decided from, each with the state it saw (a fingerprint, or
+missing). A path may be read and not written; the manifest, read and not
+written, is one. The read set is compared where the expected states of the
+targets are, twice: in step 1, under the lock, and at the end of step 2,
+immediately before activation. A path whose state differs refuses the commit
+with the conflict that names it; nothing is written, and the staging is removed,
+so nothing is left to recover. A path both read and written is compared once,
+by its operation's expected state, with which the state read must agree, or the
+commit is refused as malformed. The read set is not part of the descriptor:
+replay and recovery of an activated transaction never compare it, since after
+activation the decision was taken. It is not counted by the transaction's
+limits. Every commit that reads nothing it does not write passes an empty read
+set and behaves as before.
 
 Before activation a failure leaves targets untouched. After activation a failure
 leaves recoverable intent and blocks subsequent project mutations until resolved.

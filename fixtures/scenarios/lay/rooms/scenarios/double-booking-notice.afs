@@ -1,7 +1,6 @@
 scenario "Double booking with a notice in between" {
   description "A room booked for a time cannot be booked again for the same time."
   begin = start
-  @after(begin)
   token = sign_in@1(user: "tester")
   rooms = GET "/rooms" {
     headers { Authorization: "Bearer {{token}}" }
@@ -12,21 +11,19 @@ scenario "Double booking with a notice in between" {
     headers { Authorization: "Bearer {{token}}" }
     sample 200 { maxHours: 4, opensAt: "08:00", closesAt: "20:00" }
   }
-  short_enough = assert (policy.body.maxHours >= 1) == true
+  short_enough = assert policy.body.maxHours >= 1
   slot = { start: "2026-12-01T10:00:00Z", end: "2026-12-01T11:00:00Z" }
   first = POST "/bookings" {
     headers { Authorization: "Bearer {{token}}" }
     body { roomId: rooms.body.items[0].id, start: slot.start, end: slot.end }
     sample 201 { id: "bk-1", roomId: "room-a", start: "2026-12-01T10:00:00Z", end: "2026-12-01T11:00:00Z" }
   }
-  @after(first)
   notice = POST "/notifications" {
     headers { Authorization: "Bearer {{token}}" }
     body { channel: "email", text: "Your booking is confirmed." }
     sample 202 { id: "n-1" }
   }
   sent = assert notice.status == 202
-  @after(sent)
   booked = if first.status == 201 {
     second = POST "/bookings" {
       headers { Authorization: "Bearer {{token}}" }
@@ -34,7 +31,6 @@ scenario "Double booking with a notice in between" {
       sample 409 { error: { code: "room_unavailable", message: "The room is closed for maintenance." } }
     }
     refused = assert second.status == 409
-    @after(refused)
     calendar = GET "/rooms/{{rooms.body.items[0].id}}/bookings" {
       headers { Authorization: "Bearer {{token}}" }
       query { from: slot.start, to: slot.end }

@@ -1,4 +1,7 @@
 use apiforge_project::{AnalysisState, DocumentKind, Origin, ProjectSession, prepare_project};
+
+#[path = "../../apiforge-project/tests/support/language.rs"]
+mod language;
 use std::{
     ffi::OsStr,
     fs,
@@ -379,9 +382,9 @@ mod mcp15 {
     const KEEP_EDITING: &str = "the person chose to keep editing";
     const WSL: &str = "Windows/WSL";
     /// A scenario that passes against the demo API, with a cleanup.
-    const PASSES: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const PASSES: &str = "scenario \"MCP-15 live\" {\n  begin = start\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
     /// The same against a product the demo API does not have: it fails.
-    const FAILS: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const FAILS: &str = "scenario \"MCP-15 live\" {\n  begin = start\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
 
     /// The demo shop, its base URL `base_url` and its scenario `scenario`.
     fn shop(base_url: &str, scenario: &str) -> tempfile::TempDir {
@@ -916,10 +919,11 @@ mod mcp15 {
     fn mcp15_criterion_10_the_messages_in_order() {
         let api = api();
         // MCP-10: the end says how many steps ran and the first that did
-        // not pass: the assertion of `FAILS` (step 2, `ok`, no label).
+        // not pass: the assertion of `FAILS` (step 3 after `begin`, `ok`, no
+        // label; LANG-13 writes the start).
         for (scenario, code, state, failed) in [
             (PASSES, 0, RunState::Passed, None),
-            (FAILS, 1, RunState::Failed, Some((2, "ok"))),
+            (FAILS, 1, RunState::Failed, Some((3, "ok"))),
         ] {
             let directory = shop(&api.base_url(), scenario);
             let root = directory.path();
@@ -947,7 +951,7 @@ mod mcp15 {
                         path: SCENARIO.into(),
                         mode: RunMode::Live,
                         state,
-                        step_count: Some(3),
+                        step_count: Some(4),
                         step: failed.map(|(step, _)| step),
                         label: failed.map(|(_, label)| label.to_owned()),
                     },
@@ -1099,9 +1103,9 @@ mod issue346 {
     use std::{ffi::OsStr, fs};
 
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
-    /// An error on line 3; a warning on line 1 after three two-byte
-    /// characters, at character column 17 (byte column 20).
-    const TEXT: &str = "scenario \"Żółw\" // c\n{\n  other = )\n}\n";
+    /// An error on line 1 after three two-byte characters, at character
+    /// column 23 (byte column 26), and one on line 2.
+    const TEXT: &str = "scenario \"Żółw\" { a = )\n  other = )\n}\n";
 
     #[test]
     fn issue346_criterion_1_folder_check_prints_path_line_and_character_column() {
@@ -1116,17 +1120,11 @@ mod issue346 {
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         let lines: Vec<&str> = stderr.lines().collect();
         assert!(
-            lines.contains(&format!("{SCENARIO}:3:11: error: Expected an expression").as_str()),
+            lines.contains(&format!("{SCENARIO}:1:23: error: Expected an expression").as_str()),
             "{stderr}"
         );
         assert!(
-            lines.contains(
-                &format!(
-                    "{SCENARIO}:1:17: warning: {}",
-                    apiforge_script::UNATTACHED_COMMENT
-                )
-                .as_str()
-            ),
+            lines.contains(&format!("{SCENARIO}:2:11: error: Expected an expression").as_str()),
             "{stderr}"
         );
         assert!(!lines.iter().any(|line| has_byte_range(line)), "{stderr}");
@@ -1209,6 +1207,7 @@ mod issue430 {
     /// The example of `docs/language/reference.md` § Branches.
     const TEXT: &str = r#"scenario "Branches" {
   param quantity = 2
+  begin = start
   cart = POST "/carts" {
     body { productId: 123, quantity: param.quantity }
     sample 201 { id: "c-1", total: 160 }
@@ -1217,14 +1216,12 @@ mod issue430 {
     receipt = GET "/carts/{{cart.body.id}}" {
       sample 200 { id: "c-1" }
     }
-    @after(receipt)
     items = GET "/carts/{{cart.body.id}}/items" {
       sample 200 { items: [] }
     }
   } else {
     failed = assert cart.status == 201
   }
-  @after(created)
   logout = POST "/logout" {
     sample 204 {}
   }
@@ -1287,5 +1284,167 @@ mod issue430 {
             assert_eq!(step.status, expected, "{}", step.handle);
         }
         assert_eq!(report.status, RunStatus::Passed);
+    }
+}
+
+/// LANG-15 (#412): a project names its language version, and the command
+/// line says when this build cannot read it. The build reads
+/// `LANGUAGE_VERSION`; LANG-20 (#481) raises it to 2.
+mod lang15 {
+    use super::language::{language_of, write_language};
+    use super::run;
+    use apiforge_script::LANGUAGE_VERSION;
+    use std::{
+        collections::BTreeMap,
+        ffi::OsStr,
+        fs,
+        path::{Path, PathBuf},
+    };
+
+    const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
+    const PRODUCT: &str = "components/product.afs";
+
+    fn shop() -> tempfile::TempDir {
+        let directory = tempfile::tempdir().unwrap();
+        apiforge_project::prepare_project(directory.path(), &apiforge_core::demos::shop_project())
+            .unwrap();
+        directory
+    }
+
+    /// Every file and directory under `root`, with the bytes of each file.
+    fn tree(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+        fn walk(root: &Path, at: &Path, files: &mut BTreeMap<PathBuf, Option<Vec<u8>>>) {
+            for entry in fs::read_dir(at).unwrap() {
+                let path = entry.unwrap().path();
+                let relative = path.strip_prefix(root).unwrap().to_owned();
+                if path.is_dir() {
+                    files.insert(relative, None);
+                    walk(root, &path, files);
+                } else {
+                    files.insert(relative, Some(fs::read(&path).unwrap()));
+                }
+            }
+        }
+        let mut files = BTreeMap::new();
+        walk(root, root, &mut files);
+        files
+    }
+
+    /// Criterion 3: `check`, `print`, `apply` and `run` (simulated and live)
+    /// refuse a project written in a newer language with the one sentence
+    /// that names both versions; no file of the project changes.
+    #[test]
+    fn lang15_criterion_3_the_command_line_refuses_a_newer_project() {
+        let directory = shop();
+        let root = directory.path();
+        fs::remove_dir_all(root.join(".apiforge/local")).unwrap();
+        let newer = LANGUAGE_VERSION + 1;
+        write_language(root, newer);
+        let incoming = tempfile::NamedTempFile::new().unwrap();
+        fs::write(incoming.path(), fs::read(root.join(PRODUCT)).unwrap()).unwrap();
+        let before = tree(root);
+        let sentence = format!(
+            "This project is written in language {newer}; this build reads language {LANGUAGE_VERSION}. Update API Forge."
+        );
+        for (command, rest) in [
+            ("check", vec![]),
+            ("check", vec![OsStr::new("--file"), OsStr::new(PRODUCT)]),
+            ("print", vec![OsStr::new("--file"), OsStr::new(PRODUCT)]),
+            (
+                "apply",
+                vec![
+                    OsStr::new("--file"),
+                    OsStr::new(PRODUCT),
+                    incoming.path().as_os_str(),
+                ],
+            ),
+            ("run", vec![OsStr::new("--scenario"), OsStr::new(SCENARIO)]),
+            (
+                "run",
+                vec![
+                    OsStr::new("--scenario"),
+                    OsStr::new(SCENARIO),
+                    OsStr::new("--live"),
+                ],
+            ),
+        ] {
+            let output = run(root, command, &rest);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(
+                output.status.code(),
+                Some(1),
+                "{command} {rest:?}: {stderr}"
+            );
+            assert_eq!(stderr.trim_end(), sentence, "{command} {rest:?}");
+            assert!(output.stdout.is_empty(), "{command} {rest:?}");
+            assert_eq!(tree(root), before, "{command} {rest:?} changed the project");
+        }
+    }
+
+    /// Criterion 4: an older project opens. `check --folder` exits 1 and its
+    /// first line is for the manifest, with both versions and the fix; `run`
+    /// is refused with that sentence and sends nothing; `apply` saves.
+    #[test]
+    fn lang15_criterion_4_an_older_project_is_checked_and_does_not_run() {
+        let directory = shop();
+        let root = directory.path();
+        let older = LANGUAGE_VERSION - 1;
+        write_language(root, older);
+        let both = format!(
+            "This project is written in language {older}; this build reads language {LANGUAGE_VERSION}."
+        );
+        let fix = format!("apiforge fix --folder {}", root.display());
+
+        let check = run(root, "check", &[]);
+        assert_eq!(check.status.code(), Some(1));
+        let stderr = String::from_utf8_lossy(&check.stderr);
+        let first = stderr.lines().next().unwrap_or_default();
+        assert!(
+            first.starts_with("apiforge.project.json:"),
+            "the first line is for the manifest: {stderr}"
+        );
+        assert!(first.contains(&both) && first.contains(&fix), "{first}");
+
+        for rest in [
+            vec![OsStr::new("--scenario"), OsStr::new(SCENARIO)],
+            vec![
+                OsStr::new("--scenario"),
+                OsStr::new(SCENARIO),
+                OsStr::new("--live"),
+            ],
+        ] {
+            let output = run(root, "run", &rest);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(output.status.code(), Some(1), "{rest:?}: {stderr}");
+            assert!(stderr.contains(&both) && stderr.contains(&fix), "{stderr}");
+            assert!(output.stdout.is_empty(), "nothing ran: {rest:?}");
+        }
+
+        let incoming = root.join("incoming.txt");
+        let text = fs::read_to_string(root.join(PRODUCT)).unwrap();
+        fs::write(&incoming, format!("{text}\n")).unwrap();
+        let apply = run(
+            root,
+            "apply",
+            &[
+                OsStr::new("--file"),
+                OsStr::new(PRODUCT),
+                incoming.as_os_str(),
+            ],
+        );
+        assert!(
+            apply.status.success(),
+            "{}",
+            String::from_utf8_lossy(&apply.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(PRODUCT)).unwrap(),
+            format!("{text}\n")
+        );
+        assert_eq!(
+            language_of(root),
+            older,
+            "a save does not raise the language"
+        );
     }
 }

@@ -238,10 +238,7 @@ fn every_project_and_draft_migrates_into_an_activated_catalogue() {
     let scenario = document(&shop, DocumentKind::Scenario, &original.id);
     assert!(scenario.is_dirty(), "the unsaved scenario draft is back");
     assert_eq!(scenario.selection().caret, 3);
-    assert_eq!(
-        scenario.model(),
-        Some(&Document::Scenario(original.clone()))
-    );
+    assert_eq!(scenario.model(), Some(&written(original)));
 
     // The older component draft became its own recovered working document.
     let recovered: Vec<_> = shop
@@ -648,4 +645,50 @@ fn a_symlink_in_a_published_folder_is_not_ignored_by_ownership_verification() {
     assert!(link.is_symlink());
     assert_eq!(fs::read_to_string(note).unwrap(), "outside project");
     assert!(!data.join(CATALOGUE_FILE).exists());
+}
+
+/// A legacy scenario as its folder source says it since LANG-13 (#386,
+/// criterion 10): not equal to the original, but equal to it with its
+/// ordering edges rebuilt as a chain (`chained`) and a start written first
+/// where it had none (rule 1); every identity and position is the
+/// original's, and its steps keep the order `graph::sequence` gave.
+fn written(scenario: &apiforge_core::format::Scenario) -> Document {
+    use apiforge_core::{
+        chain::{chained, with_start},
+        graph::sequence,
+    };
+    let mut written = scenario.clone();
+    written.cleanup = chained(&scenario.cleanup).expect("a chain");
+    written.graph = with_start(
+        &chained(&scenario.graph).expect("a chain"),
+        &[&written.cleanup],
+    );
+    let steps = |graph: &apiforge_core::format::Graph| -> Vec<String> {
+        sequence(graph)
+            .into_iter()
+            .filter(|id| {
+                graph.nodes.iter().any(|node| {
+                    node.id == *id
+                        && !node.kind.is_data()
+                        && node.kind != apiforge_core::model::NodeKind::Start
+                })
+            })
+            .map(str::to_owned)
+            .collect()
+    };
+    assert_eq!(
+        steps(&written.graph),
+        steps(&scenario.graph),
+        "the order of the steps"
+    );
+    for node in &scenario.graph.nodes {
+        let kept = written.graph.nodes.iter().find(|n| n.id == node.id);
+        assert_eq!(
+            kept.map(|n| &n.position),
+            Some(&node.position),
+            "{}",
+            node.id
+        );
+    }
+    Document::Scenario(written)
 }

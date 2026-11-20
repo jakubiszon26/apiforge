@@ -18,6 +18,8 @@ uuid.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# LANG-20: an interrupted conversion, through the store's fault seam.
+apiforge-storage = { workspace = true, features = ["fault-injection"] }
 
 [lints]
 workspace = true
