@@ -117,7 +117,10 @@ fn lay28_criterion_5_the_window_draws_the_ordered_boards() {
         let label = format!("{name}, {wires:?}, checks drawn: {expanded}");
         assert!(!routes.is_empty(), "{label}: the board draws lines");
         let (data, _, kept) = super::lay45::measures(&harness, &id, &label);
-        assert!(data <= most, "{label}: {data} data crossings, {most} before");
+        assert!(
+            data <= most,
+            "{label}: {data} data crossings, {most} before"
+        );
         let found = crossings(&routes);
         let bridges: usize = board(&harness, &id)
             .debug_wires()

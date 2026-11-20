@@ -246,11 +246,7 @@ fn lay06_criterion_1_the_spine_and_the_satellites() {
             }
         }
     }
-    let bounds = cards
-        .values()
-        .copied()
-        .reduce(egui::Rect::union)
-        .unwrap();
+    let bounds = cards.values().copied().reduce(egui::Rect::union).unwrap();
     // Five columns 100 px apart are 1800 px, 1936 with the widest mark
     // LAY-06 drew; the room the lines of this board need between its
     // columns comes on top (LAY-03).
@@ -720,7 +716,10 @@ fn lay06_criterion_11_no_more_crossings_than_today() {
         let wires = board(&harness, &id).debug_wires();
         let routes: Vec<&[egui::Pos2]> = wires.iter().map(|wire| wire.points.as_slice()).collect();
         let pairs = coincident(&routes);
-        assert!(data <= most, "{label}: {data} data crossings, {most} before");
+        assert!(
+            data <= most,
+            "{label}: {data} data crossings, {most} before"
+        );
         if checks == Checks::Collapsed {
             assert!(pairs <= 97, "{label}: {pairs} coincident pairs");
         }

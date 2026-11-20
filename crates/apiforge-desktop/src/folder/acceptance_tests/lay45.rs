@@ -159,17 +159,32 @@ fn assert_sockets(harness: &FolderHarness, id: &str, context: &str) -> usize {
     let canvas = board(harness, id);
     let lines = chain(harness, id);
     for line in &lines {
-        let source = line.source.as_deref().expect("a line of the chain leaves a card");
+        let source = line
+            .source
+            .as_deref()
+            .expect("a line of the chain leaves a card");
         let (from, to) = (world(harness, id, source), world(harness, id, &line.target));
         let (_, out) = canvas.debug_order_sockets(source);
         let (into, _) = canvas.debug_order_sockets(&line.target);
         let (out, into) = (out.expect("a socket out"), into.expect("a socket in"));
         let (first, last) = (line.points[0], line.points[line.points.len() - 1]);
         let label = format!("{context}: {} -> {}", source, line.target);
-        assert!(near(first, out), "{label} starts at {first:?}, the socket is at {out:?}");
-        assert!(near(last, into), "{label} ends at {last:?}, the socket is at {into:?}");
-        assert!((out.x - from.right()).abs() < 0.5, "{label}: out on the right edge");
-        assert!((into.x - to.left()).abs() < 0.5, "{label}: in on the left edge");
+        assert!(
+            near(first, out),
+            "{label} starts at {first:?}, the socket is at {out:?}"
+        );
+        assert!(
+            near(last, into),
+            "{label} ends at {last:?}, the socket is at {into:?}"
+        );
+        assert!(
+            (out.x - from.right()).abs() < 0.5,
+            "{label}: out on the right edge"
+        );
+        assert!(
+            (into.x - to.left()).abs() < 0.5,
+            "{label}: in on the left edge"
+        );
         for (card, socket) in [(source, out), (line.target.as_str(), into)] {
             let header = canvas
                 .debug_header(card)
@@ -253,8 +268,8 @@ fn lay45_criterion_2_neighbours_are_joined_straight() {
                         pos2(b.left() - 0.5, a.bottom().min(b.bottom()) - 0.5),
                     );
                     for line in &lines {
-                        let joins = line.source.as_deref() == Some(left.as_str())
-                            && line.target == *right;
+                        let joins =
+                            line.source.as_deref() == Some(left.as_str()) && line.target == *right;
                         if joins {
                             straight += 1;
                             assert_eq!(
@@ -318,9 +333,10 @@ fn lay45_criterion_3_the_line_to_the_next_row_runs_in_the_row_gap() {
                         line.source.as_deref() == Some(last.0.as_str()) && line.target == first.0
                     }) else {
                         assert!(
-                            graph.edges.iter().any(|edge| {
-                                edge.target == first.0 && edge.branch.is_some()
-                            }),
+                            graph
+                                .edges
+                                .iter()
+                                .any(|edge| { edge.target == first.0 && edge.branch.is_some() }),
                             "{context}: a line to the next row, into {}",
                             handle_of(&graph, &first.0)
                         );
@@ -468,7 +484,9 @@ fn lay45_criterion_5_the_arrow_and_the_mark_are_gone() {
                 harness.step();
                 let said = board(&harness, &id).debug_statement();
                 assert!(
-                    !said.as_deref().is_some_and(|text| text.starts_with("after ")),
+                    !said
+                        .as_deref()
+                        .is_some_and(|text| text.starts_with("after ")),
                     "{context}: pointing left of a badge says {said:?}"
                 );
             }
@@ -616,13 +634,8 @@ fn lay45_criterion_9_cleanup_and_component_bodies() {
             "{wires:?}: released -> cancelled"
         );
 
-        let (_project, harness, id) = rooms(
-            "components/sign-in.afs",
-            WIDE,
-            false,
-            wires,
-            |root| {
-                fs::write(
+        let (_project, harness, id) = rooms("components/sign-in.afs", WIDE, false, wires, |root| {
+            fs::write(
                     root.join("components/sign-in.afs"),
                     "component sign_in \"Sign in\" {\n  \
                      description \"Open a session on the room booking API and return its token.\"\n  \
@@ -639,8 +652,7 @@ fn lay45_criterion_9_cleanup_and_component_bodies() {
                      }\n",
                 )
                 .unwrap();
-            },
-        );
+        });
         let body = graph(&harness, &id, false);
         let lines = assert_sockets(&harness, &id, &format!("component, {wires:?}"));
         assert!(lines >= 1, "{wires:?}: the component draws its chain");
@@ -715,9 +727,12 @@ pub(super) fn measures(harness: &FolderHarness, id: &str, label: &str) -> (usize
             };
             for p in a.points.windows(2) {
                 for q in b.points.windows(2) {
-                    let Some(at) =
-                        crossing(to_layout(p[0]), to_layout(p[1]), to_layout(q[0]), to_layout(q[1]))
-                    else {
+                    let Some(at) = crossing(
+                        to_layout(p[0]),
+                        to_layout(p[1]),
+                        to_layout(q[0]),
+                        to_layout(q[1]),
+                    ) else {
                         continue;
                     };
                     if both_data {
@@ -764,7 +779,10 @@ fn lay45_criterion_8_three_measures_of_crossings() {
                 eprintln!("LAY-45 {label}: data×data {data}, chain×data {chained}, gap {kept}");
                 let (most, _, _) = before(name, wires, expanded);
                 if !HELD.contains(&(name, wires, expanded)) {
-                    assert!(data <= most, "{label}: {data} data crossings, {most} before");
+                    assert!(
+                        data <= most,
+                        "{label}: {data} data crossings, {most} before"
+                    );
                 }
                 assert!(kept, "{label}: a line within 20 px of another or a card");
             }
@@ -792,7 +810,10 @@ fn lay45_criterion_8_data_lines_on_the_held_boards() {
         let label = format!("{name}, {wires:?}, checks drawn: {expanded}");
         let (data, _, _) = measures(&harness, &id, &label);
         let (most, _, _) = before(name, wires, expanded);
-        assert!(data <= most, "{label}: {data} data crossings, {most} before");
+        assert!(
+            data <= most,
+            "{label}: {data} data crossings, {most} before"
+        );
     }
 }
 
