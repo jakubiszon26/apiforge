@@ -755,11 +755,12 @@ fn diag06g_criterion_6() {
         "the oldest kept"
     );
 
-    // The source limit: no step holds a text over 1 MiB, from Code or from
-    // the board.
+    // The source limit: a text over 1 MiB is refused and is no step; a text
+    // just under it is a step held whole, given back byte for byte.
     let limit = apiforge_storage::project::MAX_SOURCE_BYTES;
     let (_directory, mut session, id) = small();
-    let filler = format!("  // {}\n", "x".repeat(limit - SMALL.len() - 12));
+    // A free comment: a note is held to the language's own, shorter limit.
+    let filler = format!("  // {}\n\n", "x".repeat(limit - SMALL.len() - 13));
     let near = SMALL.replace("  total = 2\n", &format!("{filler}  total = 2\n"));
     assert!(near.len() <= limit);
     session.edit_source(&id, &near, CODE).unwrap();
@@ -769,28 +770,20 @@ fn diag06g_criterion_6() {
         session.edit_source(&id, &over, CODE),
         Err(Error::SourceTooLarge)
     ));
-    let mut next = model(&session, &id);
-    *main_graph(&mut next) = add_node(
-        main_graph(&mut next.clone()),
-        Block::Value,
-        Position { x: 40.0, y: 40.0 },
-        None,
-        None,
-    )
-    .unwrap()
-    .graph;
-    assert!(matches!(
-        session.apply_model_edit(&id, next, ORIGIN),
-        Err(Error::SourceTooLarge)
-    ));
     assert_eq!(
         text(&session, &id),
         near,
-        "the refused edit changes nothing"
+        "the refused text changes nothing"
     );
-    assert!(session.undo(&id, ORIGIN).unwrap());
-    assert_eq!(text(&session, &id), SMALL);
-    assert!(!session.undo(&id, ORIGIN).unwrap(), "one step only");
+    let typed = near.replace("total = 2", "total = 3");
+    session.edit_source(&id, &typed, CODE).unwrap();
+    session.settle(&id).unwrap();
+    passes_through(
+        &mut session,
+        &id,
+        &[SMALL.to_owned(), near, typed],
+        "a text of 1 MiB",
+    );
 }
 
 // Criterion 7 ----------------------------------------------------------------
