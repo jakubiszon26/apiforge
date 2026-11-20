@@ -507,6 +507,11 @@ pub struct Canvas {
     last_arrangement: String,
     /// The blocks just pasted, to show once the board is drawn (UX-34).
     pasted_pending: Vec<String>,
+    /// What a wire of the order carried from a *Next* with a successor will
+    /// do, shown at the pointer (DIAG-06c).
+    caption: Option<String>,
+    /// Where a step carried from the Library lands (DIAG-06c).
+    drop_mark: Option<DropMark>,
     /// The inputs a paste left unconnected because the step they read is
     /// missing, by block and input, with that step's name (UX-39). Session
     /// state of the document's board, never written.
@@ -638,6 +643,18 @@ pub(crate) struct DrawnWire {
     pub lit: bool,
     /// Drawn at a quarter of its strength while a step is selected.
     pub dimmed: bool,
+    /// The line a wire carried from its source's *Next* would replace,
+    /// drawn faded while it is carried (DIAG-06c).
+    pub faded: bool,
+}
+
+/// Where a step carried from the Library lands (DIAG-06c): after the source
+/// of the nearest line of a chain, through its port (*Next*, *Yes* or
+/// *No*), or behind the last step of the main flow.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DropMark {
+    Line { source: String, port: String },
+    End { last: String },
 }
 
 /// A chip at a reader as the last frame drew it (LAY-23).
@@ -711,6 +728,8 @@ impl Default for Canvas {
             last_window: Vec2::ZERO,
             last_arrangement: String::new(),
             pasted_pending: Vec::new(),
+            caption: None,
+            drop_mark: None,
             missing_steps: Vec::new(),
             last_size: Vec2::ZERO,
             last_focus: None,
@@ -1055,6 +1074,37 @@ impl Canvas {
             .iter()
             .find(|(subject, _)| subject == id)
             .map(|(_, text)| text.clone())
+    }
+
+    /// The caption at the pointer while a wire of the order is carried
+    /// (DIAG-06c).
+    #[cfg(test)]
+    pub(crate) fn debug_caption(&self) -> Option<&str> {
+        self.caption.as_deref()
+    }
+
+    /// Where a step carried from the Library would land (DIAG-06c).
+    #[cfg(test)]
+    pub(crate) fn debug_drop_mark(&self) -> Option<&DropMark> {
+        self.drop_mark.as_ref()
+    }
+
+    /// Every output socket of a card's order, on the board: *Next*, *Yes*,
+    /// *No* (DIAG-06c).
+    #[cfg(test)]
+    pub(crate) fn debug_out_sockets(&self, id: &str) -> Vec<(String, Pos2)> {
+        self.cards
+            .iter()
+            .find(|card| card.id == id)
+            .map(|card| {
+                card.controls
+                    .iter()
+                    .filter_map(|(port, _)| {
+                        card.output_anchor(port).map(|at| ((*port).to_owned(), at))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// The wires the last frame drew.
@@ -2145,6 +2195,7 @@ impl Canvas {
                     label_box: label_boxes.get(&wire.id).copied(),
                     lit: lit.contains(&wire.id),
                     dimmed: dimming && !lit.contains(&wire.id),
+                    faded: false,
                 })
                 .collect();
         }

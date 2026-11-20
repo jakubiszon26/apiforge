@@ -957,6 +957,29 @@ impl FolderApp {
         }
     }
 
+    /// The board of `document_id` as a whole *Tidy up* would lay it out
+    /// now, without applying it (DIAG-06c).
+    #[cfg(test)]
+    pub(crate) fn debug_tidied(&self, document_id: &str) -> Option<Graph> {
+        let snapshot = self.snapshot(document_id)?;
+        let model = snapshot.model?;
+        let cleanup = self.cleanup(document_id);
+        let project = self.context_project();
+        let reference = reference_of(&model, cleanup);
+        let parameters = parameters_of(&model);
+        let board = Board {
+            graph: graph_of(&model, cleanup),
+            reference: &reference,
+            project: &project,
+            parameters: &parameters,
+            sibling: sibling_of(&model, cleanup),
+            density: self.density(),
+            satellites: true,
+            lines: lines_of(&self.preferences),
+        };
+        board.tidy_up(&[])
+    }
+
     /// Opens the working document of the component a block calls.
     pub(super) fn open_component(&mut self, graph: &Graph, node_id: &str) {
         let project = self.context_project();
