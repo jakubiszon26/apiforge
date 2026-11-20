@@ -61,7 +61,8 @@ yet, and that an old source is not rewritten by accident.
 
   One entry per line, sorted by path. A source is identified by its
   `documentId` (the manifest's); the path is for the reader. It is read
-  strictly, like the manifest.
+  strictly, like the manifest. An empty list is valid: every listed source
+  may have been deleted while others are still to do.
 - **Git.** The layout keeps a merge small; it does not make it free of
   conflicts (two branches that each add an entry after the same line
   conflict). A record that does not read — a merge left unresolved — is
