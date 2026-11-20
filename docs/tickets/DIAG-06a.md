@@ -3,7 +3,8 @@
 - Size: M · Owner review: 20 min · Risk: `default` (what *Add step* and a
   wire to an existing step do), `visible UI` (refusal sentences)
 - State: **Approved, ready for implementation after LANG-13 (#386),
-  LANG-06 (#143) and LAY-45 (#468) have merged.** The owner answered the
+  LANG-06 (#143), LAY-45 (#468) and DIAG-06e (#494, the delete and the
+  Undo that restores the source) have merged.** The owner answered the
   quiz on the round-1 mock-up on 2026-11-20, every question with A
   ([#391](https://github.com/jakubiszon26/apiforge/issues/391)). **Narrowed
   the same day** after an independent review found the first version an
@@ -37,8 +38,8 @@ and a deleted ordering wire, change nothing (LANG-13, consequence 3).
   back.
 - Changed (question 16): the checks and values written directly under a
   step that read only that step move with it.
-- New (question 15): a move after which a step would read a value that
-  is made below it is refused: *`pay` reads `cart.body.id`; it stays
+- New (question 15): a move after which a step would read a value made
+  by a step below it is refused: *`pay` reads `cart.body.id`; it stays
   below `cart`.* In today's banner; DIAG-06b shows it while carrying.
 - Default behaviour that changes (question 4): *Add step* on the bar puts
   the new step after the selected step, else at the end of the main flow.
@@ -103,12 +104,16 @@ document.**
    read that step and no other step move with it, in their order; one
    that also reads another step stays. Tests: K, S
    `a_step_moves_with_its_checks`, D `diag06a_criterion_3`.
-4. A move is refused, with the sentence above and nothing changed, when
-   afterwards a step would read a value made below it: the moved step
-   above its producer; a producer below its reader; the same through a
-   value or a variable that stands between them; the same for a statement
-   that travels with the step. Tests: K `place_refuses_*` (one per case),
-   D `diag06a_criterion_4_*` (the banner's text).
+4. A move is refused, with the sentence above and nothing changed,
+   exactly when the result has a cycle through ordering and values: the
+   moved step above the step that makes what it reads; a step below a
+   step that reads it; the same through a value or a variable that
+   stands between them; the same for a statement that travels with the
+   step. Where a check or value is *written* is no reason: they stand
+   anywhere in their block (rule 5 of language 2). Tests: K
+   `place_refuses_*` (one per case) and
+   `place_allows_a_data_statement_written_above`; D
+   `diag06a_criterion_4_*` (the banner's text).
 5. *Add step* on the bar: with a step selected the new step runs directly
    after it, in its braces; with an `if` selected, after the whole `if`;
    with several selected, after the one that runs last; with a check or
@@ -131,7 +136,8 @@ document.**
     property test applies random places and moves to generated chains
     with `if`s and checks the text after each.
     Test: P `diag06a_criterion_10_edits_keep_the_check`.
-11. Each edit is one step of Undo and Redo. Test: P
+11. Each edit is one step of Undo and Redo, and Undo gives the file back
+    byte for byte (DIAG-06e, criterion 7). Test: P
     `diag06a_criterion_11_*`.
 
 ## Regression potential
@@ -149,8 +155,9 @@ document.**
 
 - Moving an `if` with its braces, a move across braces, a check into or
   out of a branch, deleting an `if`: DIAG-06d (#493).
-- Deleting a step that is read, deleting *Start*, paste and duplicate:
-  DIAG-06e (#494). Until then they do what they do after LANG-13.
+- Deleting (DIAG-06e, #494, which lands before this ticket). Paste and
+  duplicate (DIAG-06f, #496): until then they do what they do after
+  LANG-13.
 - The `if`'s own *Next* socket, captions, a block dropped on a line, the
   row making room: DIAG-06c (#490). The refusal while carrying, the
   notice, `+`, *Move earlier* and *Move later*: DIAG-06b (#491).
@@ -164,7 +171,8 @@ document.**
   and written in its new place (`classify`, `insert`); after LANG-06.
 - `apiforge-project/src/session.rs`: the folder session calls the
   operation; the edge rebuild LANG-13 added for the interim is removed
-  for the edits this ticket covers and kept for those of DIAG-06e.
+  for the edits this ticket covers and kept for paste and duplicate
+  until DIAG-06f.
 - `apiforge-desktop`: `board_edit.rs` (the folder path), the banner's
   sentences.
 - The document stays a graph of ordering edges; no list of steps is
