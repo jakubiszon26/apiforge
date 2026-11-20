@@ -155,7 +155,7 @@ unattended is on the issues.
 | --- | --- | --- | --- |
 | LANG-20a #481 | the record of converted sources (`.apiforge/language-update.json`), a project's three states, what run, check and the overview do while it is being updated | M · 20 · `format` | LANG-13 |
 | LANG-20e #500 | a commit of the project store refuses when something it only read has changed | S · 10 | LANG-13 |
-| LANG-20d #499 | the record when a source is created, deleted, restored or renamed; a board edit in a source not yet converted is refused | M · 20 · `format`, `default` | LANG-20a; one owner question |
+| LANG-20d #499 | the record when a source is created, deleted, restored or renamed; a board edit in a source not yet converted is refused | M · 20 · `format`, `default` | LANG-20a; a restore of an old file into an updated project converts it when it can (the owner, #499) |
 | LANG-20b #497 | the plan of an update, its commits, the finish, `apiforge fix --folder` with `--check` and `--as-written` | M · 20 · `format` | LANG-20a, LANG-20e |
 | LANG-20f #501 | the update after a save | S · 10 · `format` | LANG-20b |
 | LANG-20c #498 | the MCP tool `fix` | S · 10 · `format` | LANG-20b |
@@ -183,7 +183,9 @@ converted is refused (#481); the window converts what it can, in one
 dialog (#481), and takes a file that is ready as written (#482);
 deleting a step that is read is refused, *Duplicate* lands after its
 original, a paste that would read what is not there is refused (#494);
-an `if` is copied with its braces (#496).
+an `if` is copied with its braces (#496); a file deleted in the old
+language and restored after the update is converted by the restore when
+it can be, else the restore is refused (#499).
 
 ## Second half — the language grows
 
