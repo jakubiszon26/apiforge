@@ -1391,7 +1391,6 @@ mod lang15 {
     /// first line is for the manifest, with both versions and the fix; `run`
     /// is refused with that sentence and sends nothing; `apply` saves.
     #[test]
-    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
     fn lang15_criterion_4_an_older_project_is_checked_and_does_not_run() {
         let directory = shop();
         let root = directory.path();

@@ -641,7 +641,7 @@ fn mcp03_check_text_run_the_reference_and_resources_over_stdio() {
 
     let reference = call(&mut server, 6, "language_reference", json!({}));
     let reference = structured(&reference);
-    assert_eq!(reference["version"], "1");
+    assert_eq!(reference["version"], "2");
     let text = reference["text"].as_str().unwrap().to_owned();
 
     let listed = server.request(7, "resources/list", json!({}));

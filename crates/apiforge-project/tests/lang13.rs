@@ -394,3 +394,66 @@ fn lang13_criterion_10_the_legacy_workspace_migrates_and_every_project_passes() 
         every_document_passes(&mut session);
     }
 }
+
+// Criterion 15 ---------------------------------------------------------------
+
+#[path = "support/language.rs"]
+mod language;
+
+/// A5: in a project still in language 1 the `@after` and `start` errors are
+/// shown without their fix (the unit of conversion is the project, LANG-20),
+/// and a run is refused with LANG-15's sentence; in a language-2 project the
+/// same text offers the fix.
+#[test]
+fn lang13_criterion_15_no_fix_in_an_older_project() {
+    use apiforge_script::{AFTER_REMOVED, START_MISSING};
+    assert_eq!(apiforge_script::LANGUAGE_VERSION, 2);
+    // Written for 0.1.0: no `start` and an `@after`.
+    let text = "scenario \"Old\" {\n  first = GET \"/first\" {\n    sample 200 {}\n  }\n  @after(first)\n  second = GET \"/second\" {\n    sample 200 {}\n  }\n}\n";
+    let fixes = |root: &Path| {
+        let mut session = ProjectSession::open(root).unwrap();
+        let id = session
+            .documents()
+            .iter()
+            .find(|d| d.entry().path.as_str() == "scenarios/old.afs")
+            .unwrap()
+            .id()
+            .to_owned();
+        session.settle(&id).unwrap();
+        let ours: Vec<bool> = session
+            .document(&id)
+            .unwrap()
+            .diagnostics()
+            .iter()
+            .filter(|d| matches!(d.message.as_str(), AFTER_REMOVED | START_MISSING))
+            .map(|d| d.fix.is_some())
+            .collect();
+        let run = session.prepare_run(&id).map(|_| ()).err();
+        (ours, run)
+    };
+    let directory = prepared_demo();
+    let root = directory.path();
+    let mut session = ProjectSession::open(root).unwrap();
+    session
+        .create_document(DocumentKind::Scenario, "scenarios/old.afs", text)
+        .unwrap();
+    drop(session);
+
+    // Language 2: both errors carry their fix.
+    let (ours, _) = fixes(root);
+    assert_eq!(ours.len(), 2, "{ours:?}");
+    assert!(ours.iter().all(|fix| *fix), "{ours:?}");
+
+    // Language 1: the same errors, without a fix; a run is refused.
+    language::write_language(root, 1);
+    let (ours, run) = fixes(root);
+    assert_eq!(ours.len(), 2, "{ours:?}");
+    assert!(ours.iter().all(|fix| !*fix), "{ours:?}");
+    let run = run.expect("a run is refused");
+    assert!(matches!(run, Error::OlderLanguage { .. }), "{run:?}");
+    assert!(
+        run.to_string()
+            .starts_with("This project is written in language 1; this build reads language 2."),
+        "{run}"
+    );
+}

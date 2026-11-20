@@ -183,7 +183,7 @@ fn criterion_3_the_overview_describes_the_demo_shop() {
     assert_eq!(overview.server_version, env!("CARGO_PKG_VERSION"));
     // MCP-03 criterion 12: the version of the reference `language_reference`
     // serves (empty until MCP-03).
-    assert_eq!(overview.reference_version, "1");
+    assert_eq!(overview.reference_version, "2");
 }
 
 #[test]
@@ -1291,10 +1291,10 @@ fn mcp03_criterion_12_the_language_reference_and_its_version() {
     let text = fs::read_to_string(file).unwrap();
     let served = tools::language_reference().unwrap();
     assert_eq!(served.text, text);
-    assert_eq!(served.version, "1");
+    assert_eq!(served.version, "2");
     // LANG-15 renamed the line: it names the language version.
-    assert!(text.starts_with("Language version: 1 "));
-    assert_eq!(reference::version(), "1");
+    assert!(text.starts_with("Language version: 2 "));
+    assert_eq!(reference::version(), "2");
     let directory = checkout();
     assert_eq!(
         tools::project_overview(directory.path())
@@ -5245,7 +5245,6 @@ mod lang15 {
     /// parse in this build's language (the case before `apiforge fix`) gets
     /// the sentence with the fix, not `invalid_text`.
     #[test]
-    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
     fn lang15_criterion_4_a_run_names_the_language_before_the_source() {
         let directory = checkout();
         let root = directory.path();
@@ -5280,7 +5279,6 @@ mod lang15 {
     /// the manifest with both versions and the fix, `run` (simulated and
     /// live) is refused with it and sends nothing, and a write still works.
     #[test]
-    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
     fn lang15_criterion_4_an_older_project_is_checked_and_does_not_run() {
         let directory = checkout();
         let root = directory.path();

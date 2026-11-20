@@ -1828,7 +1828,6 @@ mod lang15 {
     /// Criterion 4: an older project opens for reading and editing, a save
     /// works, and a run is refused with the sentence that names the fix.
     #[test]
-    #[ignore = "LANG-20: the build reads language 2 from that ticket on"]
     fn lang15_criterion_4_an_older_project_opens_and_does_not_run() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
