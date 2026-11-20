@@ -1,9 +1,10 @@
-# DIAG-06e: A delete keeps the check: it is refused when something read would go, an `if` asks once, and Undo restores the file
+# DIAG-06e: A delete keeps the check: it is refused when something read would go, and an `if` asks once
 
 - Size: M · Owner review: 20 min · Risk: `default` (a delete that worked
   is refused), `visible UI` (one confirmation, refusal sentences)
-- State: **Approved, ready for implementation after LANG-13 (#386) has
-  merged.** Owner's answers of 2026-11-20: question 1 on
+- State: **Approved; labelled with the ruling of the independent
+  review's second pass.** After LANG-13 (#386) and DIAG-06g (#502, Undo
+  restores the file), which that pass split out of this ticket. Owner's answers of 2026-11-20: question 1 on
   [#494](https://github.com/jakubiszon26/apiforge/issues/494) = A (a
   delete of a step that is read is refused, naming the readers) and
   question 7 on #391 = A (deleting an `if` with steps asks once).
@@ -49,8 +50,6 @@ a blank line that stood in what was deleted does not come back.
   question.
 - New: *Start* is not deleted while its flow has a step: *A scenario
   starts at Start. Delete its steps first.* (Rule 1 of language 2.)
-- Changed: Undo after any edit on the board gives back the file byte for
-  byte, with its comments and blank lines.
 - Removed or hidden, migrated: nothing.
 
 ## Mock-up
@@ -65,9 +64,11 @@ One function answers "what would this delete do", and the confirmation,
 the refusal and the delete itself all use its answer:
 
 1. **What goes**: the selected blocks; for an `if`, every statement in
-   its braces at any depth; for each of them, the checks, values and
-   variables that read nothing outside what goes (applied until nothing
-   more is added).
+   its braces at any depth; and a check, value or variable that **reads
+   at least one statement that goes and no statement that stays**
+   (applied until nothing more is added). A statement that reads no
+   statement at all — a literal value, a check of constants, a value of
+   a parameter or of `env` only — belongs to nothing and stays.
 2. **Who is left reading**: every statement that stays — in the main
    flow **and in the cleanup**, which sees the main flow — with a
    reference, anywhere in any of its inputs, required or optional, to
@@ -99,8 +100,12 @@ document.
 3. What goes is closed over a step's own statements: `a`, a value `v`
    that reads only `a`, a request `b` whose body reads `v` — deleting `a`
    is refused and names `b` (through `v`); with `b` selected too, `a`,
-   `v` and `b` go. Test: K `delete_preview_expands`, D
-   `diag06e_criterion_3`.
+   `v` and `b` go. And it takes nothing that reads no statement: with
+   `timeout = 30`, a check `ok = assert 1 == 1` and `limit =
+   param.limit` in the document, deleting `a` leaves all three, also when
+   another request reads `timeout`. Tests: K `delete_preview_expands`,
+   `delete_preview_leaves_what_reads_no_statement`; D
+   `diag06e_criterion_3_*`.
 4. After a delete that is done, every input of every statement that
    stays is equal to what it was. Test: K, P
    `diag06e_criterion_4_surviving_inputs_are_untouched` (compared
@@ -113,13 +118,12 @@ document.
    a question. Tests: D `diag06e_criterion_5_*`.
 6. *Start* with steps after it is not deleted; alone, it is.
    Test: D `diag06e_criterion_6`.
-7. **Undo restores the source.** After a delete of a step with its
-   checks, and of an `if` whose braces hold a free comment, blank lines
-   and attributes in the author's order, one Undo makes the file
-   byte-identical to before, and Redo to after. The same for every edit
-   the board can make today (add, wire, move of a card's step by
-   LANG-13's rule, an Inspector change). Tests: P
-   `diag06e_criterion_7_undo_is_byte_exact_*`, D `diag06e_criterion_7`.
+7. One Undo after each delete of this ticket — a step with its checks;
+   an `if` whose braces hold a free comment, blank lines and attributes
+   in the author's order — gives the file back byte for byte, and Redo
+   the file after the delete (DIAG-06g's property, asserted here for
+   these edits). Tests: P `diag06e_criterion_7_*`, D
+   `diag06e_criterion_7`.
 8. A property test deletes random selections on generated chains with
    `if`s and checks: either a refusal with nothing changed, or criterion
    4 and the check; then Undo, and the bytes are those before.
@@ -132,8 +136,6 @@ document.
 | What can break | Covered by |
 | --- | --- |
 | Deleting what nothing reads, the common case | criteria 4 and 8; the board suites' deletes unchanged |
-| Undo and Redo of every board edit (the history now keeps the text) | criterion 7; the session's history tests unchanged in what they assert |
-| Undo after a foreign write or a reload (the kept text no longer fits) | the history is cleared where it is cleared today; P test |
 | *Save as component* and *Extract*, which remove what they move out | their suites unchanged; they keep their own rule |
 | The legacy window | criterion 9 |
 
@@ -145,8 +147,6 @@ after a delete (DIAG-06b).
 ## Technical appendix
 
 `apiforge-core/src/edit/` (a new `delete.rs`: the preview and the delete;
-`graph.rs` `delete_nodes` untouched), `apiforge-project/src/session.rs`
-(history entries keep the source text beside the document; Undo installs
-both), `apiforge-desktop/src/board_edit.rs`, the existing confirmation
+`graph.rs` `delete_nodes` untouched), `apiforge-desktop/src/board_edit.rs`, the existing confirmation
 dialog, the banner. `apiforge-script/src/edit.rs` is not changed: removing
 a statement's lines is what it does today.
