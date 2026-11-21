@@ -27,6 +27,37 @@ pub const DEFAULT_SCENARIO_NAME: &str = "New scenario";
 /// Name of a new, empty project.
 pub const DEFAULT_PROJECT_NAME: &str = "My API project";
 
+/// The project a first start writes (DEMO-01): *Demo shop*, written by hand
+/// in the language as it stands, every file of `fixtures/demo/` by its path
+/// in the project. The scenarios *Buy coffee on promotion* and *The cart
+/// refuses bad orders* call the component `product` at its revision 1 and
+/// send their requests to the local demo API, as [`SHOP_BASE_URL`] names it.
+/// The repository checks these files with its other fixtures, so the demo
+/// keeps up with the language. [`shop_project`] stays what the tests build
+/// on.
+pub const FIRST_START: &[(&str, &str)] = &[
+    (
+        "apiforge.project.json",
+        include_str!("../../../fixtures/demo/apiforge.project.json"),
+    ),
+    (
+        "scenarios/buy-coffee-on-promotion.afs",
+        include_str!("../../../fixtures/demo/scenarios/buy-coffee-on-promotion.afs"),
+    ),
+    (
+        "scenarios/the-cart-refuses-bad-orders.afs",
+        include_str!("../../../fixtures/demo/scenarios/the-cart-refuses-bad-orders.afs"),
+    ),
+    (
+        "components/product.afs",
+        include_str!("../../../fixtures/demo/components/product.afs"),
+    ),
+    (
+        ".apiforge/revisions/product/1.afs",
+        include_str!("../../../fixtures/demo/.apiforge/revisions/product/1.afs"),
+    ),
+];
+
 /// Every demo project, in library order.
 pub fn demo_projects() -> Vec<Project> {
     vec![
