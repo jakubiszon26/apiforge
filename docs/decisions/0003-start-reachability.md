@@ -1,6 +1,6 @@
 # ADR 0003: Shared arguments do not activate unrelated requests
 
-- Status: accepted
+- Status: accepted; amended 2026-11-20 by LANG-13
 - Date: 2026-10-19
 - Scope: `apiforge-runner`
 
@@ -25,3 +25,18 @@ or change dependency ordering.
 This is an intentional correction of version-one behaviour. A live loopback HTTP regression test verifies that only
 the connected request is sent when it shares an argument with a disconnected one.
 The existing simulation corpus, including IF cases, continues to pass unchanged.
+
+## Amendment: the written language (LANG-13, 2026-11-20)
+
+A folder source is written so that every step follows the step before it
+([ADR 0005](0005-scenario-language.md#the-written-language)): a flow with a step
+has a Start and no step stands outside it, so "reachable from Start" holds for
+every step written in a block by construction. A step that runs nowhere can only
+be met in a published revision or the legacy workspace, which keep the reading
+above; writing such a model as a source refuses it by name.
+
+Checks and values run when what they read exists. A data statement whose
+dependencies are all on the active path, or that has none (an export of a
+component input, a check of a parameter), is on the path too; only data
+statements are added this way, so no request or call is activated by it
+(provisional, owner's decision on #386).

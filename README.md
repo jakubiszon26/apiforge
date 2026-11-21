@@ -183,23 +183,66 @@ verification every change passes and how releases are made.
 scenario "Checkout" {
   param quantity = 2
   begin = start
-  @after(begin)
   products = GET "/products" {
     sample 200 { items: [{ id: "p-1", price: 12.5 }] }
   }
   status_ok = assert products.status == 200
   first = products.body.items[0]
-  @after(status_ok)
   order = POST "/orders" {
     body { productId: first.id, quantity: param.quantity }
   }
 }
 ```
 
-`apiforge fmt`, `check`, `print`, `apply` and `run` format, validate, print
-and execute scenarios from the command line. The grammar and the round-trip
+The steps of a block run in the order they are written; checks and values
+run as soon as what they read exists. `apiforge fmt`, `check`, `print`,
+`apply` and `run` format, validate, print and execute scenarios from the
+command line. A project written for 0.1.0, whose steps were ordered with
+`@after`, opens and can be edited but does not run until
+`apiforge fix --folder <project>` has converted it: the command converts every
+source and the project file in one step, or writes nothing and lists, file by
+file and line by line, each statement to change by hand (one that runs nowhere
+today or is written elsewhere than where it runs), and each file it cannot
+read. `--check` prints the same report without writing. The grammar and the round-trip
 contract are in [ADR 0005](docs/decisions/0005-scenario-language.md); the
 reference given to models is [docs/language/reference.md](docs/language/reference.md).
+
+## Version 0.2.0
+
+The current version is 0.2.0, the first release of the scenario language
+version 2. The release notes on GitHub list the merged pull requests.
+
+### What changes from 0.1.0
+
+- The steps of a block run in the order they are written; `@after` is gone.
+- A scenario or a component with a step has a `start`, its first step.
+- `apiforge fix --folder <directory>` converts a 0.1.0 project whole, every
+  source and the project file in one step, or writes nothing and says what
+  stands in the way. `apiforge fix --folder <directory> --check` shows the
+  same report first and writes nothing. Until then the project opens and can
+  be edited, but does not run.
+- 0.1.0 cannot open a converted project: it says the project's format is not
+  one it supports, and changes nothing.
+- Under `on_error continue` a chain goes on after an error; only a missing
+  value holds a step back.
+
+### Known limits of 0.2.0
+
+- A project is converted whole, by the command line only: not in parts,
+  not by an agent over MCP and not from the window.
+- On the board, a gesture that would write a file that does not pass
+  `check` is refused, and the reason appears in the banner only after the
+  block is let go. Showing it while the block is carried, a notice of what
+  joined after a delete, and inserting or moving a step without dragging
+  come next
+  ([DIAG-06b, #491](https://github.com/jakubiszon26/apiforge/issues/491)).
+- With every wire drawn, the data lines of the 56-step `shop-50` reference
+  board cross each other more often than before: 147 times with checks
+  folded and 192 with checks drawn, until
+  [LAY-47 (#506)](https://github.com/jakubiszon26/apiforge/issues/506).
+- One layout test is ignored for a ticket outside this release: a routing
+  that fails about one run in five
+  ([LAY-36, #419](https://github.com/jakubiszon26/apiforge/issues/419)).
 
 ## Documentation
 

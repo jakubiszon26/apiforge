@@ -12,8 +12,11 @@
 //! row still selects the card (3 = A).
 //!
 //! The kept wires are the board's selected wires, so Delete still removes
-//! them and everything that ends a wire's selection ends its trace. Only
-//! data wires are traced: an ordering line already says `after …`.
+//! them and everything that ends a wire's selection ends its trace. A line
+//! of the chain of steps is pointed at like a data line (LAY-45): it is lit
+//! and its box says which step follows which, `catalogue → product`; a
+//! click keeps it too, and then it says *`product` follows `catalogue`*
+//! (DIAG-06c).
 //!
 //! A reader count's list of the fields read (LAY-18) stands in the same box:
 //! at the count while it is pointed at, and while its port's wires are drawn
@@ -100,8 +103,9 @@ pub struct Trace {
     /// The cards at the ends of the kept wires.
     ends: HashSet<String>,
     wires: HashMap<String, Traced>,
-    /// Every data wire of the board.
-    data: HashSet<String>,
+    /// Every line pointing traces: the data wires and the lines of the
+    /// chain of steps (LAY-45).
+    traced: HashSet<String>,
 }
 
 /// The input row under `pointer` that a data wire of `wires` goes into: its
@@ -142,8 +146,8 @@ impl Memory {
         super::hit_wire(&self.routes, camera, pointer)
     }
 
-    /// Remembers the data wires this frame drew, for the next frame's
-    /// pointer.
+    /// Remembers the lines this frame drew that pointing traces, for the
+    /// next frame's pointer.
     pub fn remember<'a>(
         &mut self,
         trace: &Trace,
@@ -151,7 +155,7 @@ impl Memory {
     ) {
         self.routes = drawn
             .into_iter()
-            .filter(|(id, _)| trace.data.contains(id))
+            .filter(|(id, _)| trace.traced.contains(id))
             .cloned()
             .collect();
     }
@@ -369,10 +373,18 @@ impl Trace {
         row: Option<(&str, &str)>,
         selected: &[String],
     ) -> Self {
+        // A click keeps a data line, and a line of the chain of steps
+        // (DIAG-06c), but not a branch's line out of *Yes* or *No*.
         let data: HashSet<String> = board
             .wires
             .iter()
-            .filter(|wire| !wire.control)
+            .filter(|wire| !wire.control || wire.branch.is_none())
+            .map(|wire| wire.id.clone())
+            .collect();
+        let pointable: HashSet<String> = board
+            .wires
+            .iter()
+            .filter(|wire| !wire.control || wire.branch.is_none())
             .map(|wire| wire.id.clone())
             .collect();
         let mut traced: Vec<String> = pointed.map(str::to_owned).into_iter().collect();
@@ -419,9 +431,26 @@ impl Trace {
                     (chip.id().to_owned(), chip.source_node())
                 }
             };
-            let statement = node.map_or_else(String::new, |node| {
-                readers::texts(board.graph, board.project, wire, &target.id, node, None).1
-            });
+            let handle = |id: &str| {
+                board
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == id)
+                    .map_or_else(|| id.to_owned(), |node| node.handle.clone())
+            };
+            let statement = match node {
+                // The chain of steps says which step follows which (LAY-45).
+                // A kept one says which follows which (DIAG-06c).
+                Some(node) if wire.control && kept.contains(id) => {
+                    format!("`{}` follows `{}`", handle(&target.id), handle(node))
+                }
+                Some(node) if wire.control => format!("{} → {}", handle(node), handle(&target.id)),
+                Some(node) => {
+                    readers::texts(board.graph, board.project, wire, &target.id, node, None).1
+                }
+                None => String::new(),
+            };
             // A step's field the Inspector reads from another step (LAY-42).
             let field = board
                 .graph
@@ -430,6 +459,7 @@ impl Trace {
                 .find(|node| node.id == target.id)
                 .filter(|reader| {
                     node.is_some()
+                        && !wire.control
                         && !statement.is_empty()
                         && crate::inspector::changes_source_at(
                             reader,
@@ -467,7 +497,7 @@ impl Trace {
             kept,
             ends,
             wires,
-            data,
+            traced: pointable,
         }
     }
 

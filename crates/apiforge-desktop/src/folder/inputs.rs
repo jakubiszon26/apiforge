@@ -211,6 +211,8 @@ impl FolderApp {
                 next: Box::new(Document::Component(next)),
                 selection: None,
                 check: None,
+                moved: Vec::new(),
+                placed: false,
             },
         );
     }

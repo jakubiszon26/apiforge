@@ -157,35 +157,39 @@ fn statements(name: &str) -> Vec<&'static str> {
 
 /// Where each chip with an index stood on `main` 2f6922c after Fit and the
 /// zoom set on `second`: `(reader, zoom)` → the right edge of its box and the
-/// middle of its row, on the board.
+/// middle of its row, on the board. Measured again for LAY-45 (#468): Tidy
+/// up gives a row gap the line to the next row runs in and no column room
+/// for the arrow at a badge, so the cards and their chips moved by 20 px;
+/// `first` of `booking-day`, the first step of a row, has that line on its
+/// left, and its chip stands beyond it.
 fn stubs(name: &str) -> BTreeMap<(&'static str, u32), (f32, f32)> {
     let list: &[(&str, [(f32, f32); 3])] = match name {
         "double-booking" => &[
-            ("first", [(1410.0, 107.35), (1410.0, 98.0), (1410.0, 98.0)]),
+            ("first", [(1390.0, 107.35), (1390.0, 98.0), (1390.0, 98.0)]),
             ("second", [(-10.0, 521.35), (-10.0, 512.0), (-10.0, 512.0)]),
             ("calendar", [(390.0, 465.0), (390.0, 465.0), (390.0, 465.0)]),
         ],
         "double-booking-notice" => &[
             ("first", [(1630.0, 107.35), (1630.0, 98.0), (1630.0, 98.0)]),
-            ("second", [(870.0, 521.35), (870.0, 512.0), (870.0, 512.0)]),
+            ("second", [(870.0, 541.35), (870.0, 532.0), (870.0, 532.0)]),
             (
                 "calendar",
-                [(1250.0, 465.0), (1250.0, 465.0), (1250.0, 465.0)],
+                [(1250.0, 485.0), (1250.0, 485.0), (1250.0, 485.0)],
             ),
         ],
         "booking-day" => &[
             (
                 "equipment",
-                [(1010.0, 417.0), (1010.0, 417.0), (1010.0, 417.0)],
+                [(990.0, 417.0), (990.0, 417.0), (990.0, 417.0)],
             ),
-            ("first", [(-10.0, 863.35), (-10.0, 854.0), (-10.0, 854.0)]),
+            ("first", [(-47.4, 883.35), (-45.3, 874.0), (-44.0, 874.0)]),
             (
                 "second",
-                [(-10.0, 1277.35), (-10.0, 1268.0), (-10.0, 1268.0)],
+                [(-10.0, 1297.35), (-10.0, 1288.0), (-10.0, 1288.0)],
             ),
             (
                 "calendar",
-                [(510.0, 1221.0), (510.0, 1221.0), (510.0, 1221.0)],
+                [(490.0, 1241.0), (490.0, 1241.0), (490.0, 1241.0)],
             ),
         ],
         _ => unreachable!("a room scenario"),
@@ -297,40 +301,30 @@ fn lay39_criterion_4_no_bare_arrow_at_54() {
 }
 
 /// Criterion 5: on `booking-day` at 76 % the room chips of `first` and
-/// `second` say `← rooms…[0]` and `← rooms…[1]`, or wider.
+/// `second` say `← …[0]` and `← …[1]`. Restated by the owner's decision of
+/// LAY-39 (#435, A: the criteria follow the room there is): `← rooms…[0]`
+/// needs 64.4 px and the gap gives 63.4, so the chip shows the next shorter
+/// form that still carries the index.
 #[test]
-#[ignore = "LAY-39: owner decision pending, `← rooms…[0]` needs 64.4 px at 76 % and the gap gives 63.4"]
 fn lay39_criterion_5_booking_day_at_76() {
     let (_project, mut harness, id) = open("booking-day");
     at(&mut harness, &id, 0.76);
     for (reader, index) in [("first", 0), ("second", 1)] {
         let shown = chip(&harness, &id, reader, "rooms.").shown.clone();
-        assert!(
-            [
-                format!("← rooms…[{index}].id"),
-                format!("← rooms…[{index}]")
-            ]
-            .contains(&shown),
-            "{reader}: {shown}"
-        );
+        assert_eq!(shown, format!("← …[{index}]"), "{reader}");
     }
 }
 
 /// Criterion 6: at 100 % on `double-booking` the two chips read
-/// `← rooms…[0].id` and `← rooms…[1].id`.
+/// `← rooms…[0]` and `← rooms…[1]`. Restated by the owner's decision of
+/// LAY-39 (#435, A): `← rooms…[0].id` needs 88.7 px and the gap gives 84, so
+/// the chip shows the next shorter form that still carries the index.
 #[test]
-#[ignore = "LAY-39: owner decision pending, `← rooms…[0].id` needs 88.7 px at 100 % and the gap gives 84"]
 fn lay39_criterion_6_whole_at_100() {
     let (_project, mut harness, id) = open("double-booking");
     at(&mut harness, &id, 1.0);
-    assert_eq!(
-        chip(&harness, &id, "first", "rooms.").shown,
-        "← rooms…[0].id"
-    );
-    assert_eq!(
-        chip(&harness, &id, "second", "rooms.").shown,
-        "← rooms…[1].id"
-    );
+    assert_eq!(chip(&harness, &id, "first", "rooms.").shown, "← rooms…[0]");
+    assert_eq!(chip(&harness, &id, "second", "rooms.").shown, "← rooms…[1]");
 }
 
 /// Criterion 7: nothing else moves. On the three room scenarios at 54 %,

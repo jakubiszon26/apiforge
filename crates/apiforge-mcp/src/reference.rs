@@ -3,12 +3,12 @@
 /// `docs/language/reference.md` as it was when the binary was built.
 pub const TEXT: &str = include_str!("../../../docs/language/reference.md");
 
-/// The version its first line declares (`Reference version: <n> · …`); empty
-/// when the line does not declare one.
+/// The language version its first line declares (`Language version: <n> ·
+/// …`); empty when the line does not declare one.
 pub fn version() -> &'static str {
     TEXT.lines()
         .next()
-        .and_then(|line| line.strip_prefix("Reference version: "))
+        .and_then(|line| line.strip_prefix("Language version: "))
         .and_then(|rest| rest.split_whitespace().next())
         .unwrap_or_default()
 }
@@ -19,5 +19,11 @@ mod tests {
     fn the_first_line_declares_the_version() {
         assert!(!super::version().is_empty());
         assert!(super::version().chars().all(|c| c.is_ascii_digit()));
+        // LANG-15, criterion 6: the language this build reads.
+        assert!(super::TEXT.starts_with("Language version: "));
+        assert_eq!(
+            super::version(),
+            apiforge_script::LANGUAGE_VERSION.to_string()
+        );
     }
 }

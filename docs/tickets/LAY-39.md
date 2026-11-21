@@ -86,9 +86,10 @@ checks folded, 1280 × 800; criteria 1–3 also as unit tests of the text in
    the room chips of `first` and `second` are drawn with different texts,
    one containing `[0]`, the other `[1]`.
 5. On `booking-day` at 76 % the room chips of `first` and `second` are
-   drawn as `← rooms…[0]` and `← rooms…[1]`, or wider forms of the ladder.
-6. At 100 % on `double-booking` the two chips read `← rooms…[0].id` and
-   `← rooms…[1].id`.
+   drawn as `← …[0]` and `← …[1]` (restated by the owner's decision A on
+   #435: the criteria follow the room there is).
+6. At 100 % on `double-booking` the two chips read `← rooms…[0]` and
+   `← rooms…[1]` (restated the same way).
 7. Nothing else moves: on the three room scenarios at 54 %, 76 % and
    100 % every chip and count keeps the room LAY-37 asks for (from each
    other, from the cards, from the lines at rest — `lay37`'s assertions run

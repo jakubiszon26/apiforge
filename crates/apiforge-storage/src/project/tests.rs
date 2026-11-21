@@ -5,6 +5,7 @@ use std::fs;
 pub(super) fn manifest() -> ProjectManifest {
     ProjectManifest {
         format_version: 1,
+        language_version: None,
         id: "project-existing-id".into(),
         name: "Folder project".into(),
         environment: Environment {
@@ -157,12 +158,25 @@ fn schema_rejects_unknown_versions_fields_and_collisions() {
     ));
     assert_eq!(ProjectManifest::from_bytes(&bytes).unwrap(), original);
     let mut json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    json["formatVersion"] = 2.into();
+    // Format 2 names its language (LANG-15); 3 is not read.
+    json["formatVersion"] = 3.into();
     assert!(matches!(
         ProjectManifest::from_bytes(&serde_json::to_vec(&json).unwrap()),
         Err(ProjectError::UnsupportedVersion)
     ));
+    // A field that is there holds a language: `null` is not its absence.
+    json["formatVersion"] = 2.into();
+    json["languageVersion"] = serde_json::Value::Null;
+    assert!(matches!(
+        ProjectManifest::from_bytes(&serde_json::to_vec(&json).unwrap()),
+        Err(ProjectError::InvalidMetadata)
+    ));
     json["formatVersion"] = 1.into();
+    assert!(matches!(
+        ProjectManifest::from_bytes(&serde_json::to_vec(&json).unwrap()),
+        Err(ProjectError::InvalidMetadata)
+    ));
+    json.as_object_mut().unwrap().remove("languageVersion");
     json["surprise"] = true.into();
     assert!(matches!(
         ProjectManifest::from_bytes(&serde_json::to_vec(&json).unwrap()),

@@ -120,12 +120,6 @@ pub(super) fn breaches(harness: &FolderHarness, id: &str, zoom: f32) -> Breaches
         .nodes
         .iter()
         .filter_map(|node| Some((node.handle.clone(), canvas.debug_world(&node.id)?)))
-        .chain(
-            canvas
-                .debug_marks()
-                .iter()
-                .map(|mark| ("a continuation mark".to_owned(), mark.rect)),
-        )
         .collect();
     let mut found = Breaches::default();
     // A chip stays beside its socket: left of its card, nearer it than a

@@ -31,7 +31,23 @@ changed lines of a code pull request was source code; the rest was the
 acceptance tests, the QA report and the ticket file that the process itself
 asks for. A rule that counts them discourages exactly that work.
 
+## A limit comes with its measurement
+
+A number that a ticket must reach — crossings at most, a zoom at least,
+a time under — is put to the owner only together with the measurement
+that shows it can hold: the same boards, the same build, the figure
+today and the figure a prototype or a calculation gives. A limit taken
+from another ticket's result is measured again for the state this ticket
+starts from. Introduced on 2026-11-20: LAY-45 was asked to bring a board
+back to a figure measured before the change that made it unreachable.
+
 ## When to split
+
+Before a ticket is split a second time, the planning model asks whether
+its scope is still worth what it has come to cost, and puts that to the
+owner with the option to cut: a split answers "how", not "whether".
+Introduced on 2026-11-20, when the update of a project grew from one
+ticket to eight for an application nobody yet uses.
 
 A ticket is split when **the owner could not accept it in one session**, or
 when two parts carry different risk and the safer one should not wait for the

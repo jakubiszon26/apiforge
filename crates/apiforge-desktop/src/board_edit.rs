@@ -10,7 +10,7 @@ use apiforge_core::{
     block::Block,
     edit,
     format::{Binding, Graph, Node, Position, Project, Proxy, ProxySource},
-    graph::delete_nodes,
+    graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT, delete_nodes},
 };
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -537,6 +537,205 @@ impl Board<'_> {
         })
     }
 
+    /// *Add step* on the board's bar in the folder window (DIAG-06a): a step
+    /// goes directly after the step [`edit::add_step_after`] names for the
+    /// selection, in its braces, as one from that step's *Next* does; with
+    /// nothing selected, and any other block, it is added as the library
+    /// adds it, last.
+    pub fn add_step(
+        &self,
+        block: Block,
+        component: Option<(String, u32)>,
+        position: Position,
+        selection: &[String],
+    ) -> Result<Edit, String> {
+        let selected: Vec<&str> = selection.iter().map(String::as_str).collect();
+        let anchor = (apiforge_core::chain::is_step(block.kind())
+            && block.kind() != apiforge_core::model::NodeKind::Start)
+            .then(|| edit::add_step_after(self.graph, &selected))
+            .flatten();
+        match anchor {
+            Some(anchor) => {
+                let near = self
+                    .graph
+                    .nodes
+                    .iter()
+                    .find(|node| node.id == anchor)
+                    .map_or(position, |node| Position {
+                        x: node.position.x + 340.0,
+                        y: node.position.y + 20.0,
+                    });
+                let source = (anchor.to_owned(), ORDER_PORT.to_owned());
+                self.add_node(block, component, near, Some(source))
+            }
+            None => self.add_node(block, component, position, None),
+        }
+    }
+
+    /// A wire from a step's *Next*, or from an `if`'s *Yes* or *No*, dropped
+    /// on a step of the board (DIAG-06a): the step is put at that place,
+    /// with what goes with it, or the move is refused with the board's
+    /// sentence. Returns the moved blocks beside the graph.
+    pub fn place(
+        &self,
+        source: &str,
+        source_port: &str,
+        target: &str,
+    ) -> Result<(Graph, Vec<String>), String> {
+        let at = match source_port {
+            TRUE_PORT => edit::Place::First(source, apiforge_core::model::Branch::True),
+            FALSE_PORT => edit::Place::First(source, apiforge_core::model::Branch::False),
+            _ => edit::Place::After(source),
+        };
+        edit::place(self.graph, self.project, target, at).map_err(|error| error.to_string())
+    }
+
+    /// `next`, an add or a move of steps on this board, with room made
+    /// (DIAG-06c, question 5 = A): in every braces whose steps changed, the
+    /// steps from the first place that changed to the end of that chain,
+    /// everything in the braces of an `if` among them and the cards hung
+    /// under them in shape D stand where a whole *Tidy up* of the board
+    /// puts them, placed by hand or not. Every other card keeps its
+    /// position.
+    pub fn make_room(&self, next: Graph) -> Graph {
+        use apiforge_core::chain::{braces, is_step};
+        type Key = Option<(String, apiforge_core::model::Branch)>;
+        let steps_of = |graph: &Graph| -> HashMap<Key, Vec<String>> {
+            let written = braces(graph);
+            let mut chains: HashMap<Key, Vec<String>> = HashMap::new();
+            for node in &graph.nodes {
+                if is_step(node.kind) {
+                    let key = written
+                        .get(node.id.as_str())
+                        .map(|(x, branch)| ((*x).to_owned(), *branch));
+                    chains.entry(key).or_default().push(node.id.clone());
+                }
+            }
+            chains
+        };
+        let (old, new) = (steps_of(self.graph), steps_of(&next));
+        let mut affected: HashSet<String> = HashSet::new();
+        for (key, steps) in &new {
+            let before = old.get(key).map(Vec::as_slice).unwrap_or_default();
+            let first = steps
+                .iter()
+                .zip(before.iter().map(Some).chain(std::iter::repeat(None)))
+                .position(|(now, was)| was != Some(now));
+            if let Some(first) = first {
+                affected.extend(steps[first..].iter().cloned());
+            }
+        }
+        if affected.is_empty() {
+            return next;
+        }
+        // Laid out as the document will be once its chain is written: an
+        // add carries the edge of the step it follows beside the edges the
+        // chain will drop (LANG-13).
+        let chained = apiforge_core::chain::edited(self.graph, &next);
+        let Some(tidied) = (Board {
+            graph: &chained,
+            reference: self.reference,
+            project: self.project,
+            parameters: self.parameters,
+            sibling: self.sibling,
+            density: self.density,
+            satellites: self.satellites,
+            lines: self.lines,
+        })
+        .tidy_up(&[]) else {
+            return next;
+        };
+        // Everything in the braces of an `if` among them.
+        let written = braces(&next);
+        let inside = |id: &str| {
+            let mut current = id;
+            while let Some(&(parent, _)) = written.get(current) {
+                if affected.contains(parent) {
+                    return true;
+                }
+                current = parent;
+            }
+            false
+        };
+        let within: Vec<String> = next
+            .nodes
+            .iter()
+            .filter(|node| inside(&node.id))
+            .map(|node| node.id.clone())
+            .collect();
+        affected.extend(within);
+        // The cards hung under them.
+        if let Some(plan) = canvas::shape::plan(&chained, self.sibling) {
+            for (satellite, under) in plan.satellites {
+                if affected.contains(&chained.nodes[plan.spine[under]].id) {
+                    affected.insert(chained.nodes[satellite].id.clone());
+                }
+            }
+        }
+        let mut next = next;
+        for node in &mut next.nodes {
+            if !affected.contains(&node.id) {
+                continue;
+            }
+            if let Some(tidy) = tidied.nodes.iter().find(|tidy| tidy.id == node.id) {
+                node.position = tidy.position.clone();
+                node.auto_placed = true;
+            }
+        }
+        next
+    }
+
+    /// The edit with room made for what it adds or moves ([`Board::make_room`]).
+    pub fn made_room(&self, edit: Edit) -> Edit {
+        Edit {
+            graph: self.make_room(edit.graph),
+            selection: edit.selection,
+        }
+    }
+
+    /// A step from the Library dropped on a line of a chain (DIAG-06c): it
+    /// is added and put after `source`, by `port` (*Next* after it, *Yes* or
+    /// *No* first in that branch), in that line's braces.
+    pub fn add_on_line(
+        &self,
+        block: Block,
+        component: Option<(String, u32)>,
+        position: Position,
+        source: &str,
+        port: &str,
+    ) -> Result<Edit, String> {
+        let added = self.add_node(block, component, position, None)?;
+        let id = added
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.first())
+            .cloned()
+            .ok_or_else(|| edit::EditError::NodeNotFound.to_string())?;
+        let at = match port {
+            TRUE_PORT => edit::Place::First(source, apiforge_core::model::Branch::True),
+            FALSE_PORT => edit::Place::First(source, apiforge_core::model::Branch::False),
+            _ => edit::Place::After(source),
+        };
+        let (graph, _) =
+            edit::place(&added.graph, self.project, &id, at).map_err(|error| error.to_string())?;
+        Ok(Edit {
+            graph,
+            selection: Some(vec![id]),
+        })
+    }
+
+    /// *Move out of the branch* (DIAG-06d): the check, value, variable or
+    /// export `id` is written after the `if` whose braces hold it.
+    pub fn move_out_of_branch(&self, id: &str) -> Result<(Graph, Vec<String>), String> {
+        let braces = apiforge_core::chain::braces(self.graph);
+        let x = braces
+            .get(id)
+            .map(|(x, _)| *x)
+            .ok_or_else(|| edit::EditError::NodeNotFound.to_string())?;
+        edit::place(self.graph, self.project, id, edit::Place::After(x))
+            .map_err(|error| error.to_string())
+    }
+
     /// An *Export* passes values out of a component, so it is a sink: the
     /// left edge one gap right of the rightmost card or chip, when `x` is not
     /// already there (UX-21). Being right of everything on the board, it
@@ -624,6 +823,35 @@ impl Board<'_> {
         )
     }
 
+    /// What deleting the blocks `ids` would do in the folder window
+    /// (DIAG-06e): what goes, who would be left reading it, and whether an
+    /// `if` with statements in its braces asks first. The graph beside this
+    /// one (a scenario's cleanup) is read for readers too. `needs_start` is
+    /// true on the main flow of a scenario.
+    pub fn deletion(&self, ids: &[String], needs_start: bool) -> edit::Deletion {
+        let selection: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let beside: Vec<&Graph> = self.sibling.into_iter().collect();
+        edit::delete_preview(self.graph, &beside, &selection, needs_start)
+    }
+
+    /// The folder window's delete, by `deletion`'s answer (DIAG-06e): its
+    /// statements, the wires `wires` and the proxies among `ids`. No input of
+    /// a statement that stays is changed, so call it only for a deletion
+    /// without a refusal. The legacy window keeps [`Board::delete`].
+    pub fn delete_checked(
+        &self,
+        deletion: &edit::Deletion,
+        ids: &[String],
+        wires: &[String],
+    ) -> Graph {
+        let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let wires: HashSet<&str> = wires.iter().map(String::as_str).collect();
+        edit::remove_proxies(
+            &edit::remove_connections(&edit::apply_deletion(self.graph, deletion), &wires),
+            &ids,
+        )
+    }
+
     /// Places a proxy and selects it, which shows at once what it stands for and
     /// what now reads it from here.
     pub fn add_proxy(
@@ -682,6 +910,7 @@ impl Board<'_> {
             reserved: &sibling,
             parameters: Some(self.parameters),
             project: self.project,
+            component: false,
         };
         let pasted = edit::paste_selection(&target, fragment, &Position { x: 0.0, y: 0.0 })
             .map_err(|error| error.to_string())?;
@@ -691,6 +920,72 @@ impl Board<'_> {
                 selection: Some(pasted.ids),
             },
             unresolved: pasted.unresolved,
+        })
+    }
+
+    /// The folder window's *Copy* (DIAG-06f): the selected statements, a
+    /// selected `if` with everything in its braces; `None` when the
+    /// selection holds no statement.
+    pub fn copy_statements(&self, selection: &[String]) -> Option<edit::Fragment> {
+        let selected: HashSet<&str> = selection.iter().map(String::as_str).collect();
+        let fragment = edit::copy_statements(self.graph, self.reference, &selected);
+        (!fragment.graph.nodes.is_empty()).then_some(fragment)
+    }
+
+    /// The folder window's *Paste* (DIAG-06f): the fragment written after
+    /// the step *Add step* names for `selection`, in its braces, else last
+    /// on this board, or the board's sentence for what a pasted statement
+    /// would read that is not there. `component` names the document in
+    /// that sentence. The copies land clear of every card and chip.
+    pub fn paste_statements(
+        &self,
+        fragment: &edit::Fragment,
+        selection: &[String],
+        component: bool,
+    ) -> Result<Edit, String> {
+        let selected: Vec<&str> = selection.iter().map(String::as_str).collect();
+        let after = edit::add_step_after(self.graph, &selected);
+        self.landed(
+            |target| edit::paste_statements(target, fragment, after),
+            component,
+        )
+    }
+
+    /// The folder window's *Duplicate* (DIAG-06f): each copy written
+    /// directly after its original, in its braces, or the board's sentence
+    /// for what a copy would read that is not there.
+    pub fn duplicate_statements(
+        &self,
+        selection: &[String],
+        component: bool,
+    ) -> Result<Edit, String> {
+        let selected: HashSet<&str> = selection.iter().map(String::as_str).collect();
+        self.landed(
+            |target| edit::duplicate_statements(target, &selected),
+            component,
+        )
+    }
+
+    /// A paste or a duplicate on this board, its copies landed clear and
+    /// selected.
+    fn landed(
+        &self,
+        paste: impl FnOnce(&edit::PasteTarget<'_>) -> Result<edit::Pasted, edit::EditError>,
+        component: bool,
+    ) -> Result<Edit, String> {
+        let sibling: Vec<&Graph> = self.sibling.into_iter().collect();
+        let target = edit::PasteTarget {
+            graph: self.graph,
+            visible: &[self.reference],
+            reserved: &sibling,
+            parameters: Some(self.parameters),
+            project: self.project,
+            component,
+        };
+        let pasted = paste(&target).map_err(|error| error.to_string())?;
+        Ok(Edit {
+            graph: self.land_clear(pasted.graph, &pasted.ids),
+            selection: Some(pasted.ids),
         })
     }
 

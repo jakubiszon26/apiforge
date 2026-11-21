@@ -4,12 +4,16 @@ use crate::{
     lexer::{self, Token, TokenKind},
 };
 use serde_json::Value;
-use std::{collections::HashSet, ops::Range};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
 
 type Result<T> = std::result::Result<T, ()>;
 
 pub fn parse(source: &str) -> SyntaxTree {
     let (tokens, mut diagnostics, mut omitted) = lexer::lex_counted(source);
+    let mut comments = vec![];
     let file = if source.len() > MAX_SOURCE_BYTES {
         None
     } else {
@@ -23,7 +27,7 @@ pub fn parse(source: &str) -> SyntaxTree {
         omitted += diagnostics.len().saturating_sub(MAX_DIAGNOSTICS);
         diagnostics.truncate(MAX_DIAGNOSTICS);
         if let Some(file) = &mut file {
-            omitted += attach_comments(source, &tokens, file, &mut diagnostics);
+            comments = attach_comments(source, &tokens, file, &parser.layout);
         }
         file
     };
@@ -33,7 +37,31 @@ pub fn parse(source: &str) -> SyntaxTree {
         file,
         diagnostics,
         omitted_diagnostics: omitted,
+        comments,
     }
+}
+
+/// Where the parser found the braces and lines that a free comment can stand
+/// in, which the syntax tree does not keep (LANG-06).
+#[derive(Default)]
+struct Layout {
+    /// The file's braces, from `{` to after `}`.
+    file: Option<Range<usize>>,
+    /// The cleanup's braces.
+    cleanup: Option<Range<usize>>,
+    /// By the start of a statement: the braces of its form.
+    shapes: HashMap<usize, Shape>,
+    /// Comments inside interpolations, which the file's tokens do not hold.
+    comments: Vec<Range<usize>>,
+}
+
+/// The braces of a statement's form, each from `{` to after `}`.
+enum Shape {
+    /// An `if`'s `then` and its `else` when written.
+    Branches(Range<usize>, Option<Range<usize>>),
+    /// A request's or a condition's, with each of its lines: a field or a
+    /// check.
+    Lines(Range<usize>, Vec<Range<usize>>),
 }
 
 struct Parser<'a> {
@@ -49,6 +77,9 @@ struct Parser<'a> {
     omitted: usize,
     parameter_names: HashSet<String>,
     input_names: HashSet<String>,
+    layout: Layout,
+    /// The shape of the form just read, until its statement takes it.
+    shape: Option<Shape>,
 }
 
 impl<'a> Parser<'a> {
@@ -70,6 +101,8 @@ impl<'a> Parser<'a> {
             omitted: 0,
             parameter_names: HashSet::new(),
             input_names: HashSet::new(),
+            layout: Layout::default(),
+            shape: None,
         }
     }
 
@@ -191,6 +224,7 @@ impl<'a> Parser<'a> {
             self.error("Expected a scenario or component declaration");
             return Err(());
         };
+        let open = self.range().start;
         self.expect("{")?;
         let mut file = File {
             kind,
@@ -215,7 +249,9 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
         }
-        let _ = self.expect("}");
+        if self.expect("}").is_ok() {
+            self.layout.file = Some(open..self.last_end);
+        }
         file.range.end = self.last_end;
         Ok(file)
     }
@@ -284,7 +320,9 @@ impl<'a> Parser<'a> {
             }
             "cleanup" if scenario => {
                 self.bump();
+                let open = self.range().start;
                 let statements = self.block()?;
+                self.layout.cleanup = Some(open..self.last_end);
                 if file.cleanup.replace(statements).is_some() {
                     self.error("Duplicate cleanup block");
                 }
@@ -440,6 +478,7 @@ impl<'a> Parser<'a> {
             None
         };
         self.expect("=")?;
+        self.shape = None;
         let form = if let Some(value_type) = value_type {
             Form::Export {
                 value_type,
@@ -448,6 +487,9 @@ impl<'a> Parser<'a> {
         } else {
             self.form()?
         };
+        if let Some(shape) = self.shape.take() {
+            self.layout.shapes.insert(start, shape);
+        }
         if variable && !matches!(form, Form::Value(_)) {
             self.error("Only Value blocks may be marked var");
         }
@@ -474,12 +516,19 @@ impl<'a> Parser<'a> {
             "if" => {
                 self.bump();
                 let check = self.check()?;
+                let open = self.range().start;
                 let then = self.block()?;
+                let then_braces = open..self.last_end;
+                let mut else_braces = None;
                 let otherwise = if self.eat("else") {
-                    Some(self.block()?)
+                    let open = self.range().start;
+                    let otherwise = self.block()?;
+                    else_braces = Some(open..self.last_end);
+                    Some(otherwise)
                 } else {
                     None
                 };
+                self.shape = Some(Shape::Branches(then_braces, else_braces));
                 Ok(Form::If {
                     check,
                     then,
@@ -493,8 +542,9 @@ impl<'a> Parser<'a> {
                     return Err(());
                 }
                 let mode = self.bump().into();
+                let open = self.range().start;
                 self.expect("{")?;
-                let mut checks = vec![];
+                let mut checks: Vec<Check> = vec![];
                 while !matches!(self.peek(), "}" | "") {
                     checks.push(self.check()?);
                     if !self.eat(",") {
@@ -502,6 +552,10 @@ impl<'a> Parser<'a> {
                     }
                 }
                 self.expect("}")?;
+                self.shape = Some(Shape::Lines(
+                    open..self.last_end,
+                    checks.iter().map(|check| check.range.clone()).collect(),
+                ));
                 if checks.is_empty() {
                     self.error("A condition needs at least one check");
                 }
@@ -521,8 +575,11 @@ impl<'a> Parser<'a> {
                 let url = self.expr(0)?;
                 let mut items = vec![];
                 let mut seen = HashSet::new();
+                let open = self.range().start;
                 if self.eat("{") {
+                    let mut lines = vec![];
                     while !matches!(self.peek(), "}" | "") {
+                        let start = self.range().start;
                         let item = self.peek();
                         if item != "argument" && !seen.insert(item.to_owned()) {
                             self.error("Duplicate request field");
@@ -597,8 +654,10 @@ impl<'a> Parser<'a> {
                             }
                         };
                         items.push(value);
+                        lines.push(start..self.last_end);
                     }
                     self.expect("}")?;
+                    self.shape = Some(Shape::Lines(open..self.last_end, lines));
                 }
                 Ok(Form::Request { method, url, items })
             }
@@ -972,6 +1031,13 @@ impl<'a> Parser<'a> {
                 if nested.peek() != "" {
                     nested.error("Unexpected text in interpolation");
                 }
+                self.layout.comments.extend(
+                    tokens
+                        .iter()
+                        .filter(|token| token.kind == TokenKind::Comment)
+                        .map(|token| token.range.start + base..token.range.end + base)
+                        .chain(nested.layout.comments),
+                );
                 self.omitted += nested.omitted;
                 self.append_diagnostics(nested.diagnostics);
                 parts.push(Part::Value(expr?));
@@ -1141,54 +1207,57 @@ fn visit_statements(file: &mut File, mut visit: impl FnMut(&mut Statement)) {
     }
 }
 
+/// Gives each statement its note — the comments directly above it and the
+/// one beside it — and returns every other comment with its place.
 fn attach_comments(
     source: &str,
     tokens: &[Token],
     file: &mut File,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> usize {
-    let comments: Vec<_> = tokens
+    layout: &Layout,
+) -> Vec<Comment> {
+    let mut comments: Vec<Range<usize>> = tokens
         .iter()
         .filter(|t| t.kind == TokenKind::Comment)
+        .map(|t| t.range.clone())
+        .chain(layout.comments.iter().cloned())
         .collect();
+    comments.sort_by_key(|range| range.start);
     let mut used = HashSet::new();
     // Inner statements are visited first, so a trailing comment belongs to the
     // nearest statement rather than its enclosing IF.
     visit_statements(file, |statement| {
         let mut note = vec![];
         let mut end = statement.range.start;
-        let leading = comments.partition_point(|comment| comment.range.end <= end);
+        let leading = comments.partition_point(|comment| comment.end <= end);
         for (index, comment) in comments[..leading].iter().enumerate().rev() {
             if used.contains(&index) {
                 break;
             }
-            let gap = &source[comment.range.end..end];
+            let gap = &source[comment.end..end];
             if !gap.trim().is_empty() || gap.matches('\n').count() > 1 {
                 break;
             }
             note.push((index, comment));
-            end = comment.range.start;
+            end = comment.start;
         }
         note.reverse();
-        let trailing =
-            comments.partition_point(|comment| comment.range.start < statement.range.end);
+        let trailing = comments.partition_point(|comment| comment.start < statement.range.end);
         if let Some(comment) = comments.get(trailing)
             && !used.contains(&trailing)
         {
-            let gap = &source[statement.range.end..comment.range.start];
+            let gap = &source[statement.range.end..comment.start];
             if gap.trim().is_empty() && !gap.contains('\n') {
                 note.push((trailing, comment));
-                statement.extent.end = comment.range.end;
+                statement.extent.end = comment.end;
             }
         }
         statement.extent.start = end;
         if !note.is_empty() {
             statement.note = Some(
                 note.into_iter()
-                    .map(|(index, token)| {
+                    .map(|(index, range)| {
                         used.insert(index);
-                        let text =
-                            source[token.range.start + 2..token.range.end].trim_end_matches('\r');
+                        let text = source[range.start + 2..range.end].trim_end_matches('\r');
                         text.strip_prefix(' ').unwrap_or(text).to_owned()
                     })
                     .collect::<Vec<_>>()
@@ -1196,21 +1265,163 @@ fn attach_comments(
             );
         }
     });
-    let mut omitted = 0;
-    for (index, token) in comments.iter().enumerate() {
-        if used.contains(&index) {
-            continue;
-        }
-        if diagnostics.len() < MAX_DIAGNOSTICS {
-            diagnostics.push(Diagnostic {
-                range: token.range.clone(),
-                severity: Severity::Warning,
-                message: crate::UNATTACHED_COMMENT.into(),
-                fix: None,
-            });
-        } else {
-            omitted += 1;
+    let places = Places {
+        source,
+        file,
+        layout,
+    };
+    comments
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| !used.contains(index))
+        .map(|(_, range)| Comment {
+            place: places.place(range.start),
+            range,
+        })
+        .collect()
+}
+
+/// Something written in braces that a free comment can stand in, inside or
+/// before.
+#[derive(Clone, Copy)]
+enum Child<'f> {
+    /// A part of the head, by its range.
+    Head(&'f Range<usize>),
+    Statement(&'f Statement),
+    /// The `cleanup`, by its range.
+    Cleanup(&'f Range<usize>),
+}
+
+impl Child<'_> {
+    fn range(&self) -> &Range<usize> {
+        match self {
+            Child::Head(range) | Child::Cleanup(range) => range,
+            Child::Statement(statement) => &statement.range,
         }
     }
-    omitted
+
+    /// The place of a comment written above this child.
+    fn above(&self) -> Place {
+        match self {
+            Child::Head(range) | Child::Cleanup(range) => Place::Head(range.start),
+            Child::Statement(statement) => Place::Statement(statement.range.start),
+        }
+    }
+}
+
+/// Where Format writes a free comment (LANG-06): at the place it stands in
+/// its braces, or directly above the line that holds it.
+struct Places<'s> {
+    source: &'s str,
+    file: &'s File,
+    layout: &'s Layout,
+}
+
+impl Places<'_> {
+    fn place(&self, at: usize) -> Place {
+        let braces = self.layout.file.clone().unwrap_or(self.file.range.clone());
+        if at < braces.start {
+            return Place::Top;
+        }
+        if at >= braces.end {
+            return Place::Bottom;
+        }
+        let mut children: Vec<Child> = self
+            .file
+            .items
+            .iter()
+            .map(|(item, range)| {
+                if *item == Item::Cleanup {
+                    Child::Cleanup(range)
+                } else {
+                    Child::Head(range)
+                }
+            })
+            .chain(self.file.statements.iter().map(Child::Statement))
+            .collect();
+        children.sort_by_key(|child| child.range().start);
+        self.within(&children, at, Place::End(Braces::File))
+    }
+
+    /// The place of a comment at `at` among `children`, written in braces
+    /// whose last lines are `end`: inside a child, beside one on its line
+    /// (both written above it), or before the next one.
+    fn within(&self, children: &[Child], at: usize, end: Place) -> Place {
+        if let Some(child) = children
+            .iter()
+            .find(|child| child.range().start <= at && at < child.range().end)
+        {
+            return self.inside(*child, at);
+        }
+        if let Some(child) = children.iter().rev().find(|child| child.range().end <= at)
+            && !self.source[child.range().end..at].contains('\n')
+        {
+            return child.above();
+        }
+        children
+            .iter()
+            .find(|child| child.range().start > at)
+            .map_or(end, Child::above)
+    }
+
+    fn inside(&self, child: Child, at: usize) -> Place {
+        match child {
+            Child::Head(range) => Place::Head(range.start),
+            Child::Cleanup(range) => match (&self.layout.cleanup, &self.file.cleanup) {
+                (Some(braces), Some(statements)) if braces.start < at && at < braces.end => {
+                    self.block(statements, at, Place::End(Braces::Cleanup))
+                }
+                _ => Place::Head(range.start),
+            },
+            Child::Statement(statement) => self.statement(statement, at),
+        }
+    }
+
+    fn block(&self, statements: &[Statement], at: usize, end: Place) -> Place {
+        let children: Vec<Child> = statements.iter().map(Child::Statement).collect();
+        self.within(&children, at, end)
+    }
+
+    /// A comment inside `statement`: in the braces of its branches, among
+    /// the lines of its braces, or else above the statement.
+    fn statement(&self, statement: &Statement, at: usize) -> Place {
+        let start = statement.range.start;
+        let inside = |braces: &Range<usize>| braces.start < at && at < braces.end;
+        match (&statement.form, self.layout.shapes.get(&start)) {
+            (
+                Form::If {
+                    then, otherwise, ..
+                },
+                Some(Shape::Branches(then_braces, else_braces)),
+            ) => {
+                if inside(then_braces) {
+                    return self.block(then, at, Place::End(Braces::Then(start)));
+                }
+                if let (Some(otherwise), Some(else_braces)) = (otherwise, else_braces) {
+                    if inside(else_braces) {
+                        return self.block(otherwise, at, Place::End(Braces::Else(start)));
+                    }
+                    if then_braces.end <= at && at < else_braces.start {
+                        return Place::End(Braces::Then(start));
+                    }
+                }
+                Place::Statement(start)
+            }
+            (_, Some(Shape::Lines(braces, lines))) if !lines.is_empty() && inside(braces) => lines
+                .iter()
+                .position(|line| line.start <= at && at < line.end)
+                .or_else(|| {
+                    lines
+                        .iter()
+                        .rposition(|line| line.end <= at)
+                        .filter(|&index| !self.source[lines[index].end..at].contains('\n'))
+                })
+                .or_else(|| lines.iter().position(|line| line.start > at))
+                .map_or(Place::End(Braces::Lines(start)), |index| Place::Line {
+                    statement: start,
+                    index,
+                }),
+            _ => Place::Statement(start),
+        }
+    }
 }

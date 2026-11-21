@@ -84,14 +84,32 @@ impl ProjectSession {
             .iter()
             .filter(|revision| revision.component_id == document.entry.entity_id)
             .max_by_key(|revision| revision.revision)?;
-        let model @ Document::Component(component) = document.model()? else {
+        let Document::Component(component) = document.model()? else {
             return None;
         };
         if component.handle != latest.handle {
             return None;
         }
-        let source = apiforge_script::print_folder_document(&self.context, model).ok()?;
-        (hash(&source) == latest.source_hash).then_some(latest.revision)
+        let source = apiforge_script::print_revision(&self.context, component).ok()?;
+        if hash(&source) == latest.source_hash {
+            return Some(latest.revision);
+        }
+        // A revision published before LANG-13 is written in its working copy
+        // as a chain with a start; that copy says the same thing.
+        let published = self
+            .context
+            .components
+            .iter()
+            .find(|c| c.id == latest.component_id && c.revision == latest.revision)?;
+        let Ok(Document::Component(mut written)) =
+            crate::prepare::as_written(&Document::Component(published.clone()))
+        else {
+            return None;
+        };
+        written.revision = component.revision;
+        (apiforge_script::semantic(&Document::Component(written), &self.context)
+            == apiforge_script::semantic(&Document::Component(component.clone()), &self.context))
+        .then_some(latest.revision)
     }
 
     /// Publishes the working component as its next revision. Settles pending
@@ -156,8 +174,10 @@ impl ProjectSession {
             });
         }
 
+        // A revision keeps the stored spelling (LANG-13): it is read back
+        // exactly as it is written, so it runs as it was published.
         let document = Document::Component(component.clone());
-        let source = apiforge_script::print_folder_document(&self.context, &document)
+        let source = apiforge_script::print_revision(&self.context, &component)
             .map_err(|_| Error::Unprintable)?;
         // The loader derives every revision from its own source, so a revision
         // that would not lower there must not be written at all.
@@ -165,6 +185,8 @@ impl ProjectSession {
             kind: DocumentKind::Component,
             entity_id: component.id.clone(),
             revision,
+            stored: true,
+            older: None,
         };
         let derived = analysis::derive(
             &target,

@@ -330,7 +330,7 @@ fn a_created_project_registers_a_found_source_pins_its_call_and_keeps_settings()
     // naming its revision, which folder projects reject.
     fs::write(
         root.join("found.afs"),
-        format!("scenario \"Found\" {{\n  call = ({handle}())\n}}\n"),
+        format!("scenario \"Found\" {{\n  begin = start\n  call = ({handle}())\n}}\n"),
     )
     .unwrap();
     follow_disk(&mut harness);
@@ -2369,7 +2369,7 @@ mod mcp08b {
             fs::write(manifest, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
             // The shop's illustrative promotion scenario intentionally fails;
             // this fixture tests a successful HTTP run and unchanged live consent.
-            fs::write(root.join(SCENARIO), "scenario \"MCP-12 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n}\n").unwrap();
+            fs::write(root.join(SCENARIO), "scenario \"MCP-12 live\" {\n  begin = start\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n}\n").unwrap();
             let mut harness = folder_harness(root, WIDE);
             if permitted {
                 super::mcp09::set_box(&mut harness, true);
@@ -3961,7 +3961,7 @@ mod mcp09 {
     /// Criterion 3's bound: the agent sees a change this soon.
     const SEEN: Duration = Duration::from_secs(1);
     /// A scenario that passes against the demo API, with a cleanup.
-    const LIVE: &str = "scenario \"MCP-09 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const LIVE: &str = "scenario \"MCP-09 live\" {\n  begin = start\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
 
     /// Where the application keeps its preferences: the test's own
     /// configuration directory, as `XDG_CONFIG_HOME` names it.
@@ -4900,9 +4900,9 @@ mod mcp15 {
     /// after the command's end.
     const BOUND: Duration = Duration::from_secs(2);
     /// A scenario that passes against the demo API, with a cleanup.
-    const PASSES: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const PASSES: &str = "scenario \"MCP-15 live\" {\n  begin = start\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
     /// The same against a product the demo API does not have.
-    const FAILS: &str = "scenario \"MCP-15 live\" {\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
+    const FAILS: &str = "scenario \"MCP-15 live\" {\n  begin = start\n  response = GET \"/shop/products/999\" { sample 200 { id: 999 } }\n  ok = assert response.status == 200\n  cleanup {\n    again = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  }\n}\n";
 
     /// `apiforge run --folder <FOLDER> --scenario <SCENARIO> --live`, as the
     /// binary runs it, with the binary's exit code.
@@ -11265,14 +11265,14 @@ mod ux30 {
 
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
     const FILE: &str = "components/check-cart-price.afs";
-    const TITLE: &str = "Save as component";
-    const NAME: &str = "Component name";
+    pub(super) const TITLE: &str = "Save as component";
+    pub(super) const NAME: &str = "Component name";
     const FILE_NAME: &str = "Component file";
     const DESCRIPTION: &str = "Component description";
     const PUBLISH: &str = "Publish revision 1 and call it here, in place of the selected steps";
-    const ONLY_CREATE: &str = "Only create the file; the steps stay in the scenario";
+    pub(super) const ONLY_CREATE: &str = "Only create the file; the steps stay in the scenario";
     const SAVE_AND_PUBLISH: &str = "Save and publish";
-    const CREATE_FILE: &str = "Create file";
+    pub(super) const CREATE_FILE: &str = "Create file";
     const CART_DESCRIPTION: &str = "Add the product to a cart and check the cart's total.";
 
     /// The component the dialog writes for the mock-up's choices.
@@ -11314,7 +11314,7 @@ mod ux30 {
         (harness, id)
     }
 
-    fn select_and_open(harness: &mut FolderHarness, id: &str) {
+    pub(super) fn select_and_open(harness: &mut FolderHarness, id: &str) {
         app(harness)
             .selections
             .insert(id.to_owned(), vec!["cart".to_owned(), "price".to_owned()]);
@@ -11546,11 +11546,14 @@ mod ux30 {
             .path
             .as_str()
             .to_owned();
-        assert_eq!(
-            fs::read_to_string(directory.path().join(published)).unwrap(),
-            COMPONENT,
-            "revision 1 is the file as written"
-        );
+        // The revision keeps the stored spelling (LANG-13): the file as
+        // written, with the `@after` of each step it chains.
+        let revision = fs::read_to_string(directory.path().join(published)).unwrap();
+        let without: String = revision
+            .split_inclusive('\n')
+            .filter(|line| !line.trim_start().starts_with("@after("))
+            .collect();
+        assert_eq!(without, COMPONENT, "revision 1 is the file as written");
         assert_eq!(source_of(&harness, &id), called(&before));
         assert_eq!(
             fs::read_to_string(directory.path().join(SCENARIO)).unwrap(),
@@ -12223,8 +12226,8 @@ mod ux12 {
 /// UX-34 (#251): copy, paste and duplicate across graphs and tabs, the
 /// owner's decision A of 2026-11-03. Paste works on any graph of any open
 /// document; clashing handles are numbered, references inside the pasted
-/// set follow the copies, and a reference to a step the target lacks is
-/// reported as a *Missing step*. A duplicate lands clear of its original with
+/// set follow the copies, and a reference to a step the target lacks
+/// refuses the paste (DIAG-06f). A duplicate lands clear of its original with
 /// its own label.
 mod ux34 {
     use super::mcp08b::contains;
@@ -12296,13 +12299,6 @@ mod ux34 {
         choose(harness, mode);
     }
 
-    fn notice(harness: &FolderHarness) -> String {
-        folder(harness)
-            .notice()
-            .map(|notice| notice.text.clone())
-            .unwrap_or_default()
-    }
-
     /// The statements of the scenario's cleanup block.
     fn cleanup_text(source: &str) -> &str {
         let start = source.find("cleanup {").expect("a cleanup block");
@@ -12344,9 +12340,10 @@ mod ux34 {
             "the wire inside the pasted set follows the copies:\n{source}"
         );
         let document = model(&harness, &id);
+        // The demo's six blocks and the start written for it (LANG-13).
         assert_eq!(
             graph_of(&document, false).nodes.len(),
-            6,
+            7,
             "main is unchanged"
         );
         let copies = graph_of(&document, true);
@@ -12362,9 +12359,11 @@ mod ux34 {
     }
 
     /// Criterion 2: a step copied in the scenario pastes into the
-    /// `add-to-cart.afs` component. Its reference to `product`, a step the
-    /// component lacks, is reported as a *Missing step* and left unconnected;
-    /// a second paste gets a handle that does not clash with the first.
+    /// `add-to-cart.afs` component; a second paste gets a handle that does
+    /// not clash with the first. Restated by DIAG-06f (#496, answer 3 = A):
+    /// copied without `product`, the step it reads, the paste is refused and
+    /// names it; copied with it, both are pasted and the copy reads the
+    /// pasted `product`.
     #[test]
     fn ux34_criterion_2_a_step_pastes_into_another_document() {
         let directory = shop();
@@ -12377,23 +12376,39 @@ mod ux34 {
             has_label(&harness, PASTE),
             "Paste steps is offered in another document"
         );
+        let before = source_of(&harness, &cart);
         choose(&mut harness, PASTE);
+        assert_eq!(source_of(&harness, &cart), before, "the paste is refused");
+        assert!(
+            harness
+                .query_by_label(
+                    "`active_promotion` reads `product`, which is not in this component. Copy it too."
+                )
+                .is_some(),
+            "the refusal names the step the component lacks"
+        );
 
+        open(&mut harness, &scenario, "Diagram");
+        select(
+            &mut harness,
+            &scenario,
+            false,
+            &["product", "active_promotion"],
+        );
+        copy(&mut harness);
+        open(&mut harness, &cart, "Diagram");
+        choose(&mut harness, PASTE);
         let source = source_of(&harness, &cart);
         assert!(
             source.contains("active_promotion = active_promotion@1("),
             "the step is pasted into the component:\n{source}"
         );
-        let text = notice(&harness);
-        assert!(
-            text.contains("Missing step") && text.contains("product"),
-            "the reference to the step the component lacks is reported: {text:?}"
-        );
         let document = model(&harness, &cart);
-        let pasted = node(graph_of(&document, false), "active_promotion");
+        let main = graph_of(&document, false);
+        let pasted = node(main, "active_promotion");
         assert!(
-            !pasted.inputs.contains_key("product"),
-            "the missing reference is left unconnected: {:?}",
+            pasted.inputs["product"].references_node(&node(main, "product").id),
+            "it reads the pasted product: {:?}",
             pasted.inputs
         );
 
@@ -13999,7 +14014,7 @@ mod ux16 {
     const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 
     /// A scenario whose Cleanup reads a Cleanup step and a Main step.
-    const BOTH: &str = "scenario \"UX-16\" {\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert gone.status == 200\n    @label(\"Product was read\")\n    read = assert response.status == 200\n  }\n}\n";
+    const BOTH: &str = "scenario \"UX-16\" {\n  begin = start\n  @label(\"Product\")\n  response = GET \"/shop/products/123\" { sample 200 { id: 123 } }\n  cleanup {\n    @label(\"Delete cart\")\n    gone = DELETE \"/shop/carts/1\" { sample 200 { deleted: true } }\n    @label(\"Cart was deleted\")\n    deleted = assert gone.status == 200\n    @label(\"Product was read\")\n    read = assert response.status == 200\n  }\n}\n";
 
     /// The demo shop, its scenario replaced by `text` when one is given,
     /// with the scenario's Cleanup board chosen through *Cleanup*: what each
@@ -14341,6 +14356,7 @@ mod lay16 {
     /// A request as *Add step* leaves one beside `cart`, whose response a
     /// check reads.
     const TRAY: &str = r#"scenario "Tray" {
+  begin = start
   cart = POST "/cart" {
     body { items: 1 }
     sample 201 { id: "c-1" }
@@ -14499,6 +14515,20 @@ mod lay16 {
         harness.step();
         harness.remove_cursor();
         settle(harness);
+    }
+
+    /// Takes *Wire directly* when the drop offered to save the value first:
+    /// since LANG-13 the next step can stand a row below its source, where a
+    /// read counts as far (LAY-26).
+    pub(super) fn wire_directly(harness: &mut FolderHarness) {
+        let offer = harness
+            .query_all_by_label_contains("Wire directly to")
+            .next()
+            .map(|node| node.rect().center());
+        if let Some(at) = offer {
+            press(harness, at);
+            release(harness, at);
+        }
     }
 
     pub(super) fn drag(harness: &mut FolderHarness, from: Pos2, to: Pos2) {
@@ -14822,6 +14852,7 @@ mod lay16 {
         let body = centre(&harness, "Input body of probe");
         move_to(&mut harness, near, body);
         release(&mut harness, body);
+        wire_directly(&mut harness);
         match binding_of(&harness, "probe", "body") {
             Some(Binding::Reference { node_id, port, .. }) => {
                 assert_eq!(node_id, id_of(&harness, "cart"));

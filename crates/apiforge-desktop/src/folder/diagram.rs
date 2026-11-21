@@ -2,6 +2,7 @@
 //! inspector of its selected block.
 
 use super::*;
+use apiforge_core::graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT};
 
 impl FolderApp {
     /// Where the sleeping dog is in its four-second loop, or its rest frame in
@@ -247,6 +248,7 @@ impl FolderApp {
                     },
                     scenario: Some(scenario_of(&model)),
                     shared: &shared,
+                    moves: true,
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
@@ -337,6 +339,8 @@ impl FolderApp {
                         next: Box::new(with_graphs(model, saved.main, saved.cleanup)),
                         selection: Some(selection),
                         check: None,
+                        moved: Vec::new(),
+                        placed: false,
                     },
                 );
             }
@@ -568,7 +572,37 @@ impl FolderApp {
                 component,
                 position,
                 source,
-            } => Some(board.add_node(block, component, position, source)),
+            } => Some(
+                board
+                    .add_node(block, component, position, source)
+                    .map(|edit| board.made_room(edit)),
+            ),
+            // A step dropped on a line of a chain lands there (DIAG-06c).
+            Command::AddOnLine {
+                block,
+                component,
+                position,
+                after: (source, port),
+            } => Some(
+                board
+                    .add_on_line(block, component, position, &source, &port)
+                    .map(|edit| board.made_room(edit)),
+            ),
+            Command::MoveOutOfBranch(id) => {
+                let placed = board.move_out_of_branch(&id);
+                self.apply_move(document_id, model, cleanup, placed);
+                None
+            }
+            // After the selection, in its braces (DIAG-06a).
+            Command::AddStep {
+                block,
+                component,
+                position,
+            } => Some(
+                board
+                    .add_step(block, component, position, &selection)
+                    .map(|edit| board.made_room(edit)),
+            ),
             Command::AddOperator { operator, position } => {
                 Some(Ok(board.push_node(create_operator_node(operator, position))))
             }
@@ -595,18 +629,78 @@ impl FolderApp {
                 .set_input(&node, &input, &path, binding)
                 .transpose()
                 .map(|result| result.map(Into::into)),
+            // One preview drives the refusal, the question and the delete
+            // (DIAG-06e).
+            // An ordering line is the order of the written steps: it is not
+            // deleted on its own (DIAG-06a).
+            Command::Delete { wires, .. }
+                if wires.iter().any(|wire| {
+                    wire.starts_with(crate::canvas::AFTER_IF)
+                        || graph.edges.iter().any(|edge| &edge.id == wire)
+                }) =>
+            {
+                Some(Err(apiforge_core::edit::EditError::OrderLine.to_string()))
+            }
             Command::Delete { ids, wires } => {
-                let next = board.delete(&ids, &wires);
-                let kept = selection
-                    .into_iter()
-                    .filter(|id| !ids.contains(id))
-                    .collect();
-                Some(Ok(Edit {
-                    graph: next,
-                    selection: Some(kept),
-                }))
+                let needs_start = matches!(model, Document::Scenario(_)) && !cleanup;
+                let deletion = board.deletion(&ids, needs_start);
+                let confirmed = self.confirmed_delete.take();
+                if let Some(refusal) = deletion.refusal() {
+                    Some(Err(refusal))
+                } else if let Some(question) = deletion.question().filter(|question| {
+                    // Confirmed only as asked: the same selection, question
+                    // and statements; anything else asks again.
+                    confirmed.as_ref()
+                        != Some(&ConfirmedDelete {
+                            ids: ids.clone(),
+                            question: question.clone(),
+                            gone: deletion.gone.clone(),
+                        })
+                }) {
+                    self.prompt = Some(Prompt::DeleteStatements {
+                        document_id: document_id.to_owned(),
+                        cleanup,
+                        ids,
+                        wires,
+                        question,
+                        gone: deletion.gone.clone(),
+                    });
+                    None
+                } else {
+                    let kept = selection
+                        .into_iter()
+                        .filter(|id| !ids.contains(id) && !deletion.gone.contains(id))
+                        .collect();
+                    Some(Ok(Edit {
+                        graph: board.delete_checked(&deletion, &ids, &wires),
+                        selection: Some(kept),
+                    }))
+                }
             }
             Command::AddProxy { source, position } => Some(board.add_proxy(source, position)),
+            // A wire of the order from a step dropped on a statement of the
+            // board moves it (DIAG-06a): into other braces too, and a check
+            // only from *Yes* or *No* (DIAG-06d).
+            Command::Connect {
+                source,
+                source_port,
+                target,
+                target_input,
+                ..
+            } if target_input == ORDER_PORT
+                && [ORDER_PORT, TRUE_PORT, FALSE_PORT].contains(&source_port.as_str())
+                && graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.id == source && apiforge_core::chain::is_step(node.kind))
+                && graph.nodes.iter().any(|node| node.id == target) =>
+            {
+                let placed = board
+                    .place(&source, &source_port, &target)
+                    .map(|(graph, moved)| (board.make_room(graph), moved));
+                self.apply_move(document_id, model, cleanup, placed);
+                None
+            }
             Command::Connect {
                 source,
                 source_port,
@@ -619,25 +713,29 @@ impl FolderApp {
                     .map(Into::into),
             ),
             // The clipboard belongs to the window, not to a board: what is
-            // copied pastes into any graph of any document (UX-34).
+            // copied pastes into any graph of any document (UX-34), an `if`
+            // with its braces, after the selected step (DIAG-06f).
             Command::Copy => {
-                if let Some(fragment) = board.copy(&selection) {
+                if let Some(fragment) = board.copy_statements(&selection) {
                     self.clipboard = Some(fragment);
                 }
                 None
             }
             Command::Paste => {
+                let component = matches!(model, Document::Component(_));
                 let pasted = self
                     .clipboard
                     .as_ref()
-                    .map(|fragment| board.paste(fragment));
+                    .map(|fragment| board.paste_statements(fragment, &selection, component));
                 self.apply_paste(document_id, model, cleanup, pasted);
                 None
             }
             Command::Duplicate => {
-                let pasted = board
-                    .copy(&selection)
-                    .map(|fragment| board.paste(&fragment));
+                let component = matches!(model, Document::Component(_));
+                let pasted = selection
+                    .iter()
+                    .any(|id| graph.nodes.iter().any(|node| &node.id == id))
+                    .then(|| board.duplicate_statements(&selection, component));
                 self.apply_paste(document_id, model, cleanup, pasted);
                 None
             }
@@ -713,21 +811,77 @@ impl FolderApp {
         }
     }
 
-    /// Applies a paste or a duplicate as one model edit, so one undo removes
-    /// it, brings the copies into view, and names what they read that this
-    /// board lacks: each such reference is left unconnected (UX-34).
+    /// The one question a delete asks: an `if` with statements in its braces
+    /// (DIAG-06e). *Delete* runs the delete again on the document as it is
+    /// then, so a refusal that has appeared meanwhile still refuses, and a
+    /// delete that would now take or ask anything else asks again.
+    pub(super) fn delete_statements_prompt(
+        &mut self,
+        context: &egui::Context,
+        document_id: String,
+        cleanup: bool,
+        wires: Vec<String>,
+        asked: ConfirmedDelete,
+    ) -> Option<Prompt> {
+        let (mut confirm, mut cancel) = (false, false);
+        let response =
+            dialogs::centered_modal(egui::Id::new("board-delete"), context).show(context, |ui| {
+                ui.set_width(420.0);
+                ui.heading(&asked.question);
+                ui.add_space(theme::SPACE_MD);
+                ui.horizontal(|ui| {
+                    confirm = ui.add(widgets::primary_button("Delete")).clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if response.should_close() || cancel {
+            return None;
+        }
+        if confirm {
+            let snapshot = self.snapshot(&document_id)?;
+            let model = snapshot.model?;
+            let ids = asked.ids.clone();
+            self.confirmed_delete = Some(asked);
+            self.board_command(
+                &document_id,
+                &model,
+                cleanup,
+                snapshot.editable,
+                Command::Delete { ids, wires },
+            );
+            self.confirmed_delete = None;
+            return self.prompt.take();
+        }
+        let ConfirmedDelete {
+            ids,
+            question,
+            gone,
+        } = asked;
+        Some(Prompt::DeleteStatements {
+            document_id,
+            cleanup,
+            ids,
+            wires,
+            question,
+            gone,
+        })
+    }
+
+    /// Applies a paste or a duplicate as one model edit whose chain it made
+    /// (DIAG-06f), so one undo removes it, and brings the copies into view;
+    /// a refused one shows its sentence in the board's banner.
     fn apply_paste(
         &mut self,
         document_id: &str,
         model: &Document,
         cleanup: bool,
-        pasted: Option<Result<board_edit::Paste, String>>,
+        pasted: Option<Result<Edit, String>>,
     ) {
         let Some(pasted) = pasted else {
             return;
         };
-        let paste = match pasted {
-            Ok(paste) => paste,
+        let edit = match pasted {
+            Ok(edit) => edit,
             Err(message) => {
                 self.apply_edit(document_id, model, cleanup, Err(message));
                 return;
@@ -737,28 +891,23 @@ impl FolderApp {
         // accept losing unattached comments.
         self.pasted = Some(PastedOutcome {
             document_id: document_id.to_owned(),
-            ids: paste.edit.selection.clone().unwrap_or_default(),
-            summary: missing_summary(&paste.edit.graph, &paste.unresolved),
-            missing: paste
-                .unresolved
-                .iter()
-                .filter_map(|item| match &item.missing {
-                    edit::Missing::Step(step) => Some(canvas::MissingStep {
-                        node_id: item.node_id.clone(),
-                        input: item.input.clone(),
-                        path: item.path.clone(),
-                        step: step.clone(),
-                    }),
-                    edit::Missing::Input(_) => None,
-                })
-                .collect(),
+            ids: edit.selection.clone().unwrap_or_default(),
         });
-        self.apply_edit(document_id, model, cleanup, Ok(paste.edit));
+        self.component_action(
+            document_id,
+            publication::Action::Model {
+                next: Box::new(with_graph(model, cleanup, edit.graph)),
+                selection: edit.selection,
+                check: None,
+                moved: Vec::new(),
+                placed: true,
+            },
+        );
     }
 
     /// After an applied model edit that selects `selection`: when it is the
     /// last paste, brings the copies into view, as copies from another graph
-    /// keep their place, and reports what they lost.
+    /// keep their place.
     pub(super) fn pasted_applied(&mut self, document_id: &str, selection: &[String]) {
         let Some(pasted) = self
             .pasted
@@ -768,10 +917,6 @@ impl FolderApp {
         };
         if let Some(canvas) = self.canvases.get_mut(document_id) {
             canvas.show_pasted(pasted.ids);
-            canvas.mark_missing_steps(pasted.missing);
-        }
-        if let Some(summary) = pasted.summary {
-            self.notify(summary, false);
         }
     }
 
@@ -791,6 +936,8 @@ impl FolderApp {
                     next: Box::new(with_graph(model, cleanup, edit.graph)),
                     selection: edit.selection,
                     check: None,
+                    moved: Vec::new(),
+                    placed: false,
                 },
             ),
             Err(message) => {
@@ -799,6 +946,58 @@ impl FolderApp {
                 }
             }
         }
+    }
+
+    /// Applies a move on the board as one model edit whose moved blocks the
+    /// text moves line by line (DIAG-06a), or shows its refusal in the
+    /// board's banner.
+    fn apply_move(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        cleanup: bool,
+        placed: Result<(Graph, Vec<String>), String>,
+    ) {
+        match placed {
+            Ok((graph, moved)) => self.component_action(
+                document_id,
+                publication::Action::Model {
+                    next: Box::new(with_graph(model, cleanup, graph)),
+                    selection: None,
+                    check: None,
+                    moved,
+                    placed: false,
+                },
+            ),
+            Err(message) => {
+                if let Some(canvas) = self.canvases.get_mut(document_id) {
+                    canvas.set_error(message);
+                }
+            }
+        }
+    }
+
+    /// The board of `document_id` as a whole *Tidy up* would lay it out
+    /// now, without applying it (DIAG-06c).
+    #[cfg(test)]
+    pub(crate) fn debug_tidied(&self, document_id: &str) -> Option<Graph> {
+        let snapshot = self.snapshot(document_id)?;
+        let model = snapshot.model?;
+        let cleanup = self.cleanup(document_id);
+        let project = self.context_project();
+        let reference = reference_of(&model, cleanup);
+        let parameters = parameters_of(&model);
+        let board = Board {
+            graph: graph_of(&model, cleanup),
+            reference: &reference,
+            project: &project,
+            parameters: &parameters,
+            sibling: sibling_of(&model, cleanup),
+            density: self.density(),
+            satellites: true,
+            lines: lines_of(&self.preferences),
+        };
+        board.tidy_up(&[])
     }
 
     /// Opens the working document of the component a block calls.
@@ -975,6 +1174,8 @@ impl FolderApp {
                                 next: Box::new(with_graphs(&model, read.main, read.cleanup)),
                                 selection: Some(Vec::new()),
                                 check: None,
+                                moved: Vec::new(),
+                                placed: false,
                             },
                         ),
                         Err(error) => {

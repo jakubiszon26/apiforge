@@ -250,7 +250,7 @@ mod diag07 {
         graph::{ORDER_PORT, TRUE_PORT},
         model::NodeKind,
     };
-    use apiforge_script::print_scenario;
+    use apiforge_script::print_folder_document;
 
     const AT: Position = Position { x: 0.0, y: 0.0 };
 
@@ -274,12 +274,14 @@ mod diag07 {
         )
         .expect("the request is added");
         let mut next = scenario.clone();
-        next.graph = added.graph;
+        // As the session writes a board edit: the chain is kept (LANG-13).
+        next.graph = apiforge_core::chain::edited(&scenario.graph, &added.graph);
         (next, added.node_id)
     }
 
     fn printed(project: &Project, scenario: &Scenario) -> String {
-        print_scenario(project, scenario).expect("the scenario prints")
+        print_folder_document(project, &Document::Scenario(scenario.clone()))
+            .expect("the scenario prints")
     }
 
     /// The text lowered again and printed: what a window shows of it.
@@ -366,9 +368,9 @@ mod diag07 {
         assert_eq!(sequence(graph), order, "the board's order is the run's");
     }
 
-    /// Criterion 2: the source shows `@after(cart)` on the new request,
-    /// written after `cart` and the checks and values that follow it and
-    /// before the next step; nothing else moves, and text → window → text is
+    /// Criterion 2: the new request is written after `cart` and the checks
+    /// and values that follow it and before the next step, without `@after`
+    /// since LANG-13; nothing else moves, and text → window → text is
     /// unchanged.
     #[test]
     fn criterion_2_the_step_is_written_after_its_source_and_its_checks() {
@@ -378,9 +380,8 @@ mod diag07 {
         let handle = handle_of(&next.graph, &added).to_owned();
         let text = printed(&project, &next);
         let at = line_of(&text, &format!("{handle} = "));
-        let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines[at - 1].trim(), "@after(cart)", "{text}");
-        assert!(line_of(&text, "cart_total = ") < at - 1, "{text}");
+        assert!(!text.contains("@after"), "{text}");
+        assert!(line_of(&text, "cart_total = ") < at, "{text}");
         assert!(at < line_of(&text, "cart_view = "), "{text}");
         assert_eq!(without(&text, &handle), before, "nothing else moves");
         assert_eq!(reprinted(&project, &text), text, "text → window → text");
@@ -438,11 +439,9 @@ mod diag07 {
 /// A check and a value of `cart`, written after the step that follows it.
 const CHECK_AFTER_THE_NEXT_STEP: &str = r#"scenario "Checks before the next step" {
   begin = start
-  @after(begin)
   cart = POST "/carts" {
     sample 201 { id: "c-1", total: 0 }
   }
-  @after(cart)
   paid = POST "/payments" {
     sample 201 { id: "p-1" }
   }
@@ -452,7 +451,6 @@ const CHECK_AFTER_THE_NEXT_STEP: &str = r#"scenario "Checks before the next step
     removed = DELETE "/carts/{{cart.body.id}}" {
       sample 204 {}
     }
-    @after(removed)
     again = GET "/carts/{{cart.body.id}}" {
       sample 404 {}
     }
@@ -533,11 +531,9 @@ async fn run03_criterion_5_sequence_agrees_with_the_engine() {
 const VALUE_BEFORE_START: &str = r#"scenario "A value before Start" {
   bad = "1" + 1
   begin = start
-  @after(begin)
   first = GET "/a" {
     sample 200 {}
   }
-  @after(first)
   second = GET "/b" {
     query { limit: bad }
     sample 200 {}
@@ -649,7 +645,6 @@ mod issue433 {
     /// sign-in component.
     const SOURCE: &str = r#"scenario "Double booking is refused" {
   begin = start
-  @after(begin)
   first = POST "/bookings" {
     sample 201 { id: "bk-1" }
   }
@@ -658,7 +653,6 @@ mod issue433 {
       sample 409 { error: { code: "room_unavailable" } }
     }
     refused = assert second.status == 409
-    @after(refused)
     calendar = GET "/bookings" {
       sample 200 { items: [{ id: "bk-1" }] }
     }

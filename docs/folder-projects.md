@@ -105,6 +105,36 @@ last valid version and asks first. A live run is journalled under
 `.apiforge/local/`; one interrupted by a crash is listed at the next start until
 marked as handled. The command-line `run --folder` uses saved files only.
 
+## Projects written for 0.1.0
+
+A project written for API Forge 0.1.0 ordered its steps with `@after`; this
+build runs the steps of a block in the order they are written. Such a project
+opens and can be edited, `check` reports it, and a run is refused until it is
+converted:
+
+```bash
+apiforge fix --folder /path/to/project --check   # report only, writes nothing
+apiforge fix --folder /path/to/project
+```
+
+The command judges every source the project file lists, by what it runs today.
+When every one converts without changing what runs, it removes their `@after`
+lines, writes a missing `start`, and raises the project file to language 2, all
+in one step; each changed file is listed with what was removed. Otherwise it
+writes nothing and lists, for each file, every statement in the way with its
+line, the reason and what to do: a step that runs nowhere today is deleted, or
+given `@after(<the step above it>)`, which the command then removes; a step
+written out of its place is moved. A source that is missing, is not text, is over
+1 MiB or does not parse is listed under its own heading. A source edited on the
+board before the conversion is judged like any other; restoring it from Git is
+the other way out.
+
+It refuses a project that a window or an agent holds (`--check` does not: it
+takes no lock and writes nothing, `.apiforge/local/` included), a project of a
+newer language, a project too large to convert in one step, and a project in
+which a file changed while the command read it. Comments are kept, and published
+revisions are not touched.
+
 ## Large sources
 
 A source can be up to 1 MiB. Above 256 KiB the editor shows it without colouring,
