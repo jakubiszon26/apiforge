@@ -196,7 +196,8 @@ impl FolderApp {
                     // Right to left, the chevron is the rightmost: its place
                     // is taken first and the chevron added there after *Run
                     // simulation*, which Tab therefore reaches first.
-                    let switch = crate::mock::get(&crate::mock::RUN_MENU) == 3;
+                    let switch_variant = crate::mock::get(&crate::mock::RUN_MENU);
+                    let switch = switch_variant >= 3;
                     let (_, chevron) = if switch {
                         (egui::Id::NULL, egui::Rect::NOTHING)
                     } else {
@@ -205,7 +206,11 @@ impl FolderApp {
                         space
                     };
                     let run = if switch {
-                        let button = widgets::action(Icon::Play, "Run").primary();
+                        let button = if switch_variant == 4 {
+                            widgets::icon_button(Icon::Play, run_label(live)).primary()
+                        } else {
+                            widgets::action(Icon::Play, "Run").primary()
+                        };
                         ui.add(if live { button } else { button.fill(theme::SIMULATION) })
                     } else {
                         ui.add(run_button(live))
@@ -1365,7 +1370,7 @@ fn mock_mode_switch(ui: &mut egui::Ui, live: bool) -> Option<RunMode> {
             .layout_no_wrap(text.to_owned(), font.clone(), theme::TEXT)
             .size()
             .x
-            + 20.0
+            + if crate::mock::get(&crate::mock::RUN_MENU) == 5 { 12.0 } else { 20.0 }
     };
     let (simulation, live_width) = (width("Simulation"), width("Live"));
     let (rect, _) = ui.allocate_exact_size(

@@ -909,6 +909,98 @@ mod review {
         crate::mock::set(&crate::mock::RUN_MENU, 0);
     }
 
+    /// 0.2.1 mock-up, UX-42 option C measured: the fullest header — a
+    /// component's tab with *Publish* and *Live allowed* — at 960 × 540,
+    /// as v0.2.0 ships it and with the switch, in either mode. Prints the
+    /// boxes of the header's controls.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_rel021_switch_component_tab() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        fn explorer_row(harness: &mut FolderHarness, name: &str) {
+            let tree = harness.get_by_label("Project files").rect();
+            harness
+                .query_all_by_label(name)
+                .find(|node| tree.contains(node.rect().center()))
+                .unwrap_or_else(|| panic!("no explorer row {name:?}"))
+                .click();
+            settle(harness);
+        }
+        for (variant, look) in [(0, "today"), (3, "c-switch"), (4, "c-icon"), (5, "c-tight")] {
+            crate::mock::set(&crate::mock::RUN_MENU, variant);
+            let project = shop_project();
+            let configuration = tempfile::tempdir().unwrap();
+            let manifest = apiforge_project::ProjectManifest::from_bytes(
+                &std::fs::read(project.path().join("apiforge.project.json")).unwrap(),
+            )
+            .unwrap();
+            let consent = configuration.path().join("apiforge/agent-consent.json");
+            std::fs::create_dir_all(consent.parent().unwrap()).unwrap();
+            std::fs::write(
+                &consent,
+                format!(
+                    r#"{{"version": 1, "projects": {{"{}": {{"live": true, "changedAt": "2026-11-02T10:00:00Z"}}}}}}"#,
+                    manifest.id
+                ),
+            )
+            .unwrap();
+            let mut harness = folder_harness(project.path(), MINIMUM);
+            harness
+                .state_mut()
+                .as_mut()
+                .unwrap()
+                .use_configuration_directory(configuration.path());
+            settle(&mut harness);
+            click(&mut harness, "Code");
+            explorer_row(&mut harness, "components");
+            explorer_row(&mut harness, "product.afs");
+            click(&mut harness, "Diagram");
+            for mode in ["simulation", "live"] {
+                if mode == "live" {
+                    if variant < 3 {
+                        click(&mut harness, "Run options");
+                    }
+                    click(&mut harness, "Live");
+                }
+                let run = match (variant, mode) {
+                    (3 | 5, _) => "Run",
+                    (_, "live") => "Run live",
+                    _ => "Run simulation",
+                };
+                let mut labels = vec![
+                    "Project", "Live allowed", "Code", "Diagram", "Split", "Save", "Save all",
+                    "Publish", run,
+                ];
+                if variant >= 3 {
+                    labels.extend(["Simulation", "Live"]);
+                } else {
+                    labels.push("Run options");
+                }
+                println!("MEASURE {look} {mode}");
+                for label in &labels {
+                    let rect = harness.get_by_label(label).rect();
+                    println!("MEASURE   {label:<16} x {:>6.1} .. {:>6.1}", rect.left(), rect.right());
+                }
+                let fits = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    assert_within_window(&harness, &labels);
+                    assert_disjoint(&harness, &labels);
+                }))
+                .is_ok();
+                println!("MEASURE   within the window and disjoint: {fits}");
+                capture(
+                    &mut harness,
+                    &format!("rel021-component-tab-{look}-{mode}-960"),
+                    Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 150.0))),
+                );
+            }
+        }
+        crate::mock::set(&crate::mock::RUN_MENU, 0);
+    }
+
     /// UX-04: *Running unsaved code* just left of *Cancel run* while a
     /// live run runs, on the run's tab and, at both windows, on a
     /// component's tab with *Publish* and *Live allowed*, where it names
