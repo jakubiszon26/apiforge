@@ -369,7 +369,7 @@ const NUMBER_TEXT: f32 = 11.0;
 const BADGE: f32 = 20.0;
 
 /// The halo of a step related to the selected one (LAY-10): a teal that is
-/// not the selection's accent, the running blue or a status colour.
+/// not the selection's blue, the running blue or a status colour.
 pub const RELATED: Color32 = Color32::from_rgb(40, 160, 160);
 /// How much of a dimmed card is kept: the rest is the board showing through.
 pub const CARD_KEEP: f32 = 0.6;
@@ -464,35 +464,37 @@ fn dim(painter: &Painter, rect: Rect, radius: f32, look: Look, drawn: &mut Drawn
     painter
 }
 
-/// The selection's frame outside the card and its four handles.
+/// The selection's frame (UX-41): 2 px of the selection's blue on the
+/// card's edge, outside it, with a faint halo of two strokes beyond. No
+/// handles: a card is not resized. A failed card's red border is inside
+/// the edge, so both show.
 fn selection_frame(painter: &Painter, rect: Rect, radius: f32, drawn: &mut Drawn) {
     let mut frame = DrawnFrame::default();
+    for (gap, share) in [(4.0, 0.10), (2.0, 0.18)] {
+        let color = theme::SELECTION.gamma_multiply(share);
+        painter.rect_stroke(
+            rect.expand(gap),
+            radius + gap,
+            Stroke::new(2.0, color),
+            StrokeKind::Outside,
+        );
+        frame.strokes.push(DrawnStroke {
+            gap,
+            width: 2.0,
+            color,
+        });
+    }
     painter.rect_stroke(
-        rect.expand(3.0),
-        radius + 3.0,
-        Stroke::new(2.5, theme::SELECTION),
+        rect,
+        radius,
+        Stroke::new(2.0, theme::SELECTION),
         StrokeKind::Outside,
     );
     frame.strokes.push(DrawnStroke {
-        gap: 3.0,
-        width: 2.5,
+        gap: 0.0,
+        width: 2.0,
         color: theme::SELECTION,
     });
-    for corner in [
-        rect.left_top(),
-        rect.right_top(),
-        rect.left_bottom(),
-        rect.right_bottom(),
-    ] {
-        painter.rect(
-            Rect::from_center_size(corner, Vec2::splat(7.0)),
-            1.0,
-            theme::WHITE,
-            Stroke::new(1.5, theme::SELECTION),
-            StrokeKind::Inside,
-        );
-        frame.handles += 1;
-    }
     drawn.frame = Some(frame);
 }
 
@@ -590,7 +592,7 @@ pub enum BadgeState {
 pub struct DrawnFrame {
     /// Its strokes around the card, in the order drawn.
     pub strokes: Vec<DrawnStroke>,
-    /// The square handles drawn at the card's corners.
+    /// The square handles drawn at the card's corners: none since UX-41.
     pub handles: usize,
 }
 
@@ -1192,7 +1194,7 @@ fn numbers_on_name_row(
 
 /// The border of a failed or blocked step: 2 px at every zoom, while the
 /// band keeps the step's own result (Q15 = A). The selection's frame is
-/// outside the card, so both show.
+/// outside the card's edge, so both show (UX-41).
 fn signal_border(painter: &Painter, rect: Rect, radius: f32, color: Color32) {
     painter.rect_stroke(rect, radius, Stroke::new(2.0, color), StrokeKind::Inside);
 }
@@ -1459,7 +1461,7 @@ pub fn card(
         Color32::from_black_alpha(8),
     );
     painter.rect_filled(rect, radius, theme::WHITE);
-    // The selection's frame is drawn outside the card, with its handles.
+    // The selection's frame is drawn outside the card's edge.
     painter.rect_stroke(
         rect,
         radius,
@@ -1863,7 +1865,7 @@ pub fn compact_card(
         Color32::from_black_alpha(8),
     );
     painter.rect_filled(rect, radius, theme::WHITE);
-    // The selection's frame is drawn outside the card, with its handles.
+    // The selection's frame is drawn outside the card's edge.
     painter.rect_stroke(
         rect,
         radius,
