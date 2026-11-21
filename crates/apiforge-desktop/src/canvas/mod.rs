@@ -1081,6 +1081,13 @@ impl Canvas {
         self.caption.as_deref()
     }
 
+    /// The step a carried wire of the order is over that will refuse it,
+    /// and why (DIAG-06b): its socket is drawn crossed and the wire red.
+    #[cfg(test)]
+    pub(crate) fn debug_refusal(&self) -> Option<(&str, &str)> {
+        None
+    }
+
     /// Where a step carried from the Library would land (DIAG-06c).
     #[cfg(test)]
     pub(crate) fn debug_drop_mark(&self) -> Option<&DropMark> {
