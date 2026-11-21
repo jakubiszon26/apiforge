@@ -413,6 +413,8 @@ pub fn json_tree(ui: &mut Ui, node: &str, port: &str, value: &Value) -> Option<T
         port,
         value,
         &JsonPath::root(),
+        "",
+        true,
         0,
         true,
         &mut action,
@@ -442,6 +444,8 @@ fn tree_row(
     port: &str,
     value: &Value,
     path: &JsonPath,
+    key: &str,
+    last: bool,
     depth: usize,
     supported: bool,
     action: &mut Option<TreeAction>,
@@ -466,7 +470,13 @@ fn tree_row(
     let mut open = ui
         .ctx()
         .data(|data| data.get_temp::<bool>(state_id))
-        .unwrap_or(depth == 0);
+        .unwrap_or(depth == 0 || crate::mock::opened(&text));
+    if crate::mock::get(&crate::mock::ROWS) != 0 {
+        mock_row(
+            ui, node, port, value, path, key, last, depth, supported, action, budget, state_id, open,
+        );
+        return;
+    }
     ui.horizontal(|ui| {
         ui.add_space(depth.min(4) as f32 * 8.0);
         if child_count > 0
@@ -603,6 +613,8 @@ fn tree_row(
                     port,
                     item,
                     &child,
+                    &format!("[{index}]"),
+                    index + 1 == items.len(),
                     depth + 1,
                     supported,
                     action,
@@ -611,7 +623,9 @@ fn tree_row(
             }
         }
         Value::Object(fields) => {
-            for (key, item) in fields.iter().take(range.end).skip(range.start) {
+            for (position, (key, item)) in
+                fields.iter().enumerate().take(range.end).skip(range.start)
+            {
                 if *budget == 0 {
                     break;
                 }
@@ -623,6 +637,8 @@ fn tree_row(
                     port,
                     item,
                     &child,
+                    key,
+                    position + 1 == fields.len(),
                     depth + 1,
                     supported && !reserved(key),
                     action,
@@ -631,6 +647,227 @@ fn tree_row(
             }
         }
         _ => {}
+    }
+}
+
+/// The rows of the Output data mock-ups: one line each.
+#[allow(clippy::too_many_arguments)]
+fn mock_row(
+    ui: &mut Ui,
+    node: &str,
+    port: &str,
+    value: &Value,
+    path: &JsonPath,
+    key: &str,
+    last: bool,
+    depth: usize,
+    supported: bool,
+    action: &mut Option<TreeAction>,
+    budget: &mut usize,
+    state_id: Id,
+    mut open: bool,
+) {
+    use crate::mock;
+    const STEP: f32 = 14.0;
+    const ROW: f32 = 26.0;
+    let look = mock::get(&mock::ROWS);
+    let json = look == 3;
+    let text = path.to_string();
+    let merged = mock::get(&mock::ROOT) == 1;
+    let child_count = match value {
+        Value::Array(items) => items.len(),
+        Value::Object(fields) => fields.len(),
+        _ => 0,
+    };
+    let kind = type_name(Some(value));
+    let comma = if json && !last { "," } else { "" };
+    let preview = match (value, json) {
+        (Value::Array(_), true) if open && child_count > 0 => "[".to_owned(),
+        (Value::Object(_), true) if open && child_count > 0 => "{".to_owned(),
+        (Value::Array(items), true) => format!("[ … {} ]{comma}", items.len()),
+        (Value::Object(fields), true) => format!("{{ … {} }}{comma}", fields.len()),
+        (Value::Array(items), false) if look == 2 => match items.len() {
+            1 => "1 item".to_owned(),
+            count => format!("{count} items"),
+        },
+        (Value::Object(fields), false) if look == 2 => match fields.len() {
+            1 => "1 field".to_owned(),
+            count => format!("{count} fields"),
+        },
+        (Value::Array(items), false) => format!("array · {}", items.len()),
+        (Value::Object(fields), false) => format!("object · {}", fields.len()),
+        (scalar, _) => format!("{}{comma}", json_stringify(scalar)),
+    };
+    let pointed = mock::get(&mock::ACTIONS) == 1 && mock::pointed(&text);
+    let with_actions = mock::get(&mock::ACTIONS) == 0 || pointed;
+    let unfolded = mock::get(&mock::LONG) == 1 && text == "note";
+    let row = egui::Rect::from_min_size(
+        ui.cursor().min,
+        egui::vec2(ui.available_width(), if unfolded { 62.0 } else { ROW }),
+    );
+    if pointed {
+        ui.painter().rect_filled(row, 4.0, theme::FIELD);
+    }
+    mock::guides(ui, row, depth, STEP);
+    ui.allocate_ui_with_layout(
+        row.size(),
+        egui::Layout::left_to_right(if unfolded { egui::Align::Min } else { egui::Align::Center }),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.add_space(depth as f32 * STEP);
+            let (arrow, toggle) = ui.allocate_exact_size(
+                egui::vec2(14.0, 20.0),
+                if child_count > 0 { egui::Sense::click() } else { egui::Sense::hover() },
+            );
+            if child_count > 0 {
+                ui.painter().text(
+                    arrow.center(),
+                    egui::Align2::CENTER_CENTER,
+                    if open { "▾" } else { "▸" },
+                    egui::FontId::proportional(12.0),
+                    theme::MUTED,
+                );
+                if widgets::named(toggle, if open { "Collapse field" } else { "Expand field" })
+                    .clicked()
+                {
+                    open = !open;
+                    ui.ctx().data_mut(|data| data.insert_temp(state_id, open));
+                }
+            }
+            let name = match (depth, json) {
+                (0, true) => Some(RichText::new(mock::HEADING.lock().unwrap().as_str()).size(13.0).strong().color(theme::TEXT)),
+                (0, false) if merged => Some(RichText::new(mock::HEADING.lock().unwrap().as_str()).size(13.0).strong().color(theme::TEXT)),
+                (0, false) => Some(RichText::new("$").monospace().size(12.0).color(theme::LINK)),
+                (_, true) if key.starts_with('[') => None,
+                (_, true) => Some(
+                    RichText::new(format!("\"{key}\":")).monospace().size(12.0).color(theme::LINK),
+                ),
+                (_, false) => Some(RichText::new(key).monospace().size(12.0).color(theme::LINK)),
+            };
+            if let Some(name) = name {
+                let field = ui.add(
+                    egui::Label::new(name).sense(egui::Sense::click_and_drag()).truncate(),
+                );
+                if supported {
+                    field.dnd_set_drag_payload(Payload::Variable {
+                        label: if text.is_empty() { port.to_owned() } else { text.clone() },
+                        binding: Binding::reference(node, port, text.clone()),
+                    });
+                }
+                field.on_hover_text(format!("{port}.{text}\n{kind} · drag onto an argument"));
+            }
+            let type_column = if look == 2 { 58.0 } else { 0.0 };
+            let room = (ui.available_width() - 62.0 - type_column).max(24.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(room, row.height()),
+                egui::Layout::left_to_right(if unfolded { egui::Align::Min } else { egui::Align::Center }),
+                |ui| {
+                    let label = egui::Label::new(
+                        RichText::new(&preview)
+                            .monospace()
+                            .size(12.0)
+                            .color(mock::value_colour(value)),
+                    );
+                    if unfolded {
+                        ui.set_max_width(room);
+                        ui.add(label.wrap());
+                    } else {
+                        ui.add(label.truncate()).on_hover_text(&preview);
+                    }
+                    ui.allocate_space(egui::vec2(ui.available_width(), 1.0));
+                },
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                if with_actions {
+                    if ui
+                        .add_enabled(
+                            supported,
+                            widgets::icon_button(Icon::Variable, "Assign to variable").compact(),
+                        )
+                        .clicked()
+                    {
+                        *action = Some(TreeAction::Assign { path: text.clone() });
+                    }
+                    let check = ui.add_enabled(
+                        supported,
+                        widgets::icon_button(Icon::Check, "Add comparison").compact(),
+                    );
+                    if mock::get(&mock::MENU) == 1 {
+                        egui::Popup::menu(&check).show(|ui| {
+                            ui.set_width(210.0);
+                            widgets::caption(ui, "ADD A CHECK");
+                            let subject = if text.is_empty() { port } else { text.as_str() };
+                            for line in [
+                                format!("{subject} equals {}", json_stringify(value)),
+                                format!("{subject} is a {kind}"),
+                                format!("{subject} exists"),
+                                format!("{subject} is not empty"),
+                            ] {
+                                let _ = ui.button(line);
+                            }
+                        });
+                    } else if check.clicked() {
+                        *action = Some(TreeAction::Check {
+                            path: text.clone(),
+                            value: value.clone(),
+                        });
+                    }
+                } else {
+                    ui.add_space(50.0);
+                }
+                if look == 2 {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(kind).size(11.0).color(theme::MUTED));
+                }
+            });
+        },
+    );
+    if !open || child_count == 0 {
+        return;
+    }
+    match value {
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                let mut child = path.clone();
+                child.push_index(index);
+                tree_row(
+                    ui, node, port, item, &child, &format!("[{index}]"),
+                    index + 1 == items.len(), depth + 1, supported, action, budget,
+                );
+            }
+        }
+        Value::Object(fields) => {
+            for (position, (name, item)) in fields.iter().enumerate() {
+                let mut child = path.clone();
+                child.push_key(name.clone());
+                tree_row(
+                    ui, node, port, item, &child, name,
+                    position + 1 == fields.len(), depth + 1, supported, action, budget,
+                );
+            }
+        }
+        _ => {}
+    }
+    if json {
+        let row = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), ROW));
+        mock::guides(ui, row, depth, STEP);
+        ui.allocate_ui_with_layout(
+            row.size(),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add_space(depth as f32 * STEP + 19.0);
+                ui.label(
+                    RichText::new(format!(
+                        "{}{comma}",
+                        if matches!(value, Value::Array(_)) { "]" } else { "}" }
+                    ))
+                    .monospace()
+                    .size(12.0)
+                    .color(theme::MUTED),
+                );
+            },
+        );
     }
 }
 
@@ -676,6 +913,8 @@ mod tree_tests {
                 "body",
                 &value,
                 &JsonPath::root(),
+                "",
+                true,
                 0,
                 true,
                 &mut action,
@@ -689,6 +928,8 @@ mod tree_tests {
                 "body",
                 &value,
                 &JsonPath::root(),
+                "",
+                true,
                 0,
                 true,
                 &mut action,

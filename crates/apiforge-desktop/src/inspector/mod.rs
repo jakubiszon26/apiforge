@@ -1341,14 +1341,29 @@ fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
 
 fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
     let node = context.node;
-    widgets::hint(
-        ui,
-        if context.step.is_some() {
-            "Data from the last run. Editing the block does not update it."
-        } else {
-            "Sample data — not from an API call."
-        },
-    );
+    let mocked = crate::mock::get(&crate::mock::ROWS) != 0;
+    if mocked {
+        ui.horizontal(|ui| {
+            if context.step.is_some() {
+                widgets::pill(ui, "Last run", theme::SUCCESS);
+                widgets::hint(ui, "Editing the step does not update it.");
+            } else {
+                widgets::pill(ui, "Sample", theme::WARNING);
+                widgets::hint(ui, "Not from an API call.");
+            }
+        });
+        ui.add_space(4.0);
+    } else {
+        widgets::hint(
+            ui,
+            if context.step.is_some() {
+                "Data from the last run. Editing the block does not update it."
+            } else {
+                "Sample data — not from an API call."
+            },
+        );
+    }
+    let merged = mocked && crate::mock::get(&crate::mock::ROOT) == 1;
     let mut any = false;
     for port in output_ports(node, context.project) {
         let value = match context.step {
@@ -1357,7 +1372,15 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
         };
         let Some(value) = value else { continue };
         any = true;
-        widgets::section(ui, port.display_name());
+        if mocked {
+            *crate::mock::HEADING.lock().unwrap() = port.display_name().to_owned();
+            ui.spacing_mut().item_spacing.y = 2.0;
+        }
+        if merged {
+            ui.add_space(6.0);
+        } else {
+            widgets::section(ui, port.display_name());
+        }
         if let Some(action) = fields::json_tree(ui, &node.id, &port.name, &value) {
             actions.push(match action {
                 fields::TreeAction::Check { path, value } => Action::AssertField {

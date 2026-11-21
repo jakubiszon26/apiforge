@@ -1153,6 +1153,9 @@ impl ReportPanel {
                     // the document cannot be edited; only an editable one
                     // offers *Check* and *To variable*.
                     let fields = self.tab == DetailTab::Outputs && checkable;
+                    if crate::mock::get(&crate::mock::ROWS) == 1 {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                    }
                     for (port, value) in map {
                         let branch = format!("{run_id}:{}:{}:{port}", selected.key, self.tab as u8);
                         let target = fields.then_some((step.node_id.as_str(), port.as_str()));
@@ -1216,10 +1219,20 @@ impl ReportPanel {
             self.expanded.contains(&key)
         };
 
+        let mocked = crate::mock::get(&crate::mock::ROWS) == 1;
+        if mocked {
+            let row = egui::Rect::from_min_size(
+                ui.cursor().min,
+                egui::vec2(ui.available_width(), 20.0),
+            );
+            crate::mock::guides(ui, row, depth, 14.0);
+        }
         ui.horizontal(|ui| {
             ui.add_space(depth as f32 * 14.0);
             let toggle = if expandable {
                 if is_open { "▾" } else { "▸" }
+            } else if mocked {
+                ""
             } else {
                 "·"
             };
@@ -1277,14 +1290,20 @@ impl ReportPanel {
             };
             key_response.on_hover_text(hover);
 
-            ui.label(RichText::new(":").color(theme::MUTED));
-            let summary = describe_value(value);
+            if !mocked {
+                ui.label(RichText::new(":").color(theme::MUTED));
+            }
+            let summary = match value {
+                Value::Array(items) if mocked => format!("array · {}", items.len()),
+                Value::Object(fields) if mocked => format!("object · {}", fields.len()),
+                _ => describe_value(value),
+            };
             ui.add(
                 egui::Label::new(
                     RichText::new(labels::truncate(&summary, 72))
                         .monospace()
                         .size(12.0)
-                        .color(theme::MUTED),
+                        .color(if mocked { crate::mock::value_colour(value) } else { theme::MUTED }),
                 )
                 .truncate(),
             )

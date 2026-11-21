@@ -555,3 +555,111 @@ fn review_lay10() {
         crate::testing::capture(&mut harness, name, None);
     }
 }
+
+/// Output data mock-up (DIAG-10): a response with every kind of value —
+/// nested, a list, a long text, a boolean, a null — in the Inspector's
+/// Output data as `main` draws it and in three one-line forms; the
+/// details of the recommended one; the same row in Run results.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_output_data() {
+    use crate::mock;
+    const ORDER: &str = r#"scenario "Order" {
+  begin = start
+  order = GET "/orders/o-1042" {
+    sample 200 { id: "o-1042", total: 172.5, paid: true, coupon: null, customer: { name: "Anna Nowak", email: "anna.nowak@example.test" }, items: [{ productId: 123, name: "Kawa ziarnista", quantity: 2 }, { productId: 124, name: "Filtr papierowy", quantity: 1 }], note: "Leave the parcel with the neighbour at number 14 if nobody answers the door." }
+  }
+  found = assert order.status == 200
+}
+"#;
+    fn reset() {
+        for switch in [&mock::ROWS, &mock::ACTIONS, &mock::ROOT, &mock::MENU, &mock::LONG] {
+            mock::set(switch, 0);
+        }
+    }
+    fn opened(size: egui::Vec2, run: bool) -> (tempfile::TempDir, FolderHarness) {
+        let (project, mut harness, gate) = lay07::open(ORDER, size, false);
+        if run {
+            lay07::simulate(&mut harness, &gate);
+        }
+        select(&mut harness, &["order"]);
+        show(&mut harness, "order", 1.0);
+        harness.get_by_label("Output data").click();
+        settle(&mut harness);
+        (project, harness)
+    }
+    let panel = egui::Rect::from_min_max(egui::pos2(1232.0, 98.0), egui::pos2(1592.0, 760.0));
+    let shot = |harness: &mut FolderHarness, name: &str, region: Option<egui::Rect>| {
+        crate::testing::capture(harness, &format!("output-data-{name}"), region);
+    };
+
+    // Question 1: the row. The sample, before any run.
+    for (rows, look) in [(0, "today"), (1, "a-one-line"), (2, "b-type-column"), (3, "c-json")] {
+        reset();
+        mock::set(&mock::ROWS, rows);
+        mock::set(&mock::ROOT, u8::from(rows != 0));
+        let (_project, mut harness) = opened(WIDE, false);
+        shot(&mut harness, &format!("rows-{look}"), Some(panel));
+        if rows == 1 {
+            shot(&mut harness, "window-1600", None);
+        }
+    }
+    // The smallest window.
+    for (rows, look) in [(0, "today"), (1, "a-one-line")] {
+        reset();
+        mock::set(&mock::ROWS, rows);
+        mock::set(&mock::ROOT, u8::from(rows != 0));
+        let (_project, mut harness) = opened(crate::testing::MINIMUM, false);
+        shot(&mut harness, &format!("window-960-{look}"), None);
+    }
+
+    // Question 2: the actions; DIAG-08's menu and a long value on the row.
+    for (name, actions, menu, long) in [
+        ("actions-pointed", 1, 0, 0),
+        ("menu", 0, 1, 0),
+        ("long-value", 0, 0, 1),
+    ] {
+        reset();
+        mock::set(&mock::ROWS, 1);
+        mock::set(&mock::ROOT, 1);
+        mock::set(&mock::ACTIONS, actions);
+        mock::set(&mock::MENU, menu);
+        mock::set(&mock::LONG, long);
+        let (_project, mut harness) = opened(WIDE, false);
+        if menu == 1 {
+            harness
+                .query_all_by_label("Add comparison")
+                .nth(2)
+                .expect("the row of total")
+                .click();
+            settle(&mut harness);
+        }
+        shot(&mut harness, name, Some(panel));
+    }
+
+    // Question 3: the root.
+    reset();
+    mock::set(&mock::ROWS, 1);
+    let (_project, mut harness) = opened(WIDE, false);
+    shot(&mut harness, "root-dollar", Some(panel));
+    drop(harness);
+
+    // Question 4: after a run, the Inspector and Run results.
+    for (rows, look) in [(0, "today"), (1, "a-one-line")] {
+        reset();
+        mock::set(&mock::ROWS, rows);
+        mock::set(&mock::ROOT, u8::from(rows != 0));
+        let (_project, mut harness) = opened(WIDE, true);
+        shot(&mut harness, &format!("run-{look}-window-1600"), None);
+        shot(&mut harness, &format!("run-{look}-inspector"), Some(panel));
+        harness.get_by_label("Maximise run results").click();
+        settle(&mut harness);
+        shot(
+            &mut harness,
+            &format!("run-{look}-results"),
+            Some(egui::Rect::from_min_max(egui::pos2(344.0, 130.0), egui::pos2(1004.0, 792.0))),
+        );
+        shot(&mut harness, &format!("run-{look}-results-window"), None);
+    }
+    reset();
+}
