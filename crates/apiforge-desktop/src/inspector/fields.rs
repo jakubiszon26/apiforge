@@ -404,7 +404,14 @@ pub enum TreeAction {
 
 /// A JSON value as a tree of fields with "Check" and "To variable" actions. Field
 /// names can be dragged onto arguments as a reference to `node`'s `port`.
-pub fn json_tree(ui: &mut Ui, node: &str, port: &str, value: &Value) -> Option<TreeAction> {
+/// `read_only` says why the actions are disabled, on their hover (DIAG-09).
+pub fn json_tree(
+    ui: &mut Ui,
+    node: &str,
+    port: &str,
+    value: &Value,
+    read_only: Option<&str>,
+) -> Option<TreeAction> {
     let mut action = None;
     let mut budget = JSON_ROWS_PER_FRAME;
     tree_row(
@@ -415,6 +422,7 @@ pub fn json_tree(ui: &mut Ui, node: &str, port: &str, value: &Value) -> Option<T
         &JsonPath::root(),
         0,
         true,
+        read_only,
         &mut action,
         &mut budget,
     );
@@ -444,6 +452,7 @@ fn tree_row(
     path: &JsonPath,
     depth: usize,
     supported: bool,
+    read_only: Option<&str>,
     action: &mut Option<TreeAction>,
     budget: &mut usize,
 ) {
@@ -518,21 +527,25 @@ fn tree_row(
         )
         .on_hover_text(&preview);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add_enabled(
-                    supported,
-                    widgets::icon_button(Icon::Variable, "Assign to variable").compact(),
-                )
-                .clicked()
+            // Where the step takes no edit both are disabled, and say why
+            // (DIAG-09).
+            let why = |response: egui::Response| match read_only {
+                Some(why) => response.on_disabled_hover_text(why),
+                None => response,
+            };
+            if why(ui.add_enabled(
+                supported,
+                widgets::icon_button(Icon::Variable, "Assign to variable").compact(),
+            ))
+            .clicked()
             {
                 *action = Some(TreeAction::Assign { path: text.clone() });
             }
-            if ui
-                .add_enabled(
-                    supported,
-                    widgets::icon_button(Icon::Check, "Add comparison").compact(),
-                )
-                .clicked()
+            if why(ui.add_enabled(
+                supported,
+                widgets::icon_button(Icon::Check, "Add comparison").compact(),
+            ))
+            .clicked()
             {
                 *action = Some(TreeAction::Check {
                     path: text.clone(),
@@ -605,6 +618,7 @@ fn tree_row(
                     &child,
                     depth + 1,
                     supported,
+                    read_only,
                     action,
                     budget,
                 );
@@ -625,6 +639,7 @@ fn tree_row(
                     &child,
                     depth + 1,
                     supported && !reserved(key),
+                    read_only,
                     action,
                     budget,
                 );
@@ -678,6 +693,7 @@ mod tree_tests {
                 &JsonPath::root(),
                 0,
                 true,
+                None,
                 &mut action,
                 &mut budget,
             );
@@ -691,6 +707,7 @@ mod tree_tests {
                 &JsonPath::root(),
                 0,
                 true,
+                None,
                 &mut action,
                 &mut budget,
             );

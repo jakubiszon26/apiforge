@@ -73,6 +73,9 @@ pub struct Context<'a> {
     /// The switch of the step's own checks in the *Checks* list: `None`
     /// when the board folds no check into this step (LAY-11, LAY-30).
     pub expand_here: Option<crate::canvas::ChecksHere>,
+    /// Why the step takes no edit now, said on the hover of an action the
+    /// panel disables (DIAG-09); `None` while it takes edits.
+    pub read_only: Option<&'a str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1358,7 +1361,8 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
         let Some(value) = value else { continue };
         any = true;
         widgets::section(ui, port.display_name());
-        if let Some(action) = fields::json_tree(ui, &node.id, &port.name, &value) {
+        if let Some(action) = fields::json_tree(ui, &node.id, &port.name, &value, context.read_only)
+        {
             actions.push(match action {
                 fields::TreeAction::Check { path, value } => Action::AssertField {
                     port: port.name.clone(),
