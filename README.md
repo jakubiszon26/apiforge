@@ -173,8 +173,14 @@ cargo run -p apiforge-cli --locked -- --help          # the command line
 cargo run -p apiforge-demo-api --locked               # the demo API, http://127.0.0.1:4318/demo
 ```
 
-The first start opens demo projects that run against the small local demo API.
-The [development guide](docs/development.md) covers the toolchain, the
+The first start, in an empty data directory, opens *Demo shop* on the board of
+its scenario *Buy coffee on promotion*: a product looked up through the
+component `product`, a cart created and checked, an `if` on the promotion and
+a cleanup that deletes the cart. A second scenario, *The cart refuses bad
+orders*, sends three orders the shop must refuse under `on_error continue`.
+Both run as a simulation, or live against the small local demo API. A data
+directory that already holds a project opens that project as it is. The
+[development guide](docs/development.md) covers the toolchain, the
 verification every change passes and how releases are made.
 
 ## The scenario language

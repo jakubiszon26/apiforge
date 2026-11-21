@@ -72,9 +72,9 @@ fn expected(value_type: ValueType) -> Option<(&'static str, &'static str)> {
     match value_type {
         ValueType::Any | ValueType::String => None,
         ValueType::Number => Some(("a number", "1 or 2.5")),
-        ValueType::Boolean => Some(("yes or no", "true or false")),
+        ValueType::Boolean => Some(("a boolean", "true or false")),
         ValueType::Object => Some(("an object", "{\"a\": 1}")),
-        ValueType::Array => Some(("a list", "[1, 2]")),
+        ValueType::Array => Some(("an array", "[1, 2]")),
     }
 }
 

@@ -169,6 +169,59 @@ pub fn prepare_project(root: impl AsRef<Path>, project: &Project) -> Result<Proj
     Ok(manifest)
 }
 
+/// Writes a folder project that already exists as files, such as the demo a
+/// first start prepares (DEMO-01): every file at its path, exactly as given,
+/// with the folder's `.gitignore` and `.gitattributes` rules, in one
+/// transaction. The files are the whole project: the manifest at
+/// [`MANIFEST_PATH`] among them, its sources, published revisions and, when
+/// there is one, the layout. The folder must not contain a project; opening
+/// the result is what checks it.
+pub fn prepare_files(root: impl AsRef<Path>, files: &[(&str, &str)]) -> Result<ProjectManifest> {
+    let store = ProjectStore::open_exclusive(root)?;
+    let manifest_path = ProjectPath::new(MANIFEST_PATH)?;
+    if store.read(std::slice::from_ref(&manifest_path))?.files[&manifest_path].is_some() {
+        return Err(Error::AlreadyAProject);
+    }
+    let manifest = files
+        .iter()
+        .find(|(path, _)| *path == MANIFEST_PATH)
+        .ok_or(Error::NotAProject)
+        .and_then(|(_, text)| Ok(ProjectManifest::from_bytes(text.as_bytes())?))?;
+    let mut directories = std::collections::BTreeSet::new();
+    let mut writes = Vec::new();
+    for (path, text) in files {
+        let path = ProjectPath::new(*path)?;
+        let mut parent = Path::new(path.as_str()).parent();
+        while let Some(directory) = parent.filter(|directory| !directory.as_os_str().is_empty()) {
+            // The store keeps `.apiforge` itself; what it holds is created here.
+            if directory != Path::new(".apiforge") {
+                directories.insert(directory.to_string_lossy().replace('\\', "/"));
+            }
+            parent = directory.parent();
+        }
+        writes.push(ProjectChange::Write {
+            path,
+            expected: FileState::Missing,
+            bytes: text.as_bytes().to_vec(),
+        });
+    }
+    // Parents before children: the sorted paths put each directory before
+    // anything inside it.
+    let mut changes = directories
+        .into_iter()
+        .map(|directory| {
+            Ok(ProjectChange::CreateDirectory {
+                path: ProjectPath::new(directory)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    changes.extend(writes);
+    changes.extend(crate::session::ignore_local_data(&store)?);
+    changes.extend(crate::git_rules::lf_attributes(&store)?);
+    store.commit(changes)?;
+    Ok(manifest)
+}
+
 /// A model written as a source for the first time, in the written language
 /// (LANG-13): each graph as one chain in the order its steps run today, and a
 /// `start` first where a scenario's main flow with a step has none (a

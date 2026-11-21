@@ -536,7 +536,7 @@ fn literal_editor(
     if port.value_type == ValueType::Any || value_type != port.value_type {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Type").size(11.0).color(theme::MUTED));
-            if fields::type_combo(ui, id.with("literal-type"), &mut value_type) {
+            if fields::literal_type_combo(ui, id.with("literal-type"), &mut value_type) {
                 *literal = fields::empty_literal(value_type);
                 changed = true;
             }
@@ -615,7 +615,7 @@ fn literal_editor(
                         theme::DANGER,
                         RichText::new(format!(
                             "Enter {}.",
-                            fields::value_type_label(value_type).to_lowercase()
+                            fields::with_article(fields::value_type_label(value_type))
                         ))
                         .size(11.0),
                     );
@@ -1581,7 +1581,7 @@ mod tests {
                 .iter()
                 .any(|field| field.path == "product.price")
         );
-        let bool_matches = filter_response_fields(&fields.fields, "yes / no");
+        let bool_matches = filter_response_fields(&fields.fields, "BOOLEAN");
         assert!(
             bool_matches
                 .iter()

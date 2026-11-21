@@ -651,7 +651,7 @@ fn the_run_inputs_dialog_names_every_control() {
     app.workbench.open(&id);
     app.request_run(&id, false);
     assert!(
-        exposes(&mut app, &context, "product · Object"),
+        exposes(&mut app, &context, "product · object"),
         "the dialog is open"
     );
     for mode in [Mode::Diagram, Mode::Split, Mode::Code] {

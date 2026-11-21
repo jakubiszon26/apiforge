@@ -102,16 +102,13 @@ pub fn fields(value: Option<&Value>) -> ResponseFields {
     collect_response_fields_bounded(value)
 }
 
+/// A field's type in the language's word (DIAG-08); `missing` where the
+/// field has no value.
 pub fn type_label(name: &str) -> &'static str {
-    match name {
-        "string" => "Text",
-        "number" => "Number",
-        "boolean" => "Yes / no",
-        "object" => "Object",
-        "array" => "List",
-        "null" => "Null",
-        _ => "Missing",
-    }
+    super::fields::TYPE_WORDS
+        .into_iter()
+        .find(|word| *word == name)
+        .unwrap_or("missing")
 }
 
 #[cfg(test)]
@@ -131,7 +128,7 @@ mod tests {
         let component = component_definition(&project, node).unwrap();
         let output = &apiforge_core::graph::component_outputs(component)[0].name;
         assert!(sample_output(node, output, &project).is_some());
-        assert_eq!(type_label("array"), "List");
+        assert_eq!(type_label("array"), "array");
         assert_eq!(fields(Some(&json!({"a": 1}))).fields.len(), 2);
     }
 }

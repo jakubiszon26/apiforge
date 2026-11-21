@@ -343,16 +343,10 @@ pub const VALUE_TYPES: [ValueType; 6] = [
     ValueType::Array,
 ];
 
-/// A friendly name of a value type.
+/// A value type in the language's word (DIAG-08): `any` where it is not
+/// set.
 pub fn type_label(value_type: ValueType) -> &'static str {
-    match value_type {
-        ValueType::Any => "Any",
-        ValueType::String => "Text",
-        ValueType::Number => "Number",
-        ValueType::Boolean => "Yes / no",
-        ValueType::Object => "Object",
-        ValueType::Array => "List",
-    }
+    value_type.as_str()
 }
 
 fn type_picker(

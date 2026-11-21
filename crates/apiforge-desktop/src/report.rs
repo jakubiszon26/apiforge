@@ -13,6 +13,7 @@ use crate::{
     theme, widgets,
 };
 use apiforge_core::{
+    edit::FieldCheck,
     format::{Binding, Graph, Node, OptionalJson, Project},
     graph::{component_definition, condition_predicates, predicate},
     js::{json_stringify, type_name},
@@ -30,11 +31,12 @@ const RESERVED_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     SelectNode(String),
+    /// A check of a field chosen in the menu *Add a check* (DIAG-08).
     AssertField {
         node_id: String,
         port: String,
         path: String,
-        value: Value,
+        check: FieldCheck,
     },
     AssignField {
         node_id: String,
@@ -1315,16 +1317,16 @@ impl ReportPanel {
                     } else {
                         path_text.as_str()
                     };
-                    if ui
+                    // *Check* opens the Inspector's menu Add a check (DIAG-08).
+                    let button = ui
                         .add(widgets::action(Icon::Check, "Check").compact().quiet())
-                        .on_hover_text(format!("Check {target_name}"))
-                        .clicked()
-                    {
+                        .on_hover_text(format!("Check {target_name}"));
+                    if let Some(check) = crate::inspector::check_menu(&button, target_name, value) {
                         actions.push(Action::AssertField {
                             node_id: node_id.to_owned(),
                             port: port.to_owned(),
                             path: path_text.clone(),
-                            value: value.clone(),
+                            check,
                         });
                     }
                     if ui
@@ -1449,8 +1451,8 @@ fn is_supported_key(key: &str) -> bool {
 fn describe_value(value: &Value) -> String {
     match value {
         Value::Null => "null".into(),
-        Value::Array(items) => format!("List ({})", items.len()),
-        Value::Object(fields) => format!("Object ({})", fields.len()),
+        Value::Array(items) => format!("array ({})", items.len()),
+        Value::Object(fields) => format!("object ({})", fields.len()),
         scalar => json_stringify(scalar),
     }
 }

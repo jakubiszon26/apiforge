@@ -1,0 +1,10 @@
+component product "Product" {
+  description "Fetch a product by ID together with its promotion."
+  @label("Product ID")
+  input id: number = 123
+  fetch_product = GET "/products/{{param.id}}" {
+    contract "Product"
+    sample 200 { id: 123, name: "Whole bean coffee", price: 100, promotion: { type: "fixed_price", active: true, price: 80, inna_nazwa: "Autumn offer" } }
+  }
+  export product: object = fetch_product.body
+}

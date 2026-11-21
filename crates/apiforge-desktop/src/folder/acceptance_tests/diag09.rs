@@ -12,7 +12,9 @@ use apiforge_storage::project::HolderRole;
 use egui_kittest::kittest::NodeT;
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
-const COMPARISON: &str = "Add comparison";
+/// The ✓ that was *Add comparison*; since DIAG-08 it opens the menu *Add a
+/// check*, whose *equals* writes the comparison.
+const COMPARISON: &str = "Add a check";
 const VARIABLE: &str = "Assign to variable";
 /// The hover of a disabled button on a board whose code has errors.
 const LAST_VALID: &str =
@@ -135,6 +137,7 @@ fn assert_comparison(
     let before = graph(harness, id, cleanup);
     let subject = node(&before, handle).id.clone();
     click(harness, field, COMPARISON);
+    crate::testing::choose_equals(harness, field);
     let after = graph(harness, id, cleanup);
     let new = added(&before, &after);
     assert_eq!(new.len(), 1, "one step added: {new:?}");
