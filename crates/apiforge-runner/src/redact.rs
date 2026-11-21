@@ -69,8 +69,21 @@ impl Redactor {
                 // published as `a+b+c`. Mask this form too.
                 let reparsed: String =
                     url::form_urlencoded::byte_serialize(&decode_form(secret)).collect();
-                [secret.clone(), encode_uri_component(secret), form, reparsed]
+                // A text that writes a value as JSON, such as a failed type
+                // check's message (LANG-22), holds `"` and `\` escaped: mask
+                // that form too.
+                let escaped = serde_json::to_string(secret.as_str())
+                    .map(|quoted| quoted[1..quoted.len() - 1].to_owned())
+                    .unwrap_or_default();
+                [
+                    secret.clone(),
+                    escaped,
+                    encode_uri_component(secret),
+                    form,
+                    reparsed,
+                ]
             })
+            .filter(|form| !form.is_empty())
             .collect();
         self.forms.dedup();
     }
