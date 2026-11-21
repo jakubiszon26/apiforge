@@ -2264,6 +2264,7 @@ impl App {
                 step,
                 // The workspace window shows every check card.
                 expand_here: None,
+                read_only: None,
             };
             self.inspector.show(ui, &context)
         };

@@ -102,5 +102,7 @@ whole response (REQ-10 #478). The diagnostics of a type check: LANG-22.
 `inspector/fields.rs` `tree_row` and `TreeAction`; `inspector/mod.rs`
 `Action::AssertField`; `report.rs` `Action::AssertField`;
 `apiforge_core::edit::field_assertion` gains the predicate;
-`fields::assertion_type_combo` holds the second vocabulary. The mock
+`fields::assertion_type_combo` holds the second vocabulary. The menu is
+one function called from the row, so that DIAG-10, which redraws the
+row after this ticket, moves the call and nothing else. The mock
 branch has both variants behind `mock::TYPE_CHECK`.
