@@ -19,8 +19,8 @@ use std::{
 
 /// The demo's component whose only input has a default (`id` = 123).
 const PRODUCT: &str = "components/product.afs";
-/// The header from the mode tabs to *Run options*, as a component tab shows
-/// it.
+/// The header from the mode tabs to the Run button, as a component tab
+/// shows it.
 const HEADER: [&str; 8] = [
     "Code",
     "Diagram",
@@ -28,8 +28,8 @@ const HEADER: [&str; 8] = [
     "Save",
     "Save all",
     "Publish",
+    "Run mode",
     "Run simulation",
-    "Run options",
 ];
 
 /// The demo shop at `size` in `mode` with the component at `path` active.
@@ -107,9 +107,10 @@ fn edit(harness: &mut FolderHarness, id: &str, from: &str, to: &str) {
     settle(harness);
 }
 
-/// Criterion 1: on a component tab the header holds *Run* and *Run options*
-/// next to *Publish*, every control inside the window and none overlapping,
-/// in every mode at both windows; *Run*'s hover text names both kinds.
+/// Criterion 1: on a component tab the header holds *Run* next to
+/// *Publish* (since UX-42 with the run mode switch between them), every
+/// control inside the window and none overlapping, in every mode at both
+/// windows; *Run*'s hover text names both kinds.
 #[test]
 fn ktlo23_a_component_tab_holds_run_and_run_options_beside_publish() {
     let project = shop();
@@ -119,11 +120,11 @@ fn ktlo23_a_component_tab_holds_run_and_run_options_beside_publish() {
             assert_within_window(&harness, &HEADER);
             assert_disjoint(&harness, &HEADER);
             let rect = |label| harness.get_by_label(label).rect();
-            // UX-02: the chevron *Run options* is at the Run button's right.
+            // UX-42: the run mode switch stands at the Run button's left.
             assert!(
-                rect("Publish").right() <= rect("Run simulation").left()
-                    && rect("Run simulation").right() <= rect("Run options").left(),
-                "{mode} at {size:?}: Publish, Run simulation, Run options, in this order"
+                rect("Publish").right() <= rect("Run mode").left()
+                    && rect("Run mode").right() <= rect("Run simulation").left(),
+                "{mode} at {size:?}: Publish, Run mode, Run simulation, in this order"
             );
         }
     }
@@ -412,13 +413,16 @@ fn live(harness: &mut FolderHarness, base: &str) {
         )
         .unwrap();
     settle(harness);
-    // UX-02: Live is the window's mode; the Run button then runs it.
-    choose(harness, "Run options");
-    choose(harness, "Live");
+    // UX-02: Live is the window's mode, chosen on the header's switch
+    // (UX-42); the Run button then runs it.
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::RadioButton, "Live")
+        .click();
+    settle(harness);
     choose(harness, "Run live");
 }
 
-/// Criterion 8: *Run live* (UX-02: *Run options → Live*) runs the component live; the
+/// Criterion 8: *Run live* (UX-42: *Live* on the header's switch) runs the component live; the
 /// journal names the run after the component, and a run interrupted mid-request
 /// is listed at the next start. While no step has finished, the empty report
 /// speaks of the component, not of a scenario.
