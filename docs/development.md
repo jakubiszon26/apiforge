@@ -23,7 +23,14 @@ external changes followed once a second. A folder without a project is written
 only after choosing Initialise, which can register its existing sources. `--screenshot OUT.png --folder <path>` captures it.
 Starting with no arguments works from the application data directory: it opens
 the project recorded there, migrates a legacy workspace the first time, or
-creates one project if the directory holds neither. `--managed` asks for the
+creates one project if the directory holds neither. That project is the demo
+shop of `fixtures/demo/` ([DEMO-01](tickets/DEMO-01.md)), opened on the board
+of its scenario *Buy coffee on promotion*, beside *The cart refuses bad
+orders* and the component `product` at revision 1; a data directory that
+holds a project is never given it. The files are embedded at build
+(`apiforge_core::demos::FIRST_START`) and checked with the other fixtures, so
+a change of the language that breaks the demo fails the suite.
+`demos::shop_project()` remains the demo shop the tests build on. `--managed` asks for the
 same thing explicitly. A migration that is refused activates nothing and stops in
 a *Migration stopped* window that names the project and the scenario and offers
 *Open the previous workspace* (what `--legacy` opens on request) or *Quit*.
