@@ -1,0 +1,63 @@
+{
+  "formatVersion": 2,
+  "languageVersion": 2,
+  "id": "shop",
+  "name": "Demo shop",
+  "environment": {
+    "baseUrl": "http://127.0.0.1:4318/demo/shop",
+    "variables": {},
+    "secretNames": []
+  },
+  "contracts": [
+    {
+      "id": "Product",
+      "name": "Product",
+      "sample": {
+        "id": 123,
+        "name": "Whole bean coffee",
+        "price": 100,
+        "promotion": {
+          "type": "fixed_price",
+          "active": true,
+          "price": 80,
+          "inna_nazwa": "Autumn offer"
+        }
+      }
+    }
+  ],
+  "documents": [
+    {
+      "documentId": "38625fac-c065-43cd-aa08-7c56d2eb4377",
+      "kind": "scenario",
+      "path": "scenarios/buy-coffee-on-promotion.afs",
+      "entityId": "buy-coffee-on-promotion",
+      "baseRevision": null,
+      "recovered": false
+    },
+    {
+      "documentId": "ef433a07-2505-4917-8650-f64bf9907f85",
+      "kind": "scenario",
+      "path": "scenarios/the-cart-refuses-bad-orders.afs",
+      "entityId": "the-cart-refuses-bad-orders",
+      "baseRevision": null,
+      "recovered": false
+    },
+    {
+      "documentId": "cabbecb7-31bb-4cc2-907a-caa85aeca972",
+      "kind": "component",
+      "path": "components/product.afs",
+      "entityId": "product",
+      "baseRevision": 1,
+      "recovered": false
+    }
+  ],
+  "revisions": [
+    {
+      "componentId": "product",
+      "handle": "product",
+      "revision": 1,
+      "path": ".apiforge/revisions/product/1.afs",
+      "sourceHash": "e463ed30e391494f3a8486209103d5dd61e98e7e121557919b99fa6380e59310"
+    }
+  ]
+}

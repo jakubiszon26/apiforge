@@ -1,0 +1,38 @@
+scenario "Buy coffee on promotion" {
+  description "Looks a product up, puts two of it in a new cart and checks what the shop charges. Run it as a simulation, or live against the local demo API."
+  on_error stop
+  param productId = 123
+  param quantity = 2
+  begin = start
+  // A component: the lookup every scenario of this shop needs.
+  product = product@1(id: param.productId)
+  // Values several steps read are saved once.
+  var listPrice = product.price
+  var promotion = product.promotion
+  // A request written in full. The sample answers a simulation.
+  cart = POST "/carts" {
+    body { productId: param.productId, quantity: param.quantity }
+    sample 201 { id: "sample-cart", productId: 123, quantity: 2, total: 160 }
+  }
+  // Checks stand under the step they check.
+  created = assert cart.status == 201
+  has_id = assert nonempty cart.body.id
+  total_is_a_number = assert cart.body.total is "number"
+  var cartId = cart.body.id
+  var total = cart.body.total
+  // One branch runs, the other is skipped.
+  promoted = if promotion.active == true {
+    discounted = assert total == promotion.price * param.quantity
+    saving = listPrice * param.quantity - total
+    saves = assert saving > 0
+  } else {
+    full_price = assert total == listPrice * param.quantity
+  }
+  cleanup {
+    // The cleanup runs whatever happened above.
+    removed = DELETE "/carts/{{cartId}}" {
+      sample 200 { deleted: true }
+    }
+    gone = assert removed.body.deleted == true
+  }
+}

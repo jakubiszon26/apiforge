@@ -3141,7 +3141,19 @@ mod rel05 {
             ],
             "fixtures/scenarios/lay/rooms",
         );
-        // Two scripts' scenario, seven LAY references and the three rooms.
-        assert_eq!(compared, 11, "every working scenario of fixtures/");
+        // So is the demo a first start writes (DEMO-01).
+        let root = directory.path().join("demo");
+        copy(&repository().join("fixtures/demo"), &root);
+        compared += assert_agree(
+            &root,
+            &[
+                "scenarios/buy-coffee-on-promotion.afs",
+                "scenarios/the-cart-refuses-bad-orders.afs",
+            ],
+            "fixtures/demo",
+        );
+        // Two scripts' scenario, seven LAY references, the three rooms and
+        // the demo's two.
+        assert_eq!(compared, 13, "every working scenario of fixtures/");
     }
 }

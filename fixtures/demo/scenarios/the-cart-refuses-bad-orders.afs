@@ -1,0 +1,21 @@
+scenario "The cart refuses bad orders" {
+  description "Three orders the shop must refuse. With on_error continue every case runs and the run reports each failure, not only the first."
+  on_error continue
+  begin = start
+  no_quantity = POST "/carts" {
+    body { productId: 123, quantity: 0 }
+    sample 400 { error: "Invalid product or quantity" }
+  }
+  no_quantity_refused = assert no_quantity.status == 400
+  too_many = POST "/carts" {
+    body { productId: 123, quantity: 101 }
+    sample 400 { error: "Invalid product or quantity" }
+  }
+  too_many_refused = assert too_many.status == 400
+  unknown_product = POST "/carts" {
+    body { productId: 125, quantity: 1 }
+    sample 400 { error: "Invalid product or quantity" }
+  }
+  unknown_refused = assert unknown_product.status == 400
+  unknown_says_why = assert unknown_product.body.error is "string"
+}
