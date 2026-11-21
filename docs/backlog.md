@@ -537,6 +537,13 @@ the order of work.
 | [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode is a switch in the header; [ticket](tickets/UX-42.md) | S · 20 min · `visible UI`, `removal` |
 | [#524](https://github.com/jakubiszon26/apiforge/issues/524) | REL-06 v0.2.1, a candidate first; [ticket](tickets/REL-06.md); last | S · 15 min |
 
+Proposed on 2026-11-21 and not ready: AB-01
+[#537](https://github.com/jakubiszon26/apiforge/issues/537), v0.1.0 against
+v0.2.0 on eight tester's tasks driven by agents
+([ticket](tickets/AB-01.md)). It waits for the owner's approval of the
+method and of its timing; recommended before `v0.2.1-rc.1`, so that a
+regression that blocks a task can still enter 0.2.1.
+
 ## Next sprint: REQ (not started)
 
 Request and results. The owner's run of 2026-11-19 showed that a test made
@@ -570,6 +577,11 @@ criteria:
 - [ ] *Run to here* and *Send this request alone* work from that view; a
       live request is sent only under the permission an ordinary live run
       needs (REQ-04, REQ-05).
+- [ ] The mandatory scenario — POST, the id from the response, GET with
+      that id, an assertion, DELETE — is built and run twice in the window
+      with no hand editing of the `.afs` (owner, 2026-11-21; REQ-06,
+      [ticket](tickets/REQ-06.md)); agents run it first
+      ([A/B rounds](process/ab-testing.md), proposed).
 - [ ] The owner does the task of REQ-06 on a release build, and the
       retrospective is written.
 
@@ -591,6 +603,12 @@ criteria:
 | [#477](https://github.com/jakubiszon26/apiforge/issues/477) | REQ-09 Hints for repetition: the same host or header in every request, each with a fix | S · 10 · `visible UI` | accepted into scope 2026-11-20; to analyse; the header half after LANG-18 |
 | [#478](https://github.com/jakubiszon26/apiforge/issues/478) | REQ-10 A live response saved as the sample; Expect this response | M · 20 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REP-07 and REQ-02a |
 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the owner's own run | S · 10 | after the rest |
+
+REQ-11 [#538](https://github.com/jakubiszon26/apiforge/issues/538) (a value of a response used in a later request by
+choosing it) and REQ-12 [#539](https://github.com/jakubiszon26/apiforge/issues/539) (a check from a field offers what to
+compare with) are proposed from the walk of the mandatory scenario
+([plan, section 7](sprints/req.md#7-the-mandatory-scenario-against-the-plan-2026-11-21));
+they are not in scope until the owner says so.
 
 REQ-07 to REQ-10 are the planning model's proposals
 ([plan, section 5](sprints/req.md#5-proposals-of-the-planning-model)).
