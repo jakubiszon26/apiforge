@@ -401,6 +401,8 @@ pub struct ActionButton<'a> {
     name: Option<&'a str>,
     /// A primary button's fill instead of the accent.
     fill: Option<egui::Color32>,
+    /// The hover text; an icon button's says it under its name.
+    hover: Option<&'a str>,
 }
 
 pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
@@ -413,6 +415,7 @@ pub fn action(icon: Icon, label: &str) -> ActionButton<'_> {
         pressed: None,
         name: None,
         fill: None,
+        hover: None,
     }
 }
 
@@ -463,6 +466,13 @@ impl<'a> ActionButton<'a> {
     /// Names the button for assistive technology instead of its label.
     pub fn named(mut self, name: &'a str) -> Self {
         self.name = Some(name);
+        self
+    }
+
+    /// The button's hover text; an icon button's one tooltip says it on the
+    /// line under its name (UX-42).
+    pub fn hover(mut self, text: &'a str) -> Self {
+        self.hover = Some(text);
         self
     }
 }
@@ -589,10 +599,14 @@ impl Widget for ActionButton<'_> {
             }
         }
         let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-        if self.icon_only {
-            response.on_hover_text(self.label)
-        } else {
-            response
+        match (self.icon_only, self.hover) {
+            (true, Some(hover)) => response.on_hover_ui(|ui| {
+                ui.label(self.label);
+                ui.label(hover);
+            }),
+            (true, None) => response.on_hover_text(self.label),
+            (false, Some(hover)) => response.on_hover_text(hover),
+            (false, None) => response,
         }
     }
 }

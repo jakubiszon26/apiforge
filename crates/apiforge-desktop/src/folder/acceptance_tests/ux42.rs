@@ -593,3 +593,66 @@ fn ux42_criterion_7_title_stays() {
         }
     }
 }
+
+/// Review of #530: hovering the ▶-alone Run button opens one tooltip, the
+/// button's name first and UX-02's hover text on the line under it, in
+/// either mode; *▶ Run*'s hover is UX-02's text, in one tooltip too.
+#[test]
+fn ux42_the_icon_alone_has_one_tooltip_name_first() {
+    fn tooltips(harness: &FolderHarness) -> usize {
+        harness.ctx.memory(|memory| {
+            memory
+                .areas()
+                .visible_layer_ids()
+                .iter()
+                .filter(|layer| layer.order == egui::Order::Tooltip)
+                .count()
+        })
+    }
+    fn hover(harness: &mut FolderHarness, run: &str, hover: &str) {
+        harness.hover_at(egui::pos2(480.0, 3.0));
+        settle(harness);
+        assert!(
+            crate::testing::hover_until(
+                harness,
+                |harness| harness
+                    .query_by_role_and_label(Role::Button, run)
+                    .map(|node| node.rect()),
+                |harness| contains(harness, hover),
+            ),
+            "{run}: its hover"
+        );
+    }
+    let configuration = tempfile::tempdir().unwrap();
+    let directory = shop();
+    let root = directory.path();
+    let mut harness = component_window(root, MINIMUM, configuration.path(), true);
+    for live in [false, true] {
+        switch_to(&mut harness, if live { LIVE_PART } else { SIMULATION });
+        let run = run_name(live);
+        let text = if live { LIVE_HOVER } else { SIMULATE_HOVER };
+        assert!(icon_alone(&harness, run), "{run}: ▶ alone");
+        hover(&mut harness, run, text);
+        assert_eq!(tooltips(&harness), 1, "{run}: one tooltip");
+        let button = harness.get_by_role_and_label(Role::Button, run).rect();
+        let name = harness
+            .query_all_by_label(run)
+            .map(|node| node.rect())
+            .find(|rect| *rect != button)
+            .expect("the tooltip names the button");
+        let line = harness.get_by_label(text).rect();
+        assert!(
+            name.bottom() <= line.top(),
+            "{run}: the name {name:?} above the text {line:?}"
+        );
+    }
+    harness.hover_at(egui::pos2(480.0, 3.0));
+    settle(&mut harness);
+    drop(harness);
+
+    let configuration = tempfile::tempdir().unwrap();
+    let mut harness = window(root, WIDE, configuration.path());
+    assert!(!icon_alone(&harness, SIMULATE));
+    hover(&mut harness, SIMULATE, SIMULATE_HOVER);
+    assert_eq!(tooltips(&harness), 1, "▶ Run: one tooltip");
+}

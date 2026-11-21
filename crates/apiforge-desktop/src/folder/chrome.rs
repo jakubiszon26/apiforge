@@ -217,7 +217,6 @@ impl FolderApp {
                                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
                         )
                         .add(run_button(live, compact))
-                        .on_hover_text(if live { LIVE_HOVER } else { SIMULATE_HOVER })
                         .clicked();
                     // A click on the stored mode writes nothing: a *Live*
                     // kept while observing stays until another mode is
@@ -1173,14 +1172,16 @@ fn run_label(live: bool) -> &'static str {
 
 /// The header's Run button, *▶ Run*, in the violet that also marks a
 /// simulation in Run results or in the accent for a live run (UX-02). It
-/// is named for its mode, *Run simulation* or *Run live*; where the row is
-/// too short for its word it is ▶ alone, with that name on hover (UX-42).
+/// is named for its mode, *Run simulation* or *Run live*, and its hover
+/// says what it sends; where the row is too short for its word it is ▶
+/// alone, and its one tooltip gives that name first (UX-42).
 pub(super) fn run_button(live: bool, compact: bool) -> widgets::ActionButton<'static> {
     let name = run_label(live);
+    let hover = if live { LIVE_HOVER } else { SIMULATE_HOVER };
     let button = if compact {
-        widgets::icon_button(Icon::Play, name)
+        widgets::icon_button(Icon::Play, name).hover(hover)
     } else {
-        widgets::action(Icon::Play, "Run").named(name)
+        widgets::action(Icon::Play, "Run").named(name).hover(hover)
     }
     .primary();
     if live {
