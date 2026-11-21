@@ -350,3 +350,40 @@ fn ux41_criterion_8_the_selecting_box_is_in_its_colour() {
         "gone after the drag"
     );
 }
+
+/// The selection's other marks (criteria 6-8) in one view at
+/// 1600 × 1000: a chip selected beside `cart`, marked on the minimap, and
+/// the selecting box half drawn over the empty board.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_ux41_marks() {
+    let (_project, mut harness, _gate) = after_failure_in(WIDE, true);
+    harness.get_by_label("Run results").click();
+    settle(&mut harness);
+    let cart = world_of(&harness, "cart");
+    app(&mut harness).active_board_command(crate::canvas::Command::AddProxy {
+        source: apiforge_core::format::ProxySource::Environment {
+            name: "baseUrl".into(),
+        },
+        position: apiforge_core::format::Position {
+            x: f64::from(cart.left()),
+            y: f64::from(cart.bottom() + 120.0),
+        },
+    });
+    settle(&mut harness);
+    let chip = graph(&harness).proxies.last().expect("the chip").id.clone();
+    let document = document(&harness);
+    app(&mut harness).selections.insert(document, vec![chip]);
+    settle(&mut harness);
+    show(&mut harness, "cart", 0.6);
+    let from = empty_point(&harness);
+    let to = from + egui::vec2(160.0, 110.0);
+    press(&mut harness, from);
+    move_to(&mut harness, from, to);
+    assert!(
+        canvas(&harness).debug_marquee().is_some(),
+        "the box is drawn"
+    );
+    crate::testing::capture(&mut harness, "ux41-marks-1600", None);
+    release(&mut harness, to);
+}
