@@ -131,7 +131,7 @@ them. Examples: `docs/qa/2026-11-21/UX-41/selection-failed-100.png`,
 A board shows how options look, not what a task costs on each. When the
 question is about a gesture or a flow, the options can also be compared by
 agents doing one task in the real window on each of them: an
-[A/B round](ab-testing.md) (proposed 2026-11-21). Its table stands beside
+[A/B round](ab-testing.md), for the tickets a sprint's plan names. Its table stands beside
 the board in the same quiz; it does not replace the board or the owner's
 choice.
 

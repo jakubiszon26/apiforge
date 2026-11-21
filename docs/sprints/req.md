@@ -7,7 +7,10 @@
   REP-07); the rest wait for the
   design-review captures of REQ-00. Four proposals of the planning model
   were accepted into scope on 2026-11-20 and are to be analysed (REQ-07 to
-  REQ-10, [section 5](#5-proposals-of-the-planning-model)).
+  REQ-10, [section 5](#5-proposals-of-the-planning-model)). On
+  2026-11-21 the owner added one mandatory acceptance scenario and took
+  REQ-11, REQ-12 and REQ-13 into scope
+  ([section 7](#7-the-mandatory-scenario-against-the-plan-2026-11-21)).
 - Analysis model: Fable 5.2.
 - Inputs: the owner's run of build `1d11f07` on 2026-11-19 with ten
   findings; the code on `main` at `eb2dc01`; the open issues REP-07, DIAG-02,
@@ -107,6 +110,9 @@ built before or after LANG-13 unchanged.
 | 10 | [#465](https://github.com/jakubiszon26/apiforge/issues/465) | REQ-08 duplicate as a new case; run the failed ones again | S and M · 30 · `visible UI` · to analyse | REQ-01 (the duplicate), REQ-04 (the subset run) |
 | 10 | [#477](https://github.com/jakubiszon26/apiforge/issues/477) | REQ-09 hints for repetition, each with a fix | S · 10 · `visible UI` · to analyse | none for the host hint; LANG-18 for the header hint |
 | 10 | [#478](https://github.com/jakubiszon26/apiforge/issues/478) | REQ-10 a live response saved as the sample; *Expect this response* | M · 20 · `visible UI` · to analyse | REP-07, REQ-02a; REQ-05 produces the response of a single send |
+| 10 | [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 a value of a response used in a later request by choosing it | M · 20 · `visible UI` · to analyse, with an A/B round | REQ-02a, REQ-02b; DIAG-08 and DIAG-10 to DIAG-14 for the place |
+| 10 | [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 a check from a field offers what to compare with | S–M · 15 · `visible UI`, `default` · to analyse, with an A/B round | DIAG-08 |
+| 10 | [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 the window writes only what was set | S–M · 15 · `default` · three questions open | none |
 | 11 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 the owner's own run | S · 10 | the rest |
 
 235 owner review minutes for the twelve tickets decided on 2026-11-19,
@@ -150,8 +156,11 @@ two parts:
   from the interface, with no hand editing of the `.afs` file. "If after
   REQ this cannot be done comfortably, in my view the sprint has not
   fully solved the functional tester's problem." It is run against the
-  demo API, twice, and by agents before the owner
-  ([A/B rounds](../process/ab-testing.md)).
+  demo API, live, twice; the DELETE first as a step with its own check,
+  then moved to Cleanup; and by agents before the owner
+  ([A/B rounds](../process/ab-testing.md)), whose round must show no
+  language syntax typed, green twice, no wrong turn in at least two of
+  three first-time runs and fewer actions than v0.2.0.
 - Read, edit, run and diagnose `labels` in the window without opening
   Code.
 
@@ -170,18 +179,21 @@ read and deleted by id.
 | A new scenario, its first request | the board today | adding a step in *Steps* — a question for REQ-00, a criterion of REQ-01 |
 | POST with a body | REQ-02a, REQ-02b | — |
 | Send it, see the response | REQ-04, REQ-05, UX-42 | REQ-05: a request that reads nothing, sent alone before any run |
-| Take the id from the response | REQ-02b's completion, in part | **REQ-11** [#538](https://github.com/jakubiszon26/apiforge/issues/538), proposed |
+| Take the id from the response | REQ-02b's completion, in part | **REQ-11** [#538](https://github.com/jakubiszon26/apiforge/issues/538) |
 | GET with the id in its path | REQ-02a | REQ-02b: placeholders as chips in the URL, query and headers too |
-| An assertion on the GET | Run results' *Check*; DIAG-08 for a type | **REQ-12** [#539](https://github.com/jakubiszon26/apiforge/issues/539), proposed |
+| An assertion on the GET | Run results' *Check*; DIAG-08 for a type | **REQ-12** [#539](https://github.com/jakubiszon26/apiforge/issues/539) |
 | DELETE with the id, Cleanup | the Cleanup board today; REQ-04 keeps Cleanup running | Cleanup in the list of *Steps* — REQ-00, REQ-01 |
-| The file holds what was done | — | the window writes `timeout 10s`, `@config(…)` and `@label` nobody set: a proposal in REQ-06 |
+| The file holds what was done | — | the window writes `timeout 10s`, `@config(…)` and `@label` nobody set: **REQ-13** [#540](https://github.com/jakubiszon26/apiforge/issues/540) |
 
-REQ-11 and REQ-12 are proposed, not in scope: they and the added
-criteria wait for question 4 of
-[REQ-06](../tickets/REQ-06.md#questions-for-the-owner). Both put an
-action on a field of a response and take their place from DIAG-08 (#521)
-and the redesign of *Output data* (DIAG-10 to DIAG-14); REQ-02a is not
-changed by this section.
+Decided by the owner on 2026-11-21
+([REQ-06](../tickets/REQ-06.md#decisions-owner-2026-11-21)): REQ-11,
+REQ-12 and REQ-13 are in the sprint, to be analysed, each
+`decision-needed` until its mock-up and questions are answered; the
+criteria of the right-hand column are on REQ-00 (questions 7 and 8),
+REQ-01, REQ-02b and REQ-05. REQ-11 and REQ-12 both put an action on a
+field of a response and take their place from DIAG-08 (#521) and the
+redesign of *Output data* (DIAG-10 to DIAG-14); REQ-02a is not changed by
+this section.
 
 A/B rounds in this sprint
 ([REQ-06](../tickets/REQ-06.md#ab-rounds-in-the-req-order)): the counted

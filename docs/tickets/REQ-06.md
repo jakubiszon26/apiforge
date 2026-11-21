@@ -1,8 +1,10 @@
 # REQ-06: Acceptance of the REQ sprint — the owner's own run, and one mandatory scenario
 
 - Size: S · Owner review: 10 min, plus the owner's own run · Risk: none
-- State: **Analysis; questions 1–4 wait for the owner** · the mandatory
-  scenario was added by the owner on 2026-11-21 (#463) · REQ sprint, last
+- State: **Decided** by the owner on 2026-11-21 (#463): the mandatory
+  scenario, and A for each of the nine questions
+  ([decisions](#decisions-owner-2026-11-21)) · it waits for every other
+  ticket of the sprint · REQ sprint, last
 - Analysis model: Fable 5.2 · Implementation model: — (the owner at the
   window; before him, agents under [A/B rounds](../process/ab-testing.md))
 
@@ -26,7 +28,8 @@ settings. The instruction, and nothing else:
 
 > Write a test that creates a cart with two of product 123, reads the cart
 > back by the id the API gave it, checks that it is the same cart with the
-> same quantity, and deletes it. Run it twice.
+> same quantity, and deletes it, checking that the delete worked. Run it
+> twice. Then make the delete happen even when a check fails.
 
 **Part 2 — on `labels` (FIX-01), as written on 2026-11-19**, without
 opening Code:
@@ -55,16 +58,20 @@ opening Code:
 3. **It passes twice.** The second run, with nothing changed, is green:
    the API gives a new id each time, so a check that froze the first id
    fails here.
-4. **The DELETE** stands where [question 1](#questions-for-the-owner)
-   decides, and after both runs the API holds no cart of the test.
+4. **The DELETE** is first a step of the test with its own check, then
+   moved to Cleanup in the window (decision 1 = A); after every run the
+   API holds no cart of the test.
 5. **The file says what was done:** the saved `.afs` holds the three
-   requests and the checks, and no line the tester did not ask for beyond
-   what [question 3](#questions-for-the-owner) allows.
+   requests and the checks, and no line the tester did not set (REQ-13,
+   #540).
 6. **Agents first.** Before the owner's run a baseline round is run on the
    release build ([A/B rounds](../process/ab-testing.md)): the shortest
    path and three first-time runs, recorded under
-   `docs/qa/<date>/REQ-06/`. The bar it has to meet is
-   [question 2](#questions-for-the-owner).
+   `docs/qa/<date>/REQ-06/`. The bar (decision 2 = A): no language syntax
+   typed, green twice, no wrong turn in at least two of the three
+   first-time runs, and fewer actions than v0.2.0 needed (30 pointer
+   actions and 8 text entries in the walk below; AB-01's T2 gives the
+   counted figure). The owner's own run is still the verdict.
 7. The owner does part 1 and part 2 on a release build of `main` and
    records the result on #463: done, or the findings.
 8. Each finding becomes an issue or is fixed before the sprint closes.
@@ -109,17 +116,17 @@ needed in the fixture.
 
 ### What each gap becomes
 
-Nothing below is scheduled; each waits for
-[question 4](#questions-for-the-owner).
+Decided on 2026-11-21 (4 = A): REQ-11 and REQ-12 join the sprint, the
+criteria are added, and G7 is a ticket of its own.
 
 | Gap | Proposal | Form |
 | --- | --- | --- |
-| G3 | **REQ-11: a value of a response is used in a later request by choosing it** — from the field in the response (*Use in…*), and from the field being filled (a list of the earlier steps' fields, fed by the last run as well as by the sample) | New ticket, [#538](https://github.com/jakubiszon26/apiforge/issues/538), proposed. M · `visible UI`. Which gesture: an A/B round |
-| G5 | **REQ-12: a check made from a field offers what to compare with** — this value, the value an earlier step gave or sent when it is equal now (`create.body.id`, the quantity sent), or the type (DIAG-08) | New ticket, [#539](https://github.com/jakubiszon26/apiforge/issues/539), proposed. S–M · `visible UI`, `default` (what one click writes). After DIAG-08 (#521) and the redesign of *Output data*, which own the place; this ticket does not change them |
-| G1, G6 | Two questions added to REQ-00: a step is added from *Steps* after the selected one; Cleanup is a section of the list after Main and a step can be put there | Criteria of REQ-00 and REQ-01 |
-| G2 | REQ-05: a request that reads nothing is sent alone with no last run; and a single send of a request that creates something says that nothing cleans it up | Criteria of REQ-05, with its five open questions |
-| G4 | REQ-02b: placeholders are chips with completion in the URL, the query and the headers as in the Body | Criterion of REQ-02b |
-| G7 | What the window writes for a step nobody configured (`timeout 10s`, `@config`, a `@label` equal to the handle) | Proposal, below; a default, so the owner's |
+| G3 | **REQ-11: a value of a response is used in a later request by choosing it** — from the field in the response (*Use in…*), and from the field being filled (a list of the earlier steps' fields, fed by the last run as well as by the sample) | [#538](https://github.com/jakubiszon26/apiforge/issues/538), in the sprint, to analyse. M · `visible UI`. Which gesture: an A/B round |
+| G5 | **REQ-12: a check made from a field offers what to compare with** — this value, the value an earlier step gave or sent when it is equal now (`create.body.id`, the quantity sent), or the type (DIAG-08) | [#539](https://github.com/jakubiszon26/apiforge/issues/539), in the sprint, to analyse. S–M · `visible UI`, `default` (what one click writes). After DIAG-08 (#521) and the redesign of *Output data*, which own the place; this ticket does not change them |
+| G1, G6 | Two questions added to REQ-00: a step is added from *Steps* after the selected one; Cleanup is a section of the list after Main and a step can be put there | Added: questions 7 and 8 of REQ-00 (#456), criteria of REQ-01 (#457) |
+| G2 | REQ-05: a request that reads nothing is sent alone with no last run; and a single send of a request that creates something says that nothing cleans it up | Added to REQ-05 (#462) as fixed criteria |
+| G4 | REQ-02b: placeholders are chips with completion in the URL, the query and the headers as in the Body | Added to REQ-02b (#459) |
+| G7 | What the window writes for a step nobody configured (`timeout 10s`, `@config`, a `@label` equal to the handle) | **REQ-13** [#540](https://github.com/jakubiszon26/apiforge/issues/540), [ticket](REQ-13.md); three questions open |
 
 REQ-02a (#458) and DIAG-08 (#521) are being changed by the redesign of
 the Inspector's *Output data* tab (DIAG-10 to DIAG-14, #531–#535) and are
@@ -137,72 +144,28 @@ scenario has real alternatives:
 | When | Round | Variants | Gates |
 | --- | --- | --- | --- |
 | Now | **AB-01**, v0.1.0 against v0.2.0; this scenario is its task T2 and gives the counted baseline | the two releases | nothing; [AB-01](AB-01.md) |
-| REQ-11's analysis | A value from a response into a later request | Today · A completion fed by the last run · B *Use in…* on the response field · C dragging the field onto the request's field | REQ-11 |
+| REQ-11's analysis, after DIAG-08 | A value from a response into a later request | Today · A completion fed by the last run · B *Use in…* on the response field · C dragging the field onto the request's field | REQ-11 |
 | REQ-12's analysis | A check from a field | Today (literal) · DIAG-08 as built · A the offer of sources in the ✓ menu · B the source chosen in the new check's row | REQ-12 |
 | After REQ-05 merges | Baseline of the request view: change a body, see the response | *Run to here* · *Send alone* | nothing; findings before REQ-06 |
 | REQ-06 | Baseline of the whole scenario on the release build | one | the owner's run |
 
-## Questions for the owner
+## Decisions (owner, 2026-11-21)
 
-Recommended first.
+Asked as a quiz, recommended first; the owner chose A each time. Recorded
+on #463 and #537.
 
-1. **Where is the DELETE in the mandatory scenario?**
-   A. Both: a step of the test with its own check, then the scenario once
-   more with it moved to Cleanup — tests the endpoint and the tidy-up.
-   B. In Cleanup only — it runs even when a check fails; the DELETE itself
-   is not asserted.
-   C. A step of the test only — as the sentence reads; a failed check
-   leaves the cart behind.
-2. **What does "comfortably" mean, as the bar the agents' round must
-   meet before your run?**
-   A. No language syntax typed, green twice, no wrong turn in at least two
-   of three first-time runs, and fewer actions than v0.2.0 — your own run
-   is still the verdict.
-   B. Only: done in the window and green twice — the rest is reported, not
-   required.
-   C. A fixed number: the shortest path within 20 pointer actions.
-3. **The mandatory scenario runs against…**
-   A. The demo API, live — a real server, a new id every run.
-   B. Live, and then the same scenario as a simulation from saved samples
-   (needs REQ-10).
-   C. A simulation only — nothing is sent; the id never changes, so the
-   wrong check is not caught.
-4. **The gaps.**
-   A. REQ-11 and REQ-12 join the REQ sprint, and the criteria for G1, G2,
-   G4 and G6 are added to REQ-00, REQ-01, REQ-02b and REQ-05 — the
-   scenario cannot meet criterion 2 or 3 without them.
-   B. REQ-11 joins; the check (REQ-12) goes to the sprint after — the
-   scenario is accepted with the check repaired in the Inspector.
-   C. Criteria only, no new ticket — the id is typed with completion and
-   criterion 2 is relaxed.
-5. **How many runs per variant in an A/B round?**
-   A. The shortest path and three first-time runs — shows a dead end
-   every driver meets; about an hour of agents per round.
-   B. The shortest path and one first-time run — half the cost; one
-   driver's accident reads as a finding.
-   C. The shortest path and five — steadier; a round takes an afternoon.
-6. **Which tickets get a round?**
-   A. Only those the sprint's plan names, proposed by the planning model
-   and confirmed by you with the plan.
-   B. Every `visible UI` ticket of size M or above.
-   C. Every `visible UI` ticket.
-7. **Which features first?** (the list is in
-   [Proposals](#proposals-beyond-the-request))
-   A. The three recommended: AB-01, the value from a response (REQ-11),
-   the check from a field (REQ-12 with DIAG-08).
-   B. Those and the first start (DEMO-01) and inserting and moving a step
-   (DIAG-06b).
-   C. AB-01 only for now; the rest after its results.
-8. **The budget of a round.**
-   A. 90 minutes of agents and 15 of yours; a larger round is split.
-   B. 45 and 10 — two variants and two tasks at most.
-   C. No cap; the plan states the cost of each round.
-9. **AB-01, v0.1.0 against v0.2.0: when?**
-   A. Now, finished before `v0.2.1-rc.1` is tagged — a regression that
-   blocks a task can still go into 0.2.1; the rest goes to REQ.
-   B. Right after 0.2.1, comparing v0.1.0 with v0.2.1 — nothing delays the
-   patch; regressions wait a release.
-   C. Both: now, and the failed tasks again on `v0.2.1-rc.1`.
+| | Decision |
+| --- | --- |
+| 1 = A | The DELETE is a step of the test with its own check, and the scenario is then done once more with it moved to Cleanup. Not chosen: Cleanup only; a step only |
+| 2 = A | "Comfortably", as the bar for the agents' round: no language syntax typed, green twice, no wrong turn in at least two of three first-time runs, fewer actions than v0.2.0. Not chosen: done and green twice only; a fixed number of actions |
+| 3 = A | The scenario runs live against the demo API. Not chosen: also as a simulation from saved samples; a simulation only |
+| 4 = A | REQ-11 (#538) and REQ-12 (#539) join the REQ sprint; the criteria for G1, G2, G4 and G6 are added to REQ-00, REQ-01, REQ-02b and REQ-05. Not chosen: REQ-11 only; criteria only |
+| 5 = A | An A/B round is the shortest path and three first-time runs per variant. Not chosen: one; five |
+| 6 = A | A round is run only for tickets the sprint's plan names. Not chosen: every `visible UI` ticket of size M or above; every `visible UI` ticket |
+| 7 = A | First: AB-01, then the value from a response (REQ-11) and the check from a field (REQ-12), after DIAG-08 |
+| 8 = A | A round is capped at 90 minutes of agents and 15 of the owner; a larger one is split |
+| 9 = A | AB-01 runs now, before `v0.2.1-rc.1` is tagged |
+| G7 | Yes, as a ticket of its own: REQ-13 (#540) |
 
 ## Not in scope
 
@@ -228,7 +191,7 @@ is counted with the ticket's analysis.
 | 8 | Headers and authorization (REQ-03) | Add a bearer token to one request and remove it | Today · the table and *Auth* | the diff | 30 min · 5 | after REQ-03 |
 | 9 | The run-mode switch (UX-42) | Run once as a simulation and once live | the menu · the switch | — | 20 min · 5 | not alone: decided on the board; part of a v0.2.0 against v0.2.1 round if one is run |
 
-Recommended first: 1, 2 and 3. Not proposed: pasting cURL (REQ-07) and
+Decided (7 = A): 1, 2 and 3 first; the others are not scheduled. Not proposed: pasting cURL (REQ-07) and
 duplicating a case (REQ-08) — each replaces typing with one action, and a
 round would only confirm it.
 
@@ -236,7 +199,7 @@ Other proposals:
 
 | Proposal | Problem it removes | Size · trade-off | Goes to |
 | --- | --- | --- | --- |
-| **The window writes only what was set** (G7) | A request added in the window is saved with `timeout 10s` and, for a POST, `@config({ method: "POST", timeoutMs: 10000.0 })`; a check gets a `@label` that repeats its handle. The diff of a test is longer than the test, and criterion 5 cannot be met | S–M · `default`: what a new step contains. A project saved by 0.2.0 keeps its lines | REQ, with REQ-02a's "writes the same `.afs`"; or LANG's second half |
+| **The window writes only what was set** (G7) — accepted, REQ-13 #540 | A request added in the window is saved with `timeout 10s` and, for a POST, `@config({ method: "POST", timeoutMs: 10000.0 })`; a check gets a `@label` that repeats its handle. The diff of a test is longer than the test, and criterion 5 cannot be met | S–M · `default`: what a new step contains. A project saved by 0.2.0 keeps its lines | REQ, with REQ-02a's "writes the same `.afs`"; or LANG's second half |
 | **A new scenario opens where it will be built** | *New scenario* opens Code with two lines; a tester who works in the window turns to Diagram first, every time | S · `default` | REQ-01, as a criterion once *Steps* exists: which of Canvas, Steps and Code a new, empty scenario opens in |
 | **A regression task set kept as a fixture** | AB-01's eight tasks, their start projects and pass conditions are written once and cost nothing to run again on every release candidate | S; the sheets must be kept true as the interface changes | after AB-01, a line of REL tickets: "the task set was run on the candidate" |
 | **The pass condition as a command** | A driver's "done" is checked by hand today. `apiforge check` and `apiforge run --json` already say most of it; a small script per task makes a round's verdict mechanical | S, tooling only | with AB-01 |

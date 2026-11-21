@@ -1,13 +1,14 @@
 # A/B rounds: variants compared by agents on a user's task
 
-- State: **proposed** by the planning model on 2026-11-21; not in force
-  until the owner approves it. The questions it leaves to the owner are in
-  [REQ-06](../tickets/REQ-06.md#questions-for-the-owner) (questions 5–8).
-- Decided already (owner, 2026-11-21): the REQ sprint's acceptance
-  scenario "is also to be run by agents, and the most ergonomic interface
-  worked out by A/B tests"; A/B rounds are wanted for other features too;
-  and the **first round compares v0.1.0 with v0.2.0** — "what got worse
-  will have to be addressed" ([AB-01](../tickets/AB-01.md)).
+- State: **in force** since 2026-11-21, approved by the owner with the
+  options recorded on #463 and #537: the shortest path and three
+  first-time runs per variant; a round only for tickets a sprint's plan
+  names; 90 minutes of agents and 15 of the owner per round.
+- The owner's words: the REQ sprint's acceptance scenario "is also to be
+  run by agents, and the most ergonomic interface worked out by A/B
+  tests"; A/B rounds are wanted for other features too; and the **first
+  round compares v0.1.0 with v0.2.0** — "what got worse will have to be
+  addressed" ([AB-01](../tickets/AB-01.md)).
 
 A [comparison board](planning.md#mock-ups) shows how options look. It does
 not show how many steps a task takes, where a person turns the wrong way,
@@ -75,6 +76,9 @@ again from the approved ticket, acceptance tests first.
   to `apiforge-demo-api` on loopback, started for the round.
 - The driver waits for the window before the first input and looks after
   every action that changes the view; input sent blind is a driver error.
+- A process the round starts — the demo API, the application — is stopped
+  by the process id kept when it was started. `pkill -f` and `pgrep -f`
+  are never used: the pattern matches the shell that runs it.
 - The driver may not: edit a project file outside the window, use the CLI
   or the MCP server on the project, read the application's source, or
   open Code unless the task sheet allows it. A run that broke a rule is
@@ -179,7 +183,6 @@ a sprint; it comes before it.
 Nothing changes in the [lifecycle](README.md#lifecycle-of-a-ticket). A
 variants round is part of a ticket's **analysis**: after the comparison
 board, before the quiz. A baseline round is part of a sprint's
-acceptance ticket. A version round is a ticket of its own. Which tickets
-get a round is the owner's choice
-([question 6](../tickets/REQ-06.md#questions-for-the-owner)); the
-planning model names the candidates in the sprint's plan.
+acceptance ticket. A version round is a ticket of its own. A round is run
+only for the tickets a sprint's plan names: the planning model proposes
+them with the plan and the owner confirms them with it.
