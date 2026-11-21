@@ -199,7 +199,7 @@ impl FolderApp {
                     let (_, chevron) = ui.allocate_space(egui::Vec2::splat(theme::CONTROL_HEIGHT));
                     ui.add_space(2.0 - ui.spacing().item_spacing.x);
                     let run = ui
-                        .add(run_button(live))
+                        .add(run_button(live, false))
                         .on_hover_text(if live { LIVE_HOVER } else { SIMULATE_HOVER })
                         .clicked();
                     let stored = self.run_mode.mode(&project);
@@ -1205,8 +1205,9 @@ fn run_label(live: bool) -> &'static str {
 }
 
 /// The header's Run button: *Run simulation* in the violet that also marks a
-/// simulation in Run results, or *Run live* in the accent (UX-02).
-pub(super) fn run_button(live: bool) -> widgets::ActionButton<'static> {
+/// simulation in Run results, or *Run live* in the accent (UX-02). `compact`
+/// is the button where the header's row is too short (UX-42).
+pub(super) fn run_button(live: bool, _compact: bool) -> widgets::ActionButton<'static> {
     let button = widgets::action(Icon::Play, run_label(live)).primary();
     if live {
         button

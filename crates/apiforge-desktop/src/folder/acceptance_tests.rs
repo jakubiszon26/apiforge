@@ -8027,12 +8027,12 @@ mod ux02 {
     fn ux02_criterion_1_simulation_is_one_violet() {
         assert_eq!(theme::SIMULATION, egui::Color32::from_rgb(112, 76, 182));
         assert_eq!(
-            super::super::chrome::run_button(false).primary_fill(),
+            super::super::chrome::run_button(false, false).primary_fill(),
             theme::SIMULATION,
             "Run simulation"
         );
         assert_eq!(
-            super::super::chrome::run_button(true).primary_fill(),
+            super::super::chrome::run_button(true, false).primary_fill(),
             theme::ACCENT,
             "Run live"
         );
