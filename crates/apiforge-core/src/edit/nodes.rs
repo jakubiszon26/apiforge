@@ -10,7 +10,7 @@ use crate::{
     graph::{VALUE_INPUT, condition_inputs, create_node, has_cycle, output_ports, position_after},
     handle::{handle_base, unique_handle, unique_label},
     js,
-    model::NodeKind,
+    model::{NodeKind, Predicate},
 };
 use serde_json::Value;
 
@@ -210,6 +210,63 @@ fn after_step(graph: &Graph, source: &str) -> usize {
 /// The actual value stays a reference, so the check reads the field on every run;
 /// the same binding is used for sample responses and run results.
 pub fn field_assertion(source: &Node, port: &str, path: &str, value: &Value) -> Node {
+    field_check(source, port, path, &FieldCheck::Equals(value.clone()))
+}
+
+/// What a check written from one field of a step's data asks of it: the
+/// menu *Add a check* on the field (DIAG-08).
+#[derive(Clone, Debug, PartialEq)]
+pub enum FieldCheck {
+    /// `actual == value`: the value shown.
+    Equals(Value),
+    /// `actual is "<type>"`, in the language's word for the type.
+    Type(String),
+    /// `exists actual`.
+    Exists,
+    /// `nonempty actual`.
+    NotEmpty,
+}
+
+impl FieldCheck {
+    /// The checks offered for a field showing `value`, in the menu's order:
+    /// it equals the value, is of its type, exists, is not empty.
+    pub fn offered(value: &Value) -> [Self; 4] {
+        [
+            Self::Equals(value.clone()),
+            Self::Type(js::type_name(Some(value)).to_owned()),
+            Self::Exists,
+            Self::NotEmpty,
+        ]
+    }
+
+    pub fn predicate(&self) -> Predicate {
+        match self {
+            Self::Equals(_) => Predicate::Equals,
+            Self::Type(_) => Predicate::Type,
+            Self::Exists => Predicate::Exists,
+            Self::NotEmpty => Predicate::NotEmpty,
+        }
+    }
+
+    /// The literal the check expects, when its predicate takes one.
+    pub fn expected(&self) -> Option<Value> {
+        match self {
+            Self::Equals(value) => Some(value.clone()),
+            Self::Type(name) => Some(Value::String(name.clone())),
+            Self::Exists | Self::NotEmpty => None,
+        }
+    }
+}
+
+/// A check of one output field, placed next to `source`: `check` asks it to
+/// equal a value, to be of a type, to exist or not to be empty (DIAG-08).
+///
+/// Its handle is derived from the field and may collide with existing
+/// handles; the caller adds it with [`crate::handle::unique_handle`] or
+/// `dedupe_handles`. The actual value stays a reference, so the check reads
+/// the field on every run; the same binding is used for sample responses and
+/// run results.
+pub fn field_check(source: &Node, port: &str, path: &str, check: &FieldCheck) -> Node {
     let position = Position {
         x: source.position.x + 340.0,
         y: source.position.y + 70.0,
@@ -218,11 +275,14 @@ pub fn field_assertion(source: &Node, port: &str, path: &str, value: &Value) -> 
     let subject = if path.is_empty() { port } else { path };
     node.handle = handle_base(&format!("check {subject}"));
     node.label = Some(format!("Check {subject}"));
+    node.config.predicate = Some(check.predicate());
     node.inputs.clear();
     node.inputs
         .insert("actual".into(), Binding::reference(&source.id, port, path));
-    node.inputs
-        .insert("expected".into(), Binding::literal(value.clone()));
+    if let Some(expected) = check.expected() {
+        node.inputs
+            .insert("expected".into(), Binding::literal(expected));
+    }
     node
 }
 
