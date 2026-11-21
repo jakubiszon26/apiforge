@@ -134,3 +134,45 @@ async fn lang22_criterion_4_computed_type() {
     );
     assert_eq!(typed.expected, OptionalJson::Present(json!("nubmer")));
 }
+
+#[tokio::test]
+async fn lang22_criterion_3_failure_message_hides_secrets() {
+    // The value is a secret the run learns only later, from the cleanup's
+    // Authorization header, and holds a character JSON escapes: the message
+    // masks it as the step's `actual` does.
+    for (written, secret) in [
+        (r#"demo\"secret"#, r#"demo"secret"#),
+        (r"demo\\secret", r"demo\secret"),
+    ] {
+        let text = format!(
+            r#"scenario "Secret" {{
+  begin = start
+  cart = GET "/carts/c-1" {{
+    sample 200 {{ id: "{written}" }}
+  }}
+  typed = assert cart.body.id is "number"
+  cleanup {{
+    removed = DELETE "/carts/c-1" {{
+      headers {{ Authorization: cart.body.id }}
+      sample 200 {{}}
+    }}
+  }}
+}}
+"#
+        );
+        let run = simulate(&text).await;
+        let typed = step(&run, "typed");
+        assert_eq!(typed.status, StepStatus::Failed, "{secret}");
+        assert_eq!(
+            typed.actual,
+            OptionalJson::Present(json!("[REDACTED]")),
+            "{secret}"
+        );
+        let message = typed.message.as_deref().unwrap();
+        assert!(!message.contains("secret"), "{secret}: {message}");
+        assert!(
+            message.starts_with("The comparison failed: expected number, actual string"),
+            "{message}"
+        );
+    }
+}
