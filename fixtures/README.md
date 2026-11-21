@@ -8,6 +8,7 @@
 | `semantics/*.jsonl` | Expected results of operators, field paths and number formatting, one case per line, replayed by `crates/apiforge-core/tests/semantic_corpus.rs` |
 | `scripts/*.afs` | Canonical scenario and component examples of the scenario language |
 | `scenarios/lay/*.afs` | The reference scenarios of the LAY sprint, written by hand; see below |
+| `demo/` | The folder project a first start writes (DEMO-01), written by hand; see below |
 
 ## Reference scenarios
 
@@ -40,6 +41,23 @@ owner's acceptance material for the close of the LAY sprint (#296): two
 bookings that read `rooms.body.items[0].id` and `rooms.body.items[1].id`.
 A test copies the folder to a temporary directory and opens the copy as a
 project; nothing walks it with the single-file references above.
+
+## The first-start demo
+
+`demo/` is *Demo shop* as a first start in an empty data directory writes it
+([DEMO-01](../docs/tickets/DEMO-01.md)): the scenarios *Buy coffee on
+promotion* (19 steps in a simulation, the `else` branch skipped) and *The cart
+refuses bad orders* (three refused orders under `on_error continue`), the
+component `product` and its published revision 1 under `.apiforge/revisions/`.
+The desktop embeds these files as they are (`apiforge_core::demos::FIRST_START`),
+so editing one changes what a new install opens; a file added here is added to
+that list too. They are held to what the other working sources are held to:
+`check` without a diagnostic, `fmt --check`, the recorded step order of
+LANG-13 and the same order through the command line and MCP (REL-05), and
+`crates/apiforge-cli/tests/demo01.rs` runs both scenarios live against the demo
+API. No layout is kept here: the window lays each board out as *Tidy up* does
+on its first open and saves it. `demos::shop_project()` is a different demo
+shop, the one the tests build on.
 
 ## Generated fixtures
 

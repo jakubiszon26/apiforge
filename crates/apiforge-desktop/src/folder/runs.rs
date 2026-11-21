@@ -914,6 +914,11 @@ impl FolderApp {
     }
 
     pub(super) fn review_legacy_runs(&mut self) {
+        #[cfg(test)]
+        if let Some(data) = self.legacy_data.clone() {
+            self.review_legacy_runs_from(&data);
+            return;
+        }
         let Some(data) = dirs::data_dir() else {
             self.notify("No application data directory is available.", true);
             return;

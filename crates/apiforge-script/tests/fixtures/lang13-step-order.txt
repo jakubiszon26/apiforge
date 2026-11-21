@@ -1,5 +1,8 @@
 # LANG-13: the order of the steps of every fixture as main reads it (stored
 # spelling), recorded in the acceptance commit: main flow | cleanup, Start left out.
+fixtures/demo/components/product.afs: fetch_product | 
+fixtures/demo/scenarios/buy-coffee-on-promotion.afs: product cart promoted | removed
+fixtures/demo/scenarios/the-cart-refuses-bad-orders.afs: no_quantity too_many unknown_product | 
 fixtures/scenarios/lay/fan-out.afs: catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 
 fixtures/scenarios/lay/far-value-saved.afs: session catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 
 fixtures/scenarios/lay/far-value.afs: session catalogue product cart quantity apply_coupon note stock shipping remove_coupon view checkout lookup | 

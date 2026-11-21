@@ -400,7 +400,6 @@ fn menus_opened_from_the_keyboard_are_named_and_reachable() {
     let (context, mut app) = open(directory.path());
     for (button, menu, first) in [
         ("Project", "Project menu", "Open Folder…"),
-        ("Run options", "Run options menu", "Simulation"),
         ("New", "New menu", "New scenario"),
     ] {
         open_by_keyboard(&mut app, &context, button);

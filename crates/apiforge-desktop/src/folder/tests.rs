@@ -560,8 +560,8 @@ fn every_mode_draws_at_the_minimum_window_with_an_invalid_document() {
 }
 
 /// KTLO-23a adds a component tab (decision 6): its toolbar, with *Publish*,
-/// *Run options* and *Run*, is wider than a scenario's, and the title keeps
-/// one width on both kinds of tab.
+/// the run mode switch and *Run*, is wider than a scenario's, and the title
+/// keeps one width on both kinds of tab.
 #[test]
 fn long_project_names_do_not_overlap_header_actions_in_writable_or_read_only_windows() {
     let name = "Customer integration and contract verification workspace";
@@ -581,13 +581,13 @@ fn long_project_names_do_not_overlap_header_actions_in_writable_or_read_only_win
     for (app, context) in [(&mut writer, &context), (&mut reader, &read_context)] {
         for size in [egui::vec2(960.0, 540.0), egui::vec2(1600.0, 1000.0)] {
             let mut titles = Vec::new();
-            // The chevron *Run options* paints no text (UX-02); its place
-            // is checked by `ux02_criterion_7_the_header_fits`.
+            // The Run button paints *Run* (UX-42); the switch's place is
+            // checked by `ux42_criterion_6_the_fullest_header_fits`.
             for (tab, actions) in [
-                (&scenario, &["Save", "Save all", "Run simulation"][..]),
+                (&scenario, &["Save", "Save all", "Simulation", "Run"][..]),
                 (
                     &component,
-                    &["Save", "Save all", "Publish", "Run simulation"][..],
+                    &["Save", "Save all", "Publish", "Simulation", "Run"][..],
                 ),
             ] {
                 app.workbench.open(tab);
@@ -2030,7 +2030,8 @@ fn folder_run_settles_unsaved_code_and_reports_in_every_mode_then_becomes_stale(
         .unwrap()
         .edit_source(&id, &edited, CODE)
         .unwrap();
-    let at = label_position(&mut app, &context, "Run simulation");
+    // The Run button paints *Run* in either mode (UX-42).
+    let at = label_position(&mut app, &context, "Run");
     click(&mut app, &context, at);
     finish_folder_run(&mut app);
     assert_eq!(
