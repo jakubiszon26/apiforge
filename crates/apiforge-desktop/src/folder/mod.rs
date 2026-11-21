@@ -450,6 +450,10 @@ pub struct FolderApp {
     /// the marks to appear (UX-03).
     #[cfg(test)]
     marks_shown: Option<(String, Vec<usize>, Option<Duration>)>,
+    /// The application data directory *Review legacy runs* reads in place
+    /// of the person's own (UX-42); `None` reads the person's.
+    #[cfg(test)]
+    legacy_data: Option<PathBuf>,
 }
 
 /// What a paste shows once its edit is applied: its copies (UX-34).
@@ -636,6 +640,8 @@ impl FolderApp {
             marks_clock: None,
             #[cfg(test)]
             marks_shown: None,
+            #[cfg(test)]
+            legacy_data: None,
         }
     }
 
@@ -1113,6 +1119,14 @@ impl FolderApp {
         self.consent = crate::consent::AgentConsent::in_configuration(directory);
         self.run_mode = crate::run_mode::RunModeStore::in_configuration(directory);
         self.say_consent();
+    }
+
+    /// Reads legacy runs from `directory`, as the application data
+    /// directory would hold them, instead of the person's own: a test seam
+    /// (UX-42).
+    #[cfg(test)]
+    pub(crate) fn use_legacy_data_directory(&mut self, directory: &std::path::Path) {
+        self.legacy_data = Some(directory.to_owned());
     }
 
     // ----- Frame -----------------------------------------------------------------

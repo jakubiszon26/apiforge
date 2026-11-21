@@ -216,6 +216,12 @@ impl FolderApp {
                     ui.close();
                     self.open_environment();
                 }
+                // Here since the run mode left its menu for the header's
+                // switch (UX-42).
+                if ui.button("Review legacy runs").clicked() {
+                    ui.close();
+                    self.review_legacy_runs();
+                }
             }
             if !entries.is_empty() {
                 ui.separator();
