@@ -30,7 +30,7 @@ use apiforge_core::{
     },
     journal::{EffectState, JournalEntry, JournalRun, JournalSink},
     js::{self, js_key_order},
-    model::{BodyFormat, Branch, ErrorPolicy, HttpMethod, Match, NodeKind, ValueType},
+    model::{BodyFormat, Branch, ErrorPolicy, HttpMethod, Match, NodeKind, Predicate, ValueType},
     operator::{Operator, OperatorError, RandomSource, simulated_uuid},
     path,
     predicate::PredicateError,
@@ -987,15 +987,47 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             let (status, message) = if node.kind == NodeKind::Condition {
                 (
                     StepStatus::Blocked,
-                    "Invalid data: the input condition is not met.",
+                    "Invalid data: the input condition is not met.".to_owned(),
+                )
+            } else if predicate(node) == Predicate::Type {
+                (
+                    StepStatus::Failed,
+                    self.type_failure(input("expected").as_ref(), input("actual").as_ref()),
                 )
             } else {
-                (StepStatus::Failed, "The comparison failed.")
+                (StepStatus::Failed, "The comparison failed.".to_owned())
             };
             step.status = status;
-            step.message = Some(message.to_owned());
+            step.message = Some(message);
         }
         Ok(())
+    }
+
+    /// What a failed type check says (LANG-22): the type the value has beside
+    /// the value, `expected string, actual number (160)`, so the reader does
+    /// not work the type out. The value is written redacted, as the report's
+    /// `actual` is; one longer than [`SHOWN_CHARS`] is left to `actual` whole
+    /// rather than cut, since a cut text could hide a secret from the
+    /// report's redaction.
+    fn type_failure(&self, expected: Option<&Value>, actual: Option<&Value>) -> String {
+        const SHOWN_CHARS: usize = 60;
+        let shown = |value: &Value| self.redactor.redact_value(value).to_string();
+        let expected = match expected {
+            Some(Value::String(name)) => self.redactor.redact_str(name),
+            Some(other) => shown(other),
+            None => "—".to_owned(),
+        };
+        let found = js::type_name(actual);
+        match actual
+            .filter(|value| !value.is_null())
+            .map(shown)
+            .filter(|text| text.chars().count() <= SHOWN_CHARS)
+        {
+            Some(value) => {
+                format!("The comparison failed: expected {expected}, actual {found} ({value}).")
+            }
+            None => format!("The comparison failed: expected {expected}, actual {found}."),
+        }
     }
 
     async fn component(
