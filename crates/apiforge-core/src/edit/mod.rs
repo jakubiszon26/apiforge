@@ -45,8 +45,8 @@ pub use inspect::{
     collect_response_fields, collect_response_fields_bounded, sample_paths,
 };
 pub use nodes::{
-    AddedNode, AssignedVariable, OutputRef, add_check, add_node, assign_response_variable,
-    field_assertion,
+    AddedNode, AssignedVariable, FieldCheck, OutputRef, add_check, add_node,
+    assign_response_variable, field_assertion, field_check,
 };
 pub use place::{Place, add_step_after, place};
 pub use proxies::{

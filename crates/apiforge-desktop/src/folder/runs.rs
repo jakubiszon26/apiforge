@@ -741,9 +741,10 @@ impl FolderApp {
         }
     }
 
-    /// *Add comparison* or *Assign to variable* on a field of a step's
-    /// data: the run's results or, before any run, the step's sample
-    /// (DIAG-09). Neither needs a run: the graph that holds the step tells
+    /// A check from the menu *Add a check* (DIAG-08) or *Assign to
+    /// variable* on a field of a step's data: the run's results or, before
+    /// any run, the step's sample (DIAG-09). Neither needs a run: the graph
+    /// that holds the step tells
     /// the cleanup from the main flow. A check is counted against the
     /// document's report only while that report is not stale (UX-01).
     pub(super) fn field_action(&mut self, id: &str, action: crate::report::Action) {
@@ -760,7 +761,7 @@ impl FolderApp {
                 node_id,
                 port,
                 path,
-                value,
+                check,
             } => {
                 let cleanup = !graph_of(&model, false)
                     .nodes
@@ -788,8 +789,8 @@ impl FolderApp {
                         satellites: true,
                         lines: lines_of(&self.preferences),
                     };
-                    let pushed = board
-                        .push_check(&node_id, edit::field_assertion(node, &port, &path, &value));
+                    let pushed =
+                        board.push_check(&node_id, edit::field_check(node, &port, &path, &check));
                     // The check is counted when its edit applies, which may
                     // first ask about unattached comments (UX-35).
                     self.component_action(

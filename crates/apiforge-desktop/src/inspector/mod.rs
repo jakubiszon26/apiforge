@@ -10,7 +10,7 @@ mod fields;
 mod response;
 pub mod source_change;
 
-pub use fields::{forget_field_text, type_combo};
+pub use fields::{check_menu, forget_field_text, type_combo};
 pub use response::sample_output;
 
 use crate::icons::Icon;
@@ -36,10 +36,11 @@ pub enum Action {
     /// A change to ordering edges of the board.
     UpdateGraph(Graph),
     EditComponent,
+    /// A check of a field chosen in the menu *Add a check* (DIAG-08).
     AssertField {
         port: String,
         path: String,
-        value: serde_json::Value,
+        check: apiforge_core::edit::FieldCheck,
     },
     AssignField {
         port: String,
@@ -1364,10 +1365,10 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
         if let Some(action) = fields::json_tree(ui, &node.id, &port.name, &value, context.read_only)
         {
             actions.push(match action {
-                fields::TreeAction::Check { path, value } => Action::AssertField {
+                fields::TreeAction::Check { path, check } => Action::AssertField {
                     port: port.name.clone(),
                     path,
-                    value,
+                    check,
                 },
                 fields::TreeAction::Assign { path } => Action::AssignField {
                     port: port.name.clone(),
