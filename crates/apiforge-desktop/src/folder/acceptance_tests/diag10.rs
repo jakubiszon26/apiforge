@@ -318,10 +318,14 @@ fn diag10_criterion_2_nesting_and_names() {
         !shows(&harness, "items[1].name"),
         "a nested row shows its own name, not its path"
     );
+    // The hover is a text, whose words AccessKit keeps as its value.
     let path = |harness: &FolderHarness| {
         harness
             .query_all_by_label_contains("items[1].name")
-            .filter_map(|node| node.accesskit_node().label())
+            .filter_map(|node| {
+                let node = node.accesskit_node();
+                node.label().or_else(|| node.value())
+            })
             .find(|label| label.contains("string"))
     };
     let shown = crate::testing::hover_until(
