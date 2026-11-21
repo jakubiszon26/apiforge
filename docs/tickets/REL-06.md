@@ -2,10 +2,12 @@
 
 - Size: S · Owner review: 15 min · Risk: none of its own (it ships the
   `default`, `removal` and `visible UI` changes of its tickets)
-- State: Backlog (issue #524) · **decision needed: question 13** (a
-  release candidate first, or the tag at once) · last of 0.2.1, after
-  its six tickets have merged · not ready
-- Analysis model: Fable 5.2 · Implementation model: —
+- State: **Approved, ready for implementation** (issue #524) · decided
+  by the owner on 2026-11-21: **a release candidate first**,
+  `v0.2.1-rc.1`, then `v0.2.1` after the owner has tried the packages ·
+  last of 0.2.1, **after its six tickets have merged** · labelled
+  `ready:opus`
+- Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
 
@@ -26,9 +28,8 @@ request and put to the owner, not assumed.
 - As decided for REL-05 (#414) and unchanged unless the owner says so:
   the owner pushes the tags; published as a pre-release; the notes are
   the list GitHub generates.
-- Question 13: a candidate `v0.2.1-rc.1` first, as for 0.2.0
-  (**recommended**: the first start and the header change, and the four
-  findings came from trying a candidate), or `v0.2.1` at once.
+- Decided (question 13): a candidate `v0.2.1-rc.1` first, as for 0.2.0;
+  `v0.2.1` after the owner has tried its packages.
 - Mock-up: not applicable.
 
 ## Release conditions

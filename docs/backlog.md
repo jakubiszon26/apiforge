@@ -521,10 +521,11 @@ same day, on the issues. The mock-ups are on `mock/rel-0.2.1`; the
 issues carry `sprint:0.2.1`. About 105 owner minutes. The table is in
 the order of work.
 
-- Open: UX-42's question 12 — the switch the owner chose does not fit a
-  component's header at 960 px as drawn, by about 32 px
-  ([ticket](tickets/UX-42.md#the-measurement-and-question-12)); REL-06's
-  question 13, a release candidate or the tag at once.
+- Decided the same day on a measurement: the switch the owner chose is
+  about 32 px short on a component's header at 960 px, so there the Run
+  button is ▶ alone
+  ([ticket](tickets/UX-42.md#the-measurement-and-question-12)); a release
+  candidate `v0.2.1-rc.1` comes first. Nothing waits for a decision.
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
@@ -533,8 +534,8 @@ the order of work.
 | [#399](https://github.com/jakubiszon26/apiforge/issues/399) | DIAG-09 Add comparison and Assign to variable work before the first run; [ticket](tickets/DIAG-09.md) | S · 10 min · `visible UI` |
 | [#521](https://github.com/jakubiszon26/apiforge/issues/521) | DIAG-08 A check of a field's type in one step from the field; [ticket](tickets/DIAG-08.md); after DIAG-09 | S · 20 min · `visible UI` |
 | [#523](https://github.com/jakubiszon26/apiforge/issues/523) | DEMO-01 The first-start project shows the 0.2.0 language; [ticket](tickets/DEMO-01.md); after LANG-22 and DIAG-08 only in that its scenario is what they are tried on | M · 30 min · `default`, `visible UI` |
-| [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode is a switch in the header; [ticket](tickets/UX-42.md); waits for question 12 | S · 20 min · `visible UI`, `removal` |
-| [#524](https://github.com/jakubiszon26/apiforge/issues/524) | REL-06 v0.2.1; [ticket](tickets/REL-06.md); last | S · 15 min |
+| [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode is a switch in the header; [ticket](tickets/UX-42.md) | S · 20 min · `visible UI`, `removal` |
+| [#524](https://github.com/jakubiszon26/apiforge/issues/524) | REL-06 v0.2.1, a candidate first; [ticket](tickets/REL-06.md); last | S · 15 min |
 
 ## Next sprint: REQ (not started)
 
