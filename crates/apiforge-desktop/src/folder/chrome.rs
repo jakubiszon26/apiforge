@@ -196,12 +196,26 @@ impl FolderApp {
                     // Right to left, the chevron is the rightmost: its place
                     // is taken first and the chevron added there after *Run
                     // simulation*, which Tab therefore reaches first.
-                    let (_, chevron) = ui.allocate_space(egui::Vec2::splat(theme::CONTROL_HEIGHT));
-                    ui.add_space(2.0 - ui.spacing().item_spacing.x);
-                    let run = ui
-                        .add(run_button(live))
-                        .on_hover_text(if live { LIVE_HOVER } else { SIMULATE_HOVER })
-                        .clicked();
+                    let switch = crate::mock::get(&crate::mock::RUN_MENU) == 3;
+                    let (_, chevron) = if switch {
+                        (egui::Id::NULL, egui::Rect::NOTHING)
+                    } else {
+                        let space = ui.allocate_space(egui::Vec2::splat(theme::CONTROL_HEIGHT));
+                        ui.add_space(2.0 - ui.spacing().item_spacing.x);
+                        space
+                    };
+                    let run = if switch {
+                        let button = widgets::action(Icon::Play, "Run").primary();
+                        ui.add(if live { button } else { button.fill(theme::SIMULATION) })
+                    } else {
+                        ui.add(run_button(live))
+                    }
+                    .on_hover_text(if live { LIVE_HOVER } else { SIMULATE_HOVER })
+                    .clicked();
+                    let mut switched = None;
+                    if switch {
+                        switched = mock_mode_switch(ui, live);
+                    }
                     let stored = self.run_mode.mode(&project);
                     // The menu shows the mode the button runs; a click on
                     // an item is the person's choice even when it is the
@@ -213,7 +227,46 @@ impl FolderApp {
                     };
                     let mut chosen = None;
                     let mut review = false;
+                    let variant = crate::mock::get(&crate::mock::RUN_MENU);
                     let menu = |ui: &mut egui::Ui| {
+                        if variant == 1 || variant == 2 {
+                            ui.set_width(if variant == 1 { 280.0 } else { 200.0 });
+                            if variant == 1 {
+                                widgets::caption(ui, "RUN MODE");
+                                ui.add_space(2.0);
+                            }
+                            for (mode, label, hint, enabled) in [
+                                (
+                                    RunMode::Simulation,
+                                    "Simulation",
+                                    "Sample responses; no request is sent.",
+                                    true,
+                                ),
+                                (
+                                    RunMode::Live,
+                                    "Live",
+                                    "Requests go to the project's API.",
+                                    !observing,
+                                ),
+                            ] {
+                                if mock_mode_row(ui, shown == mode, mode, label, hint, enabled, variant)
+                                {
+                                    chosen = Some(mode);
+                                }
+                            }
+                            ui.add_space(2.0);
+                            ui.separator();
+                            if ui
+                                .add(egui::Button::new(
+                                    RichText::new("Review legacy runs").color(theme::MUTED),
+                                ).frame(false))
+                                .clicked()
+                            {
+                                ui.close();
+                                review = true;
+                            }
+                            return;
+                        }
                         widgets::caption(ui, "RUN MODE");
                         mode_item(
                             ui,
@@ -237,12 +290,17 @@ impl FolderApp {
                             review = true;
                         }
                     };
-                    widgets::action_menu_at(
-                        ui,
-                        chevron,
-                        widgets::icon_button(Icon::ChevronDown, OPTIONS),
-                        menu,
-                    );
+                    if switch {
+                        let _ = menu;
+                        chosen = switched;
+                    } else {
+                        widgets::action_menu_at(
+                            ui,
+                            chevron,
+                            widgets::icon_button(Icon::ChevronDown, OPTIONS),
+                            menu,
+                        );
+                    }
                     // Opening the menu writes nothing: a *Live* kept while
                     // observing stays until another mode is chosen (UX-02).
                     if let Some(mode) = chosen.filter(|mode| *mode != stored) {
@@ -1240,4 +1298,118 @@ fn mode_item(
         }
     });
     ui.advance_cursor_after_rect(item.min_rect());
+}
+
+/// Mock-up (0.2.1): a run mode as one whole row of the menu. With a hint
+/// under the name (variant 1) or as a command with the hint on hover
+/// (variant 2). The chosen row carries the mode's colour and a check.
+fn mock_mode_row(
+    ui: &mut egui::Ui,
+    chosen: bool,
+    mode: RunMode,
+    label: &str,
+    hint: &str,
+    enabled: bool,
+    variant: u8,
+) -> bool {
+    let tall = variant == 1;
+    let height = if tall { 46.0 } else { 30.0 };
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), height),
+        if enabled { egui::Sense::click() } else { egui::Sense::hover() },
+    );
+    let colour = if mode == RunMode::Live { theme::ACCENT } else { theme::SIMULATION };
+    let painter = ui.painter();
+    if chosen {
+        painter.rect_filled(rect, 6.0, colour.gamma_multiply(0.10));
+    } else if response.hovered() {
+        painter.rect_filled(rect, 6.0, theme::FIELD);
+    }
+    let text = if enabled { theme::TEXT } else { theme::MUTED };
+    let name = if tall { label.to_owned() } else { format!("Run {}", label.to_lowercase()) };
+    let top = if tall { rect.top() + 7.0 } else { rect.center().y - 8.0 };
+    painter.circle_filled(egui::pos2(rect.left() + 14.0, top + 8.0), 4.0, colour);
+    painter.text(
+        egui::pos2(rect.left() + 28.0, top),
+        egui::Align2::LEFT_TOP,
+        name,
+        egui::FontId::new(theme::FONT_BODY, if chosen { theme::bold_family() } else { egui::FontFamily::Proportional }),
+        text,
+    );
+    if tall {
+        painter.text(
+            egui::pos2(rect.left() + 28.0, top + 18.0),
+            egui::Align2::LEFT_TOP,
+            hint,
+            egui::FontId::proportional(theme::FONT_META),
+            theme::MUTED,
+        );
+    }
+    if chosen {
+        let mark = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - 16.0, rect.center().y),
+            egui::Vec2::splat(16.0),
+        );
+        Icon::Check.paint(painter, mark, colour);
+    }
+    let response = if tall { response } else { response.on_hover_text(hint) };
+    widgets::named(response, label).clicked()
+}
+
+/// Mock-up (0.2.1), variant 3: the mode as a two-part switch in the header,
+/// left of the Run button; no menu.
+fn mock_mode_switch(ui: &mut egui::Ui, live: bool) -> Option<RunMode> {
+    let font = egui::FontId::proportional(theme::FONT_LABEL);
+    let width = |text: &str| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), theme::TEXT)
+            .size()
+            .x
+            + 20.0
+    };
+    let (simulation, live_width) = (width("Simulation"), width("Live"));
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(simulation + live_width + 4.0, theme::CONTROL_HEIGHT),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 8.0, theme::FIELD);
+    let mut chosen = None;
+    let mut left = rect.left() + 2.0;
+    for (mode, label, part) in [
+        (RunMode::Simulation, "Simulation", simulation),
+        (RunMode::Live, "Live", live_width),
+    ] {
+        let segment = egui::Rect::from_min_size(
+            egui::pos2(left, rect.top() + 2.0),
+            egui::vec2(part, rect.height() - 4.0),
+        );
+        left += part;
+        let on = live == (mode == RunMode::Live);
+        let colour = if mode == RunMode::Live { theme::ACCENT } else { theme::SIMULATION };
+        let response = ui.interact(segment, ui.id().with(("mock-mode", label)), egui::Sense::click());
+        if on {
+            ui.painter().rect(
+                segment,
+                6.0,
+                theme::WHITE,
+                egui::Stroke::new(1.0, theme::BORDER),
+                egui::StrokeKind::Inside,
+            );
+        }
+        ui.painter().text(
+            segment.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            if on {
+                egui::FontId::new(theme::FONT_LABEL, theme::bold_family())
+            } else {
+                font.clone()
+            },
+            if on { colour } else { theme::MUTED },
+        );
+        if widgets::named(response, label).clicked() {
+            chosen = Some(mode);
+        }
+    }
+    chosen
 }

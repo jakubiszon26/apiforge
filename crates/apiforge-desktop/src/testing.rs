@@ -849,6 +849,66 @@ mod review {
         }
     }
 
+    /// 0.2.1 mock-up: the run mode menu as v0.2.0 ships it and in three
+    /// other forms, in either mode, at both windows.
+    #[test]
+    #[ignore = "design review capture; run with tools/gui/review.sh"]
+    fn review_rel021_run_mode() {
+        fn click(harness: &mut FolderHarness, label: &str) {
+            harness.get_by_label(label).click();
+            harness.hover_at(egui::pos2(480.0, 3.0));
+            settle(harness);
+        }
+        for (variant, look) in [(0, "today"), (1, "a-rows"), (2, "b-commands"), (3, "c-switch")] {
+            crate::mock::set(&crate::mock::RUN_MENU, variant);
+            for (size, suffix) in [(MINIMUM, "960"), (WIDE, "1600")] {
+                let project = shop_project();
+                let configuration = tempfile::tempdir().unwrap();
+                let mut harness = folder_harness(project.path(), size);
+                harness
+                    .state_mut()
+                    .as_mut()
+                    .unwrap()
+                    .use_configuration_directory(configuration.path());
+                settle(&mut harness);
+                click(&mut harness, "Diagram");
+                for mode in ["simulation", "live"] {
+                    if mode == "live" {
+                        if variant != 3 {
+                            click(&mut harness, "Run options");
+                        }
+                        click(&mut harness, "Live");
+                    }
+                    if variant != 3 {
+                        click(&mut harness, "Run options");
+                    }
+                    let window = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                    let region = egui::Rect::from_min_max(
+                        egui::pos2(window.right() - 560.0, 0.0),
+                        egui::pos2(window.right(), 330.0),
+                    );
+                    capture(
+                        &mut harness,
+                        &format!("rel021-run-mode-{look}-{mode}-{suffix}"),
+                        Some(region),
+                    );
+                    if suffix == "960" && mode == "live" {
+                        capture(
+                            &mut harness,
+                            &format!("rel021-run-mode-{look}-{mode}-{suffix}-window"),
+                            None,
+                        );
+                    }
+                    if variant != 3 {
+                        harness.key_press(egui::Key::Escape);
+                        settle(&mut harness);
+                    }
+                }
+            }
+        }
+        crate::mock::set(&crate::mock::RUN_MENU, 0);
+    }
+
     /// UX-04: *Running unsaved code* just left of *Cancel run* while a
     /// live run runs, on the run's tab and, at both windows, on a
     /// component's tab with *Publish* and *Live allowed*, where it names

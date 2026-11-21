@@ -555,3 +555,158 @@ fn review_lay10() {
         crate::testing::capture(&mut harness, name, None);
     }
 }
+
+/// 0.2.1 mock-up: the selected card in the look v0.2.0 ships and in three
+/// others, on a failed step at 100 % and on `cart` with its relations at
+/// 60 %.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_rel021_selection() {
+    for (variant, look) in [(0, "today"), (1, "a-ink"), (2, "b-blue"), (3, "c-accent")] {
+        crate::mock::set(&crate::mock::SELECTION, variant);
+        for (selected, zoom, collapsed, view) in [
+            ("checkout", 1.0, true, "failed-100"),
+            ("cart", 1.0, true, "passed-100"),
+            ("cart", 0.6, false, "focus-60"),
+        ] {
+            let project = crate::testing::shop_project();
+            fs::write(
+                project
+                    .path()
+                    .join("scenarios/promotion-and-cart-price.afs"),
+                failing(),
+            )
+            .unwrap();
+            fs::remove_file(project.path().join(".apiforge/diagram.json")).unwrap();
+            let (_project, mut harness, gate) = lay07::opened(project, WIDE, !collapsed);
+            let document = document(&harness);
+            app(&mut harness).selections.insert(document, Vec::new());
+            settle(&mut harness);
+            choose(&mut harness, "Tidy up");
+            harness.step();
+            lay07::simulate(&mut harness, &gate);
+            harness.get_by_label("Run results").click();
+            settle(&mut harness);
+            select(&mut harness, &[selected]);
+            show(&mut harness, selected, zoom);
+            let id = id_of(&harness, selected);
+            let card = canvas(&harness)
+                .debug_cards()
+                .iter()
+                .find(|(card, _)| *card == id)
+                .map(|(_, rect)| *rect)
+                .unwrap();
+            let region = if zoom < 1.0 {
+                card.expand2(egui::vec2(430.0, 250.0))
+            } else {
+                card.expand2(egui::vec2(170.0, 70.0))
+            };
+            crate::testing::capture(
+                &mut harness,
+                &format!("rel021-selection-{look}-{view}"),
+                Some(region),
+            );
+        }
+    }
+    crate::mock::set(&crate::mock::SELECTION, 0);
+}
+
+/// 0.2.1 mock-up: a check of a field's type from the Inspector's Output
+/// data, as v0.2.0 offers it and in two other forms.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_rel021_type_check() {
+    for (variant, look) in [(0, "today"), (1, "a-menu"), (2, "b-chip")] {
+        crate::mock::set(&crate::mock::TYPE_CHECK, variant);
+        let (_project, mut harness, gate) = lay07::open(&lay07::fixture("shop-30"), WIDE, false);
+        lay07::simulate(&mut harness, &gate);
+        harness.get_by_label("Run results").click();
+        settle(&mut harness);
+        select(&mut harness, &["cart"]);
+        show(&mut harness, "cart", 1.0);
+        harness.get_by_label("Output data").click();
+        settle(&mut harness);
+        if variant == 1 {
+            let button = harness
+                .query_all_by_label("Add comparison")
+                .nth(2)
+                .expect("a field row");
+            button.click();
+            settle(&mut harness);
+        }
+        let region = egui::Rect::from_min_max(egui::pos2(1232.0, 98.0), egui::pos2(1592.0, 780.0));
+        crate::testing::capture(
+            &mut harness,
+            &format!("rel021-type-check-{look}"),
+            Some(region),
+        );
+    }
+    crate::mock::set(&crate::mock::TYPE_CHECK, 0);
+}
+
+/// Writes the demo project a first start prepares, for reading.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_rel021_demo_dump() {
+    let project = crate::testing::shop_project();
+    let out = std::path::PathBuf::from(std::env::var("REL021_DEMO").unwrap());
+    for file in [
+        "scenarios/promotion-and-cart-price.afs",
+        "components/product.afs",
+        "components/active-promotion.afs",
+        "components/add-to-cart.afs",
+    ] {
+        let target = out.join(file);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::copy(project.path().join(file), target).unwrap();
+    }
+    std::process::Command::new("cp")
+        .arg("-r")
+        .arg(project.path())
+        .arg(out.join("project"))
+        .status()
+        .unwrap();
+    let (_project, mut harness, _gate) = lay07::opened(project, WIDE, false);
+    settle(&mut harness);
+    crate::testing::capture(&mut harness, "rel021-demo-today-1600", None);
+}
+
+/// 0.2.1 mock-up: the proposed first-start scenario on the board, tidied,
+/// before and after a simulation.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_rel021_demo_proposed() {
+    let source = fs::read_to_string(std::env::var("REL021_PROPOSED").unwrap()).unwrap();
+    for size in [WIDE, crate::testing::MINIMUM] {
+        let project = crate::testing::shop_project();
+        fs::write(
+            project
+                .path()
+                .join("scenarios/promotion-and-cart-price.afs"),
+            &source,
+        )
+        .unwrap();
+        fs::remove_file(project.path().join(".apiforge/diagram.json")).unwrap();
+        let (_project, mut harness, gate) = lay07::opened(project, size, false);
+        let document = document(&harness);
+        app(&mut harness).selections.insert(document, Vec::new());
+        settle(&mut harness);
+        choose(&mut harness, "Tidy up");
+        harness.step();
+        fit(&mut harness);
+        settle(&mut harness);
+        let width = size.x as u32;
+        crate::testing::capture(&mut harness, &format!("rel021-demo-proposed-{width}"), None);
+        if size == WIDE {
+            lay07::simulate(&mut harness, &gate);
+            harness.get_by_label("Run results").click();
+            settle(&mut harness);
+            fit(&mut harness);
+            settle(&mut harness);
+            crate::testing::capture(&mut harness, "rel021-demo-proposed-run-1600", None);
+            harness.get_by_label("Code").click();
+            settle(&mut harness);
+            crate::testing::capture(&mut harness, "rel021-demo-proposed-code-1600", None);
+        }
+    }
+}

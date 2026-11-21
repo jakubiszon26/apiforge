@@ -78,7 +78,7 @@ pub fn wire(
     zoom: f32,
 ) {
     let color = match (selected, control, branch) {
-        (true, ..) => theme::ACCENT,
+        (true, ..) => crate::mock::selection_colour(),
         (_, true, Some(Branch::False)) => theme::BRANCH_NO,
         (_, true, Some(Branch::True)) => theme::BRANCH_YES,
         (_, true, None) => theme::CONTROL_WIRE,
@@ -462,6 +462,30 @@ fn dim(painter: &Painter, rect: Rect, radius: f32, look: Look, drawn: &mut Drawn
 
 /// The selection's frame outside the card and its four handles.
 fn selection_frame(painter: &Painter, rect: Rect, radius: f32, drawn: &mut Drawn) {
+    let colour = crate::mock::selection_colour();
+    match crate::mock::get(&crate::mock::SELECTION) {
+        0 => {}
+        variant => {
+            if variant == 2 {
+                for (grow, alpha) in [(6.0, 0.10), (4.0, 0.18)] {
+                    painter.rect_stroke(
+                        rect.expand(grow - 2.0),
+                        radius + grow - 2.0,
+                        Stroke::new(2.0, colour.gamma_multiply(alpha)),
+                        StrokeKind::Outside,
+                    );
+                }
+            }
+            painter.rect_stroke(
+                rect,
+                radius,
+                Stroke::new(2.0, colour),
+                StrokeKind::Outside,
+            );
+            drawn.handles = true;
+            return;
+        }
+    }
     painter.rect_stroke(
         rect.expand(3.0),
         radius + 3.0,
@@ -1167,7 +1191,7 @@ fn signal_border(painter: &Painter, rect: Rect, radius: f32, color: Color32) {
 
 fn wire_color(selected: bool, control: bool, branch: Option<Branch>) -> Color32 {
     match (selected, control, branch) {
-        (true, ..) => theme::ACCENT,
+        (true, ..) => crate::mock::selection_colour(),
         (_, true, Some(Branch::False)) => theme::BRANCH_NO,
         (_, true, Some(Branch::True)) => theme::BRANCH_YES,
         (_, true, None) => theme::CONTROL_WIRE,

@@ -1,0 +1,27 @@
+scenario "Promotion and cart price" {
+  description "Check the promotion, the final price and an extra field. The demo data can be run against the local demo API."
+  on_error continue
+  begin = start
+  @label("Expected price")
+  expected_price = 80 * 1
+  @label("Product")
+  product = product@1(id: 123)
+  @label("Field inna_nazwa")
+  field_inna_nazwa = assert nonempty product.promotion.inna_nazwa
+  @label("Active promotion")
+  active_promotion = active_promotion@1(product: product)
+  @label("Add to cart")
+  add_to_cart = add_to_cart@1(product: active_promotion, quantity: 1)
+  @label("Promotional price")
+  promotional_price = assert add_to_cart.total ~= expected_price within 0.005
+  cleanup {
+    @label("Delete cart")
+    @config({ method: "DELETE", timeoutMs: 10000.0, sampleResponse: { deleted: true } })
+    delete_cart = DELETE "/carts/{{add_to_cart.id}}" {
+      timeout 10s
+      sample 200 { deleted: true }
+    }
+    @label("Cart was deleted")
+    cart_was_deleted = assert delete_cart.status == 200
+  }
+}

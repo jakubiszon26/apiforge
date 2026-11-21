@@ -513,7 +513,7 @@ fn tree_row(
         // Actions have a fixed budget; a long value gets ellipsised rather than
         // pushing the buttons outside the inspector.
         ui.add_sized(
-            [(ui.available_width() - 68.0).max(24.0), 22.0],
+            [(ui.available_width() - if crate::mock::get(&crate::mock::TYPE_CHECK) == 2 { 130.0 } else { 68.0 }).max(24.0), 22.0],
             egui::Label::new(RichText::new(&preview).size(11.0).color(theme::MUTED)).truncate(),
         )
         .on_hover_text(&preview);
@@ -527,17 +527,45 @@ fn tree_row(
             {
                 *action = Some(TreeAction::Assign { path: text.clone() });
             }
-            if ui
-                .add_enabled(
-                    supported,
-                    widgets::icon_button(Icon::Check, "Add comparison").compact(),
-                )
-                .clicked()
-            {
+            let mock = crate::mock::get(&crate::mock::TYPE_CHECK);
+            let check = ui.add_enabled(
+                supported,
+                widgets::icon_button(Icon::Check, "Add comparison").compact(),
+            );
+            if mock == 1 {
+                let kind = type_name(Some(value));
+                egui::Popup::menu(&check).show(|ui| {
+                    ui.set_width(210.0);
+                    widgets::caption(ui, "ADD A CHECK");
+                    let subject = if text.is_empty() { port } else { text.as_str() };
+                    for line in [
+                        format!("{subject} equals {preview}"),
+                        format!("{subject} is a {kind}"),
+                        format!("{subject} exists"),
+                        format!("{subject} is not empty"),
+                    ] {
+                        let _ = ui.button(line);
+                    }
+                });
+            } else if check.clicked() {
                 *action = Some(TreeAction::Check {
                     path: text.clone(),
                     value: value.clone(),
                 });
+            }
+            if mock == 2 {
+                let kind = type_name(Some(value));
+                let _ = ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new(kind).size(11.0).color(theme::LINK),
+                        )
+                        .fill(theme::WHITE)
+                        .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                        .corner_radius(9.0)
+                        .min_size(egui::vec2(0.0, 18.0)),
+                    )
+                    .on_hover_text(format!("Add a check: is a {kind}"));
             }
         });
     });
