@@ -350,8 +350,9 @@ pub fn assert_disjoint<State>(harness: &Harness<'_, State>, labels: &[&str]) {
 }
 
 /// Clicks the *Check* on the row of `field` in Run results: the *Check*
-/// level with the field's label (UX-01). The pointer then leaves for the
-/// header's empty top margin, so nothing stays hovered.
+/// level with the field's label (UX-01), then *equals ‹value›* in the menu
+/// *Add a check* it opens (DIAG-08), the check it wrote before. The pointer
+/// then leaves for the header's empty top margin, so nothing stays hovered.
 pub fn check_field(harness: &mut FolderHarness, field: &str) {
     let y = harness.get_by_label(field).rect().center().y;
     harness
@@ -363,6 +364,19 @@ pub fn check_field(harness: &mut FolderHarness, field: &str) {
             a.total_cmp(&b)
         })
         .unwrap_or_else(|| panic!("the {field} row offers no Check"))
+        .click();
+    settle(harness);
+    choose_equals(harness, field);
+}
+
+/// Chooses *equals ‹value›* in the open menu *Add a check* of `field`
+/// (DIAG-08). The pointer then leaves for the header's empty top margin.
+pub fn choose_equals(harness: &mut FolderHarness, field: &str) {
+    use egui_kittest::kittest::NodeT;
+    harness
+        .query_all_by_label_contains(" equals ")
+        .find(|item| item.accesskit_node().role() == egui::accesskit::Role::Button)
+        .unwrap_or_else(|| panic!("the menu of {field} offers equals"))
         .click();
     harness.hover_at(egui::pos2(480.0, 3.0));
     settle(harness);

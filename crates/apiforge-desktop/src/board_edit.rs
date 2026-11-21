@@ -777,8 +777,17 @@ impl Board<'_> {
     }
 
     /// Adds a check on `subject` and selects it, in the braces the subject
-    /// stands in (#433), keeping it clear of occupied positions.
-    pub fn push_check(&self, subject: &str, check: Node) -> Edit {
+    /// stands in (#433), keeping it clear of occupied positions. A second
+    /// check of the same field takes the next free handle, `check_total_2`
+    /// (DIAG-08): the menu offers several checks of one field.
+    pub fn push_check(&self, subject: &str, mut check: Node) -> Edit {
+        check.handle = apiforge_core::handle::unique_handle(&check.handle, |handle| {
+            self.graph
+                .nodes
+                .iter()
+                .chain(self.sibling.into_iter().flat_map(|graph| &graph.nodes))
+                .any(|node| node.handle == handle)
+        });
         let id = check.id.clone();
         Edit {
             graph: self.free_slot_for(edit::add_check(self.graph, subject, check), &id),

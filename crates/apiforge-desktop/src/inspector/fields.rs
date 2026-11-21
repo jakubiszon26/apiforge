@@ -3,6 +3,7 @@
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
+    edit::FieldCheck,
     format::Binding,
     js::{json_stringify, type_name},
     model::ValueType,
@@ -22,14 +23,29 @@ pub const VALUE_TYPES: [ValueType; 6] = [
     ValueType::Array,
 ];
 
+/// The language's words for the types of a value, in the order the window
+/// lists them (DIAG-08): the words of `is "<type>"`.
+pub const TYPE_WORDS: [&str; 6] = ["string", "number", "boolean", "object", "array", "null"];
+
+/// A value type in the language's word: `any` where the type is not set.
 pub fn value_type_label(value_type: ValueType) -> &'static str {
+    value_type.as_str()
+}
+
+/// The type of a literal in the language's word: a literal of no base type
+/// is `null` (see [`literal_type`]).
+fn literal_type_label(value_type: ValueType) -> &'static str {
     match value_type {
-        ValueType::Any => "Any data",
-        ValueType::String => "Text",
-        ValueType::Number => "Number",
-        ValueType::Boolean => "Yes / no",
-        ValueType::Object => "Object",
-        ValueType::Array => "List",
+        ValueType::Any => "null",
+        other => other.as_str(),
+    }
+}
+
+/// `word` with its article: *a number*, *an object*.
+pub fn with_article(word: &str) -> String {
+    match word.chars().next() {
+        Some('a' | 'e' | 'i' | 'o' | 'u') => format!("an {word}"),
+        _ => format!("a {word}"),
     }
 }
 
@@ -58,40 +74,47 @@ pub fn empty_literal(value_type: ValueType) -> Value {
 }
 
 pub fn type_combo(ui: &mut Ui, id: Id, value: &mut ValueType) -> bool {
+    labelled_type_combo(ui, id, value, value_type_label)
+}
+
+/// The type of a literal: `null`, then the five base types (DIAG-08).
+pub fn literal_type_combo(ui: &mut Ui, id: Id, value: &mut ValueType) -> bool {
+    labelled_type_combo(ui, id, value, literal_type_label)
+}
+
+fn labelled_type_combo(
+    ui: &mut Ui,
+    id: Id,
+    value: &mut ValueType,
+    label: fn(ValueType) -> &'static str,
+) -> bool {
     let before = *value;
     let combo = egui::ComboBox::from_id_salt(id)
-        .selected_text(value_type_label(*value))
+        .selected_text(label(*value))
         .width(ui.available_width().min(160.0))
         .show_ui(ui, |ui| {
             for option in VALUE_TYPES {
-                ui.selectable_value(value, option, value_type_label(option));
+                ui.selectable_value(value, option, label(option));
             }
         });
     widgets::named(combo.response, "Value type");
     *value != before
 }
 
-/// The expected JSON type of a "has type" comparison; "any" would not test anything.
+/// The expected JSON type of a "has type" comparison, in the language's
+/// words; "any" would not test anything.
 pub fn assertion_type_combo(ui: &mut Ui, id: Id, value: &mut String) -> bool {
     let before = value.clone();
-    let options = [
-        ("string", "Text"),
-        ("number", "Number"),
-        ("boolean", "Yes / no"),
-        ("object", "Object"),
-        ("array", "List"),
-        ("null", "Null"),
-    ];
-    let selected = options
-        .iter()
-        .find(|(name, _)| name == value)
-        .map_or("Choose a type", |(_, label)| label);
+    let selected = TYPE_WORDS
+        .into_iter()
+        .find(|name| name == value)
+        .unwrap_or("Choose a type");
     let combo = egui::ComboBox::from_id_salt(id)
         .selected_text(selected)
         .width(ui.available_width())
         .show_ui(ui, |ui| {
-            for (name, label) in options {
-                ui.selectable_value(value, name.to_owned(), label);
+            for name in TYPE_WORDS {
+                ui.selectable_value(value, name.to_owned(), name);
             }
         });
     widgets::named(combo.response, "Expected type");
@@ -398,8 +421,47 @@ pub fn template_map(
 
 /// What the user chose in the output tree.
 pub enum TreeAction {
-    Check { path: String, value: Value },
+    Check { path: String, check: FieldCheck },
     Assign { path: String },
+}
+
+/// The menu *Add a check* that `button` opens on a field showing `value`
+/// (DIAG-08): *equals ‹value›*, *is a ‹type›*, *exists*, *is not empty*,
+/// each read as a sentence about `subject` before it is written. The one
+/// place that draws it, for the Inspector's tree and Run results alike.
+pub fn check_menu(button: &egui::Response, subject: &str, value: &Value) -> Option<FieldCheck> {
+    let mut chosen = None;
+    egui::Popup::menu(button).show(|ui| {
+        // Escape closes the menu and leaves the selection under it.
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            ui.close();
+        }
+        widgets::name_menu(ui, "Add a check menu");
+        ui.set_min_width(200.0);
+        widgets::caption(ui, "ADD A CHECK");
+        for check in FieldCheck::offered(value) {
+            if ui.button(check_sentence(subject, &check)).clicked() {
+                chosen = Some(check);
+                ui.close();
+            }
+        }
+    });
+    chosen
+}
+
+/// A check of `subject` as the menu reads it: *total is a number*.
+fn check_sentence(subject: &str, check: &FieldCheck) -> String {
+    let subject = crate::labels::truncate(subject, 48);
+    match check {
+        FieldCheck::Equals(value) => format!(
+            "{subject} equals {}",
+            crate::labels::truncate(&json_stringify(value), 40)
+        ),
+        FieldCheck::Type(word) if word == "null" => format!("{subject} is null"),
+        FieldCheck::Type(word) => format!("{subject} is {}", with_article(word)),
+        FieldCheck::Exists => format!("{subject} exists"),
+        FieldCheck::NotEmpty => format!("{subject} is not empty"),
+    }
 }
 
 /// A JSON value as a tree of fields with "Check" and "To variable" actions. Field
@@ -462,8 +524,8 @@ fn tree_row(
     *budget -= 1;
     let text = path.to_string();
     let preview = match value {
-        Value::Array(items) => format!("List · {}", items.len()),
-        Value::Object(fields) => format!("Object · {}", fields.len()),
+        Value::Array(items) => format!("array · {}", items.len()),
+        Value::Object(fields) => format!("object · {}", fields.len()),
         scalar => crate::labels::truncate(&json_stringify(scalar), 60),
     };
     let child_count = match value {
@@ -541,15 +603,16 @@ fn tree_row(
             {
                 *action = Some(TreeAction::Assign { path: text.clone() });
             }
-            if why(ui.add_enabled(
+            // The ✓ opens the menu Add a check (DIAG-08).
+            let check = why(ui.add_enabled(
                 supported,
-                widgets::icon_button(Icon::Check, "Add comparison").compact(),
-            ))
-            .clicked()
-            {
+                widgets::icon_button(Icon::Check, "Add a check").compact(),
+            ));
+            let subject = if text.is_empty() { port } else { text.as_str() };
+            if let Some(check) = check_menu(&check, subject, value) {
                 *action = Some(TreeAction::Check {
                     path: text.clone(),
-                    value: value.clone(),
+                    check,
                 });
             }
         });

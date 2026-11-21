@@ -2157,7 +2157,7 @@ impl App {
                 node_id,
                 port,
                 path,
-                value,
+                check,
             } => {
                 if self.is_run_stale() {
                     self.notice = Some(
@@ -2178,7 +2178,7 @@ impl App {
                     Phase::Cleanup
                 };
                 self.editor.set_phase(target_phase);
-                self.add_field_assertion(&node_id, &port, &path, &value);
+                self.add_field_assertion(&node_id, &port, &path, &check);
             }
             report::Action::AssignField {
                 node_id,
@@ -2291,8 +2291,8 @@ impl App {
                 }
                 inspector::Action::UpdateGraph(graph) => self.apply_graph(graph),
                 inspector::Action::EditComponent => self.edit_component(&node.id),
-                inspector::Action::AssertField { port, path, value } => {
-                    self.add_field_assertion(&node.id, &port, &path, &value)
+                inspector::Action::AssertField { port, path, check } => {
+                    self.add_field_assertion(&node.id, &port, &path, &check)
                 }
                 inspector::Action::AssignField { port, path } => {
                     self.dialog = Some(Dialog::AssignVariable(dialogs::AssignVariableDialog::new(
@@ -2319,7 +2319,7 @@ impl App {
         source: &str,
         port: &str,
         path: &str,
-        value: &serde_json::Value,
+        check: &edit::FieldCheck,
     ) {
         let Some(node) = self
             .editor
@@ -2331,7 +2331,7 @@ impl App {
         else {
             return;
         };
-        let assertion = edit::field_assertion(&node, port, path, value);
+        let assertion = edit::field_check(&node, port, path, check);
         let label = if path.is_empty() { port } else { path };
         let edit = self.with_board(|board| board.push_check(source, assertion));
         self.apply_edit(Ok(edit));
@@ -4630,7 +4630,7 @@ mod tests {
             node_id: target_id.clone(),
             port: "body".into(),
             path: "status".into(),
-            value: json!(200),
+            check: edit::FieldCheck::Equals(json!(200)),
         });
         assert_eq!(app.editor.graph().nodes.len(), count_before);
         assert!(
@@ -4659,7 +4659,7 @@ mod tests {
             node_id: cleanup_id,
             port: "status".into(),
             path: String::new(),
-            value: json!(200),
+            check: edit::FieldCheck::Equals(json!(200)),
         });
         assert_eq!(app.editor.phase(), Phase::Cleanup);
         assert_eq!(

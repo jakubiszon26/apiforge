@@ -1178,13 +1178,13 @@ impl FolderApp {
                     }
                 }
                 // The run's data or, before any run, the sample (DIAG-09).
-                inspector::Action::AssertField { port, path, value } => self.field_action(
+                inspector::Action::AssertField { port, path, check } => self.field_action(
                     document_id,
                     crate::report::Action::AssertField {
                         node_id: node.id.clone(),
                         port,
                         path,
-                        value,
+                        check,
                     },
                 ),
                 inspector::Action::AssignField { port, path } => self.field_action(
