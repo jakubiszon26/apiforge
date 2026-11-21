@@ -35,6 +35,11 @@ pub const ACCENT_SOFT: Color32 = Color32::from_rgb(251, 233, 221);
 /// (UX-02). White text on it reads at 6.3 : 1.
 pub const SIMULATION: Color32 = Color32::from_rgb(112, 76, 182);
 
+/// A value's colour by its type in the tree of a step's data (DIAG-10): a
+/// text, a number, and `true`, `false` and `null`.
+pub const VALUE_STRING: Color32 = Color32::from_rgb(46, 125, 78);
+pub const VALUE_NUMBER: Color32 = Color32::from_rgb(176, 92, 40);
+pub const VALUE_LITERAL: Color32 = Color32::from_rgb(112, 76, 182);
 pub const SPACE_SM: f32 = 8.0;
 pub const SPACE_MD: f32 = 12.0;
 pub const SPACE_LG: f32 = 16.0;

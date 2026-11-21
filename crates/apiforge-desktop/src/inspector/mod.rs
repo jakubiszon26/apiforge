@@ -1345,14 +1345,17 @@ fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
 
 fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
     let node = context.node;
-    widgets::hint(
-        ui,
+    // Where the data comes from: a mark and a sentence (DIAG-10).
+    ui.horizontal(|ui| {
         if context.step.is_some() {
-            "Data from the last run. Editing the block does not update it."
+            widgets::pill(ui, "Last run", theme::SUCCESS);
+            widgets::hint(ui, "Editing the step does not update it.");
         } else {
-            "Sample data — not from an API call."
-        },
-    );
+            widgets::pill(ui, "Sample", theme::WARNING);
+            widgets::hint(ui, "Not from an API call.");
+        }
+    });
+    ui.add_space(theme::SPACE_SM);
     let mut any = false;
     for port in output_ports(node, context.project) {
         let value = match context.step {
@@ -1360,10 +1363,19 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
             None => response::sample_output(node, &port.name, context.project),
         };
         let Some(value) = value else { continue };
+        if any {
+            ui.add_space(4.0);
+        }
         any = true;
-        widgets::section(ui, port.display_name());
-        if let Some(action) = fields::json_tree(ui, &node.id, &port.name, &value, context.read_only)
-        {
+        // The output's heading is the first row of its tree.
+        if let Some(action) = fields::json_tree(
+            ui,
+            &node.id,
+            &port.name,
+            port.display_name(),
+            &value,
+            context.read_only,
+        ) {
             actions.push(match action {
                 fields::TreeAction::Check { path, check } => Action::AssertField {
                     port: port.name.clone(),
