@@ -23,6 +23,25 @@ owner decision, KTLO-03 closed so that a refused migration reports and stops,
 and folder equivalents for the CI probes that open the legacy window. M7 then
 continues on the folder mode only.
 
+## Releases
+
+| Version | Contents |
+| --- | --- |
+| 0.1.0 | The first release, a pre-release: folder projects, the window, the command line and the MCP server; language 1, steps ordered with `@after` |
+| 0.2.0 | Language 2, the one-chain language of the LANG sprint ([REL-05](tickets/REL-05.md)) |
+
+What changes in a file from 0.1.0 to 0.2.0: the steps of a block run in the
+order they are written and `@after` is gone; a scenario or a component with a
+step has a `start`, its first step; under `on_error continue` only a missing
+value holds a step back. A project records its language in its manifest
+(`languageVersion`). `apiforge fix --folder <directory>` converts a 0.1.0
+project whole or writes nothing and says what stands in the way (`--check`
+looks first); 0.1.0 cannot open a converted project. Converting a project in
+parts, an agent's `fix` and the window's own update are on the backlog, as
+are the reason shown while a block is carried (DIAG-06b), bands (LAY-13) and a
+corridor for data lines (LAY-47). The known limits are listed in the
+[README](../README.md#known-limits-of-020).
+
 ## Goals
 
 1. **Export block** — a component publishes values to its caller by placing Export
