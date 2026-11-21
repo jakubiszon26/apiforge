@@ -355,3 +355,72 @@ fn demo01_criterion_6_existing_project_untouched() {
         assert!(after[path] == *bytes, "{path} changed");
     }
 }
+
+/// Every block of a scenario, main flow and cleanup, at its rounded position.
+fn positions(model: &Document) -> BTreeMap<String, (i64, i64)> {
+    [false, true]
+        .into_iter()
+        .flat_map(|cleanup| graph_of(model, cleanup).nodes.iter())
+        .map(|node| {
+            (
+                node.handle.clone(),
+                (
+                    node.position.x.round() as i64,
+                    node.position.y.round() as i64,
+                ),
+            )
+        })
+        .collect()
+}
+
+/// The layout of the first board is *Tidy up*'s, as in the approved
+/// mock-up, and it is on disk once the window has opened: the first start
+/// writes the demo's texts and the window lays each board out as its first
+/// open does (LAY-33), at the density this computer draws, and saves that.
+#[test]
+fn demo01_the_first_board_is_tidy_ups_and_saved() {
+    for size in [MINIMUM, WIDE] {
+        let data = tempfile::tempdir().unwrap();
+        let mut harness = first_start(data.path(), size);
+        let root = folder(&harness).root.clone();
+        let id = document_at(&harness, BUY_COFFEE);
+        let positions = |harness: &FolderHarness| {
+            positions(session(harness).document(&id).unwrap().model().unwrap())
+        };
+        let opened = positions(&harness);
+        let document = session(&harness).document(&id).unwrap();
+        assert!(
+            !document.is_dirty() && !document.is_layout_dirty(),
+            "{size:?}: a first start leaves nothing unsaved"
+        );
+        // Read back by a session without a window, as MCP or the command
+        // line would read it.
+        let saved = {
+            let session = apiforge_project::ProjectSession::open(&root).unwrap();
+            let document = session
+                .documents()
+                .iter()
+                .find(|document| document.entry().path.as_str() == BUY_COFFEE)
+                .unwrap();
+            self::positions(document.model().unwrap())
+        };
+        assert_eq!(saved, opened, "{size:?}: the first board's layout is saved");
+
+        app(&mut harness).active_board_command(Command::TidyUp(Vec::new()));
+        settle(&mut harness);
+        let tidied = positions(&harness);
+        let moved: Vec<String> = opened
+            .iter()
+            .filter(|(handle, at)| {
+                let to = tidied[*handle];
+                (to.0 - at.0).abs() > 1 || (to.1 - at.1).abs() > 1
+            })
+            .map(|(handle, at)| format!("{handle} {at:?} -> {:?}", tidied[handle]))
+            .collect();
+        assert!(
+            moved.is_empty(),
+            "{size:?}: Tidy up moves {} cards of the first board: {moved:#?}",
+            moved.len()
+        );
+    }
+}

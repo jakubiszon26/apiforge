@@ -14,7 +14,7 @@
 //! not part of that migration, so it is remembered the way an opened folder is
 //! remembered, and the catalogue is never rewritten after activation.
 use super::*;
-use apiforge_project::{MigrationError, ProjectCatalogue, migrate_workspace, prepare_project};
+use apiforge_project::{MigrationError, ProjectCatalogue, migrate_workspace, prepare_files};
 use apiforge_storage::{StorageError, WorkspaceStore};
 use std::path::Path;
 
@@ -285,22 +285,30 @@ fn preferred_root(catalogue: &ProjectCatalogue, data: &Path) -> Option<PathBuf> 
 }
 
 /// Writes one managed project and opens it. A new user has an application to
-/// look at rather than an empty board, so it holds the demo the legacy window
-/// shows on a first run; a managed project is a folder project like any other
-/// and can be renamed, edited or replaced.
+/// look at rather than an empty board, so it holds the demo shop written in
+/// the language as it stands (DEMO-01); a managed project is a folder project
+/// like any other and can be renamed, edited or replaced. Only a data
+/// directory with no project gets it: one that holds a project opens that
+/// project, whatever demo it began with.
 fn create(
     data: &Path,
     density: &placement::DensityHandle,
 ) -> apiforge_project::Result<opening::Destination> {
-    let project = apiforge_core::demos::shop_project();
+    let files = apiforge_core::demos::FIRST_START;
+    let id = files
+        .iter()
+        .find(|(path, _)| *path == apiforge_storage::project::MANIFEST_PATH)
+        .map(|(_, text)| apiforge_storage::project::ProjectManifest::from_bytes(text.as_bytes()))
+        .ok_or(apiforge_project::Error::NotAProject)??
+        .id;
     let projects = data.join(apiforge_project::PROJECTS_DIRECTORY);
     // Migration names a destination after its project, so creation does too.
     // Nothing should occupy the name here, but a directory left by something
     // else is stepped over rather than written into.
     let root = (0..)
         .map(|suffix| match suffix {
-            0 => projects.join(&project.id),
-            n => projects.join(format!("{}-{n}", project.id)),
+            0 => projects.join(&id),
+            n => projects.join(format!("{id}-{n}")),
         })
         .find(|path| !path.exists())
         .expect("a free project directory");
@@ -308,7 +316,7 @@ fn create(
         path: root.clone(),
         source,
     })?;
-    prepare_project(&root, &project)?;
+    prepare_files(&root, files)?;
     opening::load(root, density)
 }
 
