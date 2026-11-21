@@ -140,7 +140,7 @@ async fn lang22_criterion_3_failure_message_hides_secrets() {
     // The value is a secret the run learns only later, from the cleanup's
     // Authorization header, and holds a character JSON escapes: the message
     // masks it as the step's `actual` does.
-    for (written, secret) in [
+    for (written, _raw) in [
         (r#"demo\"secret"#, r#"demo"secret"#),
         (r"demo\\secret", r"demo\secret"),
     ] {
@@ -162,14 +162,17 @@ async fn lang22_criterion_3_failure_message_hides_secrets() {
         );
         let run = simulate(&text).await;
         let typed = step(&run, "typed");
-        assert_eq!(typed.status, StepStatus::Failed, "{secret}");
+        assert_eq!(typed.status, StepStatus::Failed, "{written}");
         assert_eq!(
             typed.actual,
             OptionalJson::Present(json!("[REDACTED]")),
-            "{secret}"
+            "{written}"
         );
         let message = typed.message.as_deref().unwrap();
-        assert!(!message.contains("secret"), "{secret}: {message}");
+        assert!(
+            !message.contains("secret"),
+            "the failure message must mask the value"
+        );
         assert!(
             message.starts_with("The comparison failed: expected number, actual string"),
             "{message}"
