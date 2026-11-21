@@ -21,10 +21,13 @@ pub use collapse::collapsible;
 #[cfg(test)]
 pub(crate) use edge::{DrawnEdge, Side};
 pub use layout::{Card, CardDensity, Chip, parse_inline};
+/// The halo of a related step, which a test compares with the selection's.
+#[cfg(test)]
+pub(crate) use paint::RELATED;
 #[cfg(test)]
 pub(crate) use paint::debug_overview_line;
 #[cfg(test)]
-pub(crate) use paint::{BadgeState, DrawnBadge, DrawnText, NUMBER_MIN, TextKind};
+pub(crate) use paint::{BadgeState, DrawnBadge, DrawnFrame, DrawnText, NUMBER_MIN, TextKind};
 pub use readers::WireMode;
 pub use resting::{Drawn, LANE, Lane, Lines, resting};
 pub use routing::WireStyle;
@@ -643,6 +646,8 @@ pub(crate) struct DrawnWire {
     /// The line a wire carried from its source's *Next* would replace,
     /// drawn faded while it is carried (DIAG-06c).
     pub faded: bool,
+    /// Its colour before it is dimmed, where it was drawn (UX-41).
+    pub colour: Option<Color32>,
 }
 
 /// Where a step carried from the Library lands (DIAG-06c): after the source
@@ -940,10 +945,11 @@ impl Canvas {
         self.debug_drawn(id)?.ring
     }
 
-    /// Whether the card `id` drew the selection's handles.
+    /// The selection's frame around the card `id` in the last frame
+    /// (UX-41).
     #[cfg(test)]
-    pub(crate) fn debug_handles(&self, id: &str) -> bool {
-        self.debug_drawn(id).is_some_and(|drawn| drawn.handles)
+    pub(crate) fn debug_frame(&self, id: &str) -> Option<DrawnFrame> {
+        self.debug_drawn(id)?.frame.clone()
     }
 
     /// The ports ringed in the last frame: the card and the port on screen.
@@ -1994,6 +2000,8 @@ impl Canvas {
         let mut at_rest: Vec<Vec<Pos2>> = Vec::new();
         #[cfg(test)]
         let mut bridged: HashMap<String, Vec<Pos2>> = HashMap::new();
+        #[cfg(test)]
+        let mut colours: HashMap<String, Color32> = HashMap::new();
         {
             let request = routing::Request {
                 cards: &cards,
@@ -2013,7 +2021,7 @@ impl Canvas {
                 if wire.routed {
                     at_rest.push(wire.points.clone());
                 }
-                paint::routed_wire(
+                let _colour = paint::routed_wire(
                     &board_painter,
                     wire,
                     camera,
@@ -2022,6 +2030,8 @@ impl Canvas {
                         || lit.contains(&wire.id),
                     (dimming && !lit.contains(&wire.id)) || faded(&wire.id),
                 );
+                #[cfg(test)]
+                colours.insert(wire.id.clone(), _colour);
                 if let Some(text) = wire_labels.get(&wire.id) {
                     paint::wire_label(&board_painter, wire, camera, text);
                 }
@@ -2072,13 +2082,15 @@ impl Canvas {
             };
             let routed = self.revealed_router.routes(&request).to_vec();
             for wire in &routed {
-                paint::routed_wire(
+                let _colour = paint::routed_wire(
                     &board_painter,
                     wire,
                     camera,
                     true,
                     dimming && !lit.contains(&wire.id),
                 );
+                #[cfg(test)]
+                colours.insert(wire.id.clone(), _colour);
                 drawn_revealed.push((wire.id.clone(), wire.points.clone()));
                 #[cfg(test)]
                 bridged.insert(
@@ -2206,6 +2218,7 @@ impl Canvas {
                     lit: lit.contains(&wire.id),
                     dimmed: dimming && !lit.contains(&wire.id),
                     faded: faded(&wire.id),
+                    colour: colours.get(&wire.id).copied(),
                 })
                 .collect();
         }

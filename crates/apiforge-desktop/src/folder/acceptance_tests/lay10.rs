@@ -23,7 +23,7 @@ fn check_colour() -> Color32 {
 
 /// `shop-30` whose checkout answers with a total the check does not expect:
 /// the request succeeds, `checkout_total` fails.
-fn failing() -> String {
+pub(super) fn failing() -> String {
     let source = lay07::fixture("shop-30");
     let before = r#"sample 201 { orderId: "o-1", status: "created", total: 172.5 }"#;
     assert!(source.contains(before), "the fixture's checkout sample");
@@ -33,14 +33,14 @@ fn failing() -> String {
     )
 }
 
-fn fit(harness: &mut FolderHarness) {
+pub(super) fn fit(harness: &mut FolderHarness) {
     choose(harness, "Fit the view");
     harness.step();
 }
 
 /// `shop-30` after a failed simulation, the whole board in view, its checks
 /// drawn as cards unless `collapsed`.
-fn after_failure_in(
+pub(super) fn after_failure_in(
     size: egui::Vec2,
     collapsed: bool,
 ) -> (tempfile::TempDir, FolderHarness, Arc<Gate>) {
@@ -156,12 +156,8 @@ fn assert_focus(harness: &FolderHarness, handle: &str, context: &str) {
     let related = related(harness, handle);
     let canvas = canvas(harness);
     assert!(
-        canvas.debug_selected(&selected),
+        canvas.debug_selected(&selected) && canvas.debug_frame(&selected).is_some(),
         "{context}: {handle} has the selection's frame"
-    );
-    assert!(
-        canvas.debug_handles(&selected),
-        "{context}: {handle} keeps its handles"
     );
     assert!(!canvas.debug_dimmed(&selected), "{context}: {handle}");
     assert!(
@@ -191,7 +187,7 @@ fn assert_focus(harness: &FolderHarness, handle: &str, context: &str) {
         if *id == selected || related.contains(id) {
             assert!(!canvas.debug_dimmed(id), "{context}: {name} is related");
             if let Some(ring) = canvas.debug_ring(id) {
-                assert_ne!(ring, theme::ACCENT, "{context}: {name}'s halo");
+                assert_ne!(ring, theme::SELECTION, "{context}: {name}'s halo");
             }
         } else if signalled(harness, id) {
             assert!(!canvas.debug_dimmed(id), "{context}: {name} failed");
@@ -225,7 +221,7 @@ fn assert_focus(harness: &FolderHarness, handle: &str, context: &str) {
 /// Criterion 1: selecting `cart` rings `login`, `first`, `second`,
 /// `cart_total` and `order` with the halo and their ports, `cart_total` in
 /// the check colour; every card not related is dimmed; the selection keeps
-/// its handles. The hub `login` the same; selecting `begin` rings `login`
+/// its frame (UX-41: the frame stands for LAY-10's handles). The hub `login` the same; selecting `begin` rings `login`
 /// and lights the dashed wire between them.
 #[test]
 fn lay10_criterion_1_selecting_cart_rings_its_relations() {
@@ -500,7 +496,7 @@ fn lay10_criterion_6_a_check_rings_its_subjects() {
     // not the check, so no ordering relation rings it either.
     let address = canvas(&harness).debug_ring(&id_of(&harness, "address"));
     assert_ne!(address, Some(check_colour()), "address is not a subject");
-    assert_ne!(address, Some(theme::ACCENT), "nor the selection");
+    assert_ne!(address, Some(theme::SELECTION), "nor the selection");
 }
 
 /// The views of the owner's acceptance: `shop-30` tidied with its checks
@@ -549,7 +545,9 @@ fn review_lay10() {
         show(&mut harness, selected, 0.6);
         assert_a_card_in_view(&harness, name);
         assert!(
-            canvas(&harness).debug_handles(&id_of(&harness, selected)),
+            canvas(&harness)
+                .debug_frame(&id_of(&harness, selected))
+                .is_some(),
             "{name}: the selection is drawn"
         );
         crate::testing::capture(&mut harness, name, None);

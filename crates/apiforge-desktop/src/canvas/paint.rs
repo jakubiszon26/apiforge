@@ -78,7 +78,7 @@ pub fn wire(
     zoom: f32,
 ) {
     let color = match (selected, control, branch) {
-        (true, ..) => theme::ACCENT,
+        (true, ..) => theme::SELECTION,
         (_, true, Some(Branch::False)) => theme::BRANCH_NO,
         (_, true, Some(Branch::True)) => theme::BRANCH_YES,
         (_, true, None) => theme::CONTROL_WIRE,
@@ -136,14 +136,17 @@ pub fn wire(
 ///
 /// A bridge is a gap in the line with a small semicircle over it, so a crossing
 /// reads as one wire passing above the other instead of a junction.
+///
+/// Returns the wire's colour before it is dimmed or lightened.
 pub fn routed_wire(
     painter: &Painter,
     routed: &Routed,
     camera: Camera,
     selected: bool,
     dimmed: bool,
-) {
-    let mut color = wire_color(selected, routed.control, routed.branch);
+) -> Color32 {
+    let own = wire_color(selected, routed.control, routed.branch);
+    let mut color = own;
     if dimmed {
         // Not a wire of the selected step (LAY-10).
         color = color.gamma_multiply(WIRE_KEEP);
@@ -170,7 +173,7 @@ pub fn routed_wire(
         flatten(&routed.pieces, camera)
     };
     if line.len() < 2 {
-        return;
+        return own;
     }
     let hops: Vec<Pos2> = routed
         .bridges
@@ -216,6 +219,7 @@ pub fn routed_wire(
             color,
         );
     }
+    own
 }
 
 /// The name on an `@after` drawn from a folded check's subject (LAY-11):
@@ -462,12 +466,18 @@ fn dim(painter: &Painter, rect: Rect, radius: f32, look: Look, drawn: &mut Drawn
 
 /// The selection's frame outside the card and its four handles.
 fn selection_frame(painter: &Painter, rect: Rect, radius: f32, drawn: &mut Drawn) {
+    let mut frame = DrawnFrame::default();
     painter.rect_stroke(
         rect.expand(3.0),
         radius + 3.0,
-        Stroke::new(2.5, theme::ACCENT),
+        Stroke::new(2.5, theme::SELECTION),
         StrokeKind::Outside,
     );
+    frame.strokes.push(DrawnStroke {
+        gap: 3.0,
+        width: 2.5,
+        color: theme::SELECTION,
+    });
     for corner in [
         rect.left_top(),
         rect.right_top(),
@@ -478,11 +488,12 @@ fn selection_frame(painter: &Painter, rect: Rect, radius: f32, drawn: &mut Drawn
             Rect::from_center_size(corner, Vec2::splat(7.0)),
             1.0,
             theme::WHITE,
-            Stroke::new(1.5, theme::ACCENT),
+            Stroke::new(1.5, theme::SELECTION),
             StrokeKind::Inside,
         );
+        frame.handles += 1;
     }
-    drawn.handles = true;
+    drawn.frame = Some(frame);
 }
 
 /// The soft halo around a related card: three widening strokes of its
@@ -570,6 +581,27 @@ pub enum BadgeState {
     Running,
     /// A run is on and has not reached the step: the number, muted.
     Pending,
+}
+
+/// The selection's frame as a card drew it, which only a test build
+/// collects (UX-41).
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct DrawnFrame {
+    /// Its strokes around the card, in the order drawn.
+    pub strokes: Vec<DrawnStroke>,
+    /// The square handles drawn at the card's corners.
+    pub handles: usize,
+}
+
+/// One stroke around a card, on screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct DrawnStroke {
+    /// From the card's edge to the stroke's inner side.
+    pub gap: f32,
+    pub width: f32,
+    pub color: Color32,
 }
 
 /// A badge as a card drew it, which only a test build collects.
@@ -675,8 +707,8 @@ pub struct Drawn {
     pub badge: Option<DrawnBadge>,
     /// The card has the selection's frame.
     pub selected: bool,
-    /// The selection's handles at the corners (LAY-10).
-    pub handles: bool,
+    /// What the selection's frame drew (UX-41).
+    pub frame: Option<DrawnFrame>,
     /// The card is dimmed, and the colour painted over it to dim it.
     pub dimmed: bool,
     pub veil: Option<Color32>,
@@ -1167,7 +1199,7 @@ fn signal_border(painter: &Painter, rect: Rect, radius: f32, color: Color32) {
 
 fn wire_color(selected: bool, control: bool, branch: Option<Branch>) -> Color32 {
     match (selected, control, branch) {
-        (true, ..) => theme::ACCENT,
+        (true, ..) => theme::SELECTION,
         (_, true, Some(Branch::False)) => theme::BRANCH_NO,
         (_, true, Some(Branch::True)) => theme::BRANCH_YES,
         (_, true, None) => theme::CONTROL_WIRE,
