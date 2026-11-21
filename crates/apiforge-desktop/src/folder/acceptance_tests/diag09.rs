@@ -48,9 +48,10 @@ fn node<'a>(graph: &'a Graph, handle: &str) -> &'a Node {
 }
 
 /// `handle` of the board (Cleanup when `cleanup`) selected, the Inspector on
-/// *Output data*.
+/// *Output data*. A check or a variable added is selected after its edit, so
+/// a second action on the step selects the step again.
 fn output_data(harness: &mut FolderHarness, id: &str, cleanup: bool, handle: &str) {
-    if cleanup {
+    if cleanup && !folder(harness).cleanup(id) {
         choose(harness, "Cleanup");
     }
     let step = node(&graph(harness, id, cleanup), handle).id.clone();
@@ -240,6 +241,7 @@ fn diag09_criterion_3_cleanup() {
         ("delete_cart", "body", "deleted"),
         serde_json::json!(true),
     );
+    output_data(&mut harness, &id, true, "delete_cart");
     assert_variable(
         &mut harness,
         project.path(),
