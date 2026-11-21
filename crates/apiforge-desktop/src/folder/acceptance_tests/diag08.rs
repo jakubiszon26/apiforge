@@ -354,8 +354,16 @@ fn assert_lists_the_words(harness: &mut FolderHarness, name: &str, words: &[&str
             "{name} offers {word}"
         );
     }
+    // The Library's block *Object* is a step, not a type: the list and the
+    // Inspector stand right of the Inspector's edge.
+    let edge = harness.get_by_label("Resize inspector").rect().left();
     for word in OLD_WORDS {
-        assert!(!has_label(harness, word), "{name} does not say {word}");
+        assert!(
+            harness
+                .query_all_by_label(word)
+                .all(|node| node.rect().left() < edge),
+            "{name} does not say {word}"
+        );
     }
     harness.key_press(egui::Key::Escape);
     settle(harness);
@@ -392,24 +400,25 @@ fn diag08_criterion_5_one_vocabulary() {
     for old in ["Object (1)", "List (1)"] {
         assert!(!has_label(&harness, old), "Run results do not say {old}");
     }
-    select(&mut harness, "check_total");
+    select(&mut harness, "Check total");
     assert!(
         harness.query_by_label_contains("is number").is_some(),
         "the type check's requirement reads is number"
     );
 }
 
-/// Chooses `handle`'s row in the step list of Run results.
-fn select(harness: &mut FolderHarness, handle: &str) {
-    let row = format!("{handle} · ");
+/// Chooses the first row of a step named `name` in the step list of Run
+/// results: its label, or its handle where it has none.
+fn select(harness: &mut FolderHarness, name: &str) {
+    let row = format!("{name} · ");
     let label = harness
         .query_all_by_label_contains(&row)
         .filter_map(|found| found.accesskit_node().label())
         .find(|label| label.starts_with(&row))
-        .unwrap_or_else(|| panic!("{handle} has a row in the step list"));
-    harness.get_by_label(&label).scroll_to_me();
+        .unwrap_or_else(|| panic!("{name} has a row in the step list"));
+    harness.query_all_by_label(&label).next().unwrap().scroll_to_me();
     settle(harness);
-    harness.get_by_label(&label).click();
+    harness.query_all_by_label(&label).next().unwrap().click();
     settle(harness);
 }
 
