@@ -511,26 +511,30 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   LANG-04 #132). Their format questions return to the owner with the
   analyses.
 
-## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (analysis; not started)
+## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (planned; not started)
 
 The owner tried the v0.2.0-rc.1 packages on 2026-11-21 and raised four
-findings; v0.2.0 was tagged as it was and these go to 0.2.1. A fifth
-ticket is the planning model's, found while reproducing the second. Every
-ticket waits for the owner's answers (eleven questions, on the issues);
-none is `ready`. The mock-ups are on `mock/rel-0.2.1` at `58710bc`; the
-issues carry `sprint:0.2.1`. About 90 owner minutes.
+findings; v0.2.0 was tagged as it was and these go to 0.2.1. LANG-22 is
+the planning model's, found while reproducing the second; DIAG-09 is
+#399, taken in with DIAG-08. The owner answered the eleven questions the
+same day, on the issues. The mock-ups are on `mock/rel-0.2.1`; the
+issues carry `sprint:0.2.1`. About 105 owner minutes. The table is in
+the order of work.
+
+- Open: UX-42's question 12 — the switch the owner chose does not fit a
+  component's header at 960 px as drawn, by about 32 px
+  ([ticket](tickets/UX-42.md#the-measurement-and-question-12)); REL-06's
+  question 13, a release candidate or the tag at once.
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
-| [#519](https://github.com/jakubiszon26/apiforge/issues/519) | UX-41 The selected step no longer looks like an error; [ticket](tickets/UX-41.md) | S · 15 min · `visible UI` |
-| [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode menu reads as two choices; [ticket](tickets/UX-42.md) | S · 15 min · `visible UI`, `removal` |
-| [#521](https://github.com/jakubiszon26/apiforge/issues/521) | DIAG-08 A check of a field's type in one step from the field; [ticket](tickets/DIAG-08.md) | S · 20 min · `visible UI` |
-| [#522](https://github.com/jakubiszon26/apiforge/issues/522) | LANG-22 A type check that cannot pass is reported when it is written; [ticket](tickets/LANG-22.md) | S · 10 min · `migration` |
-| [#523](https://github.com/jakubiszon26/apiforge/issues/523) | DEMO-01 The first-start project shows the 0.2.0 language; [ticket](tickets/DEMO-01.md) | M · 30 min · `default`, `visible UI` |
-
-Candidates, the owner's to take or leave: #399 (*Add comparison* before
-the first run) with DIAG-08; a release ticket REL-06 for 0.2.1 once the
-set is decided.
+| [#519](https://github.com/jakubiszon26/apiforge/issues/519) | UX-41 The selected step no longer looks like an error: a blue frame, no handles; [ticket](tickets/UX-41.md) | S · 15 min · `visible UI` |
+| [#522](https://github.com/jakubiszon26/apiforge/issues/522) | LANG-22 A type check that cannot pass is reported when it is written; [ticket](tickets/LANG-22.md) | S · 10 min |
+| [#399](https://github.com/jakubiszon26/apiforge/issues/399) | DIAG-09 Add comparison and Assign to variable work before the first run; [ticket](tickets/DIAG-09.md) | S · 10 min · `visible UI` |
+| [#521](https://github.com/jakubiszon26/apiforge/issues/521) | DIAG-08 A check of a field's type in one step from the field; [ticket](tickets/DIAG-08.md); after DIAG-09 | S · 20 min · `visible UI` |
+| [#523](https://github.com/jakubiszon26/apiforge/issues/523) | DEMO-01 The first-start project shows the 0.2.0 language; [ticket](tickets/DEMO-01.md); after LANG-22 and DIAG-08 only in that its scenario is what they are tried on | M · 30 min · `default`, `visible UI` |
+| [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode is a switch in the header; [ticket](tickets/UX-42.md); waits for question 12 | S · 20 min · `visible UI`, `removal` |
+| [#524](https://github.com/jakubiszon26/apiforge/issues/524) | REL-06 v0.2.1; [ticket](tickets/REL-06.md); last | S · 15 min |
 
 ## Next sprint: REQ (not started)
 

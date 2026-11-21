@@ -2,9 +2,13 @@
 
 - Size: M · Owner review: 30 min · Risk: `default` (what a new install
   contains), `visible UI`
-- State: Analysis (issue #523) · proposal posted, **decision needed** (questions 9–11)
-  · for 0.2.1 · found by the owner on the v0.2.0-rc.1 packages, 2026-11-21
-- Analysis model: Fable 5.2 · Implementation model: —
+- State: **Approved, ready for implementation** (issue #523) · decided
+  by the owner on 2026-11-21 on the proposal: the new scenario
+  **replaces** the old one; the second scenario is **in**; an install
+  that already has a project is **left as it is** · for 0.2.1 · found by
+  the owner on the v0.2.0-rc.1 packages, 2026-11-21 · labelled
+  `ready:opus`
+- Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
 
@@ -32,15 +36,15 @@ translation of the reference editor's fixture
 
 ## What the owner will see
 
-- Default behaviour that changes (question 9): a first start opens
+- Default behaviour that changes (decided): a first start opens
   *Demo shop* with the scenario **Buy coffee on promotion** — the text
   below — and one component, `product`, written by hand.
-- New (question 10): a second scenario, **The cart refuses bad orders**,
+- New (decided): a second scenario, **The cart refuses bad orders**,
   three refused orders under `on_error continue`.
-- Removed (question 9): the components *Active promotion* and *Add to
+- Removed (decided): the components *Active promotion* and *Add to
   cart* leave the first-start project; the scenario *Promotion and cart
   price* is replaced.
-- Migrated or converted (question 11): nothing. A data directory that
+- Migrated or converted (decided): nothing. A data directory that
   already holds a project is not touched.
 
 ```afs
@@ -110,8 +114,11 @@ a layout file made the same way.
 Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/demo01.rs`
 and `crates/apiforge-cli/tests/demo01.rs`.
 
-1. A first start in an empty data directory opens *Demo shop* with the
-   approved scenario(s) and the component `product` at revision 1; the
+1. A first start in an empty data directory opens *Demo shop* with
+   *Buy coffee on promotion* and *The cart refuses bad orders*, their
+   texts as approved (`docs/qa/2026-11-21/DEMO-01/*.afs` on
+   `mock/rel-0.2.1`), and the component `product` at revision 1, with no
+   other scenario or component; the
    first scenario's tab is open. `demo01_criterion_1_first_start`.
 2. Every file of the demo passes `fmt --check` and `check` with no
    diagnostic at all, warnings included. `demo01_criterion_2_clean`.
@@ -139,7 +146,7 @@ writes changes. The legacy workspace window's demos. A tour or hints.
 
 | Proposal | Problem solved | Size, risk | Trade-offs | Where |
 | --- | --- | --- | --- | --- |
-| *New demo project* in the Project menu | A tester who edited the demo, or installed before 0.2.1, gets the fresh one without deleting the data directory | S · `visible UI` | One more menu entry; writes a second *Demo shop* folder | 0.2.1 if question 11 = B, else later |
+| *New demo project* in the Project menu | A tester who edited the demo, or installed before 0.2.1, gets the fresh one without deleting the data directory | S · `visible UI` | One more menu entry; writes a second *Demo shop* folder | Not taken for 0.2.1 (the owner, 2026-11-21); later |
 | The demo as `.afs` files in `fixtures/demo/`, embedded at build and held to REL-05's condition 1 | The demo can no longer fall behind the language: every release checks it as it checks the reference's examples | inside this ticket | The first-start project is prepared from text, not from the graph builders | this ticket's implementation |
 | The demo API's `inna_nazwa` becomes `label` | A leftover of the translation shows in every product response | S | Touches `apiforge-demo-api`, `fixtures/projects/shop.json` and the tests that read the field | later |
 

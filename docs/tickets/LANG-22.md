@@ -1,11 +1,15 @@
 # LANG-22: A type check that cannot pass is reported when it is written
 
-- Size: S · Owner review: 10 min · Risk: `migration` (question 8: a file
-  that passes `check` today may stop passing)
-- State: Analysis (issue #522) · **decision needed** (question 8) · for 0.2.1 · found
-  by the planning model while reproducing the owner's finding of
-  2026-11-21 (DIAG-08)
-- Analysis model: Fable 5.2 · Implementation model: —
+- Size: S · Owner review: 10 min · Risk: none of the five flags.
+  Backward compatibility is touched and **decided by the owner**
+  (2026-11-21, on #522): a type name outside the six is an **error**, so
+  a file with such a line no longer passes `check`. First filed with
+  `migration`; no data is converted or read by a new loader, so the flag
+  was withdrawn when the decision was recorded
+- State: **Approved, ready for implementation** (issue #522) · for 0.2.1
+  · found by the planning model while reproducing the owner's finding of
+  2026-11-21 (DIAG-08) · labelled `ready:opus`
+- Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
 
@@ -25,7 +29,8 @@ wrong is told at once, in words that name the six types.
 
 - New: `is "nubmer"` is marked in the editor and by `check`: *Unknown
   type "nubmer". A type is "string", "number", "boolean", "object",
-  "array" or "null".* (question 8: an error or a warning).
+  "array" or "null".* It is an error (decided): the document does not
+  run until the name is corrected.
 - New: `is number` is marked *A type is written in quotes: is "number"*,
   with the fix on the mark.
 - Changed: a failed type check reports *expected string, actual number
@@ -37,8 +42,9 @@ wrong is told at once, in words that name the six types.
 Tests in `crates/apiforge-script/tests/lang22.rs` and
 `crates/apiforge-runner/tests/lang22.rs`.
 
-1. `is "nubmer"` gives the diagnostic above at the literal's range; the
-   six names give none. `lang22_criterion_1_unknown_type_name`.
+1. `is "nubmer"` gives the diagnostic above, as an error, at the
+   literal's range, and the document does not run; the six names give
+   none. `lang22_criterion_1_unknown_type_name`.
 2. `is number` (and the other five bare words) gives the quote
    diagnostic with a fix that writes the quotes; a handle that really is
    called `number` is still read as a handle. `lang22_criterion_2_bare_type_word`.
