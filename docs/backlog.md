@@ -511,6 +511,27 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   LANG-04 #132). Their format questions return to the owner with the
   analyses.
 
+## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (analysis; not started)
+
+The owner tried the v0.2.0-rc.1 packages on 2026-11-21 and raised four
+findings; v0.2.0 was tagged as it was and these go to 0.2.1. A fifth
+ticket is the planning model's, found while reproducing the second. Every
+ticket waits for the owner's answers (eleven questions, on the issues);
+none is `ready`. The mock-ups are on `mock/rel-0.2.1` at `58710bc`; the
+issues carry `sprint:0.2.1`. About 90 owner minutes.
+
+| Issue | Ticket | Estimate |
+| --- | --- | --- |
+| [#519](https://github.com/jakubiszon26/apiforge/issues/519) | UX-41 The selected step no longer looks like an error; [ticket](tickets/UX-41.md) | S · 15 min · `visible UI` |
+| [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode menu reads as two choices; [ticket](tickets/UX-42.md) | S · 15 min · `visible UI`, `removal` |
+| [#521](https://github.com/jakubiszon26/apiforge/issues/521) | DIAG-08 A check of a field's type in one step from the field; [ticket](tickets/DIAG-08.md) | S · 20 min · `visible UI` |
+| [#522](https://github.com/jakubiszon26/apiforge/issues/522) | LANG-22 A type check that cannot pass is reported when it is written; [ticket](tickets/LANG-22.md) | S · 10 min · `migration` |
+| [#523](https://github.com/jakubiszon26/apiforge/issues/523) | DEMO-01 The first-start project shows the 0.2.0 language; [ticket](tickets/DEMO-01.md) | M · 30 min · `default`, `visible UI` |
+
+Candidates, the owner's to take or leave: #399 (*Add comparison* before
+the first run) with DIAG-08; a release ticket REL-06 for 0.2.1 once the
+set is decided.
+
 ## Next sprint: REQ (not started)
 
 Request and results. The owner's run of 2026-11-19 showed that a test made
