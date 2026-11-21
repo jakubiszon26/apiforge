@@ -446,6 +446,13 @@ scenario "Assertions" {
   `~=` checks of one condition share one tolerance.
 - In a check, `exists` and `contains` are predicates. Write the function form
   as `op.exists(x)` or `op.contains(x, y)` there.
+- A type is written in quotes and is one of the six above. Another name
+  (`is "nubmer"`) is an error, **`Unknown type "nubmer"`**, and the file does
+  not pass `check` or run until it is corrected; a name without quotes
+  (`is number`) is an error whose fix writes them, unless a statement of
+  that name exists. A type read from a value (`is param.kind`) is checked
+  when the step runs. A failed type check names both types and the value:
+  `expected string, actual number (160)`.
 
 ## Branches: if and else
 
@@ -766,6 +773,10 @@ messages you will meet most:
 - **``Expected `}` ``**, or the same with `)`, `]`, `:` or `=`: a brace or
   separator is missing; the fix inserts it. Count the braces of the block
   above the range.
+- **`Unknown type "…". A type is "string", "number", "boolean", "object",
+  "array" or "null".`**: a type check names a type that does not exist, and
+  could never pass. Correct the spelling. **`A type is written in quotes: is
+  "number"`**: the type is written without quotes; the fix writes them.
 - **`Unknown block handle`**: a name that is no statement of the file. Check
   the spelling, and that a main-flow statement does not use a cleanup handle
   (`Main flow cannot reference cleanup`).
