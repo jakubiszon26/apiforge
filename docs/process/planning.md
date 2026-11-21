@@ -128,6 +128,13 @@ recommended option sits in the whole window; the board does not replace
 them. Examples: `docs/qa/2026-11-21/UX-41/selection-failed-100.png`,
 `docs/qa/2026-11-21/UX-42/run-mode-live-960.png` on `mock/rel-0.2.1`.
 
+A board shows how options look, not what a task costs on each. When the
+question is about a gesture or a flow, the options can also be compared by
+agents doing one task in the real window on each of them: an
+[A/B round](ab-testing.md) (proposed 2026-11-21). Its table stands beside
+the board in the same quiz; it does not replace the board or the owner's
+choice.
+
 A mock-up is approved as a whole or sent back; approval is noted in the
 ticket's state. The implementation is then measured against the mock-up in the
 QA report.

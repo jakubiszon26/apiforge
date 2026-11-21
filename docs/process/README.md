@@ -11,6 +11,7 @@ whose findings every rule below answers.
 | [Estimation](estimation.md) | Size classes, review time, risk flags, splitting |
 | [Testing](testing.md) | Acceptance tests first, the QA report, the regression smoke list |
 | [Retrospective](retrospective.md) | The sprint review and its three actions |
+| [A/B rounds](ab-testing.md) | Variants and versions compared by agents on a user's task; what is measured; how regressions become tickets (proposed 2026-11-21) |
 | [Autonomy](autonomy.md) | Which tickets another model may take unattended, how it picks one, what it escalates, who merges |
 | [Backlog](../backlog.md) | The sprint: its goal, exit criteria and the issues in it |
 | [Issues](https://github.com/jakubiszon26/apiforge/issues) | The tickets: one issue each, with state, estimate and discussion |
