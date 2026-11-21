@@ -2261,7 +2261,7 @@ pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) -> C
         Color32::from_black_alpha(8),
     );
     let outline = if selected {
-        theme::ACCENT
+        theme::SELECTION
     } else {
         color.gamma_multiply(0.45)
     };
@@ -2433,8 +2433,8 @@ pub fn minimap(
     let map = |point: Pos2| inner.min + (point - bounds.min) * scale;
     for card in shapes.cards {
         let fill = if selection.contains(card.id.as_str()) {
-            marks.push((card.id.clone(), theme::ACCENT));
-            theme::ACCENT
+            marks.push((card.id.clone(), theme::SELECTION));
+            theme::SELECTION
         } else {
             theme::MINIMAP
         };
@@ -2446,8 +2446,8 @@ pub fn minimap(
     }
     for chip in shapes.chips {
         let fill = if selection.contains(chip.id()) {
-            marks.push((chip.id().to_owned(), theme::ACCENT));
-            theme::ACCENT
+            marks.push((chip.id().to_owned(), theme::SELECTION));
+            theme::SELECTION
         } else {
             theme::VARIABLE.gamma_multiply(0.6)
         };

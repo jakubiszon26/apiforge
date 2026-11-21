@@ -3931,7 +3931,7 @@ impl Canvas {
             return;
         };
         let area = Rect::from_two_pos(*from, pointer);
-        let (fill, outline) = (theme::ACCENT.gamma_multiply(0.08), theme::ACCENT);
+        let (fill, outline) = (theme::SELECTION.gamma_multiply(0.08), theme::SELECTION);
         ui.painter().rect(
             area,
             2.0,

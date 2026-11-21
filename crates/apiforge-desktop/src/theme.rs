@@ -12,7 +12,8 @@ pub const ACCENT: Color32 = Color32::from_rgb(224, 89, 39);
 pub const ACCENT_HOVER: Color32 = Color32::from_rgb(206, 76, 29);
 pub const ACCENT_PRESSED: Color32 = Color32::from_rgb(185, 66, 23);
 /// The selection on the board: a selected card's frame and its step's
-/// wires (UX-41). A blue that is none of a run's colours, so red always
+/// wires, a selected chip's outline, the selection on the minimap and the
+/// box a drag draws to select (UX-41). A blue that is none of a run's colours, so red always
 /// means failed.
 pub const SELECTION: Color32 = Color32::from_rgb(44, 108, 214);
 pub const LINK: Color32 = Color32::from_rgb(70, 106, 145);
