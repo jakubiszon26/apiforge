@@ -1,0 +1,18 @@
+scenario "Cart lifecycle" {
+  begin = start
+  @config({ method: "POST", timeoutMs: 10000.0 })
+  create = POST "http://127.0.0.1:4318/demo/shop/carts" {
+    body { productId: 123, quantity: 2 }
+    timeout 10s
+  }
+  read = GET "http://127.0.0.1:4318/demo/shop/carts/{{create.body.id}}" {
+    timeout 10s
+  }
+  @label("Check id")
+  check_id = assert read.body.id == "498c383b-1a4d-4911-af84-e325bf3a5d40"
+  cleanup {
+    remove = DELETE "http://127.0.0.1:4318/demo/shop/carts/{{create.body.id}}" {
+      timeout 10s
+    }
+  }
+}

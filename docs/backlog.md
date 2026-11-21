@@ -538,6 +538,12 @@ the order of work.
 | [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode is a switch in the header; [ticket](tickets/UX-42.md) | S · 20 min · `visible UI`, `removal` |
 | [#524](https://github.com/jakubiszon26/apiforge/issues/524) | REL-06 v0.2.1, a candidate first; [ticket](tickets/REL-06.md); last | S · 15 min |
 
+AB-01 [#537](https://github.com/jakubiszon26/apiforge/issues/537), v0.1.0 against v0.2.0 on eight tester's tasks driven by
+agents ([ticket](tickets/AB-01.md)), runs beside these tickets: the owner
+approved the method and the timing on 2026-11-21 — now, before
+`v0.2.1-rc.1`, so that a regression that blocks a task can still enter
+0.2.1. Round 1 is `ready:opus`; it changes nothing in the product.
+
 ## Next sprint: REQ (not started)
 
 Request and results. The owner's run of 2026-11-19 showed that a test made
@@ -571,6 +577,11 @@ criteria:
 - [ ] *Run to here* and *Send this request alone* work from that view; a
       live request is sent only under the permission an ordinary live run
       needs (REQ-04, REQ-05).
+- [ ] The mandatory scenario — POST, the id from the response, GET with
+      that id, an assertion, DELETE — is built and run twice in the window
+      with no hand editing of the `.afs` (owner, 2026-11-21; REQ-06,
+      [ticket](tickets/REQ-06.md)); agents run it first
+      ([A/B rounds](process/ab-testing.md)).
 - [ ] The owner does the task of REQ-06 on a release build, and the
       retrospective is written.
 
@@ -592,7 +603,10 @@ criteria:
 | [#465](https://github.com/jakubiszon26/apiforge/issues/465) | REQ-08 A new case duplicated from an existing one; run the failed ones again | S and M · 30 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REQ-01 and REQ-04 |
 | [#477](https://github.com/jakubiszon26/apiforge/issues/477) | REQ-09 Hints for repetition: the same host or header in every request, each with a fix | S · 10 · `visible UI` | accepted into scope 2026-11-20; to analyse; the header half after LANG-18 |
 | [#478](https://github.com/jakubiszon26/apiforge/issues/478) | REQ-10 A live response saved as the sample; Expect this response | M · 20 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REP-07 and REQ-02a |
-| [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the owner's own run | S · 10 | after the rest |
+| [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 A value of a response is used in a later request by choosing it | M · 20 · `visible UI` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
+| [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 A check made from a field offers what to compare with | S–M · 15 · `visible UI`, `default` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
+| [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 The window writes only what was set; [ticket](tickets/REQ-13.md) | S–M · 15 · `default` | in scope 2026-11-21; three questions open |
+| [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the mandatory scenario and the owner's own run; [ticket](tickets/REQ-06.md) | S · 10 | after the rest |
 
 REQ-07 to REQ-10 are the planning model's proposals
 ([plan, section 5](sprints/req.md#5-proposals-of-the-planning-model)).
