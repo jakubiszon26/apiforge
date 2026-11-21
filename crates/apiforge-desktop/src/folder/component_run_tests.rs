@@ -502,9 +502,9 @@ fn review_component_run() {
 // ----- KTLO-23b: the Run inputs dialog (criterion 9, decision 1) ----------------
 
 /// The field of the demo's `product` input, which has no default.
-const PRODUCT_FIELD: &str = "product · Object";
+const PRODUCT_FIELD: &str = "product · object";
 /// The field of the demo's `quantity` input, whose default is 1.
-const QUANTITY_FIELD: &str = "Quantity · quantity · Number";
+const QUANTITY_FIELD: &str = "Quantity · quantity · number";
 
 fn asks_for_inputs(harness: &FolderHarness) -> bool {
     harness.query_by_label("Run inputs").is_some()
@@ -745,9 +745,9 @@ const NOTES_SOURCE: &str = "component Notes \"Notes\" {
   size = length(given.value)
 }
 ";
-const ITEM_FIELD: &str = "item · Object";
+const ITEM_FIELD: &str = "item · object";
 /// The optional marker is part of the field's name (criterion 4).
-pub(super) const NOTE_FIELD: &str = "note · Text · optional";
+pub(super) const NOTE_FIELD: &str = "note · string · optional";
 
 /// The demo shop with the `Notes` component beside its own.
 pub(super) fn shop_with_notes() -> tempfile::TempDir {

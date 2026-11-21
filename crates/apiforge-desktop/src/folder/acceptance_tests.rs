@@ -10497,7 +10497,7 @@ mod ux32 {
         assert!(required.accesskit_node().is_disabled(), "forced on");
         assert!(contains(&harness, "An input without a default is required"));
         choose(&mut harness, TYPE);
-        choose(&mut harness, "Text");
+        choose(&mut harness, "string");
         harness.get_by_label(DEFAULT).focus();
         harness.step();
         harness.get_by_label(DEFAULT).type_text("\"EUR\"");
@@ -10623,7 +10623,7 @@ mod ux32 {
         assert!(has_label(&harness, "quantity * number = 2"), "the pill");
 
         choose(&mut harness, TYPE);
-        choose(&mut harness, "Text");
+        choose(&mut harness, "string");
         assert!(source_of(&harness, &id).contains("  input quantity: string = 2\n"));
         assert!(
             harness
@@ -10783,9 +10783,9 @@ mod ux32 {
         let before = source_of(&harness, &id);
         choose(&mut harness, QUANTITY);
         choose(&mut harness, TYPE);
-        choose(&mut harness, "List");
+        choose(&mut harness, "array");
         assert_eq!(source_of(&harness, &id), before, "the type is kept");
-        assert!(contains(&harness, "The default 1 is not a list"));
+        assert!(contains(&harness, "The default 1 is not an array"));
         type_over(&mut harness, DEFAULT, "true");
         assert!(contains(&harness, "The default is not a number"));
         assert!(source_of(&harness, &id).contains("  input quantity: number\n"));
@@ -11415,7 +11415,7 @@ mod ux30 {
     }
 
     /// Criterion 1: the dialog opens with the name focused and the file
-    /// named after it; it proposes `product` (Object · Product, required,
+    /// named after it; it proposes `product` (object · Product, required,
     /// from a wire outside the selection), `quantity` (Number, 1 becomes its
     /// default) and `expected` (Number, required) as inputs, and `cart`
     /// ticked with the check's `value` and `passed` unticked as outputs.
@@ -11443,7 +11443,7 @@ mod ux30 {
                 (
                     1,
                     "product",
-                    "Object",
+                    "object",
                     "Product",
                     true,
                     "Add to cart → product · a wire from outside the selection",
@@ -11451,7 +11451,7 @@ mod ux30 {
                 (
                     2,
                     "quantity",
-                    "Number",
+                    "number",
                     "No contract",
                     false,
                     "Add to cart → Quantity · the value 1 becomes its default",
@@ -11459,7 +11459,7 @@ mod ux30 {
                 (
                     3,
                     "expected",
-                    "Number",
+                    "number",
                     "No contract",
                     true,
                     "Promotional price → Expected value · a wire from outside the selection",
@@ -11494,7 +11494,7 @@ mod ux30 {
 
             assert_eq!(toggled(&harness, "Use output 1"), Some(Toggled::True));
             assert_eq!(field_value(&harness, "Output 1 name"), "cart");
-            assert_eq!(field_value(&harness, "Output 1 type"), "Object");
+            assert_eq!(field_value(&harness, "Output 1 type"), "object");
             assert_eq!(field_value(&harness, "Output 1 contract"), "Cart");
             assert!(has_label(&harness, "Add to cart → cart"));
             for (row, caption) in [
@@ -13653,6 +13653,10 @@ mod ux18 {
         first(harness, right).scroll_to_me();
         settle(harness);
         first(harness, right).click();
+        // *Check* opens the menu Add a check (DIAG-08); *equals* is the
+        // check it wrote at once before.
+        settle(harness);
+        crate::testing::choose_equals(harness, "the field");
     }
 
     /// Criterion 3: *Check* on the rightmost step in Run results adds a card
