@@ -2245,7 +2245,8 @@ pub fn trays(painter: &Painter, card: &Card, camera: Camera, inputs: bool, outpu
 ///
 /// A chip is deliberately not a card. It holds no arguments and no settings — it
 /// is the same value shown in another place — so it stays a pill with one name.
-pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
+/// Returns the chip's outline colour.
+pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) -> Color32 {
     let z = camera.zoom;
     let rect = camera.rect(chip.rect());
     let radius = (CHIP_HEIGHT / 2.0 * z).max(2.0);
@@ -2259,18 +2260,16 @@ pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
         radius,
         Color32::from_black_alpha(8),
     );
+    let outline = if selected {
+        theme::ACCENT
+    } else {
+        color.gamma_multiply(0.45)
+    };
     painter.rect(
         rect,
         radius,
         color.gamma_multiply(if selected { 0.22 } else { 0.12 }),
-        Stroke::new(
-            if selected { 1.7 } else { 1.0 },
-            if selected {
-                theme::ACCENT
-            } else {
-                color.gamma_multiply(0.45)
-            },
-        ),
+        Stroke::new(if selected { 1.7 } else { 1.0 }, outline),
         StrokeKind::Inside,
     );
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
@@ -2304,6 +2303,7 @@ pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
         );
     }
     socket(painter, camera.to_screen(chip.output_anchor()), false, z);
+    outline
 }
 
 /// Data sockets are round, control sockets square, so they differ beyond colour.
@@ -2416,6 +2416,7 @@ pub fn minimap(
     shapes: super::Shapes<'_>,
     camera: Camera,
     selection: &HashSet<&str>,
+    marks: &mut Vec<(String, Color32)>,
 ) -> Option<(Rect, Rect, f32)> {
     let rect = minimap_rect?;
     let bounds = shapes.bounds()?;
@@ -2432,6 +2433,7 @@ pub fn minimap(
     let map = |point: Pos2| inner.min + (point - bounds.min) * scale;
     for card in shapes.cards {
         let fill = if selection.contains(card.id.as_str()) {
+            marks.push((card.id.clone(), theme::ACCENT));
             theme::ACCENT
         } else {
             theme::MINIMAP
@@ -2444,6 +2446,7 @@ pub fn minimap(
     }
     for chip in shapes.chips {
         let fill = if selection.contains(chip.id()) {
+            marks.push((chip.id().to_owned(), theme::ACCENT));
             theme::ACCENT
         } else {
             theme::VARIABLE.gamma_multiply(0.6)

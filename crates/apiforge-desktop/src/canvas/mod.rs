@@ -612,6 +612,17 @@ pub struct Canvas {
     /// The minimap and the zoom bar of the last frame, on screen.
     #[cfg(test)]
     chrome: (Option<Rect>, Rect),
+    /// The selected cards and chips the minimap marked in the last frame,
+    /// and their colour (UX-41).
+    #[cfg(test)]
+    minimap_marks: Vec<(String, Color32)>,
+    /// Each chip's outline in the last frame (UX-41).
+    #[cfg(test)]
+    chip_outlines: Vec<(String, Color32)>,
+    /// The fill and outline of the box a drag on the empty board draws to
+    /// select, while it is drawn (UX-41).
+    #[cfg(test)]
+    marquee: Option<(Color32, Color32)>,
 }
 
 /// A wire as the last frame drew it: its id, its source and target cards,
@@ -794,6 +805,12 @@ impl Default for Canvas {
             ringed_ports: Vec::new(),
             #[cfg(test)]
             chrome: (None, Rect::NOTHING),
+            #[cfg(test)]
+            minimap_marks: Vec::new(),
+            #[cfg(test)]
+            chip_outlines: Vec::new(),
+            #[cfg(test)]
+            marquee: None,
         }
     }
 }
@@ -943,6 +960,29 @@ impl Canvas {
     #[cfg(test)]
     pub(crate) fn debug_ring(&self, id: &str) -> Option<Color32> {
         self.debug_drawn(id)?.ring
+    }
+
+    /// The selected cards and chips the minimap marked in the last frame,
+    /// with their colour (UX-41).
+    #[cfg(test)]
+    pub(crate) fn debug_minimap_marks(&self) -> &[(String, Color32)] {
+        &self.minimap_marks
+    }
+
+    /// The outline of the chip `id` in the last frame (UX-41).
+    #[cfg(test)]
+    pub(crate) fn debug_chip_outline(&self, id: &str) -> Option<Color32> {
+        self.chip_outlines
+            .iter()
+            .find(|(chip, _)| chip == id)
+            .map(|(_, colour)| *colour)
+    }
+
+    /// The fill and outline of the selecting box while it is drawn
+    /// (UX-41).
+    #[cfg(test)]
+    pub(crate) fn debug_marquee(&self) -> Option<(Color32, Color32)> {
+        self.marquee
     }
 
     /// The selection's frame around the card `id` in the last frame
@@ -1741,6 +1781,7 @@ impl Canvas {
             self.cards = cards.clone();
             self.lines.clear();
             self.drawn.clear();
+            self.chip_outlines.clear();
         }
         if let Some(Drag::Nodes { ids, offset }) = &self.drag {
             for card in cards.iter_mut().filter(|card| ids.contains(&card.id)) {
@@ -2614,7 +2655,9 @@ impl Canvas {
             {
                 commands.push(Command::Move(moved_positions(input.graph, &ids, offset)));
             }
-            paint::chip(&board_painter, chip, camera, selection.contains(chip.id()));
+            let _outline = paint::chip(&board_painter, chip, camera, selection.contains(chip.id()));
+            #[cfg(test)]
+            self.chip_outlines.push((chip.id().to_owned(), _outline));
             self.chip_controls(&mut board_ui, chip, camera, !input.read_only, &mut commands);
         }
 
@@ -2909,14 +2952,22 @@ impl Canvas {
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &summary));
         }
         self.zoom_controls(ui, viewport, &overlays, shapes(&cards, &chips, &extents));
-        if let Some((mm_inner, bounds, scale)) = paint::minimap(
+        let mut minimap_marks = Vec::new();
+        let minimap = paint::minimap(
             &painter,
             overlays.minimap,
             overlays.board,
             shapes(&cards, &chips, &extents),
             camera,
             &selection,
-        ) && let Some(mm_rect) = overlays.minimap
+            &mut minimap_marks,
+        );
+        #[cfg(test)]
+        {
+            self.minimap_marks = minimap_marks;
+        }
+        if let Some((mm_inner, bounds, scale)) = minimap
+            && let Some(mm_rect) = overlays.minimap
         {
             let mm_response = ui
                 .interact(
@@ -3869,6 +3920,10 @@ impl Canvas {
                 additive: ui.input(|state| state.modifiers.command),
             });
         }
+        #[cfg(test)]
+        {
+            self.marquee = None;
+        }
         let Some(Drag::Select { from, additive }) = &self.drag else {
             return;
         };
@@ -3876,13 +3931,18 @@ impl Canvas {
             return;
         };
         let area = Rect::from_two_pos(*from, pointer);
+        let (fill, outline) = (theme::ACCENT.gamma_multiply(0.08), theme::ACCENT);
         ui.painter().rect(
             area,
             2.0,
-            theme::ACCENT.gamma_multiply(0.08),
-            Stroke::new(1.0, theme::ACCENT),
+            fill,
+            Stroke::new(1.0, outline),
             StrokeKind::Inside,
         );
+        #[cfg(test)]
+        {
+            self.marquee = Some((fill, outline));
+        }
         if background.drag_stopped() {
             let mut selected: Vec<String> = if *additive {
                 input.selection.to_vec()

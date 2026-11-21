@@ -2,11 +2,16 @@
 //! selected card has a 2 px blue frame on its edge with a faint halo and no
 //! corner handles, and the selected step's wires are the same blue (B,
 //! decided 2026-11-21); red always means failed. On `shop-30` after a
-//! failed simulation, as LAY-10's tests open it.
+//! failed simulation, as LAY-10's tests open it. The owner's decision of
+//! 2026-11-21 on #519 adds criteria 6-8: the selection's other marks, on
+//! the minimap, on a chip and the box a drag draws to select, take the
+//! same blue.
 
 use super::lay07;
-use super::lay10::{after_failure_in, failing, fit};
-use super::lay16::{canvas, document, id_of, select, show, switch_density};
+use super::lay10::{after_failure_in, empty_point, failing, fit};
+use super::lay16::{
+    canvas, document, graph, id_of, move_to, press, release, select, show, switch_density, world_of,
+};
 use super::*;
 use crate::canvas::DrawnFrame;
 use crate::theme;
@@ -251,4 +256,97 @@ fn review_ux41() {
         });
         crate::testing::capture(&mut harness, name, region);
     }
+}
+
+/// Criterion 6: a selected card is marked on the minimap in
+/// `theme::SELECTION`, and only the selection is marked.
+#[test]
+fn ux41_criterion_6_the_minimap_marks_the_selection_in_its_colour() {
+    let (_project, mut harness, _gate) = after_failure_in(WIDE, true);
+    select(&mut harness, &["cart"]);
+    fit(&mut harness);
+    assert!(
+        canvas(&harness).debug_minimap().is_some(),
+        "the minimap is drawn"
+    );
+    assert_eq!(
+        canvas(&harness).debug_minimap_marks(),
+        [(id_of(&harness, "cart"), theme::SELECTION)].as_slice(),
+        "cart, and only cart, is marked in the selection's colour"
+    );
+}
+
+/// Criterion 7: a selected chip is outlined in `theme::SELECTION`, an
+/// unselected one is not, and the minimap marks the chip in it too.
+#[test]
+fn ux41_criterion_7_a_selected_chip_is_outlined_in_its_colour() {
+    let (_project, mut harness, _gate) = after_failure_in(WIDE, true);
+    let cart = world_of(&harness, "cart");
+    app(&mut harness).active_board_command(crate::canvas::Command::AddProxy {
+        source: apiforge_core::format::ProxySource::Environment {
+            name: "baseUrl".into(),
+        },
+        position: apiforge_core::format::Position {
+            x: f64::from(cart.left()),
+            y: f64::from(cart.bottom() + 120.0),
+        },
+    });
+    settle(&mut harness);
+    let chip = graph(&harness)
+        .proxies
+        .last()
+        .expect("the chip is on the board")
+        .id
+        .clone();
+    select(&mut harness, &[]);
+    show(&mut harness, "cart", 0.6);
+    let outline = canvas(&harness)
+        .debug_chip_outline(&chip)
+        .expect("the chip is drawn");
+    assert_ne!(outline, theme::SELECTION, "an unselected chip");
+
+    let document = document(&harness);
+    app(&mut harness)
+        .selections
+        .insert(document, vec![chip.clone()]);
+    settle(&mut harness);
+    harness.step();
+    assert_eq!(
+        canvas(&harness).debug_chip_outline(&chip),
+        Some(theme::SELECTION),
+        "the selected chip's outline"
+    );
+    assert!(
+        canvas(&harness)
+            .debug_minimap_marks()
+            .contains(&(chip, theme::SELECTION)),
+        "the minimap marks the selected chip: {:?}",
+        canvas(&harness).debug_minimap_marks()
+    );
+}
+
+/// Criterion 8: the box a drag on the empty board draws to select is
+/// `theme::SELECTION`, its fill a faint wash of it.
+#[test]
+fn ux41_criterion_8_the_selecting_box_is_in_its_colour() {
+    let (_project, mut harness, _gate) = after_failure_in(WIDE, true);
+    select(&mut harness, &[]);
+    fit(&mut harness);
+    let from = empty_point(&harness);
+    let to = from + egui::vec2(80.0, 60.0);
+    press(&mut harness, from);
+    move_to(&mut harness, from, to);
+    assert_eq!(
+        canvas(&harness).debug_marquee(),
+        Some((theme::SELECTION.gamma_multiply(0.08), theme::SELECTION)),
+        "the selecting box"
+    );
+    release(&mut harness, to);
+    settle(&mut harness);
+    harness.step();
+    assert_eq!(
+        canvas(&harness).debug_marquee(),
+        None,
+        "gone after the drag"
+    );
 }

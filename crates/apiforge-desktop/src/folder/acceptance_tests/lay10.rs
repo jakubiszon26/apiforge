@@ -424,7 +424,7 @@ fn assert_restored(harness: &FolderHarness, context: &str) {
 }
 
 /// A point of the board in view with no card on it.
-fn empty_point(harness: &FolderHarness) -> Pos2 {
+pub(super) fn empty_point(harness: &FolderHarness) -> Pos2 {
     let canvas = canvas(harness);
     let focus = canvas.debug_focus();
     let cards: Vec<Rect> = canvas
