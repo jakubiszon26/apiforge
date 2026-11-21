@@ -735,6 +735,27 @@ impl FolderApp {
                     );
                 }
             }
+            Action::AssertField { .. } | Action::AssignField { .. } => {
+                self.field_action(id, action);
+            }
+        }
+    }
+
+    /// *Add comparison* or *Assign to variable* on a field of a step's
+    /// data: the run's results or, before any run, the step's sample
+    /// (DIAG-09). Neither needs a run: the graph that holds the step tells
+    /// the cleanup from the main flow. A check is counted against the
+    /// document's report only while that report is not stale (UX-01).
+    pub(super) fn field_action(&mut self, id: &str, action: crate::report::Action) {
+        use crate::report::Action;
+        let Some(snapshot) = self.snapshot(id) else {
+            return;
+        };
+        if !snapshot.editable {
+            return;
+        }
+        let Some(model) = snapshot.model else { return };
+        match action {
             Action::AssertField {
                 node_id,
                 port,
@@ -751,7 +772,9 @@ impl FolderApp {
                     .runs
                     .reports
                     .get(id)
-                    .map_or(0, |report| self.freshness(report).checks());
+                    .map(|report| self.freshness(report))
+                    .filter(|freshness| *freshness != Freshness::Stale)
+                    .map(Freshness::checks);
                 if let Some(node) = graph.nodes.iter().find(|node| node.id == node_id) {
                     let context = self.context_project();
                     let parameters = parameters_of(&model);
@@ -774,16 +797,18 @@ impl FolderApp {
                         publication::Action::Model {
                             next: Box::new(with_graph(&model, cleanup, pushed.graph)),
                             selection: pushed.selection,
-                            check: Some(Box::new(PendingCheck {
-                                field: crate::report::CheckedField {
-                                    node_id,
-                                    port,
-                                    path,
-                                },
-                                cleanup,
-                                before,
-                                checks,
-                            })),
+                            check: checks.map(|checks| {
+                                Box::new(PendingCheck {
+                                    field: crate::report::CheckedField {
+                                        node_id,
+                                        port,
+                                        path,
+                                    },
+                                    cleanup,
+                                    before,
+                                    checks,
+                                })
+                            }),
                             moved: Vec::new(),
                             placed: false,
                         },
@@ -810,6 +835,7 @@ impl FolderApp {
                     )),
                 });
             }
+            _ => {}
         }
     }
 
