@@ -416,7 +416,11 @@ fn select(harness: &mut FolderHarness, name: &str) {
         .filter_map(|found| found.accesskit_node().label())
         .find(|label| label.starts_with(&row))
         .unwrap_or_else(|| panic!("{name} has a row in the step list"));
-    harness.query_all_by_label(&label).next().unwrap().scroll_to_me();
+    harness
+        .query_all_by_label(&label)
+        .next()
+        .unwrap()
+        .scroll_to_me();
     settle(harness);
     harness.query_all_by_label(&label).next().unwrap().click();
     settle(harness);
