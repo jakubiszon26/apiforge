@@ -746,15 +746,20 @@ mod review {
         }
     }
 
-    /// UX-02: the Run button in either mode, beside MCP-09's *Live
-    /// allowed*, after a simulation so the SIMULATION badge is in view; the
-    /// chevron's menu in either mode; a component's tab, with *Publish*, the
-    /// fullest header. Compare with `docs/qa/2026-11-02/UX-00/ux02-*`.
+    /// UX-02 and UX-42: the run mode switch and the Run button in either
+    /// mode, beside MCP-09's *Live allowed*, after a simulation so the
+    /// SIMULATION badge is in view; a component's tab, with *Publish* and
+    /// *r1 · no changes*, the fullest header, where at 960 × 540 the Run
+    /// button is ▶ alone. Compare with `docs/qa/2026-11-21/UX-42/*` on
+    /// `mock/rel-0.2.1`.
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
-    fn review_ux02_run_mode() {
+    fn review_ux42_run_mode() {
         fn click(harness: &mut FolderHarness, label: &str) {
-            harness.get_by_label(label).click();
+            harness
+                .query_by_role_and_label(egui::accesskit::Role::RadioButton, label)
+                .unwrap_or_else(|| harness.get_by_label(label))
+                .click();
             // The pointer leaves for the header's empty top margin, so no
             // control is captured hovered.
             harness.hover_at(egui::pos2(480.0, 3.0));
@@ -803,14 +808,7 @@ mod review {
                 std::thread::sleep(Duration::from_millis(5));
             }
             settle(&mut harness);
-            let header = [
-                "Code",
-                "Diagram",
-                "Split",
-                "Save",
-                "Save all",
-                "Run options",
-            ];
+            let header = ["Code", "Diagram", "Split", "Save", "Save all", "Run mode"];
             for run in ["Run simulation", "Run live"] {
                 let mode = if run == "Run live" {
                     "live"
@@ -821,13 +819,7 @@ mod review {
                 labels.extend(["Live allowed", run]);
                 assert_within_window(&harness, &labels);
                 assert_disjoint(&harness, &labels);
-                capture(&mut harness, &format!("ux02-run-{mode}-{suffix}"), None);
-                click(&mut harness, "Run options");
-                capture(
-                    &mut harness,
-                    &format!("ux02-run-options-{mode}-{suffix}"),
-                    None,
-                );
+                capture(&mut harness, &format!("ux42-run-{mode}-{suffix}"), None);
                 click(
                     &mut harness,
                     if run == "Run live" {
@@ -841,11 +833,31 @@ mod review {
             explorer_row(&mut harness, "components");
             explorer_row(&mut harness, "product.afs");
             click(&mut harness, "Diagram");
-            let mut labels = header.to_vec();
-            labels.extend(["Live allowed", "Run simulation", "Publish"]);
-            assert_within_window(&harness, &labels);
-            assert_disjoint(&harness, &labels);
-            capture(&mut harness, &format!("ux02-component-tab-{suffix}"), None);
+            for run in ["Run simulation", "Run live"] {
+                let mode = if run == "Run live" {
+                    "live"
+                } else {
+                    "simulation"
+                };
+                click(
+                    &mut harness,
+                    if run == "Run live" {
+                        "Live"
+                    } else {
+                        "Simulation"
+                    },
+                );
+                let mut labels = header.to_vec();
+                labels.extend(["Live allowed", run, "Publish"]);
+                assert_within_window(&harness, &labels);
+                assert_disjoint(&harness, &labels);
+                capture(
+                    &mut harness,
+                    &format!("ux42-component-tab-{mode}-{suffix}"),
+                    None,
+                );
+            }
+            click(&mut harness, "Simulation");
         }
     }
 
