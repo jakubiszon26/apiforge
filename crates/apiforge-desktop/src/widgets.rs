@@ -608,25 +608,6 @@ pub fn action_menu(
     response
 }
 
-/// [`action_menu`] with its button at `rect`, a place `ui` took earlier: the
-/// button then follows the widgets drawn meanwhile in the Tab order. The
-/// cursor of `ui` stays where it is.
-pub fn action_menu_at(
-    ui: &mut Ui,
-    rect: egui::Rect,
-    button: ActionButton<'_>,
-    content: impl FnOnce(&mut Ui),
-) -> Response {
-    let name = menu_name(&button);
-    let response = ui
-        .new_child(egui::UiBuilder::new().max_rect(rect).layout(
-            egui::Layout::centered_and_justified(egui::Direction::TopDown),
-        ))
-        .add(button);
-    show_menu(&response, &name, content);
-    response
-}
-
 fn menu_name(button: &ActionButton<'_>) -> String {
     format!("{} menu", button.label.trim_end_matches('…'))
 }

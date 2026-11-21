@@ -89,32 +89,21 @@ impl FolderApp {
                 }) + ui.spacing().item_spacing.x
             };
             // The toolbar's 650 px were measured with *Run* and the text
-            // button *Run options*. The mode's label is wider, as much as
-            // the wider of the two whatever the mode, so the title does not
-            // move when the mode changes; the chevron gives back what the
-            // text button took beyond its own width (UX-02).
-            let text_width = |ui: &egui::Ui, text: &str, font: egui::FontId| {
-                ui.fonts_mut(|fonts| {
-                    fonts
-                        .layout_no_wrap(text.to_owned(), font, theme::TEXT)
-                        .size()
-                        .x
-                })
-            };
-            let bold = egui::FontId::new(theme::FONT_BODY, theme::bold_family());
-            let mut reserved = 650.0
-                + text_width(ui, run_label(false), bold.clone()).max(text_width(
-                    ui,
-                    run_label(true),
-                    bold.clone(),
-                ))
-                - text_width(ui, "Run", bold)
-                - (text_width(
-                    ui,
-                    OPTIONS,
-                    egui::FontId::proportional(theme::FONT_BODY),
-                ) + 2.0 * ui.spacing().button_padding.x
-                    - theme::CONTROL_HEIGHT);
+            // button *Run options*. The switch *Simulation | Live* takes the
+            // text button's place and *▶ Run* is that *Run*: the row
+            // reserves the same in either mode, so the title does not move
+            // when the mode changes (UX-02, UX-42).
+            let options_button = ui.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(
+                        "Run options".to_owned(),
+                        egui::FontId::proportional(theme::FONT_BODY),
+                        theme::TEXT,
+                    )
+                    .size()
+                    .x
+            }) + 2.0 * ui.spacing().button_padding.x;
+            let mut reserved = 650.0 - options_button + mode_switch_width(ui);
             if read_only {
                 reserved += badge(ui, if observing { "Observing" } else { "Read-only" });
             }
@@ -175,8 +164,9 @@ impl FolderApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // The width the row takes left of the run controls, measured
                 // as it is drawn: the *Running …* label gets what is left
-                // (UX-04). *Cancel run* is narrower than the Run button and
-                // its chevron, so the title's reservation above holds.
+                // (UX-04), and the Run button its form (UX-42). *Cancel run*
+                // is narrower than the switch and the Run button, so the
+                // title's reservation above holds.
                 let rest_id = egui::Id::new("folder-header-rest");
                 let rest = ui
                     .ctx()
@@ -193,75 +183,52 @@ impl FolderApp {
                         running_label(ui, text, *hover, room);
                     }
                 } else if let Some(id) = &run_document {
-                    // Right to left, the chevron is the rightmost: its place
-                    // is taken first and the chevron added there after *Run
-                    // simulation*, which Tab therefore reaches first.
-                    let (_, chevron) = ui.allocate_space(egui::Vec2::splat(theme::CONTROL_HEIGHT));
-                    ui.add_space(2.0 - ui.spacing().item_spacing.x);
-                    let run = ui
-                        .add(run_button(live, false))
-                        .on_hover_text(if live { LIVE_HOVER } else { SIMULATE_HOVER })
-                        .clicked();
-                    let stored = self.run_mode.mode(&project);
-                    // The menu shows the mode the button runs; a click on
-                    // an item is the person's choice even when it is the
-                    // one shown, as *Simulation* is while observing.
+                    // The Run button reads *▶ Run* where the row holds it
+                    // with the 8 px a control keeps from its neighbour, and
+                    // is ▶ alone where it does not (UX-42, question 12 = A):
+                    // the choice follows the row's width as measured, not
+                    // the kind of tab.
+                    let whole = mode_switch_width(ui)
+                        + ui.spacing().item_spacing.x
+                        + run_width(ui, false);
+                    let compact = ui.available_width() < rest + whole;
+                    // Right to left the Run button is the rightmost: its
+                    // place is taken first and the button added there after
+                    // the switch, which Tab therefore reaches first.
+                    let (_, place) = ui.allocate_space(egui::vec2(
+                        run_width(ui, compact),
+                        theme::CONTROL_HEIGHT,
+                    ));
+                    // The switch shows the mode the button runs; a click on
+                    // a part is the person's choice even when it is the one
+                    // shown, as *Simulation* is while observing. Live
+                    // requests are the holder's to send while this window
+                    // observes (MCP-08a).
                     let shown = if live {
                         RunMode::Live
                     } else {
                         RunMode::Simulation
                     };
-                    let mut chosen = None;
-                    let mut review = false;
-                    let menu = |ui: &mut egui::Ui| {
-                        widgets::caption(ui, "RUN MODE");
-                        mode_item(
-                            ui,
-                            shown,
-                            &mut chosen,
-                            RunMode::Simulation,
-                            "Simulation",
-                            true,
-                        );
-                        widgets::hint(ui, "Sample responses; no request is sent.");
-                        ui.add_space(theme::SPACE_SM);
-                        // Live requests are the holder's to send while this
-                        // window observes (MCP-08a).
-                        mode_item(ui, shown, &mut chosen, RunMode::Live, "Live", !observing);
-                        widgets::hint(ui, "Requests go to the project's API.");
-                        ui.separator();
-                        widgets::hint(ui, "The Run button runs this mode until you change it.");
-                        ui.separator();
-                        if ui.button("Review legacy runs").clicked() {
-                            ui.close();
-                            review = true;
-                        }
-                    };
-                    widgets::action_menu_at(
-                        ui,
-                        chevron,
-                        widgets::icon_button(Icon::ChevronDown, OPTIONS),
-                        menu,
-                    );
-                    // Opening the menu writes nothing: a *Live* kept while
-                    // observing stays until another mode is chosen (UX-02).
+                    let chosen = mode_switch(ui, shown, !observing);
+                    let run = ui
+                        .new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(place)
+                                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                        )
+                        .add(run_button(live, compact))
+                        .on_hover_text(if live { LIVE_HOVER } else { SIMULATE_HOVER })
+                        .clicked();
+                    // A click on the stored mode writes nothing: a *Live*
+                    // kept while observing stays until another mode is
+                    // chosen (UX-02).
+                    let stored = self.run_mode.mode(&project);
                     if let Some(mode) = chosen.filter(|mode| *mode != stored) {
                         self.run_mode.set(&project, mode);
-                    }
-                    if review {
-                        self.review_legacy_runs();
                     }
                     if run {
                         self.request_run(id, live);
                     }
-                } else {
-                    ui.menu_button("Runs", |ui| {
-                        widgets::name_menu(ui, "Runs menu");
-                        if ui.button("Review legacy runs").clicked() {
-                            ui.close();
-                            self.review_legacy_runs();
-                        }
-                    });
                 }
                 // Measured between left edges: the available width stops at
                 // zero when the row is too wide, an edge does not.
@@ -327,8 +294,10 @@ impl FolderApp {
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(rest_id, measured));
                     // A label laid out with the old width would overlap or
-                    // cut short; this pass is drawn again with the new one.
-                    if running.is_some() {
+                    // cut short, and the Run button would keep a form the
+                    // row no longer has room for (UX-42); this pass is drawn
+                    // again with the new one.
+                    if running.is_some() || run_document.is_some() {
                         ui.ctx().request_discard("UX-04: the header's row changed width");
                     }
                 }
@@ -1140,8 +1109,6 @@ fn tab_face(
     None
 }
 
-/// The chevron at the right of the Run button, and its menu's name.
-const OPTIONS: &str = "Run options";
 const SIMULATE_HOVER: &str = "Simulate the selected scenario or component with sample responses, including unsaved valid code";
 const LIVE_HOVER: &str = "Send the requests of the selected scenario or component to the API, including unsaved valid code";
 
@@ -1192,7 +1159,7 @@ fn running_label(ui: &mut egui::Ui, text: &str, hover: Option<&str>, room: f32) 
 }
 
 /// The narrowest the project name gets in the header: at 960 px with *Live
-/// allowed*, *Run simulation* and the room for *rN · no changes* (UX-25).
+/// allowed*, the run controls and the room for *rN · no changes* (UX-25).
 const TITLE_NARROWEST: f32 = 36.0;
 
 /// The caption beside a disabled *Publish* (COMP-00 Q6 = B).
@@ -1204,11 +1171,18 @@ fn run_label(live: bool) -> &'static str {
     if live { "Run live" } else { "Run simulation" }
 }
 
-/// The header's Run button: *Run simulation* in the violet that also marks a
-/// simulation in Run results, or *Run live* in the accent (UX-02). `compact`
-/// is the button where the header's row is too short (UX-42).
-pub(super) fn run_button(live: bool, _compact: bool) -> widgets::ActionButton<'static> {
-    let button = widgets::action(Icon::Play, run_label(live)).primary();
+/// The header's Run button, *▶ Run*, in the violet that also marks a
+/// simulation in Run results or in the accent for a live run (UX-02). It
+/// is named for its mode, *Run simulation* or *Run live*; where the row is
+/// too short for its word it is ▶ alone, with that name on hover (UX-42).
+pub(super) fn run_button(live: bool, compact: bool) -> widgets::ActionButton<'static> {
+    let name = run_label(live);
+    let button = if compact {
+        widgets::icon_button(Icon::Play, name)
+    } else {
+        widgets::action(Icon::Play, "Run").named(name)
+    }
+    .primary();
     if live {
         button
     } else {
@@ -1216,29 +1190,188 @@ pub(super) fn run_button(live: bool, _compact: bool) -> widgets::ActionButton<'s
     }
 }
 
-/// A run mode in the *Run options* menu, selected when it is `shown`, 8 px
-/// further in than the RUN MODE caption (the owner's addition to the UX-00
-/// mock-up); its highlight still reaches the menu's right edge. A click puts
-/// `mode` in `chosen`.
-fn mode_item(
-    ui: &mut egui::Ui,
-    shown: RunMode,
-    chosen: &mut Option<RunMode>,
-    mode: RunMode,
-    label: &str,
-    enabled: bool,
-) {
-    let mut rect = ui.available_rect_before_wrap();
-    rect.min.x += theme::SPACE_SM;
-    let mut item = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    item.add_enabled_ui(enabled, |ui| {
-        if ui
-            .selectable_label(shown == mode, label)
-            .on_disabled_hover_text(runs::LIVE_PAUSED)
-            .clicked()
-        {
-            *chosen = Some(mode);
-        }
+/// The width [`run_button`] takes.
+fn run_width(ui: &egui::Ui, compact: bool) -> f32 {
+    if compact {
+        return theme::CONTROL_HEIGHT;
+    }
+    let bold = egui::FontId::new(theme::FONT_BODY, theme::bold_family());
+    // The icon's 16 px, 10 px either side and 6 px before the word.
+    20.0 + 16.0
+        + 6.0
+        + ui.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap("Run".to_owned(), bold, theme::TEXT)
+                .size()
+                .x
+        })
+}
+
+/// The run mode switch's parts: the mode, its name and its hover text, the
+/// hints of UX-02's menu.
+const MODE_PARTS: [(RunMode, &str, &str); 2] = [
+    (
+        RunMode::Simulation,
+        "Simulation",
+        "Sample responses; no request is sent.",
+    ),
+    (RunMode::Live, "Live", "Requests go to the project's API."),
+];
+/// The room either side of a part's name, and around the parts.
+const PART_PADDING: f32 = 10.0;
+const SWITCH_INSET: f32 = 2.0;
+
+fn part_width(ui: &egui::Ui, name: &str) -> f32 {
+    ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(
+                name.to_owned(),
+                egui::FontId::proportional(theme::FONT_LABEL),
+                theme::TEXT,
+            )
+            .size()
+            .x
+    }) + 2.0 * PART_PADDING
+}
+
+/// The width [`mode_switch`] takes, the same in either mode.
+fn mode_switch_width(ui: &egui::Ui) -> f32 {
+    MODE_PARTS
+        .iter()
+        .map(|(_, name, _)| part_width(ui, name))
+        .sum::<f32>()
+        + 2.0 * SWITCH_INSET
+}
+
+/// The two-part switch *Simulation | Live* left of the Run button (UX-42),
+/// one radio group, *Run mode*, for assistive technology. The part `shown`
+/// is white with its name in its mode's colour, the other muted; *Live* is
+/// disabled with MCP-08a's reason unless `live_enabled`. Tab reaches the
+/// part shown, and Left and Right move the choice. Returns the part
+/// clicked or moved to; it runs nothing.
+fn mode_switch(ui: &mut egui::Ui, shown: RunMode, live_enabled: bool) -> Option<RunMode> {
+    let (rect, group) = ui.allocate_exact_size(
+        egui::vec2(mode_switch_width(ui), theme::CONTROL_HEIGHT),
+        egui::Sense::hover(),
+    );
+    group.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::RadioGroup, ui.is_enabled(), "Run mode")
     });
-    ui.advance_cursor_after_rect(item.min_rect());
+    ui.painter().rect_filled(rect, 8, theme::FIELD);
+    let mut parts = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .accessibility_parent(group.id),
+    );
+    let id = |mode: RunMode| egui::Id::new(("folder-run-mode", mode == RunMode::Live));
+    let mut chosen = None;
+    let mut focus = None;
+    let mut left = rect.left() + SWITCH_INSET;
+    for (mode, name, hint) in MODE_PARTS {
+        let width = part_width(ui, name);
+        let segment = egui::Rect::from_min_max(
+            egui::pos2(left, rect.top() + SWITCH_INSET),
+            egui::pos2(left + width, rect.bottom() - SWITCH_INSET),
+        );
+        left += width;
+        let on = mode == shown;
+        let enabled = mode == RunMode::Simulation || live_enabled;
+        // Only the part shown is a focus stop: the arrows move between the
+        // two, as in any radio group.
+        let sense = if on {
+            egui::Sense::click()
+        } else {
+            egui::Sense::CLICK
+        };
+        let response = parts
+            .add_enabled_ui(enabled, |ui| ui.interact(segment, id(mode), sense))
+            .inner;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, on, name)
+        });
+        let colour = match mode {
+            RunMode::Live => theme::ACCENT,
+            RunMode::Simulation => theme::SIMULATION,
+        };
+        let painter = ui.painter();
+        if on {
+            painter.rect(
+                segment,
+                6,
+                theme::WHITE,
+                egui::Stroke::new(1.0, theme::BORDER),
+                egui::StrokeKind::Inside,
+            );
+        } else if enabled && response.hovered() {
+            painter.rect_filled(segment, 6, theme::BORDER);
+        }
+        if response.has_focus() {
+            painter.rect_stroke(
+                segment.shrink(0.5),
+                6,
+                egui::Stroke::new(1.5, theme::ACCENT),
+                egui::StrokeKind::Inside,
+            );
+        }
+        painter.text(
+            segment.center(),
+            egui::Align2::CENTER_CENTER,
+            name,
+            if on {
+                egui::FontId::new(theme::FONT_LABEL, theme::bold_family())
+            } else {
+                egui::FontId::proportional(theme::FONT_LABEL)
+            },
+            if on {
+                colour
+            } else if enabled {
+                theme::MUTED
+            } else {
+                theme::MUTED.gamma_multiply(0.5)
+            },
+        );
+        if response.has_focus() {
+            // The arrows move the choice, not the focus to a neighbour.
+            ui.memory_mut(|memory| {
+                memory.set_focus_lock_filter(
+                    response.id,
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        ..Default::default()
+                    },
+                );
+            });
+            let (back, forth) = ui.input(|input| {
+                (
+                    input.key_pressed(egui::Key::ArrowLeft),
+                    input.key_pressed(egui::Key::ArrowRight),
+                )
+            });
+            let to = match (back, forth) {
+                (true, false) => Some(RunMode::Simulation),
+                (false, true) if live_enabled => Some(RunMode::Live),
+                _ => None,
+            };
+            if let Some(to) = to.filter(|to| *to != shown) {
+                chosen = Some(to);
+                focus = Some(to);
+            }
+        }
+        let response = if enabled {
+            response
+                .on_hover_text(hint)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+        } else {
+            response.on_disabled_hover_text(runs::LIVE_PAUSED)
+        };
+        if response.clicked() {
+            chosen = Some(mode);
+        }
+    }
+    // After both parts: the one moved to is no focus stop in this frame, and
+    // egui takes the focus from a widget that is not.
+    if let Some(to) = focus {
+        ui.memory_mut(|memory| memory.request_focus(id(to)));
+    }
+    chosen
 }
