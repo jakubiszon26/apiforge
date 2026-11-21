@@ -142,5 +142,52 @@ each analysis brings its own questions and mock-up.
 ## 6. Exit criteria
 
 In the [backlog](../backlog.md#next-sprint-req-not-started). The
-acceptance is the owner's own run (REQ-06): read, edit, run and diagnose
-`labels` in the window without opening Code.
+acceptance is the owner's own run ([REQ-06](../tickets/REQ-06.md)), in
+two parts:
+
+- **One mandatory scenario** (owner, 2026-11-21): POST → take the ID from
+  the response → GET with that ID → an assertion → DELETE, everything
+  from the interface, with no hand editing of the `.afs` file. "If after
+  REQ this cannot be done comfortably, in my view the sprint has not
+  fully solved the functional tester's problem." It is run against the
+  demo API, twice, and by agents before the owner
+  ([A/B rounds](../process/ab-testing.md)).
+- Read, edit, run and diagnose `labels` in the window without opening
+  Code.
+
+## 7. The mandatory scenario against the plan (2026-11-21)
+
+The planning model walked the scenario on the released v0.2.0
+([REQ-06, the walk](../tickets/REQ-06.md#the-scenario-against-v020-and-the-plan)).
+It can be built in the window today in about 30 pointer actions; it
+cannot be built without typing `{{create.body.id}}` by heart, and the
+check one click makes from the response compares with that run's id and
+fails on the next run. The demo API needs nothing: carts are created,
+read and deleted by id.
+
+| Step | Covered by | Not covered |
+| --- | --- | --- |
+| A new scenario, its first request | the board today | adding a step in *Steps* — a question for REQ-00, a criterion of REQ-01 |
+| POST with a body | REQ-02a, REQ-02b | — |
+| Send it, see the response | REQ-04, REQ-05, UX-42 | REQ-05: a request that reads nothing, sent alone before any run |
+| Take the id from the response | REQ-02b's completion, in part | **REQ-11** [#538](https://github.com/jakubiszon26/apiforge/issues/538), proposed |
+| GET with the id in its path | REQ-02a | REQ-02b: placeholders as chips in the URL, query and headers too |
+| An assertion on the GET | Run results' *Check*; DIAG-08 for a type | **REQ-12** [#539](https://github.com/jakubiszon26/apiforge/issues/539), proposed |
+| DELETE with the id, Cleanup | the Cleanup board today; REQ-04 keeps Cleanup running | Cleanup in the list of *Steps* — REQ-00, REQ-01 |
+| The file holds what was done | — | the window writes `timeout 10s`, `@config(…)` and `@label` nobody set: a proposal in REQ-06 |
+
+REQ-11 and REQ-12 are proposed, not in scope: they and the added
+criteria wait for question 4 of
+[REQ-06](../tickets/REQ-06.md#questions-for-the-owner). Both put an
+action on a field of a response and take their place from DIAG-08 (#521)
+and the redesign of *Output data* (DIAG-10 to DIAG-14); REQ-02a is not
+changed by this section.
+
+A/B rounds in this sprint
+([REQ-06](../tickets/REQ-06.md#ab-rounds-in-the-req-order)): the counted
+baseline of the scenario is task T2 of AB-01
+([#537](https://github.com/jakubiszon26/apiforge/issues/537), v0.1.0
+against v0.2.0); a variants round in the analysis of REQ-11 and of
+REQ-12; a baseline of the request view after REQ-05; and the baseline on
+the release build before the owner's run. The views of REQ-00 are decided
+and drawn, not driven: no round for the shape.
