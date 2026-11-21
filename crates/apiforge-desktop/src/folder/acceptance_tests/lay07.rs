@@ -313,7 +313,7 @@ fn lay07_criterion_3_the_running_step_is_marked_apart_from_the_selection() {
     );
     let line = result_line(&harness, "cart_view");
     assert_eq!(line.text, "Running…");
-    assert_ne!(line.color, theme::ACCENT, "not the selection's colour");
+    assert_ne!(line.color, theme::SELECTION, "not the selection's colour");
     assert!(
         !canvas(&harness).debug_selected(&id_of(&harness, "cart_view")),
         "the running step is not the selection"
@@ -330,7 +330,7 @@ fn lay07_criterion_3_the_running_step_is_marked_apart_from_the_selection() {
         running.fill, selected.fill,
         "the running badge is told apart from a finished one"
     );
-    assert_ne!(running.fill, theme::ACCENT, "nor shares the selection's");
+    assert_ne!(running.fill, theme::SELECTION, "nor shares the selection's");
     // A step not reached yet is muted.
     show_held(&mut harness, "address", 0.6);
     assert_eq!(badge(&harness, "address").state, BadgeState::Pending);

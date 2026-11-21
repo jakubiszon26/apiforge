@@ -525,7 +525,7 @@ the order of work.
   about 32 px short on a component's header at 960 px, so there the Run
   button is ▶ alone
   ([ticket](tickets/UX-42.md#the-measurement-and-question-12)); a release
-  candidate `v0.2.1-rc.1` comes first. Nothing waits for a decision.
+  candidate `v0.2.1-rc.1` comes first. DIAG-10, added and decided the same day, is the owner's fifth finding. Nothing waits for a decision.
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |
@@ -533,6 +533,7 @@ the order of work.
 | [#522](https://github.com/jakubiszon26/apiforge/issues/522) | LANG-22 A type check that cannot pass is reported when it is written; [ticket](tickets/LANG-22.md) | S · 10 min |
 | [#399](https://github.com/jakubiszon26/apiforge/issues/399) | DIAG-09 Add comparison and Assign to variable work before the first run; [ticket](tickets/DIAG-09.md) | S · 10 min · `visible UI` |
 | [#521](https://github.com/jakubiszon26/apiforge/issues/521) | DIAG-08 A check of a field's type in one step from the field; [ticket](tickets/DIAG-08.md); after DIAG-09 | S · 20 min · `visible UI` |
+| [#531](https://github.com/jakubiszon26/apiforge/issues/531) | DIAG-10 Output data reads as a tree: a field on one line; [ticket](tickets/DIAG-10.md); after DIAG-08 | S · 20 min · `visible UI`, `removal` |
 | [#523](https://github.com/jakubiszon26/apiforge/issues/523) | DEMO-01 The first-start project shows the 0.2.0 language; [ticket](tickets/DEMO-01.md); after LANG-22 and DIAG-08 only in that its scenario is what they are tried on | M · 30 min · `default`, `visible UI` |
 | [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode is a switch in the header; [ticket](tickets/UX-42.md) | S · 20 min · `visible UI`, `removal` |
 | [#524](https://github.com/jakubiszon26/apiforge/issues/524) | REL-06 v0.2.1, a candidate first; [ticket](tickets/REL-06.md); last | S · 15 min |
@@ -577,8 +578,9 @@ criteria:
 | --- | --- | --- | --- |
 | [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 A reference scenario of independent negative requests (`labels`) | S · 5 | merged in #485 (2026-11-20) |
 | [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 A check reads the same everywhere and says what it compares | M · 15 · `visible UI`, `removal` | `ready:opus`; not open together with LAY-45, DIAG-06a or DIAG-06c (`canvas/`) |
-| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` |
+| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` · criterion 7: the row is DIAG-10's ([#531](https://github.com/jakubiszon26/apiforge/issues/531)) |
 | [#381](https://github.com/jakubiszon26/apiforge/issues/381) | REP-07 Run results: a request with its checks under it | M · 25 · `visible UI`, `default` | `ready:opus` · after DIAG-02 and REP-08 |
+| [#533](https://github.com/jakubiszon26/apiforge/issues/533) | DIAG-12 A field of a response that a check already reads is marked | S–M · `visible UI` | proposal of DIAG-10, accepted into scope 2026-11-21; to analyse with a mock-up; with REP-07 |
 | [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 The Steps view and the request beside its response: captures and decisions | S · 30 · `visible UI`, `default` | the planning model's; after LANG-13 |
 | [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01 Diagram → Steps | M · 30 · `visible UI` | waits for REQ-00's captures |
 | [#458](https://github.com/jakubiszon26/apiforge/issues/458) | REQ-02a The selected request and its response side by side | M · 30 · `visible UI` | waits for REQ-00's captures |
@@ -610,6 +612,12 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
   LANG-21a [#482](https://github.com/jakubiszon26/apiforge/issues/482), LANG-21b [#495](https://github.com/jakubiszon26/apiforge/issues/495). Cut from 0.2.0 on 2026-11-20;
   analysed and reviewed, each with its ticket file on its branch; taken
   only if users with 0.1.0 projects appear.
+- Three proposals of DIAG-10 the owner took into the backlog on
+  2026-11-21, each to analyse with a mock-up: DIAG-11 [#532](https://github.com/jakubiszon26/apiforge/issues/532),
+  *Copy value* and *Copy path* on a row of a response, with REP-04
+  [#148](https://github.com/jakubiszon26/apiforge/issues/148); DIAG-13 [#534](https://github.com/jakubiszon26/apiforge/issues/534), a filter by name above the tree;
+  DIAG-14 [#535](https://github.com/jakubiszon26/apiforge/issues/535), the component dialog's path picker takes the
+  row of Output data.
 - Panel widths carry over between projects opened in the same window: egui
   caches panel sizes under fixed IDs, so a restored per-project width loses
   to the cached one (project files, split code, diagnostics and, after
