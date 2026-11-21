@@ -90,6 +90,7 @@ fn component_window(
     if allowed {
         set_box(&mut harness, true);
     }
+    assert_eq!(has_label(&harness, BADGE), allowed, "Live allowed");
     let component = only(&harness, DocumentKind::Component);
     app(&mut harness).activate_tab(&component);
     settle(&mut harness);
@@ -488,14 +489,7 @@ fn ux42_criterion_6_the_fullest_header_fits() {
             title(&harness).width()
         );
         assert!(icon_alone(&harness, run), "{what}: ▶ alone");
-        assert!(
-            hover_shows(
-                &mut harness,
-                run,
-                if live { LIVE_HOVER } else { SIMULATE_HOVER }
-            ),
-            "{what}: the mode's hover"
-        );
+        // Counted before any hover, whose tooltip would already name it.
         let names = harness.query_all_by_label(run).count();
         assert!(
             crate::testing::hover_until(
@@ -507,6 +501,16 @@ fn ux42_criterion_6_the_fullest_header_fits() {
             ),
             "{what}: named on hover"
         );
+        assert!(
+            hover_shows(
+                &mut harness,
+                run,
+                if live { LIVE_HOVER } else { SIMULATE_HOVER }
+            ),
+            "{what}: the mode's hover"
+        );
+        harness.hover_at(egui::pos2(480.0, 3.0));
+        settle(&mut harness);
     }
     drop(harness);
 
@@ -517,6 +521,8 @@ fn ux42_criterion_6_the_fullest_header_fits() {
         (WIDE, false),
         (egui::vec2(1100.0, 540.0), true),
     ] {
+        // A configuration of its own: the consent is kept per person.
+        let configuration = tempfile::tempdir().unwrap();
         let mut harness = component_window(root, size, configuration.path(), allowed);
         let scenario = only(&harness, DocumentKind::Scenario);
         let component = only(&harness, DocumentKind::Component);
@@ -554,23 +560,30 @@ fn ux42_criterion_6_the_fullest_header_fits() {
 /// windows, with and without *Live allowed*.
 #[test]
 fn ux42_criterion_7_title_stays() {
-    let configuration = tempfile::tempdir().unwrap();
     let directory = shop();
     for size in [MINIMUM, WIDE] {
         for allowed in [false, true] {
+            let configuration = tempfile::tempdir().unwrap();
             let mut harness =
                 component_window(directory.path(), size, configuration.path(), allowed);
             let scenario = only(&harness, DocumentKind::Scenario);
             let component = only(&harness, DocumentKind::Component);
+            // The name keeps one place on every tab (KTLO-23); the mode
+            // tabs stand where the tab's toolbar leaves them, in either mode.
             let mut titles = Vec::new();
             for tab in [&scenario, &component] {
                 app(&mut harness).activate_tab(tab);
                 settle(&mut harness);
+                let mut rows = Vec::new();
                 for part in [SIMULATION, LIVE_PART] {
                     switch_to(&mut harness, part);
-                    let code = harness.get_by_label("Code").rect();
-                    titles.push((title(&harness), code.left()));
+                    titles.push(title(&harness));
+                    rows.push(harness.get_by_label("Code").rect());
                 }
+                assert_eq!(
+                    rows[0], rows[1],
+                    "{tab} at {size:?}, Live allowed {allowed}: Code moved"
+                );
             }
             assert!(
                 titles.windows(2).all(|pair| pair[0] == pair[1]),
