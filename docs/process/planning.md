@@ -9,8 +9,8 @@ the stage had shipped.
 ## The ticket
 
 A ticket is a GitHub issue titled `<ID>: <goal>`, labelled as the
-[process](README.md#labels) says, created with `gh issue create` when the
-ticket is accepted into a sprint. When the issue is not enough — anything
+[process](README.md#labels) says, created with `gh issue create` and put
+in the sprint's milestone when the ticket is accepted into a sprint. When the issue is not enough — anything
 above `S`, or anything with a risk flag — the ticket also gets a file
 `docs/tickets/<ID>.md`, linked from the issue, with these sections, in this
 order:
@@ -71,15 +71,44 @@ A ticket delivers one result the owner can accept, and that result travels as
    then the QA report; the draft becomes ready for review.
 
 What this rules out: a pull request whose only content is a backlog row, a
-recorded decision or a sentence of a ticket. Those changes ride on the pull
-request of the ticket they describe, or on the next pull request that touches
-the backlog. A separate analysis pull request is right only when the analysis
-unblocks several tickets (KTLO-05a, LAY-00, MCP-00 are the pattern); a
-one-ticket analysis is the first commit of the ticket's own pull request.
+recorded decision or a sentence of a ticket. Those changes need no pull
+request at all ([a change of plan](#a-change-of-plan-needs-no-pull-request)).
+A ticket's pull request does not edit `docs/backlog.md` either: what was
+merged is read from the pull requests. A separate analysis pull request is
+right only when the analysis unblocks several tickets (KTLO-05a, LAY-00,
+MCP-00 are the pattern); a one-ticket analysis is the first commit of the
+ticket's own pull request.
 
 An analysis that stops at a decision the owner has not yet taken leaves the
 draft open with the `decision-needed` label on the issue; the branch waits,
 nothing else is started on it.
+
+## A change of plan needs no pull request
+
+A sprint is a [milestone](https://github.com/jakubiszon26/apiforge/milestones).
+Its description holds the goal, the exit criteria and the order of work —
+a table of issues with their estimate and state — and its issues are the
+sprint's. The order, a state, a ticked criterion or a ticket taken in or
+out is changed there, on GitHub, with no commit. A milestone keeps no
+history of its edits, so it holds state and order only: a decision, with
+its date and reason, goes on the issue or in the ticket file.
+
+What a change of plan writes in the repository is committed to `main`
+directly, without a branch or a pull request:
+
+| May be committed to `main` directly | Never |
+| --- | --- |
+| `docs/backlog.md`: a closed sprint's record, the *Later* list | Code, tests, fixtures, workflows |
+| `docs/sprints/*.md`: a sprint's plan, its decisions, its record | `docs/process/`, `AGENTS.md`, an ADR: these are a ticket of their own |
+| `docs/handoff.md` | A new ticket's analysis: the first commit of its draft pull request |
+| A decision or state line in a ticket file already on `main` | A commit with anything from the left column and anything else |
+
+Who: the owner, or the planning model in a session with the owner, the
+commit naming the decision it records. An agent working a ticket, and any
+agent working unattended, never commits to `main`. Introduced on
+2026-11-22 (KTLO-47): 12 of 15 documentation-only pull requests among the
+100 before it changed the backlog, and seven ticket pull requests changed
+it too.
 
 ## A rule several tickets share has one owner
 

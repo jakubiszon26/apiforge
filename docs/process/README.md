@@ -13,7 +13,8 @@ whose findings every rule below answers.
 | [Retrospective](retrospective.md) | The sprint review and its three actions |
 | [A/B rounds](ab-testing.md) | Variants and versions compared by agents on a user's task; what is measured; how regressions become tickets |
 | [Autonomy](autonomy.md) | Which tickets another model may take unattended, how it picks one, what it escalates, who merges |
-| [Backlog](../backlog.md) | The sprint: its goal, exit criteria and the issues in it |
+| [Milestones](https://github.com/jakubiszon26/apiforge/milestones) | The sprints: each one's goal, exit criteria, order of work and issues |
+| [Backlog](../backlog.md) | The record of closed sprints, and the candidates for later |
 | [Issues](https://github.com/jakubiszon26/apiforge/issues) | The tickets: one issue each, with state, estimate and discussion |
 | [Development guide](../development.md) | Toolchain, verification commands, branch rules |
 | [GUI testing](../gui-testing.md) | Interaction tests, design review captures, native probes |
@@ -29,8 +30,10 @@ Backlog → Analysis → Estimate → Owner approval → Acceptance test → Imp
    `S1-07`, …) with the goal in the owner's words, the estimate and the labels
    below. The issue is where the ticket's state lives: open or closed, and
    `decision-needed` or `awaiting-acceptance` while it waits for the owner.
-   [`docs/backlog.md`](../backlog.md) names the sprint, its exit criteria and
-   the issues in it; it does not repeat their state.
+   The sprint is a milestone: its description names the goal, the exit
+   criteria and the order of work, and changes on GitHub without a commit
+   ([a change of plan](planning.md#a-change-of-plan-needs-no-pull-request)).
+   [`docs/backlog.md`](../backlog.md) keeps the record of closed sprints.
 2. **Analysis.** Written for the owner, one page at most: what changes on
    screen, what disappears, what migrates, what the acceptance criteria are.
    A change that touches the interface includes a mock-up. Technical detail
@@ -95,7 +98,8 @@ the ticket before implementation.
   `L` is split. Changed lines are recorded in the pull request, not limited.
 - **Branches:** every branch starts at `main`. A branch is never based on an
   unmerged branch, and there is no integration branch that collects several
-  tickets before review.
+  tickets before review. A change of plan alone needs no branch
+  ([planning](planning.md#a-change-of-plan-needs-no-pull-request)).
 - **Ignored tests:** `#[ignore = "KTLO-04: …"]` names the ticket that will
   resolve it; an ignore without a ticket is a defect.
 
@@ -103,7 +107,7 @@ the ticket before implementation.
 
 | Label | Meaning |
 | --- | --- |
-| `sprint:<name>` | The sprint the issue belongs to |
+| `sprint:<name>` | Record only: the sprint of an issue closed before 2026-11-22. A sprint is now the issue's milestone, and the label is no longer given |
 | `size:S`, `size:M`, `size:L` | The [size class](estimation.md#size); `L` is not scheduled |
 | `risk:format`, `risk:migration`, `risk:default`, `risk:visible-ui`, `risk:removal` | The [risk flags](estimation.md#risk-flags) |
 | `decision-needed` | Waits for an owner decision named in the issue |

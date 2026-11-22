@@ -31,4 +31,4 @@ Smoke list: <!-- result of the regression smoke list on the release binary, with
 - [ ] Regression smoke list run on the release binary; results in the QA section above
 - [ ] No `#[ignore]` without a ticket ID, other than a design-review view or a spawned helper
 - [ ] WIP after this pull request: at most four awaiting acceptance, within 60 estimated review minutes
-- [ ] The issue is labelled `awaiting-acceptance` and `docs/backlog.md` still lists it
+- [ ] The issue is labelled `awaiting-acceptance` and is in the sprint's milestone; `docs/backlog.md` is not edited

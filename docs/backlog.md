@@ -4,15 +4,19 @@ Tickets are [GitHub issues](https://github.com/jakubiszon26/apiforge/issues),
 one per ticket, titled `<ID>: <goal>` and labelled as the
 [development process](process/README.md#labels) says. Their state — open,
 closed, `decision-needed`, `awaiting-acceptance` — lives there and nowhere
-else. This file names the current sprint, its exit criteria and the issues
-in it, and keeps the record of finished sprints. Where the work stood at
-the end of the last working day, and what comes next, is in the
-[handoff](handoff.md).
+else. A sprint is a
+[milestone](https://github.com/jakubiszon26/apiforge/milestones): its
+description holds the goal, the exit criteria and the order of work, and is
+changed on GitHub without a commit
+([a change of plan](process/planning.md#a-change-of-plan-needs-no-pull-request)).
+This file keeps the record of closed sprints, written once when a sprint
+closes, and the candidates for later. Where the work stood at the end of
+the last working day, and what comes next, is in the [handoff](handoff.md).
 
 At most four pull requests await owner acceptance at a time, within 60
 estimated review minutes ([limits](process/README.md#limits-that-keep-review-possible)).
 A ticked exit criterion names the evidence that ticked it: the report, the
-run or the issue.
+run or the issue. A ticket's pull request does not edit this file.
 
 ## Sprint: KTLO (2026-10-25 to 2026-10-27, closed)
 
@@ -459,162 +463,15 @@ Deferred to LAY-2 with the reasons in the plan: DIAG-01 descriptions
 (#167 (3)), wire-length metrics beyond LAY-01. Mock branches `mock/lay-00-*`
 stay on origin because the issues' images point at their commits.
 
-## Sprint: LANG (current; started 2026-11-20)
+## Open sprints
 
-The language sprint follows LAY, which closed on 2026-11-19 (#296). **The
-owner started it on 2026-11-20**, without waiting for the LAY
-[retrospective](retrospectives/2026-11-20-lay.md), which was written the
-same day. The sequence is the owner's decision 14 = B of 2026-11-19: part
-A to 0.2.0 first, the REQ sprint after it. Design and implementation had
-been paused since 2026-11-17, except what LAY needed (RUN-03 #389, DIAG-07
-#392, LANG-14 #390). The plan, the order and the decisions
-are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
+Each is a milestone; its record is written here when it closes. Until
+2026-11-22 the state of these sprints was kept in this file; it is in the
+file's history up to KTLO-47.
 
-- Merged on 2026-11-20: FIX-01 #454 (#485), RUN-01 #126 (#487), LANG-15
-  #412 (#486), and beside the sprint #474, #476 (plans and process) and
-  #484 (CI).
-- Merged since: LANG-13 #386 (#488), LANG-20e [#500](https://github.com/jakubiszon26/apiforge/issues/500) (#504), LANG-05
-  #142 (#505), DIAG-06g [#502](https://github.com/jakubiszon26/apiforge/issues/502) (#507), LANG-06 #143 with KTLO-37 #211
-  (#508), LAY-45 [#468](https://github.com/jakubiszon26/apiforge/issues/468) (#509), DIAG-06e [#494](https://github.com/jakubiszon26/apiforge/issues/494) (#510).
-- To the 0.2.0 release, in merge order: LANG-20 [#481](https://github.com/jakubiszon26/apiforge/issues/481) (`apiforge fix
-  --folder`: a whole project in one commit, or nothing) beside DIAG-06a
-  #391 (a step moves inside its braces); then DIAG-06d [#493](https://github.com/jakubiszon26/apiforge/issues/493) (with an
-  `if`'s braces and across them); then DIAG-06c [#490](https://github.com/jakubiszon26/apiforge/issues/490) (the board
-  shows and takes the chain) and DIAG-06f [#496](https://github.com/jakubiszon26/apiforge/issues/496) (paste and
-  duplicate); then REL-05 #414. Not a condition of the release: DIAG-06b
-  [#491](https://github.com/jakubiszon26/apiforge/issues/491). About 120 owner minutes ahead. The table is in
-  [sprints/lang.md](sprints/lang.md#after-the-reviews-and-the-cut-of-2026-11-20).
-- **Cut from 0.2.0 by the owner on 2026-11-20** — nobody uses the
-  application yet, so the update of a project is one command — and in
-  the backlog, to be taken only if users appear: LANG-20b [#497](https://github.com/jakubiszon26/apiforge/issues/497),
-  LANG-20c [#498](https://github.com/jakubiszon26/apiforge/issues/498), LANG-20d [#499](https://github.com/jakubiszon26/apiforge/issues/499), LANG-20f [#501](https://github.com/jakubiszon26/apiforge/issues/501), LANG-21a
-  [#482](https://github.com/jakubiszon26/apiforge/issues/482), LANG-21b [#495](https://github.com/jakubiszon26/apiforge/issues/495). They carry no sprint label; their ticket
-  files stay on their branches.
-- Decided by the owner on 2026-11-20 and recorded on the issues: the two
-  questions of LANG-13 (#386), LANG-05 (#142), the sixteen questions of
-  DIAG-06 (#391), the keys of DIAG-06b (#491), delete, paste and
-  duplicate (#494, #496), the chain side to side and how its crossings
-  are measured (#468), and the project update (#481: whole, by one
-  command, or not at all). Nothing of the first half waits for a
-  decision.
-- Beside the sprint: [#489](https://github.com/jakubiszon26/apiforge/issues/489), a Windows timing failure of one `mcp08b`
-  test, rerun once and noted there until its cause is read.
-- After it: LANG-16 #413 (part B of LANG-00), then LANG-01 #127 with
-  LANG-09 #353, LANG-08 #352 with LANG-07 #212 and LANG-17, LANG-02 #129
-  with LANG-04 #132 and LANG-19, LANG-18, LANG-03 #131.
-- Accepted into scope by the owner on 2026-11-20, for the second half —
-  analysed and planned there, no design approved yet: LANG-17 [#470](https://github.com/jakubiszon26/apiforge/issues/470)
-  a table of cases, or a request based on another (one analysis with
-  LANG-16 #413 and LANG-08 #352); LANG-18 [#471](https://github.com/jakubiszon26/apiforge/issues/471) headers and
-  authorization shared by a scenario; LANG-19 [#472](https://github.com/jakubiszon26/apiforge/issues/472) a check without
-  an invented name, one check for several fields (with LANG-02 #129 and
-  LANG-04 #132). Their format questions return to the owner with the
-  analyses.
-
-## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (planned; not started)
-
-The owner tried the v0.2.0-rc.1 packages on 2026-11-21 and raised four
-findings; v0.2.0 was tagged as it was and these go to 0.2.1. LANG-22 is
-the planning model's, found while reproducing the second; DIAG-09 is
-#399, taken in with DIAG-08. The owner answered the eleven questions the
-same day, on the issues. The mock-ups are on `mock/rel-0.2.1`; the
-issues carry `sprint:0.2.1`. About 105 owner minutes. The table is in
-the order of work.
-
-- Decided the same day on a measurement: the switch the owner chose is
-  about 32 px short on a component's header at 960 px, so there the Run
-  button is ▶ alone
-  ([ticket](tickets/UX-42.md#the-measurement-and-question-12)); a release
-  candidate `v0.2.1-rc.1` comes first. DIAG-10, added and decided the same day, is the owner's fifth finding. Nothing waits for a decision.
-
-| Issue | Ticket | Estimate |
-| --- | --- | --- |
-| [#519](https://github.com/jakubiszon26/apiforge/issues/519) | UX-41 The selected step no longer looks like an error: a blue frame, no handles; [ticket](tickets/UX-41.md) | S · 15 min · `visible UI` |
-| [#522](https://github.com/jakubiszon26/apiforge/issues/522) | LANG-22 A type check that cannot pass is reported when it is written; [ticket](tickets/LANG-22.md) | S · 10 min |
-| [#399](https://github.com/jakubiszon26/apiforge/issues/399) | DIAG-09 Add comparison and Assign to variable work before the first run; [ticket](tickets/DIAG-09.md) | S · 10 min · `visible UI` |
-| [#521](https://github.com/jakubiszon26/apiforge/issues/521) | DIAG-08 A check of a field's type in one step from the field; [ticket](tickets/DIAG-08.md); after DIAG-09 | S · 20 min · `visible UI` |
-| [#531](https://github.com/jakubiszon26/apiforge/issues/531) | DIAG-10 Output data reads as a tree: a field on one line; [ticket](tickets/DIAG-10.md); after DIAG-08 | S · 20 min · `visible UI`, `removal` |
-| [#523](https://github.com/jakubiszon26/apiforge/issues/523) | DEMO-01 The first-start project shows the 0.2.0 language; [ticket](tickets/DEMO-01.md); after LANG-22 and DIAG-08 only in that its scenario is what they are tried on | M · 30 min · `default`, `visible UI` |
-| [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode is a switch in the header; [ticket](tickets/UX-42.md) | S · 20 min · `visible UI`, `removal` |
-| [#524](https://github.com/jakubiszon26/apiforge/issues/524) | REL-06 v0.2.1, a candidate first; [ticket](tickets/REL-06.md); last | S · 15 min |
-
-AB-01 [#537](https://github.com/jakubiszon26/apiforge/issues/537), v0.1.0 against v0.2.0 on eight tester's tasks driven by
-agents ([ticket](tickets/AB-01.md)), runs beside these tickets: the owner
-approved the method and the timing on 2026-11-21 — now, before
-`v0.2.1-rc.1`, so that a regression that blocks a task can still enter
-0.2.1. Round 1 is `ready:opus`; it changes nothing in the product.
-
-## Next sprint: REQ (not started)
-
-Request and results. The owner's run of 2026-11-19 showed that a test made
-of independent requests is read and edited in the wrong places: results
-that do not say what was checked, a body eight sections down a narrow
-panel, a response folded behind clicks, and no view whose unit is one
-request. The findings, causes, mock-ups and decisions are in
-[`docs/sprints/req.md`](sprints/req.md); the issues carry `sprint:req`.
-It follows LANG part A and is designed for the written-order chain of
-LANG-13. FIX-01 merged on 2026-11-20 (#485), ahead of the sprint, as a
-case for LANG-13's fix. Three more of its tickets do not depend on the
-language and are ready now (DIAG-02 and REP-08, then REP-07); they wait
-for the owner to open the sprint or to pull them forward.
-
-Capacity: **235** owner review minutes over the 12 tickets decided on
-2026-11-19, and about **75** more for the four proposals the owner
-accepted into scope on 2026-11-20 (REQ-07 to REQ-10), whose estimates are
-the proposals' own until each is analysed: about 310 over 16. Exit
-criteria:
-
-- [ ] A check reads the same on its card, on a folded line, in the
-      Inspector and in Run results, and says what it compares (DIAG-02).
-- [ ] After a run on `labels` the list says which request failed and which
-      check, without opening a row; a response is read without a click
-      (REP-07, REP-08).
-- [ ] A scenario is read as a numbered list of steps with their checks
-      (REQ-01).
-- [ ] A request is edited with its response beside it: the body in an
-      editor with line numbers and validity, headers in a table,
-      authorization from a list (REQ-02a, REQ-02b, REQ-03; closes DIAG-04).
-- [ ] *Run to here* and *Send this request alone* work from that view; a
-      live request is sent only under the permission an ordinary live run
-      needs (REQ-04, REQ-05).
-- [ ] The mandatory scenario — POST, the id from the response, GET with
-      that id, an assertion, DELETE — is built and run twice in the window
-      with no hand editing of the `.afs` (owner, 2026-11-21; REQ-06,
-      [ticket](tickets/REQ-06.md)); agents run it first
-      ([A/B rounds](process/ab-testing.md)).
-- [ ] The owner does the task of REQ-06 on a release build, and the
-      retrospective is written.
-
-| Issue | Ticket | Estimate · risk | State |
-| --- | --- | --- | --- |
-| [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 A reference scenario of independent negative requests (`labels`) | S · 5 | merged in #485 (2026-11-20) |
-| [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 A check reads the same everywhere and says what it compares | M · 15 · `visible UI`, `removal` | `ready:opus`; not open together with LAY-45, DIAG-06a or DIAG-06c (`canvas/`) |
-| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` · criterion 7: the row is DIAG-10's ([#531](https://github.com/jakubiszon26/apiforge/issues/531)) |
-| [#381](https://github.com/jakubiszon26/apiforge/issues/381) | REP-07 Run results: a request with its checks under it | M · 25 · `visible UI`, `default` | `ready:opus` · after DIAG-02 and REP-08 |
-| [#533](https://github.com/jakubiszon26/apiforge/issues/533) | DIAG-12 A field of a response that a check already reads is marked | S–M · `visible UI` | proposal of DIAG-10, accepted into scope 2026-11-21; to analyse with a mock-up; with REP-07 |
-| [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 The Steps view and the request beside its response: captures and decisions | S · 30 · `visible UI`, `default` | the planning model's; after LANG-13 |
-| [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01 Diagram → Steps | M · 30 · `visible UI` | waits for REQ-00's captures |
-| [#458](https://github.com/jakubiszon26/apiforge/issues/458) | REQ-02a The selected request and its response side by side | M · 30 · `visible UI` | waits for REQ-00's captures |
-| [#459](https://github.com/jakubiszon26/apiforge/issues/459) | REQ-02b The body editor; closes DIAG-04 [#365](https://github.com/jakubiszon26/apiforge/issues/365) | M · 20 · `visible UI` | waits for REQ-00's captures |
-| [#460](https://github.com/jakubiszon26/apiforge/issues/460) | REQ-03 Headers as a table; authorization from a list | M · 15 · `visible UI` | waits for REQ-00's captures |
-| [#461](https://github.com/jakubiszon26/apiforge/issues/461) | REQ-04 Run to here | S · 15 · `visible UI` | waits for REQ-00's captures |
-| [#462](https://github.com/jakubiszon26/apiforge/issues/462) | REQ-05 Send this request alone | M · 25 · `visible UI`, `default` | `decision-needed` |
-| [#464](https://github.com/jakubiszon26/apiforge/issues/464) | REQ-07 A request in and out as cURL; a failed check copied as a report | S–M · 15 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REP-07 and REQ-02a |
-| [#465](https://github.com/jakubiszon26/apiforge/issues/465) | REQ-08 A new case duplicated from an existing one; run the failed ones again | S and M · 30 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REQ-01 and REQ-04 |
-| [#477](https://github.com/jakubiszon26/apiforge/issues/477) | REQ-09 Hints for repetition: the same host or header in every request, each with a fix | S · 10 · `visible UI` | accepted into scope 2026-11-20; to analyse; the header half after LANG-18 |
-| [#478](https://github.com/jakubiszon26/apiforge/issues/478) | REQ-10 A live response saved as the sample; Expect this response | M · 20 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REP-07 and REQ-02a |
-| [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 A value of a response is used in a later request by choosing it | M · 20 · `visible UI` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
-| [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 A check made from a field offers what to compare with | S–M · 15 · `visible UI`, `default` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
-| [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 The window writes only what was set; [ticket](tickets/REQ-13.md) | S–M · 15 · `default` | in scope 2026-11-21; three questions open |
-| [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the mandatory scenario and the owner's own run; [ticket](tickets/REQ-06.md) | S · 10 | after the rest |
-
-REQ-07 to REQ-10 are the planning model's proposals
-([plan, section 5](sprints/req.md#5-proposals-of-the-planning-model)).
-Accepted means in scope: each still gets its analysis, its mock-up and the
-owner's decisions before any label. GEN-01 [#473](https://github.com/jakubiszon26/apiforge/issues/473), suggested negative
-cases of a field, is accepted too and is in no sprint: it writes rows of a
-table of cases and is analysed after LANG-17. UX-19 [#227](https://github.com/jakubiszon26/apiforge/issues/227) edits the same list as REP-07 and merges beside it,
-not with it.
+- **LANG**, current since 2026-11-20: [milestone](https://github.com/jakubiszon26/apiforge/milestone/1) · [plan](sprints/lang.md)
+- **0.2.1**, the owner's findings on v0.2.0-rc.1: [milestone](https://github.com/jakubiszon26/apiforge/milestone/2)
+- **REQ**, next, not started: [milestone](https://github.com/jakubiszon26/apiforge/milestone/3) · [plan](sprints/req.md)
 
 ## Later
 
