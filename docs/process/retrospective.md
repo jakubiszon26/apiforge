@@ -14,8 +14,8 @@ Collected before any opinion, from Git and the backlog:
 | Pull requests merged; median and maximum changed lines | `git log --merges`, `git diff --shortstat` |
 | Commits by type (`feat`, `fix`, `test`, `docs`) | `git log --format=%s` |
 | Estimate vs actual per ticket: size, review minutes, rounds of changes | Ticket files |
-| Tickets that changed class or were split mid-sprint | Backlog history |
-| Defects found **after** owner acceptance | Issues or backlog rows opened against merged tickets |
+| Tickets that changed class or were split mid-sprint | Issue timelines (a `size:*` label changed, an issue added to or taken from the milestone); before 2026-11-22, the backlog's history |
+| Defects found **after** owner acceptance | Issues opened against merged tickets |
 | Ignored tests, with and without a ticket | `rg '#\[ignore'` |
 | Owner decisions asked for, and how many were asked late (after code existed) | Ticket files |
 | Smoke list runs per platform | QA reports |

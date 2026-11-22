@@ -33,7 +33,7 @@ The same rules apply to people and to coding agents:
 - [Development guide](docs/development.md): toolchain, the verification every
   change passes, branches and pull requests, conventions.
 
-Start from an open issue of the current sprint ([backlog](docs/backlog.md)),
+Start from an open issue of the current sprint ([milestones](https://github.com/jakubiszon26/apiforge/milestones)),
 or open an issue first for anything that changes what a person sees, a
 default, compatibility or the project file format: those are the owner's
 decisions. Only the owner merges to `main`.

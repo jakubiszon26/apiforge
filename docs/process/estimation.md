@@ -88,7 +88,7 @@ analysis the owner approves before code.
 
 ## Recording
 
-In the backlog row: `S · 20 min · visible UI`. In the ticket file, the same
+In the milestone's order of work: `S · 20 min · visible UI`. In the ticket file, the same
 line plus, at close, the actual values, all three of them:
 
 ```text

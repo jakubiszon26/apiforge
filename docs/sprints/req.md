@@ -147,7 +147,7 @@ each analysis brings its own questions and mock-up.
 
 ## 6. Exit criteria
 
-In the [backlog](../backlog.md#next-sprint-req-not-started). The
+In the [REQ milestone](https://github.com/jakubiszon26/apiforge/milestone/3). The
 acceptance is the owner's own run ([REQ-06](../tickets/REQ-06.md)), in
 two parts:
 

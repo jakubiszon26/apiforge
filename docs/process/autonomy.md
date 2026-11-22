@@ -40,9 +40,10 @@ resumed.
 
 Told to pick a ticket and work, the agent:
 
-1. Lists `gh issue list --label sprint:<current> --label ready:<model>` and
-   takes the first by the backlog's order (the order of the table in
-   [`docs/backlog.md`](../backlog.md), dependencies first); a ticket whose
+1. Lists `gh issue list --milestone <sprint> --label ready:<model>` and
+   takes the first by the sprint's order (the order of work in the
+   milestone's description, `gh api repos/{owner}/{repo}/milestones --jq
+   '.[] | .title, .description'`, dependencies first); a ticket whose
    `after` ticket is not merged is skipped.
 2. Checks the [work-in-progress limit](README.md#limits-that-keep-review-possible)
    against the open pull requests; if it is reached, it addresses review
