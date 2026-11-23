@@ -2028,8 +2028,6 @@ impl FolderApp {
 
     // ----- Helpers ---------------------------------------------------------------
 
-    /// Configuration and published components; views are drawn only while a
-    /// project is open.
     /// The index of the checks of `model` (DIAG-12): the one kept while the
     /// model and the project are the same, else a new one.
     fn check_index(&mut self, model: &Arc<Document>) -> Arc<crate::inspector::CheckIndex> {
@@ -2067,6 +2065,8 @@ impl FolderApp {
         }
     }
 
+    /// Configuration and published components; views are drawn only while a
+    /// project is open.
     fn context_project(&self) -> Arc<Project> {
         self.session
             .as_ref()

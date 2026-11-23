@@ -7,7 +7,7 @@
 //! names. On the board's fixture `cart`.
 use super::mcp08b::contains;
 use super::*;
-use crate::inspector::{CheckIndex, DrawnMark, MarkTone, Marks};
+use crate::inspector::{CheckIndex, DrawnMark, MarkTone, Marks, Outcomes};
 use crate::testing::MINIMUM;
 use apiforge_core::format::{Graph, Node};
 use apiforge_core::model::NodeKind;
@@ -587,11 +587,12 @@ fn diag12_criterion_5_run_results_take_the_outcome() {
 /// edit the run's marks still stand on *Check*, in the colour of the run;
 /// their menu lists the field's checks, a check the run does not know
 /// *Not run*, and offers neither *Add a check* nor *To variable*.
-/// Choosing that check selects it on the board and leaves the step's
-/// results in the details pane.
+/// Choosing that check selects it on the board; the details pane keeps the
+/// step whose field it was chosen on, rather than going blank.
 #[test]
 fn diag12_review_a_stale_report_keeps_its_marks() {
     let (_project, mut harness, id) = opened(WIDE, &source(CHECKS, ""));
+    app(&mut harness).debug_draw_checks();
     run(&mut harness);
     // An edit after the run: a check of total the run does not know.
     let edited = source(
@@ -650,7 +651,12 @@ fn diag12_review_a_stale_report_keeps_its_marks() {
     harness.remove_cursor();
     settle(&mut harness);
     assert_eq!(graph(&harness, &id).nodes.len(), before.nodes.len());
-    assert_selected(&harness, &id, "total_exists", "cart");
+    // Drawn as a card, the check itself is selected, not the step.
+    assert_eq!(
+        folder(&harness).selections.get(&id).cloned(),
+        Some(vec![node(&graph(&harness, &id), "total_exists").id.clone()]),
+        "choosing total_exists selects it on the board"
+    );
     // The details pane keeps the step the menu was opened on.
     assert!(
         !contains(&harness, "Results will appear while the scenario runs."),
@@ -753,7 +759,7 @@ fn tree_drawn(
                         checked: &|_| false,
                         marks: Some(Marks {
                             index,
-                            run: Some(outcomes),
+                            run: Some(&Outcomes::of(outcomes)),
                         }),
                     },
                 );

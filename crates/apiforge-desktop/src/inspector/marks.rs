@@ -152,13 +152,28 @@ fn push(checks: &mut Vec<usize>, check: usize) {
 }
 
 /// What a tree of fields marks: the document's index and, in Run results,
-/// the run whose outcomes colour the marks.
+/// the outcomes of the run that colour the marks.
 #[derive(Clone, Copy)]
 pub struct Marks<'a> {
     pub index: &'a CheckIndex,
     /// `None` in the Inspector, whose mark says that a check exists, not how
     /// it ended.
-    pub run: Option<&'a RunResult>,
+    pub run: Option<&'a Outcomes<'a>>,
+}
+
+/// The status of each step of a run, by node: looked up once per frame of
+/// Run results, not once per output.
+pub struct Outcomes<'a>(HashMap<&'a str, StepStatus>);
+
+impl<'a> Outcomes<'a> {
+    pub fn of(run: &'a RunResult) -> Self {
+        Self(
+            run.steps
+                .iter()
+                .map(|step| (step.node_id.as_str(), step.status))
+                .collect(),
+        )
+    }
 }
 
 /// How a mark is coloured.
@@ -192,22 +207,15 @@ pub(super) struct TreeMarks<'a> {
     index: &'a CheckIndex,
     port: &'a PortMarks,
     /// The run's status of each check, when the tree is Run results'.
-    outcomes: Option<HashMap<&'a str, StepStatus>>,
+    outcomes: Option<&'a Outcomes<'a>>,
 }
 
 impl<'a> TreeMarks<'a> {
     pub(super) fn new(marks: Marks<'a>, node: &str, port: &str) -> Option<Self> {
-        let port = marks.index.port(node, port)?;
-        let outcomes = marks.run.map(|run| {
-            run.steps
-                .iter()
-                .map(|step| (step.node_id.as_str(), step.status))
-                .collect()
-        });
         Some(Self {
             index: marks.index,
-            port,
-            outcomes,
+            port: marks.index.port(node, port)?,
+            outcomes: marks.run,
         })
     }
 
@@ -225,8 +233,7 @@ impl<'a> TreeMarks<'a> {
             .collect();
         let status = |check: &IndexedCheck| {
             self.outcomes
-                .as_ref()
-                .and_then(|outcomes| outcomes.get(check.id.as_str()).copied())
+                .and_then(|outcomes| outcomes.0.get(check.id.as_str()).copied())
         };
         let failed = checks
             .iter()

@@ -14,7 +14,7 @@ pub mod source_change;
 pub use fields::{
     Opening, Results, TreeAction, forget_field_text, forget_results_tree, results_tree, type_combo,
 };
-pub use marks::{CheckIndex, Marks};
+pub use marks::{CheckIndex, Marks, Outcomes};
 #[cfg(test)]
 pub use marks::{DrawnMark, MarkTone, debug_forget_marks, debug_marks};
 pub use response::sample_output;

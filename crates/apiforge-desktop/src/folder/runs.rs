@@ -622,11 +622,12 @@ impl FolderApp {
         if !self.runs.reports.contains_key(id) {
             return;
         }
+        let snapshot = self.snapshot(id);
         // The marks are the document's as it stands (DIAG-12).
-        let checks = self
-            .snapshot(id)
-            .and_then(|snapshot| snapshot.model)
-            .map(|model| self.check_index(&model));
+        let checks = snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.model.as_ref())
+            .map(|model| self.check_index(model));
         let Some(report) = self.runs.reports.get(id) else {
             return;
         };
@@ -638,7 +639,6 @@ impl FolderApp {
             .map(|check| check.field.clone())
             .collect();
         let stale = freshness == Freshness::Stale;
-        let snapshot = self.snapshot(id);
         let policy = snapshot
             .as_ref()
             .and_then(|snapshot| match snapshot.model.as_deref() {

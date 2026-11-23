@@ -1054,6 +1054,8 @@ impl ReportPanel {
             self.tab = DetailTab::Outputs;
         }
 
+        // The outcomes that colour the marks, once per frame (DIAG-12).
+        let outcomes = context.checks.map(|_| crate::inspector::Outcomes::of(run));
         let height = ui.available_height().max(80.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
@@ -1086,7 +1088,7 @@ impl ReportPanel {
                                 context.component,
                                 context.checks.map(|index| crate::inspector::Marks {
                                     index,
-                                    run: Some(run),
+                                    run: outcomes.as_ref(),
                                 }),
                                 actions,
                             );
