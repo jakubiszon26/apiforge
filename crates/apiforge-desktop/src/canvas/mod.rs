@@ -4153,11 +4153,11 @@ impl Canvas {
             handle(&plus.target)
         );
         let rect = plus.rect();
-        // The `+` takes the primary button; a right-click on it opens the
-        // board's menu and a secondary or middle drag pans, as on the board
-        // under it.
+        // The `+` takes clicks only: a drag that starts on it goes to the
+        // socket or the board under it, and a right-click on it opens the
+        // board's menu, as on the board.
         let response = ui
-            .interact(rect, ui.id().with("chain-plus"), Sense::click_and_drag())
+            .interact(rect, ui.id().with("chain-plus"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(&label);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
@@ -4167,12 +4167,6 @@ impl Canvas {
             PLUS_SIZE / 2.0,
             response.hovered(),
         );
-        if response.dragged_by(PointerButton::Middle)
-            || response.dragged_by(PointerButton::Secondary)
-        {
-            self.camera.pan += response.drag_delta();
-            self.camera_moved_by_user = true;
-        }
         if response.secondary_clicked() {
             self.menu = Some(ActionMenu::new(pointer, camera.to_world(pointer), None));
             self.plus = None;
