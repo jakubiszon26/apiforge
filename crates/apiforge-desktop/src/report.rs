@@ -14,7 +14,7 @@ use crate::{
 use apiforge_core::{
     edit::FieldCheck,
     format::{Graph, Node, OptionalJson, Project},
-    graph::{component_definition, condition_predicates, predicate},
+    graph::{condition_predicates, predicate},
     js::json_stringify,
     model::{ErrorPolicy, Match, NodeKind, Predicate},
     run::{CauseEnds, Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
@@ -22,6 +22,11 @@ use apiforge_core::{
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
+
+mod list;
+pub use list::Line;
+#[cfg(test)]
+pub use list::arrange;
 
 /// Requests from the report panel to the application.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,6 +46,9 @@ pub enum Action {
     },
     SetErrorPolicy(ErrorPolicy),
     ExportReport,
+    /// The step list's edge was let go at this width, which the host
+    /// remembers on this computer (REP-07).
+    RememberListWidth(f32),
 }
 
 /// A field checked from these results since their run (UX-01): its row
@@ -97,15 +105,10 @@ impl<'a> RunGraphs<'a> {
     /// The node of `row`'s step: through the component calls that hold it,
     /// or `None` when one of them, or the node, is no longer there.
     fn node(&self, row: &StepRow<'_>) -> Option<&'a Node> {
-        let mut graph = match row.step.phase {
-            Phase::Main => self.main,
-            Phase::Cleanup => self.cleanup?,
-        };
-        for call in &row.calls {
-            let call = graph.nodes.iter().find(|node| node.id == *call)?;
-            graph = &component_definition(self.project, call)?.graph;
-        }
-        graph.nodes.iter().find(|node| node.id == row.step.node_id)
+        self.graph(row.step.phase, &row.calls)?
+            .nodes
+            .iter()
+            .find(|node| node.id == row.step.node_id)
     }
 }
 
@@ -217,6 +220,42 @@ pub(crate) fn several_text(count: usize, mode: Match) -> String {
     match mode {
         Match::All => format!("all of {count} checks"),
         Match::Any => format!("any of {count} checks"),
+    }
+}
+
+/// What the details of a check say beside its step's (REP-07).
+struct CheckDetail<'a> {
+    /// Its predicate as its card writes it.
+    predicate: String,
+    /// What it compared, with every name.
+    checked: Option<String>,
+    /// The step it is listed under, and that step's number.
+    head: Option<(StepRow<'a>, Option<usize>)>,
+}
+
+impl CheckDetail<'_> {
+    /// `Check weight_31_field · of step 6 Weight 31 kg · POST
+    /// /parcels/pc-001/labels → 422`.
+    fn line(&self, step: &StepResult) -> String {
+        let mut line = format!("Check {}", step.handle);
+        if let Some((head, number)) = &self.head {
+            line.push_str(" · of step ");
+            if let Some(number) = number {
+                line.push_str(&format!("{number} "));
+            }
+            line.push_str(head.step.display_name());
+            if let Some(request) = &head.step.request {
+                line.push_str(&format!(
+                    " · {} {}",
+                    request.method,
+                    list::url_path(&request.url)
+                ));
+                if let Some(status) = head.step.outputs.get("status").and_then(Value::as_u64) {
+                    line.push_str(&format!(" → {status}"));
+                }
+            }
+        }
+        line
     }
 }
 
@@ -487,7 +526,32 @@ pub struct ReportPanel {
     json_text: Option<(egui::Id, std::sync::Arc<String>)>,
     /// This frame's `Context::checked`, for the value rows.
     checked: Vec<CheckedField>,
+    /// The step list's width (REP-07), before it is fitted to the panel.
+    list_width: f32,
+    /// The width the host last gave, from the preferences.
+    adopted_width: Option<f32>,
+    /// While the list's edge is dragged: where the press was and the width
+    /// then.
+    edge_grab: Option<(f32, f32)>,
+    /// The steps whose checks are folded, by row key; none after a run.
+    folded: std::collections::HashSet<String>,
+    /// *Failed*: only the steps with a failed, blocked or errored row.
+    failed_only: bool,
+    /// The row the keyboard moved to, which takes the focus when drawn.
+    focus: Option<String>,
+    /// The list arranged for the run shown.
+    arranged: list::Arranged,
 }
+
+/// The step list's width before it is dragged, and its least width
+/// (REP-07); the details keep at least [`DETAILS_LEAST_WIDTH`].
+const LIST_WIDTH: f32 = 300.0;
+const LIST_LEAST_WIDTH: f32 = 240.0;
+const DETAILS_LEAST_WIDTH: f32 = 400.0;
+/// The width of the list's edge.
+const LIST_EDGE: f32 = 9.0;
+/// The accessible name of the list's edge.
+pub(crate) const RESIZE_LIST: &str = "Resize the step list";
 
 impl Default for ReportPanel {
     fn default() -> Self {
@@ -513,6 +577,13 @@ impl Default for ReportPanel {
             json: false,
             json_text: None,
             checked: Vec::new(),
+            list_width: LIST_WIDTH,
+            adopted_width: None,
+            edge_grab: None,
+            folded: Default::default(),
+            failed_only: false,
+            focus: None,
+            arranged: Default::default(),
         }
     }
 }
@@ -542,6 +613,16 @@ impl ReportPanel {
     /// it.
     pub fn set_json_view(&mut self, json: bool) {
         self.json = json;
+    }
+
+    /// The step list's width as the host remembers it (REP-07): taken when
+    /// it differs from what the host gave before, so a drag in progress is
+    /// not undone by the value it will replace.
+    pub fn adopt_list_width(&mut self, width: Option<f32>) {
+        if self.adopted_width != width {
+            self.adopted_width = width;
+            self.list_width = width.unwrap_or(LIST_WIDTH);
+        }
     }
 
     /// Whether the open panel fills the window, so the caller draws nothing else.
@@ -886,6 +967,9 @@ impl ReportPanel {
             self.last_run_id = run_id.map(str::to_owned);
             self.selected_key = None;
             self.json_text = None;
+            // Every step's checks are shown after a run (REP-07).
+            self.folded.clear();
+            self.focus = None;
         }
         if node_changed {
             self.last_selected_node_id = selected_node_id.map(str::to_owned);
@@ -899,6 +983,23 @@ impl ReportPanel {
             if !run_changed
                 && rows.iter().any(|row| {
                     Some(row.key.as_str()) == self.selected_key.as_deref() && row.root_id == node_id
+                })
+            {
+                return run_changed;
+            }
+            // A check folded into its step on the board selects that step
+            // there (LAY-11); the check's row listed under it stays chosen
+            // (REP-07).
+            if !run_changed
+                && let Some(index) = rows
+                    .iter()
+                    .position(|row| Some(row.key.as_str()) == self.selected_key.as_deref())
+                && self.arranged.lines.iter().any(|line| {
+                    line.row == index
+                        && line.under.is_some_and(|head| {
+                            rows.get(head)
+                                .is_some_and(|head| head.step.node_id == node_id)
+                        })
                 })
             {
                 return run_changed;
@@ -1014,7 +1115,44 @@ impl ReportPanel {
                 &resolved
             }
         };
-        header_row(ui, run, ends, context.files_busy, actions);
+        let rows = flatten_steps(&run.steps);
+        self.arranged.update(run, &rows, context.graphs);
+        // *Failed* counts what the summary counts in its groups (REP-07).
+        let failed = not_run::summary(&run.steps, ends)
+            .into_iter()
+            .filter(|(group, _)| list::counted(*group))
+            .map(|(_, count)| count)
+            .sum::<usize>();
+        if failed == 0 {
+            self.failed_only = false;
+        }
+        let heads: Vec<String> = self
+            .arranged
+            .lines
+            .iter()
+            .filter_map(|line| line.under)
+            .map(|head| rows[head].key.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mut controls = Controls {
+            steps: self
+                .arranged
+                .lines
+                .iter()
+                .filter(|line| {
+                    let row = &rows[line.row];
+                    line.under.is_none() && row.depth == 0 && row.step.kind != NodeKind::Start
+                })
+                .count(),
+            failed,
+            failed_only: self.failed_only,
+            foldable: !heads.is_empty(),
+            all_folded: !heads.is_empty() && heads.iter().all(|key| self.folded.contains(key)),
+            below: false,
+            chosen: None,
+        };
+        header_row(ui, run, ends, context.files_busy, actions, &mut controls);
         if run.diagnostic {
             ui.label(
                 RichText::new(
@@ -1039,7 +1177,6 @@ impl ReportPanel {
         }
         ui.add_space(4.0);
 
-        let rows = flatten_steps(&run.steps);
         let selected = resolve_selected(
             &rows,
             self.selected_key.as_deref(),
@@ -1053,19 +1190,49 @@ impl ReportPanel {
         {
             self.tab = DetailTab::Outputs;
         }
+        // What the details say of a check: its predicate, what it compared
+        // and the step it is listed under (REP-07).
+        let check = selected.as_ref().and_then(|selected| {
+            let index = rows.iter().position(|row| row.key == selected.key)?;
+            let entry = self.arranged.entries.get(index)?;
+            let under = self
+                .arranged
+                .lines
+                .iter()
+                .find(|line| line.row == index)
+                .and_then(|line| line.under);
+            Some(CheckDetail {
+                predicate: entry.predicate.clone()?,
+                checked: entry.checked.clone(),
+                head: under.map(|head| (rows[head].clone(), self.arranged.entries[head].number)),
+            })
+        });
 
         // The outcomes that colour the marks, once per frame (DIAG-12).
         let outcomes = context.checks.map(|_| crate::inspector::Outcomes::of(run));
         let height = ui.available_height().max(80.0);
+        let gap = ui.spacing().item_spacing.x;
+        let available = ui.available_width();
+        // Between its least width and half the panel, leaving the details
+        // theirs (REP-07).
+        let widest = (available / 2.0)
+            .min(available - DETAILS_LEAST_WIDTH - LIST_EDGE - 2.0 * gap)
+            .max(LIST_LEAST_WIDTH);
+        let width = self.list_width.clamp(LIST_LEAST_WIDTH, widest);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
-                egui::vec2(300.0, height),
+                egui::vec2(width, height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
+                    ui.set_width(width);
+                    if controls.below {
+                        ui.horizontal(|ui| list_controls(ui, &mut controls));
+                        ui.add_space(4.0);
+                    }
                     self.step_list(ui, &rows, selected.as_ref(), ends, actions);
                 },
             );
-            ui.separator();
+            self.list_edge(ui, width, widest, height, actions);
             ui.allocate_ui_with_layout(
                 egui::vec2(ui.available_width(), height),
                 egui::Layout::top_down(egui::Align::Min),
@@ -1082,6 +1249,7 @@ impl ReportPanel {
                                 ui,
                                 &run.id,
                                 selected.as_ref(),
+                                check.as_ref(),
                                 ends,
                                 requirement,
                                 !context.document_locked,
@@ -1096,6 +1264,70 @@ impl ReportPanel {
                 },
             );
         });
+        match controls.chosen {
+            Some(Chosen::All) => self.failed_only = false,
+            Some(Chosen::Failed) => self.failed_only = true,
+            Some(Chosen::Collapse) => self.folded.extend(heads),
+            Some(Chosen::Expand) => self.folded.clear(),
+            None => {}
+        }
+    }
+
+    /// The list's edge, dragged between its least width and `widest`; let
+    /// go, its width is remembered (REP-07).
+    fn list_edge(
+        &mut self,
+        ui: &mut Ui,
+        width: f32,
+        widest: f32,
+        height: f32,
+        actions: &mut Vec<Action>,
+    ) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(LIST_EDGE, height), Sense::hover());
+        let edge = ui.interact(rect, egui::Id::new("report-list-edge"), Sense::drag());
+        let value = f64::from(width.round());
+        edge.widget_info(|| {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, RESIZE_LIST);
+            info.value = Some(value);
+            info
+        });
+        if edge.drag_started() {
+            let origin = ui
+                .input(|input| input.pointer.press_origin())
+                .or(edge.interact_pointer_pos())
+                .map_or(rect.center().x, |origin| origin.x);
+            self.edge_grab = Some((origin, width));
+        }
+        if edge.dragged()
+            && let (Some((origin, from)), Some(pointer)) =
+                (self.edge_grab, edge.interact_pointer_pos())
+        {
+            let next = (from + pointer.x - origin).clamp(LIST_LEAST_WIDTH, widest);
+            if (next - self.list_width).abs() > f32::EPSILON {
+                self.list_width = next;
+                ui.ctx().request_repaint();
+            }
+        }
+        if edge.drag_stopped() {
+            self.edge_grab = None;
+            self.list_width = self.list_width.clamp(LIST_LEAST_WIDTH, widest);
+            actions.push(Action::RememberListWidth(self.list_width));
+        }
+        let engaged = edge.hovered() || edge.dragged();
+        ui.painter().line_segment(
+            [rect.center_top(), rect.center_bottom()],
+            Stroke::new(
+                if engaged { 2.0 } else { 1.0 },
+                if engaged {
+                    theme::ACCENT
+                } else {
+                    theme::BORDER
+                },
+            ),
+        );
+        let _ = edge
+            .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+            .on_hover_text("Drag to change the width of the step list");
     }
 
     fn step_list(
@@ -1106,6 +1338,115 @@ impl ReportPanel {
         ends: &CauseEnds,
         actions: &mut Vec<Action>,
     ) {
+        let arranged = std::mem::take(&mut self.arranged);
+        let lines = &arranged.lines;
+        let entries = &arranged.entries;
+        let bad: Vec<bool> = rows.iter().map(|row| list::bad(row, ends)).collect();
+        // A step's checks, and how many of them did not pass.
+        let mut checks = vec![(0usize, 0usize); rows.len()];
+        for line in lines {
+            if let Some(head) = line.under {
+                checks[head].0 += 1;
+                if bad[line.row] {
+                    checks[head].1 += 1;
+                }
+            }
+        }
+        // *Failed*: the rows that did not pass, the steps they are listed
+        // under and the calls that hold them.
+        let kept: Vec<bool> = if self.failed_only {
+            let mut kept = bad.clone();
+            for line in lines {
+                if let Some(head) = line.under
+                    && bad[line.row]
+                {
+                    kept[head] = true;
+                }
+            }
+            let by_key: std::collections::HashMap<&str, usize> = rows
+                .iter()
+                .enumerate()
+                .map(|(index, row)| (row.key.as_str(), index))
+                .collect();
+            for index in 0..rows.len() {
+                if !kept[index] {
+                    continue;
+                }
+                let mut key = rows[index].key.as_str();
+                while let Some(at) = key.rfind('/') {
+                    key = &key[..at];
+                    if let Some(&parent) = by_key.get(key) {
+                        kept[parent] = true;
+                    }
+                }
+            }
+            kept
+        } else {
+            vec![true; rows.len()]
+        };
+        let visible = |folded: &std::collections::HashSet<String>| -> Vec<Line> {
+            lines
+                .iter()
+                .copied()
+                .filter(|line| kept[line.row])
+                .filter(|line| {
+                    line.under
+                        .is_none_or(|head| !folded.contains(&rows[head].key))
+                })
+                .collect()
+        };
+        let mut shown = visible(&self.folded);
+
+        // The keyboard: up and down move between the rows, left and right
+        // fold and open a step's checks (REP-07).
+        let focused = ui.memory(|memory| memory.focused());
+        if let Some(at) = shown
+            .iter()
+            .position(|line| Some(list::row_id(&rows[line.row].key)) == focused)
+        {
+            let id = list::row_id(&rows[shown[at].row].key);
+            ui.memory_mut(|memory| {
+                memory.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        tab: false,
+                        escape: false,
+                    },
+                )
+            });
+            let mut target = None;
+            ui.input_mut(|input| {
+                let line = shown[at];
+                let key = &rows[line.row].key;
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                    target = shown.get(at + 1).map(|line| line.row);
+                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                    target = at.checked_sub(1).map(|before| shown[before].row);
+                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+                    match line.under {
+                        None if checks[line.row].0 > 0 => {
+                            self.folded.insert(key.clone());
+                        }
+                        Some(head) => target = Some(head),
+                        None => {}
+                    }
+                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
+                    && line.under.is_none()
+                {
+                    self.folded.remove(key);
+                }
+            });
+            if let Some(target) = target {
+                let row = &rows[target];
+                self.selected_key = Some(row.key.clone());
+                self.focus = Some(row.key.clone());
+                actions.push(Action::SelectNode(row.root_id.clone()));
+            }
+            shown = visible(&self.folded);
+        }
+
         egui::ScrollArea::vertical()
             .id_salt("report-steps")
             .auto_shrink([false, false])
@@ -1114,22 +1455,56 @@ impl ReportPanel {
                     widgets::hint(ui, "Waiting for the first step…");
                     return;
                 }
-                for (index, row) in rows.iter().enumerate() {
-                    if row.step.phase == Phase::Cleanup
-                        && row.depth == 0
-                        && (index == 0 || rows[index - 1].step.phase != Phase::Cleanup)
-                    {
+                let mut cleanup = false;
+                for (index, line) in shown.iter().enumerate() {
+                    let row = &rows[line.row];
+                    if row.step.phase == Phase::Cleanup && row.depth == 0 && !cleanup {
+                        cleanup = true;
                         ui.add_space(6.0);
                         widgets::caption(ui, "AFTER TEST · CLEANUP");
                         ui.add_space(2.0);
                     }
-                    let is_active = selected.is_some_and(|active| active.key == row.key);
-                    if step_row_button(ui, row, is_active, ends).clicked() {
+                    let shape = match line.under {
+                        Some(_) => list::Shape::Check,
+                        None if matches!(row.step.kind, NodeKind::Assert | NodeKind::Condition) => {
+                            list::Shape::Lone
+                        }
+                        None => list::Shape::Head {
+                            checks: checks[line.row].0,
+                            failed: checks[line.row].1,
+                            folded: self.folded.contains(&row.key),
+                        },
+                    };
+                    let view = list::RowView {
+                        row,
+                        entry: &entries[line.row],
+                        shape,
+                        head: line.under.map(|head| &rows[head]),
+                        active: selected.is_some_and(|active| active.key == row.key),
+                        words: row.words(ends),
+                        ran: row.step.cause.is_none(),
+                        first: index == 0,
+                    };
+                    let drawn = list::draw(ui, &view);
+                    if self.focus.as_deref() == Some(row.key.as_str()) {
+                        self.focus = None;
+                        drawn.row.request_focus();
+                        drawn.row.scroll_to_me(None);
+                    }
+                    if let Some(fold) = drawn.fold
+                        && fold.clicked()
+                    {
+                        if !self.folded.remove(&row.key) {
+                            self.folded.insert(row.key.clone());
+                        }
+                    } else if drawn.row.clicked() {
+                        drawn.row.request_focus();
                         self.selected_key = Some(row.key.clone());
                         actions.push(Action::SelectNode(row.root_id.clone()));
                     }
                 }
             });
+        self.arranged = arranged;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1138,6 +1513,7 @@ impl ReportPanel {
         ui: &mut Ui,
         run_id: &str,
         selected: Option<&StepRow<'_>>,
+        check: Option<&CheckDetail<'_>>,
         ends: &CauseEnds,
         requirement: Option<Requirement>,
         editable: bool,
@@ -1163,11 +1539,36 @@ impl ReportPanel {
         let checkable = selected.depth == 0 && step.kind != NodeKind::Export;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(
-                    RichText::new(step.display_name())
-                        .size(14.0)
-                        .family(theme::bold_family()),
-                );
+                match check {
+                    // A check is titled by its predicate, its handle and
+                    // its step under it (REP-07).
+                    Some(check) => {
+                        let title = ui.add(
+                            egui::Label::new(
+                                RichText::new(&check.predicate)
+                                    .monospace()
+                                    .size(13.5)
+                                    .strong(),
+                            )
+                            .wrap(),
+                        );
+                        widgets::named(title, check.predicate.as_str());
+                        let line = check.line(step);
+                        let said = ui.label(
+                            RichText::new(&line)
+                                .size(theme::FONT_LABEL)
+                                .color(theme::MUTED),
+                        );
+                        widgets::named(said, line);
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new(step.display_name())
+                                .size(14.0)
+                                .family(theme::bold_family()),
+                        );
+                    }
+                }
                 if selected.depth > 0 {
                     widgets::hint(ui, format!("Step inside component · {}", step.node_id));
                 }
@@ -1210,7 +1611,71 @@ impl ReportPanel {
                 Some(requirement) => requirement.text(&step.expected),
                 None => expected_text(Predicate::Equals, &step.expected, 0.0),
             };
-            comparison_box(ui, &expected, &step.actual);
+            comparison_box(
+                ui,
+                check.and_then(|check| check.checked.as_deref()),
+                &expected,
+                &step.actual,
+            );
+        }
+        // The response of the step a check is listed under, the field it
+        // read marked by DIAG-12's mark (REP-07).
+        if let Some((head, _)) = check.and_then(|check| check.head.as_ref())
+            && !head.step.outputs.is_empty()
+        {
+            ui.add_space(6.0);
+            let heading = format!(
+                "Response of {} · the checked field is marked",
+                head.step.display_name()
+            );
+            let said = ui.label(
+                RichText::new(&heading)
+                    .size(theme::FONT_LABEL)
+                    .color(theme::MUTED),
+            );
+            widgets::named(said, heading);
+            let document =
+                egui::Id::new(("report-response", run_id, selected.key.as_str(), self.epoch));
+            self.trees.insert(document);
+            let none = |_: &str| false;
+            ui.push_id(("report-response", run_id, &selected.key), |ui| {
+                for (port, value) in &head.step.outputs {
+                    let (opening, large) = match self.folding {
+                        Folding::Default => *self
+                            .openings
+                            .entry(egui::Id::new((
+                                "report-opening",
+                                run_id,
+                                head.key.as_str(),
+                                "response",
+                                port,
+                            )))
+                            .or_insert_with(|| by_default(value)),
+                        folding => (opening(folding, value), false),
+                    };
+                    large_line(ui, opening, large, port);
+                    // A check chosen in a mark's menu is selected (DIAG-12).
+                    if let Some(crate::inspector::TreeAction::Select { check }) =
+                        crate::inspector::results_tree(
+                            ui,
+                            document,
+                            &head.step.node_id,
+                            port,
+                            value,
+                            crate::inspector::Results {
+                                opening,
+                                fields: true,
+                                offers: false,
+                                checked: &none,
+                                marks,
+                            },
+                        )
+                    {
+                        actions.push(Action::SelectNode(check));
+                    }
+                }
+            });
+            ui.add_space(6.0);
         }
 
         let outputs = format!("Outputs  {}", step.outputs.len());
@@ -1616,12 +2081,100 @@ pub(crate) fn mode_pill(mode: RunMode) -> (&'static str, Color32) {
     }
 }
 
+/// The list's controls above the run: *All | Failed* and *Collapse
+/// checks* (REP-07), and what was chosen in them.
+struct Controls {
+    /// The steps the list holds, its checks apart.
+    steps: usize,
+    /// The rows *Failed* keeps, as the summary counts them.
+    failed: usize,
+    failed_only: bool,
+    /// Some step has checks under it.
+    foldable: bool,
+    all_folded: bool,
+    /// The run's line has no room for them: they stand above the list.
+    below: bool,
+    chosen: Option<Chosen>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Chosen {
+    All,
+    Failed,
+    Collapse,
+    Expand,
+}
+
+impl Controls {
+    fn all_text(&self) -> String {
+        format!("All {}", self.steps)
+    }
+
+    fn failed_text(&self) -> String {
+        format!("Failed {}", self.failed)
+    }
+
+    fn fold_text(&self) -> &'static str {
+        if self.all_folded {
+            "Expand checks"
+        } else {
+            "Collapse checks"
+        }
+    }
+
+    /// The width they take on a line.
+    fn width(&self, ui: &Ui) -> f32 {
+        let gap = ui.spacing().item_spacing.x;
+        list::segment_width(ui, &self.all_text())
+            + list::segment_width(ui, &self.failed_text())
+            + 8.0
+            + 20.0
+            + 14.0
+            + 6.0
+            + text_width(ui, self.fold_text(), theme::FONT_LABEL)
+            + 3.0 * gap
+    }
+}
+
+/// *All | Failed* and *Collapse checks*, left to right.
+fn list_controls(ui: &mut Ui, controls: &mut Controls) {
+    ui.spacing_mut().item_spacing.x = 0.0;
+    if list::segment(ui, &controls.all_text(), !controls.failed_only, true).clicked() {
+        controls.chosen = Some(Chosen::All);
+    }
+    let enabled = controls.failed > 0;
+    let failed = ui.add_enabled_ui(enabled, |ui| {
+        list::segment(ui, &controls.failed_text(), controls.failed_only, enabled)
+    });
+    if failed.inner.clicked() {
+        controls.chosen = Some(Chosen::Failed);
+    }
+    ui.add_space(8.0);
+    let (icon, chosen) = if controls.all_folded {
+        (Icon::ChevronDown, Chosen::Expand)
+    } else {
+        (Icon::ChevronRight, Chosen::Collapse)
+    };
+    let fold = ui.add_enabled_ui(controls.foldable, |ui| {
+        ui.add(
+            widgets::action(icon, controls.fold_text())
+                .compact()
+                .quiet()
+                .hover("Fold or show the checks under every step"),
+        )
+    });
+    if fold.inner.clicked() {
+        controls.chosen = Some(chosen);
+    }
+}
+
 fn header_row(
     ui: &mut Ui,
     run: &RunResult,
     ends: &CauseEnds,
     files_busy: bool,
     actions: &mut Vec<Action>,
+    controls: &mut Controls,
 ) {
     ui.horizontal(|ui| {
         let (text, colour) = mode_pill(run.mode);
@@ -1639,6 +2192,19 @@ fn header_row(
             )
             .on_hover_text("No HTTP requests are sent in simulation mode.");
         }
+        let groups = not_run::summary(&run.steps, ends);
+        let gap = ui.spacing().item_spacing.x;
+        // What stays right of the run's own words: the summary and Export.
+        let summary = groups
+            .iter()
+            .map(|(group, count)| text_width(ui, &format!("{count} {}", group.label()), 12.0) + gap)
+            .sum::<f32>()
+            + 20.0
+            + 14.0
+            + 6.0
+            + text_width(ui, "Export", theme::FONT_LABEL)
+            + gap;
+        controls.below = ui.available_width() < summary + controls.width(ui) + 16.0;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add_enabled(
@@ -1652,8 +2218,15 @@ fn header_row(
             }
             // Every step in one group, the steps that did not run by their
             // cause (LAY-19); right to left, so the last group first.
-            for (group, count) in not_run::summary(&run.steps, ends).into_iter().rev() {
+            for (group, count) in groups.into_iter().rev() {
                 group_label(ui, group, count);
+            }
+            if !controls.below {
+                ui.add_space(8.0);
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add_space((ui.available_width() - controls.width(ui)).max(0.0));
+                    list_controls(ui, controls);
+                });
             }
         });
     });
@@ -1676,25 +2249,36 @@ fn group_label(ui: &mut Ui, group: not_run::Group, count: usize) {
     );
 }
 
-fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
+/// The EXPECTED and ACTUAL sides of a check, under what it compared when
+/// that is known (REP-07).
+fn comparison_box(ui: &mut Ui, checked: Option<&str>, expected: &str, actual: &OptionalJson) {
     egui::Frame::new()
         .fill(theme::FIELD)
         .stroke(Stroke::new(1.0, theme::BORDER))
         .corner_radius(6)
         .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
+            if let Some(checked) = checked {
+                widgets::subcaption(ui, "CHECKED");
+                let value = ui.add(egui::Label::new(RichText::new(checked).monospace()).wrap());
+                widgets::named(value, checked);
+                ui.add_space(4.0);
+            }
             ui.horizontal(|ui| {
                 let col_width = ((ui.available_width() - 28.0) * 0.5).max(80.0);
                 ui.allocate_ui(egui::vec2(col_width, 36.0), |ui| {
                     ui.vertical(|ui| {
                         widgets::subcaption(ui, "EXPECTED");
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(labels::truncate(expected, 120)).monospace(),
+                        let value = ui
+                            .add(
+                                egui::Label::new(
+                                    RichText::new(labels::truncate(expected, 120)).monospace(),
+                                )
+                                .truncate(),
                             )
-                            .truncate(),
-                        )
-                        .on_hover_text(expected);
+                            .on_hover_text(expected);
+                        // Named by its text, which the label may cut (REP-07).
+                        widgets::named(value, expected);
                     });
                 });
                 ui.label(RichText::new("→").color(theme::MUTED));
@@ -1705,13 +2289,15 @@ fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
                             OptionalJson::Present(value) => compact_json(value),
                             OptionalJson::Missing => "(missing value)".into(),
                         };
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(labels::truncate(&text, 120)).monospace(),
+                        let value = ui
+                            .add(
+                                egui::Label::new(
+                                    RichText::new(labels::truncate(&text, 120)).monospace(),
+                                )
+                                .truncate(),
                             )
-                            .truncate(),
-                        )
-                        .on_hover_text(text);
+                            .on_hover_text(&text);
+                        widgets::named(value, text);
                     });
                 });
             });
@@ -1720,87 +2306,6 @@ fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
 
 fn compact_json(value: &Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| json_stringify(value))
-}
-
-fn step_row_button(
-    ui: &mut Ui,
-    row: &StepRow<'_>,
-    active: bool,
-    ends: &CauseEnds,
-) -> egui::Response {
-    let indent = row.depth as f32 * 14.0;
-    let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 42.0), Sense::click());
-    let painter = ui.painter();
-    if active {
-        painter.rect_filled(rect, 6.0, theme::ACCENT_SOFT);
-    } else if response.hovered() {
-        painter.rect_filled(rect, 6.0, theme::BG);
-    }
-
-    let status_color = status_color(row.step.status);
-    let badge_center = egui::pos2(rect.left() + 14.0 + indent, rect.center().y);
-    painter.circle_filled(badge_center, 8.0, status_color.gamma_multiply(0.15));
-    painter.text(
-        badge_center,
-        egui::Align2::CENTER_CENTER,
-        status_mark(row.step.status),
-        egui::FontId::proportional(11.0),
-        status_color,
-    );
-
-    let text_left = rect.left() + 28.0 + indent;
-    let name_color = if active { theme::ACCENT } else { theme::TEXT };
-    // Reserve the duration column by width, rather than truncating every name
-    // at a fixed character count (which lets wider names overlap the duration).
-    let mut name = egui::text::LayoutJob::simple_singleline(
-        row.step.display_name().to_owned(),
-        egui::FontId::new(12.5, theme::bold_family()),
-        name_color,
-    );
-    name.wrap.max_width = (rect.right() - text_left - 76.0).max(16.0);
-    name.wrap.max_rows = 1;
-    let galley = painter.layout_job(name);
-    painter.galley(egui::pos2(text_left, rect.top() + 5.0), galley, name_color);
-    let words = row.words(ends);
-    let sub = if row.depth > 0 {
-        format!("Inside component · {words}")
-    } else {
-        words.clone()
-    };
-    // A step that did not run took no time (LAY-19).
-    let ran = row.step.cause.is_none();
-    painter.text(
-        egui::pos2(text_left, rect.top() + 29.0),
-        egui::Align2::LEFT_CENTER,
-        sub,
-        egui::FontId::proportional(11.0),
-        theme::MUTED,
-    );
-    if ran {
-        painter.text(
-            egui::pos2(rect.right() - 8.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            format!("{} ms", row.step.duration_ms),
-            egui::FontId::monospace(10.5),
-            theme::MUTED,
-        );
-    }
-    let a11y_label = if ran {
-        format!(
-            "{} · {words} · {} ms",
-            row.step.display_name(),
-            row.step.duration_ms
-        )
-    } else {
-        format!("{} · {words}", row.step.display_name())
-    };
-    response.widget_info(move || {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
-    });
-    response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .on_hover_text(row.step.display_name())
 }
 
 fn run_pill(status: RunStatus) -> (&'static str, Color32) {

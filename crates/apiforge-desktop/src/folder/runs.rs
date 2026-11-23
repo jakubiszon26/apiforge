@@ -667,6 +667,9 @@ impl FolderApp {
         self.runs
             .panel
             .set_json_view(self.workbench.panels.results_json);
+        self.runs
+            .panel
+            .adopt_list_width(self.preferences.run_list_width);
         let actions = self.runs.panel.show(
             ui,
             &crate::report::Context {
@@ -707,6 +710,17 @@ impl FolderApp {
         action: crate::report::Action,
     ) {
         use crate::report::Action;
+        if let Action::RememberListWidth(width) = action {
+            // Remembered on this computer, for every project (REP-07).
+            self.preferences.run_list_width = Some(width);
+            let preferences = self.preferences.clone();
+            self.storage_io(
+                "Saving preferences…",
+                move || preferences.save(crate::preferences::Preference::RunListWidth),
+                |_, _| {},
+            );
+            return;
+        }
         let Some(snapshot) = self.snapshot(id) else {
             return;
         };
@@ -729,6 +743,7 @@ impl FolderApp {
                     self.export_text("run-report.json".into(), text);
                 }
             }
+            Action::RememberListWidth(_) => {}
             _ if stale || !snapshot.editable => {}
             Action::SetErrorPolicy(policy) => {
                 if let Document::Scenario(mut scenario) = Arc::unwrap_or_clone(model) {
@@ -759,6 +774,17 @@ impl FolderApp {
     /// document's report only while that report is not stale (UX-01).
     pub(super) fn field_action(&mut self, id: &str, action: crate::report::Action) {
         use crate::report::Action;
+        if let Action::RememberListWidth(width) = action {
+            // Remembered on this computer, for every project (REP-07).
+            self.preferences.run_list_width = Some(width);
+            let preferences = self.preferences.clone();
+            self.storage_io(
+                "Saving preferences…",
+                move || preferences.save(crate::preferences::Preference::RunListWidth),
+                |_, _| {},
+            );
+            return;
+        }
         let Some(snapshot) = self.snapshot(id) else {
             return;
         };
