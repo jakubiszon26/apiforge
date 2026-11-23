@@ -1,9 +1,11 @@
 # DIAG-16: Choose a response field takes a typed path
 
 - Size: S · Owner review: 10 min · Risk: `visible UI`
-- State: **Analysis, waits for the owner** (issue #550) · question 2
-  below · the same on v0.1.0 and v0.2.0, not a regression · no `ready:*`
-  label yet
+- State: **Approved, ready for implementation** (issue #550) · decided
+  by the owner on 2026-11-23 on the board, recorded on #550: **A, a row
+  *Use "…"***, taken by Return or a click · the same on v0.1.0 and
+  v0.2.0, not a regression · labelled `ready:opus`; the sprint is the
+  owner's to name
 - Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
@@ -44,15 +46,18 @@ with DIAG-15), from `review_req_check_making` on
 `mock/req-check-making` at `dab4de5a`. Whole windows of A:
 `docs/qa/2026-11-23/DIAG-16/a-1600.png`, `a-960.png`.
 
+Decided by the owner on 2026-11-23: **A**. The table keeps what was
+offered.
+
 | Option | Look | For the person at the window |
 | --- | --- | --- |
-| **A — a row *Use "id"* (recommended)** | The typed text as the list's row, with *Return ↵* at its end and a line saying it is a typed path | What every run tried now works: type, Return. One field in the dialog |
+| **A — a row *Use "id"* (chosen)** | The typed text as the list's row, with *Return ↵* at its end and a line saying it is a typed path | What every run tried now works: type, Return. One field in the dialog |
 | B — a *Path* field in the dialog | The search stays a search; under the list a field *Path* and *Use path* | Nothing is ambiguous; two text fields to tell apart, and the path typed into the first one is still lost |
 | C — only the hint changes | *Run the request or add a sample response to list its fields.* and a line pointing at *Edit path manually* | The smallest change; the dialog still cannot do it, the tester closes it and looks for the fold |
 
 ## Acceptance criteria
 
-Written for A; tests in `folder/acceptance_tests/diag16.rs`.
+Tests in `folder/acceptance_tests/diag16.rs`.
 
 1. With no sample and no run, typing `id` shows the row *Use "id"*;
    Return takes it: the reference's path is `id`, the dialog closes,
@@ -81,7 +86,7 @@ empty list after an edit (DIAG-13 #534, DIAG-14 #535).
 
 | Proposal | Problem solved | Size, risk | Trade-offs | Where |
 | --- | --- | --- | --- | --- |
-| Up and down move through the list, Return takes the row marked | The dialog is a search that only a pointer can finish | S · `visible UI` | A highlighted row to draw and keep in view | with this ticket if the owner says so, else later |
+| Up and down move through the list, Return takes the row marked | The dialog is a search that only a pointer can finish | S · `visible UI` | A highlighted row to draw and keep in view | later; not part of this ticket |
 
 ## Technical appendix
 

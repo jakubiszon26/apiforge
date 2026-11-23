@@ -1,8 +1,13 @@
 # DIAG-12: A field of a response that a check already reads is marked
 
 - Size: M · Owner review: 20 min · Risk: `visible UI`
-- State: **Analysis, waits for the owner** (issue #533) · questions 3
-  and 4 below · REQ, with REP-07 (#381) · no `ready:*` label yet
+- State: **Approved, ready for implementation** (issue #533) · decided
+  by the owner on 2026-11-23 on the board, recorded on #533: the mark is
+  **A, the ✓ filled** (outlined on a folded parent; *2 checks* /
+  *1 failed* in Run results, the menu lists the checks first); marked
+  are **A, checks only, on the field the check names** · REQ · order:
+  **after REP-08 (#563) merges, before REP-07 (#381)**, which uses this
+  ticket's index · labelled `ready:opus`
 - Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
@@ -45,11 +50,14 @@ results below; from `review_req_check_making` on
 Whole windows of A: `a-inspector-960.png`, `a-results-960.png`,
 `a-results-1600.png`.
 
+Decided by the owner on 2026-11-23: **A** and **A**. The tables keep
+what was offered.
+
 Question 3, the mark:
 
 | Option | Look | For the person at the window |
 | --- | --- | --- |
-| **A — the ✓ is filled (recommended)** | The button that adds a check is a filled square where a check exists; in Run results *Check* reads *2 checks* or *1 failed* | The mark is where the hand goes to check a field, costs no width at 960 × 540, and opens the checks themselves |
+| **A — the ✓ is filled (chosen)** | The button that adds a check is a filled square where a check exists; in Run results *Check* reads *2 checks* or *1 failed* | The mark is where the hand goes to check a field, costs no width at 960 × 540, and opens the checks themselves |
 | B — a chip beside the value | `== 201`, `nonempty`, *2 checks* in a pill before ✓ | What is checked is read without pointing; the value loses up to a third of a narrow row, and a long expected value is cut anyway |
 | C — a line at the row's edge | A 3 px line left of the row, as an editor marks covered lines | The quietest and good for scanning a long response; says nothing itself and is far from ✓ |
 
@@ -57,12 +65,12 @@ Question 4, what is marked:
 
 | Option | For the person at the window |
 | --- | --- |
-| **A — checks only; the field the check names (recommended)** | `nonempty items` marks `items`, not its children. A folded field with a checked field inside carries the outlined mark (*1 check inside*), so a folded response still shows where its checks are. A field a later step reads is not marked |
+| **A — checks only; the field the check names (chosen)** | `nonempty items` marks `items`, not its children. A folded field with a checked field inside carries the outlined mark (*1 check inside*), so a folded response still shows where its checks are. A field a later step reads is not marked |
 | B — also a field a later step reads | The {} is filled the same way where a step or a variable reads the field. Answers "is this used", a different question from "is this checked"; two marks on a row, and it needs its own mock-up before approval |
 
 ## Acceptance criteria
 
-Written for 3 A and 4 A; tests in `folder/acceptance_tests/diag12.rs`
+Tests in `folder/acceptance_tests/diag12.rs`
 on the board's fixture.
 
 1. In *Output data* of `cart` the rows `total`, `paid`, `items`,
@@ -114,4 +122,5 @@ accepts; the Inspector's `Context` and `report::Context` hand it to
 takes `checked`). Outcomes from `RunResult::steps`. Risk named for M:
 the index and the run's results disagree after an edit since the run —
 criterion 5's "none ran" covers a check the run does not know. Merges
-after REP-08 (#563); REP-07 after this or with its index stubbed.
+after REP-08 (#563) and before REP-07 (#381): REP-07 is not opened
+until this ticket is merged, as both edit the row and `report.rs`.

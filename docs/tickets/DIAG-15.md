@@ -1,10 +1,11 @@
 # DIAG-15: The Checks tab of a step can add a check
 
 - Size: S · Owner review: 15 min · Risk: `visible UI`
-- State: **Analysis, waits for the owner** (issue #547) · class 2, REQ,
-  and **A — *Add check* opens DIAG-08's menu over the response fields**
-  decided by the owner on 2026-11-23; open: where the button sits and
-  how the menu reads (question 1 below) · no `ready:*` label yet
+- State: **Approved, ready for implementation** (issue #547) · class 2,
+  REQ · decided by the owner on 2026-11-23 on the board, recorded on
+  #547: ***Add check* opens DIAG-08's menu over the response fields**,
+  and **A, a button on the tab's first line, then a menu of fields**,
+  which folds and scrolls at 960 × 540 · labelled `ready:opus`
 - Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
@@ -43,9 +44,12 @@ is DIAG-16), from `review_req_check_making` on `mock/req-check-making`
 at `dab4de5a`. Whole windows of A with the menu open:
 `a-menu-1600.png`, `a-menu-960.png`.
 
+Decided by the owner on 2026-11-23: **A**. The table keeps what was
+offered.
+
 | Option | Look | For the person at the window |
 | --- | --- | --- |
-| **A — a button, then a menu of fields (recommended)** | *Add check* is the first line of the tab. It opens *Add a check of*: the HTTP status and the response's fields as Output data writes them; a field opens DIAG-08's four sentences beside it | One place to press, the same in the empty and the full tab; two clicks to a check; the list of checks does not move |
+| **A — a button, then a menu of fields (chosen)** | *Add check* is the first line of the tab. It opens *Add a check of*: the HTTP status and the response's fields as Output data writes them; a field opens DIAG-08's four sentences beside it | One place to press, the same in the empty and the full tab; two clicks to a check; the list of checks does not move |
 | B — the response stands in the tab | No button: under the list, *Add a check from the response* and the tree of Output data with its ✓ and {} | Nothing to find and exactly the menu already known; but Output data is shown twice, {} has no business in *Checks*, and a list of four checks pushes the tree off the panel at 960 × 540 |
 
 **Found on the mock-up (A):** at 960 × 540 the menu of this small
@@ -55,7 +59,7 @@ it: rows as high as Output data's, nested fields folded, a scroll.
 
 ## Acceptance criteria
 
-Written for A; tests in `folder/acceptance_tests/diag15.rs`.
+Tests in `folder/acceptance_tests/diag15.rs`.
 
 1. The *Checks* tab of a request shows *Add check* as its first line,
    with no check and with checks; a step with no output shows none.
