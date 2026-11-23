@@ -312,25 +312,27 @@ fn lay09_criterion_5_zooming_moves_no_card() {
     }
 }
 
-/// Criterion 6: a full check card's subtitle writes its predicate as the
-/// compact card's title does (LAY-21). Since DIAG-02 the text is the code's
-/// (`status == 201`, not `cart.status is equal to 201`) and the subject is
-/// named on the compact card's line under the title.
+/// Criterion 6: a full check card's subtitle names its subject and
+/// predicate (LAY-21). Since DIAG-02 the text is the code's
+/// (`cart.status == 201`, not `cart.status is equal to 201`); the compact
+/// card, which names the subject on the line under its title, leaves the
+/// step's name out of the title, and the full card, which has no such line,
+/// keeps it.
 #[test]
 fn lay09_criterion_6_a_check_names_its_subject() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
     app(&mut harness).debug_draw_checks();
     settle(&mut harness);
     show(&mut harness, "cart_created", 0.6);
-    let line = "status == 201".to_owned();
     let lines = lines(&harness, "cart_created");
-    assert!(lines.contains(&line), "{lines:?}");
+    assert!(lines.contains(&"status == 201".to_owned()), "{lines:?}");
     assert!(
         lines
             .iter()
             .any(|line| line.starts_with("cart_created · of ") && line.ends_with(" cart")),
         "the line under the title names the subject: {lines:?}"
     );
+    let line = "cart.status == 201".to_owned();
     switch_density(&mut harness);
     settle(&mut harness);
     for zoom in [0.6, 1.0] {

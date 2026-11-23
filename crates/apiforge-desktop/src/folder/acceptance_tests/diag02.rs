@@ -222,6 +222,15 @@ fn diag02_criterion_1_the_card_and_the_inspector_write_the_same_text() {
         .filter(|label| row.contains_rect(label.rect()))
         .count();
     assert_eq!(written, 1, "the Inspector writes {card:?} in the row");
+    // The names are left out where the step is shown beside the text: the
+    // Inspector is the step's, and the row's sources name it in full.
+    let sources = "Sources: weight_31.body.error.code";
+    assert!(
+        harness
+            .query_all_by_label(sources)
+            .any(|label| row.contains_rect(label.rect())),
+        "the row names the step: {sources:?}"
+    );
     for old in ["equals", "is equal to"] {
         assert!(
             harness.query_by_label_contains(old).is_none(),
@@ -468,6 +477,297 @@ fn diag02_criterion_7_check_cards_keep_distinct_accessible_names() {
             "{name} names one card"
         );
     }
+}
+
+/// Owner's acceptance (2026-11-23): the predicate title is bold, as in the
+/// mock-up, in the monospace font's bold face.
+#[test]
+fn diag02_review_the_predicate_title_is_bold() {
+    let (_project, mut harness, id) = labels_with_checks();
+    let graph = graph(&harness, &id);
+    let check = node(&graph, "weight_31_code").clone();
+    show(&mut harness, &id, "weight_31_code", 1.0);
+    let texts = board(&harness, &id).debug_texts(&check.id);
+    let title = texts
+        .iter()
+        .find(|text| text.text == "error.code == \"out_of_range\"")
+        .unwrap_or_else(|| panic!("the title among {texts:?}"));
+    assert_eq!(title.family, crate::theme::bold_mono_family(), "{title:?}");
+}
+
+/// A response whose body has a field named like an output of its step.
+const FIELDS: &str = r#"scenario "Fields" {
+  begin = start
+  order = GET "/order" {
+    sample 200 { status: "open", headers: { x: 1 }, error: { code: "none" } }
+  }
+  order_open = assert order.body.status == "open"
+  cart = POST "/cart" {
+    body { items: 1 }
+    sample 201 { id: "c-1" }
+  }
+  cart_created = assert cart.status == 201
+  other = GET "/other" {
+    sample 200 { headers: { x: 1 }, error: { code: "none" } }
+  }
+  other_header = assert other.body.headers.x == 1
+  other_code = assert other.body.error.code == "none"
+}
+"#;
+
+/// Ruling 1 with its addendum: under its one step a check leaves `body.`
+/// out only when the next name is not one of the step's outputs, so
+/// `order.body.status` never reads as `order.status`. Unit, card and the
+/// folded line of LAY-30.
+#[test]
+fn diag02_ruling_1_body_stays_before_the_name_of_an_output() {
+    use apiforge_script::{Document, LowerContext, lower, parse};
+    let project = apiforge_core::demos::shop_project();
+    let lowered = lower(&parse(FIELDS), &LowerContext::folder(&project));
+    let Some(Document::Scenario(scenario)) = lowered.document else {
+        panic!("the scenario lowers: {:#?}", lowered.diagnostics);
+    };
+    let graph = scenario.graph;
+    for (handle, step, own) in [
+        ("order_open", "order", "body.status == \"open\""),
+        ("cart_created", "cart", "status == 201"),
+        ("other_header", "other", "body.headers.x == 1"),
+        ("other_code", "other", "error.code == \"none\""),
+    ] {
+        assert_eq!(
+            written(&graph, &project, handle, Some(step)).text(),
+            own,
+            "{handle} under its step"
+        );
+    }
+
+    let (_project, mut harness, id) = tidied_text(FIELDS, WIDE, Checks::Expanded);
+    let graph = super::lay23::graph(&harness, &id);
+    for (handle, text) in [
+        ("order_open", "body.status == \"open\""),
+        ("cart_created", "status == 201"),
+    ] {
+        show(&mut harness, &id, handle, 1.0);
+        assert_eq!(card_text(&harness, node(&graph, handle)), text, "{handle}");
+    }
+
+    let (_project, harness, id) = tidied_text(FIELDS, WIDE, Checks::Collapsed);
+    let graph = super::lay23::graph(&harness, &id);
+    let line = |handle: &str| {
+        board(&harness, &id)
+            .debug_aggregate(&node(&graph, handle).id)
+            .unwrap_or_else(|| panic!("{handle} has a checks line"))
+    };
+    assert!(
+        line("order").ends_with(" · body.status == \"open\""),
+        "{}",
+        line("order")
+    );
+    assert!(
+        line("cart").ends_with(" · status == 201"),
+        "{}",
+        line("cart")
+    );
+}
+
+/// Calculations in a check's operands, and the same calculation as a value.
+const SUMS: &str = r#"scenario "Sums" {
+  begin = start
+  cart = POST "/cart" {
+    body { items: 1 }
+    sample 201 { total: 200, price: 50 }
+  }
+  doubled = cart.body.price * 2
+  enough = assert cart.body.total - 1 > cart.body.price * 2
+}
+"#;
+
+/// Ruling 4: a check's operands take the signs of the code too (`-`, `*`),
+/// on the card and in the Inspector; a Value card of the same calculation
+/// keeps the board's (`×`).
+#[test]
+fn diag02_ruling_4_operands_take_the_signs_of_the_code() {
+    let (_project, mut harness, id) = tidied_text(SUMS, WIDE, Checks::Expanded);
+    let graph = super::lay23::graph(&harness, &id);
+    let text = "total - 1 > price * 2";
+    show(&mut harness, &id, "enough", 1.0);
+    assert_eq!(card_text(&harness, node(&graph, "enough")), text);
+
+    show(&mut harness, &id, "doubled", 1.0);
+    let value = board(&harness, &id).debug_texts(&node(&graph, "doubled").id);
+    assert!(
+        value.iter().any(|line| line.text == "cart.body.price × 2"),
+        "the Value card keeps the board's sign: {value:?}"
+    );
+
+    app(&mut harness)
+        .selections
+        .insert(id.clone(), vec![node(&graph, "cart").id.clone()]);
+    settle(&mut harness);
+    super::open_checks_tab(&mut harness);
+    assert!(
+        harness.query_by_label(text).is_some(),
+        "the Inspector writes {text:?}"
+    );
+}
+
+/// The text a check card draws as its one-row title below 75 %.
+fn one_row_title(harness: &FolderHarness, id: &str, check: &Node) -> String {
+    let texts = board(harness, id).debug_texts(&check.id);
+    texts
+        .iter()
+        .find(|text| text.kind == TextKind::Line && text.text.contains(" == "))
+        .unwrap_or_else(|| panic!("a title among {texts:?}"))
+        .text
+        .clone()
+}
+
+/// A field name longer than a row of the title.
+const WORD: &str = r#"scenario "Word" {
+  begin = start
+  cart = POST "/cart" {
+    body { items: 1 }
+    sample 201 { averyveryverylongfieldnamethatkeepsgoing: 1 }
+  }
+  long_name = assert cart.body.averyveryverylongfieldnamethatkeepsgoing == 1
+}
+"#;
+
+/// Review: below 75 % the one-row title is the title as shown, not its rows
+/// joined with spaces, so a row broken inside a word reads as one word.
+#[test]
+fn diag02_review_the_one_row_title_adds_no_space() {
+    let (_project, mut harness, id) = tidied_text(WORD, WIDE, Checks::Expanded);
+    let graph = super::lay23::graph(&harness, &id);
+    let check = node(&graph, "long_name").clone();
+    let text = "averyveryverylongfieldnamethatkeepsgoing == 1";
+    show(&mut harness, &id, "long_name", 1.0);
+    assert_eq!(card_text(&harness, &check), text);
+    show(&mut harness, &id, "long_name", 0.6);
+    assert_eq!(one_row_title(&harness, &id, &check), text);
+}
+
+/// An `if` and a *Data condition* of one comparison.
+const BRANCHES: &str = r#"scenario "Branches" {
+  begin = start
+  order = GET "/order" {
+    sample 200 { status: "created" }
+  }
+  ready = condition all { order.status == 200 }
+  paid = if order.body.status == "created" {
+    pay = POST "/pay" {
+      sample 200 { paid: true }
+    }
+  } else {
+    unpaid = assert false == true
+  }
+}
+"#;
+
+/// Review: a full `if` card and a full *Data condition* card of one
+/// comparison write their predicate as their subtitle, not a bare sign.
+#[test]
+fn diag02_review_full_if_and_condition_cards_write_their_predicate() {
+    let (_project, mut harness, id) = tidied_text(BRANCHES, WIDE, Checks::Expanded);
+    super::lay16::switch_density(&mut harness);
+    settle(&mut harness);
+    let graph = super::lay23::graph(&harness, &id);
+    for (handle, text) in [
+        ("ready", "order.status == 200"),
+        ("paid", "order.body.status == \"created\""),
+    ] {
+        show(&mut harness, &id, handle, 1.0);
+        let texts = board(&harness, &id).debug_texts(&node(&graph, handle).id);
+        assert!(
+            texts
+                .iter()
+                .any(|line| line.kind == TextKind::Subtitle && line.text == text),
+            "{handle}'s subtitle is {text:?}: {texts:?}"
+        );
+    }
+}
+
+/// Review: a title too long is shortened inside its actual operand only,
+/// and the path is split at the dots outside brackets and quotes.
+#[test]
+fn diag02_review_only_the_actual_path_is_shortened() {
+    use crate::canvas::{Part, PartRole};
+    let part = |text: &str, role| Part {
+        text: text.into(),
+        role,
+    };
+    let expected = "\"Weight must be at most 30 kg.\"";
+    // A quoted key with a dot in it stays whole.
+    let quoted = CheckText {
+        parts: vec![
+            part(
+                "rows[\"a.b\"].details.reasons[0].constraints.maximum.message.text",
+                PartRole::Operand,
+            ),
+            part(" == ", PartRole::Sign),
+            part(expected, PartRole::Text),
+        ],
+        actual: Some(0),
+        ..CheckText::default()
+    };
+    let shown = fit_title(&quoted, 28, 3).shown;
+    assert!(
+        shown.starts_with("rows[\"a.b\"]…") && shown.ends_with(&format!(" == {expected}")),
+        "{shown:?}"
+    );
+    // A path that is the expected operand is not the one shortened: the
+    // title is cut at its end.
+    let reversed = CheckText {
+        parts: vec![
+            part(expected, PartRole::Text),
+            part(" == ", PartRole::Sign),
+            part(
+                "error.details.reasons[0].constraints.maximum.message.text",
+                PartRole::Operand,
+            ),
+        ],
+        actual: Some(0),
+        ..CheckText::default()
+    };
+    let shown = fit_title(&reversed, 28, 3).shown;
+    assert!(
+        !shown.contains("error…") && shown.ends_with('…'),
+        "{shown:?}"
+    );
+}
+
+/// Review: the Inspector caps a long value written in a check, as it did
+/// before DIAG-02 (80 characters), in its text and its accessible label.
+#[test]
+fn diag02_review_the_inspector_caps_a_long_value() {
+    let long = "x".repeat(200);
+    let source = format!(
+        r#"scenario "Long value" {{
+  begin = start
+  cart = POST "/cart" {{
+    body {{ items: 1 }}
+    sample 201 {{ note: "{long}" }}
+  }}
+  noted = assert cart.body.note == "{long}"
+}}
+"#
+    );
+    let (_project, mut harness, id) = tidied_text(&source, WIDE, Checks::Expanded);
+    let graph = super::lay23::graph(&harness, &id);
+    app(&mut harness)
+        .selections
+        .insert(id.clone(), vec![node(&graph, "cart").id.clone()]);
+    settle(&mut harness);
+    super::open_checks_tab(&mut harness);
+    let capped = format!(
+        "note == {}",
+        crate::labels::truncate(&format!("\"{long}\""), 80)
+    );
+    assert!(
+        harness.query_by_label(&capped).is_some(),
+        "the Inspector writes {capped:?}"
+    );
+    assert!(harness.query_by_label_contains(&long).is_none());
 }
 
 /// The captures of the pull request: `labels` with every check card shown,
