@@ -339,6 +339,10 @@ pub struct FolderApp {
     /// context are the same: deriving it reads every block and sample.
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
+    /// The model each board's notice after a delete was written for
+    /// (DIAG-06b): its *Undo* undoes the delete only while the document is
+    /// still at it, and any other edit ends the notice.
+    notice_models: HashMap<String, Arc<Document>>,
     /// Each step's own choice of its checks, per document (LAY-30).
     checks_here: checks_here::ChecksHere,
     /// The steps the Cleanup board's cards read, kept while the model is the
@@ -591,6 +595,7 @@ impl FolderApp {
             caret_statement: None,
             completion_names: None,
             canvases: HashMap::new(),
+            notice_models: HashMap::new(),
             checks_here: checks_here::ChecksHere::default(),
             cleanup_reference: None,
             check_index: None,

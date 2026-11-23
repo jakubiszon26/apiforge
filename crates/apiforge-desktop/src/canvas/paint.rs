@@ -88,6 +88,51 @@ pub fn wire(
         (_, false, _) => theme::DATA_WIRE,
     };
     let width = if selected { 2.4 } else { 1.6 };
+    carried(painter, start, end, control, branch, (color, width), zoom);
+}
+
+/// The `+` on the line of a chain under the pointer (DIAG-06b): a filled
+/// circle of `radius` with a white cross, stronger while pointed at.
+pub fn plus(painter: &Painter, centre: Pos2, radius: f32, hovered: bool) {
+    let fill = if hovered {
+        theme::ACCENT
+    } else {
+        theme::ACCENT.gamma_multiply(0.85)
+    };
+    painter.circle(centre, radius, fill, Stroke::new(1.5, theme::WHITE));
+    let arm = radius * 0.5;
+    let stroke = Stroke::new(2.0, theme::WHITE);
+    painter.line_segment([centre - vec2(arm, 0.0), centre + vec2(arm, 0.0)], stroke);
+    painter.line_segment([centre - vec2(0.0, arm), centre + vec2(0.0, arm)], stroke);
+}
+
+/// A wire of the order carried over a step that will refuse it (DIAG-06b):
+/// red, and the socket it points at crossed.
+pub fn refused_wire(painter: &Painter, start: Pos2, end: Pos2, branch: Option<Branch>, zoom: f32) {
+    carried(
+        painter,
+        start,
+        end,
+        true,
+        branch,
+        (theme::DANGER, 2.4),
+        zoom,
+    );
+    let radius = (7.0 * zoom.max(0.6)).max(6.0);
+    painter.circle(end, radius, theme::WHITE, Stroke::new(2.0, theme::DANGER));
+    let along = vec2(radius, -radius) * std::f32::consts::FRAC_1_SQRT_2;
+    painter.line_segment([end - along, end + along], Stroke::new(2.0, theme::DANGER));
+}
+
+fn carried(
+    painter: &Painter,
+    start: Pos2,
+    end: Pos2,
+    control: bool,
+    branch: Option<Branch>,
+    (color, width): (Color32, f32),
+    zoom: f32,
+) {
     let points = wire_points(start, end, control, zoom);
     if control {
         // Dashed: sample the curve and draw every other segment.
