@@ -324,6 +324,36 @@ pub fn resolve_selected<'a, 'b>(
         .or_else(|| rows.first())
 }
 
+/// What *Expand all* and *Collapse all* last chose (REP-08).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Folding {
+    #[default]
+    Default,
+    ExpandAll,
+    CollapseAll,
+}
+
+/// How the rows of a value open before one is folded by hand (REP-08).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Opening {
+    Heading,
+    Levels(usize),
+    Leaves,
+    Closed,
+}
+
+impl Opening {
+    /// REP-08: a stub until the implementation.
+    pub(crate) fn open(self, depth: usize) -> bool {
+        depth == 0
+    }
+}
+
+/// REP-08: a stub until the implementation, today's rule.
+pub(crate) fn opening(_folding: Folding, _value: &Value) -> Opening {
+    Opening::Heading
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DetailTab {
     #[default]
