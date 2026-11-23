@@ -670,7 +670,7 @@ impl Inspector {
                     &mut state.search,
                     focus_search,
                     &fields.fields,
-                    data.value.is_some(),
+                    &data,
                     &state.port,
                     (ctx.content_rect().height() - 280.0).clamp(60.0, 320.0),
                 );

@@ -10,7 +10,7 @@ use apiforge_core::{
     model::ValueType,
     operator::{Operator, OperatorGroup},
     path,
-    run::RunResult,
+    run::{RunMode, RunResult},
 };
 use eframe::egui::{self, Id, RichText, Stroke, Ui};
 use serde_json::Value;
@@ -1330,31 +1330,236 @@ pub(crate) fn filter_response_fields<'a>(
         .collect()
 }
 
+/// What is typed in the search of a field list when no listed field has it
+/// as its path (DIAG-16): a row *Use "…"* that takes it.
+struct TypedPath {
+    /// The text as typed, trimmed.
+    text: String,
+    /// The path written, in its canonical form, or why the text is not one.
+    path: Result<String, &'static str>,
+    /// The row's second line.
+    note: String,
+}
+
+/// Why a path through a key [`path::JsonPath::resolve`] never reads is
+/// refused.
+const RESERVED_KEY: &str = "Not a path: __proto__, constructor and prototype are never read";
+
+impl TypedPath {
+    fn of(
+        search: &str,
+        visible: &[&apiforge_core::edit::ResponseField],
+        source: &response::Source,
+    ) -> Option<Self> {
+        let text = search.trim();
+        if text.is_empty() {
+            return None;
+        }
+        let path = match path::JsonPath::parse(text) {
+            Ok(parsed) if parsed.has_reserved_key() => Err(RESERVED_KEY),
+            Ok(parsed) => {
+                let canonical = parsed.to_string();
+                if visible.iter().any(|field| field.path == canonical) {
+                    return None;
+                }
+                Ok(parsed)
+            }
+            Err(error) => Err(not_a_path(error)),
+        };
+        let note = match &path {
+            Err(_) => String::new(),
+            Ok(parsed) => {
+                let place = match &source.value {
+                    None => "checked against the response on the next run".to_owned(),
+                    Some(value) => format!(
+                        "{} the {}",
+                        if parsed.resolve(value).is_some() {
+                            "in"
+                        } else {
+                            "not in"
+                        },
+                        match source.run {
+                            None => "sample",
+                            Some(RunMode::Simulation) => "last simulated response",
+                            Some(RunMode::Live) => "last response from the API",
+                        }
+                    ),
+                };
+                let canonical = parsed.to_string();
+                // What was typed, when the path written is spelled otherwise.
+                let typed = if canonical == text {
+                    String::new()
+                } else {
+                    format!(" · typed {text}")
+                };
+                format!("A typed path · {place}{typed}")
+            }
+        };
+        let path = path.map(|parsed| parsed.to_string());
+        Some(Self {
+            text: text.to_owned(),
+            path,
+            note,
+        })
+    }
+
+    fn line(&self) -> &str {
+        match &self.path {
+            Ok(_) => &self.note,
+            Err(reason) => reason,
+        }
+    }
+
+    /// The text the row names: the path it writes, or what was typed when
+    /// it is not a path.
+    fn shown(&self) -> &str {
+        match &self.path {
+            Ok(path) => path,
+            Err(_) => &self.text,
+        }
+    }
+}
+
+/// Why a typed text is not a path the language accepts.
+fn not_a_path(error: path::PathSyntaxError) -> &'static str {
+    match error {
+        path::PathSyntaxError::EmptySegment(_) => {
+            "Not a path: a name is missing beside a dot, as in data.items"
+        }
+        path::PathSyntaxError::MissingSeparator(_) => {
+            "Not a path: a dot goes between ] and a name, as in items[0].name"
+        }
+        path::PathSyntaxError::MalformedBracket(_) => {
+            "Not a path: brackets hold a number or a quoted name, as in items[0]"
+        }
+        path::PathSyntaxError::InvalidQuotedKey(_) => {
+            "Not a path: the quoted name is not valid, as in [\"a key\"]"
+        }
+    }
+}
+
+/// The mark at the end of the row Return takes.
+const RETURN_MARK: &str = "Return ↵";
+
+/// Paints [`RETURN_MARK`] at the right of `rect`; returns the room it took.
+fn return_mark(ui: &Ui, rect: egui::Rect) -> f32 {
+    let galley = ui.painter().layout_no_wrap(
+        RETURN_MARK.into(),
+        egui::FontId::proportional(11.0),
+        theme::MUTED,
+    );
+    let width = galley.size().x;
+    ui.painter().galley(
+        egui::pos2(
+            rect.right() - 10.0 - width,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        theme::MUTED,
+    );
+    width + 16.0
+}
+
+/// The row *Use "…"*; returns whether it was clicked.
+fn typed_path_row(ui: &mut Ui, typed: &TypedPath, takes_return: bool) -> bool {
+    let enabled = typed.path.is_ok();
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 46.0),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    let label = format!("Use \"{}\" — {}", typed.shown(), typed.line());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &label));
+    ui.painter().rect_filled(
+        rect,
+        4.0,
+        if !enabled {
+            theme::BG
+        } else if response.hovered() {
+            theme::ACCENT_SOFT.gamma_multiply(1.4)
+        } else {
+            theme::ACCENT_SOFT
+        },
+    );
+    let mark = if takes_return && enabled {
+        return_mark(ui, rect)
+    } else {
+        0.0
+    };
+    let mut clip = rect.shrink(4.0);
+    clip.max.x -= mark;
+    let painter = ui.painter().with_clip_rect(clip);
+    let end = painter
+        .text(
+            rect.left_top() + egui::vec2(8.0, 5.0),
+            egui::Align2::LEFT_TOP,
+            "Use ",
+            egui::FontId::proportional(13.0),
+            if enabled { theme::TEXT } else { theme::MUTED },
+        )
+        .right();
+    painter.text(
+        egui::pos2(end, rect.top() + 6.0),
+        egui::Align2::LEFT_TOP,
+        typed.shown(),
+        egui::FontId::monospace(12.0),
+        if enabled { theme::LINK } else { theme::MUTED },
+    );
+    painter.text(
+        rect.left_top() + egui::vec2(8.0, 25.0),
+        egui::Align2::LEFT_TOP,
+        typed.line(),
+        egui::FontId::proportional(12.0),
+        if enabled { theme::MUTED } else { theme::DANGER },
+    );
+    let response = response.on_hover_text(typed.line());
+    enabled && response.clicked()
+}
+
 /// Renders the searchable list of response fields and returns `(chosen_path, visible_count)`.
+///
+/// What is typed and is not the path of a listed field is a last row *Use
+/// "…"* (DIAG-16); Return in the search takes the first row.
 pub(crate) fn searchable_field_list(
     ui: &mut Ui,
     search: &mut String,
     focus_search: bool,
     fields: &[apiforge_core::edit::ResponseField],
-    has_source_value: bool,
+    source: &response::Source,
     port: &str,
     max_height: f32,
 ) -> (Option<String>, usize) {
     let mut chosen = None;
-    let field = ui.add(
-        crate::widgets::text_edit(search)
-            .hint_text("Search names, paths or values…")
-            .desired_width(f32::INFINITY),
+    let field = widgets::named(
+        ui.add(
+            crate::widgets::text_edit(search)
+                .hint_text("Search names, paths or values…")
+                .desired_width(f32::INFINITY),
+        ),
+        "Search response fields",
     );
     if focus_search {
         field.request_focus();
     }
+    // A single-line field gives up the focus on Return. Only a plain Return
+    // takes a row.
+    let returned = (field.has_focus() || field.lost_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Enter) && input.modifiers.is_none());
     let visible = filter_response_fields(fields, search);
     let visible_count = visible.len();
+    let typed = TypedPath::of(search, &visible, source);
+    // Return takes the first row once something is typed, unless what is
+    // typed is not a path: then it takes nothing, even a listed field.
+    let takes_return =
+        !search.trim().is_empty() && typed.as_ref().is_none_or(|typed| typed.path.is_ok());
     egui::ScrollArea::vertical()
         .max_height(max_height)
         .show_rows(ui, 46.0, visible_count, |ui, range| {
-            for field in &visible[range] {
+            let first = range.start;
+            for (index, field) in visible[range].iter().enumerate() {
                 let (rect, response) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), 46.0),
                     egui::Sense::click(),
@@ -1376,10 +1581,17 @@ pub(crate) fn searchable_field_list(
                 response.widget_info(move || {
                     egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
                 });
+                let mark = if takes_return && first + index == 0 {
+                    return_mark(ui, rect)
+                } else {
+                    0.0
+                };
                 let inset = 8.0 + field.depth.min(6) as f32 * 8.0;
                 // Two lines keep long JSON paths separate from their type
                 // and value. Each row is clipped to its own hit target.
-                let painter = ui.painter().with_clip_rect(rect.shrink(4.0));
+                let mut clip = rect.shrink(4.0);
+                clip.max.x -= mark;
+                let painter = ui.painter().with_clip_rect(clip);
                 painter.text(
                     rect.left_top() + egui::vec2(inset, 5.0),
                     egui::Align2::LEFT_TOP,
@@ -1400,15 +1612,35 @@ pub(crate) fn searchable_field_list(
                 }
             }
         });
+    if let Some(typed) = &typed
+        && typed_path_row(ui, typed, takes_return && visible.is_empty())
+    {
+        chosen = typed.path.clone().ok();
+    }
     if visible.is_empty() {
         widgets::hint(
             ui,
-            if !has_source_value {
-                "Run the request or add a sample response. You can also type a path."
-            } else {
-                "No matching field. Change the search or type a path."
+            match (&source.value, source.run) {
+                (None, _) => "Run the request or add a sample response to list its fields.",
+                (Some(_), None) => "No field of the sample matches.",
+                (Some(_), Some(RunMode::Simulation)) => {
+                    "No field of the last simulated response matches."
+                }
+                (Some(_), Some(RunMode::Live)) => "No field of the last response matches.",
             },
         );
+    }
+    if returned && chosen.is_none() {
+        if takes_return {
+            chosen = visible
+                .first()
+                .map(|field| field.path.clone())
+                .or_else(|| typed.and_then(|typed| typed.path.ok()));
+        }
+        if chosen.is_none() {
+            // Nothing to take: the search keeps the focus.
+            field.request_focus();
+        }
     }
     (chosen, visible_count)
 }
@@ -1433,13 +1665,22 @@ fn field_picker(
                 .size(16.0)
                 .family(theme::bold_family()),
         );
-        widgets::hint(ui, &source.origin);
+        // DIAG-16: only this line says a step has nothing to show yet; the
+        // Inspector and the variable's dialog keep the origin's words.
+        widgets::hint(
+            ui,
+            if source.value.is_none() && source.run.is_none() {
+                "No sample yet"
+            } else {
+                &source.origin
+            },
+        );
         let (picked, visible_len) = searchable_field_list(
             ui,
             &mut search,
             focus_search,
             &fields.fields,
-            source.value.is_some(),
+            source,
             port,
             (ctx.content_rect().height() - 220.0).clamp(60.0, 380.0),
         );
@@ -1588,6 +1829,63 @@ mod tests {
                 .any(|field| field.path == "product.active")
         );
         assert!(filter_response_fields(&fields.fields, "zzzz-missing").is_empty());
+    }
+
+    #[test]
+    fn a_typed_path_is_offered_in_its_canonical_form_unless_it_is_listed() {
+        let value = serde_json::json!({ "items": [{ "price": 1 }] });
+        let fields = response::fields(Some(&value));
+        let listed: Vec<_> = fields.fields.iter().collect();
+        let sample = response::Source {
+            value: Some(value),
+            origin: "Sample data".into(),
+            run: None,
+        };
+        let typed = TypedPath::of(" data.[0] ", &listed, &sample).unwrap();
+        assert_eq!(typed.text, "data.[0]");
+        assert_eq!(typed.path, Ok("data[0]".into()));
+        assert_eq!(typed.shown(), "data[0]");
+        assert_eq!(
+            typed.line(),
+            "A typed path · not in the sample · typed data.[0]"
+        );
+        // `items.[0]` is the listed `items[0]`.
+        assert!(TypedPath::of("items.[0]", &listed, &sample).is_none());
+        // Listed but not shown by the search: offered, and found.
+        let typed = TypedPath::of("items.[0]", &[], &sample).unwrap();
+        assert_eq!(
+            typed.line(),
+            "A typed path · in the sample · typed items.[0]"
+        );
+        let typed = TypedPath::of("a..b", &listed, &sample).unwrap();
+        assert_eq!(
+            typed.line(),
+            "Not a path: a name is missing beside a dot, as in data.items"
+        );
+        assert!(TypedPath::of("   ", &listed, &sample).is_none());
+    }
+
+    #[test]
+    fn a_typed_path_through_a_reserved_key_is_refused() {
+        let value = serde_json::json!({ "constructor": 1, "items": [{ "price": 1 }] });
+        let sample = response::Source {
+            value: Some(value),
+            origin: "Sample data".into(),
+            run: None,
+        };
+        for text in [
+            "__proto__",
+            "constructor",
+            "items[0].prototype",
+            "[\"__proto__\"].a",
+        ] {
+            let typed = TypedPath::of(text, &[], &sample).unwrap();
+            assert_eq!(
+                typed.path,
+                Err("Not a path: __proto__, constructor and prototype are never read"),
+                "{text}"
+            );
+        }
     }
 }
 
