@@ -4153,8 +4153,11 @@ impl Canvas {
             handle(&plus.target)
         );
         let rect = plus.rect();
+        // The `+` takes the primary button; a right-click on it opens the
+        // board's menu and a secondary or middle drag pans, as on the board
+        // under it.
         let response = ui
-            .interact(rect, ui.id().with("chain-plus"), Sense::click())
+            .interact(rect, ui.id().with("chain-plus"), Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(&label);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
@@ -4164,7 +4167,16 @@ impl Canvas {
             PLUS_SIZE / 2.0,
             response.hovered(),
         );
-        if response.clicked() {
+        if response.dragged_by(PointerButton::Middle)
+            || response.dragged_by(PointerButton::Secondary)
+        {
+            self.camera.pan += response.drag_delta();
+            self.camera_moved_by_user = true;
+        }
+        if response.secondary_clicked() {
+            self.menu = Some(ActionMenu::new(pointer, camera.to_world(pointer), None));
+            self.plus = None;
+        } else if response.clicked() {
             let mut menu = ActionMenu::new(
                 pointer,
                 camera.to_world(pointer),
@@ -5073,9 +5085,11 @@ impl Canvas {
                     .show(ui, |ui| {
                         let width = (overlays.board.width() - 160.0).clamp(160.0, 520.0);
                         ui.horizontal(|ui| {
+                            // As high as *Undo*, so that one line of the
+                            // sentence stands level with it.
                             ui.allocate_ui_with_layout(
-                                vec2(width, 0.0),
-                                egui::Layout::top_down(egui::Align::LEFT),
+                                vec2(width, ui.spacing().interact_size.y),
+                                egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
                                     let text = ui.add(
                                         egui::Label::new(
@@ -5135,9 +5149,11 @@ impl Canvas {
                         // readers (DIAG-06e), wraps within the board.
                         let width = (overlays.board.width() - 80.0).clamp(160.0, 520.0);
                         ui.horizontal_top(|ui| {
+                            // As high as *Undo*, so that one line of the
+                            // sentence stands level with it.
                             ui.allocate_ui_with_layout(
-                                vec2(width, 0.0),
-                                egui::Layout::top_down(egui::Align::LEFT),
+                                vec2(width, ui.spacing().interact_size.y),
+                                egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
                                     ui.add(
                                         egui::Label::new(
