@@ -1092,7 +1092,9 @@ impl Lower<'_> {
         cleanup: bool,
     ) {
         self.slot(node, actual, &check.actual, cleanup);
-        if let Some(value) = &check.expected {
+        if let Some(value) = &check.expected
+            && (predicate(&check.predicate) != Predicate::Type || self.written_type(value))
+        {
             self.slot(node, expected, value, cleanup);
         }
         if let Some(value) = &check.tolerance {
@@ -1109,6 +1111,41 @@ impl Lower<'_> {
                 self.error(value.range.clone(), "Tolerance must be a number");
             }
         }
+    }
+    /// The type a type check names, when it is written as it stands (LANG-22):
+    /// a literal must be one of [`TYPE_NAMES`], and one of them written as a
+    /// bare word, which no statement is called, is told to take quotes. A
+    /// type read from a value is left to the run. Returns whether `value` is
+    /// still read as the expected value.
+    fn written_type(&mut self, value: &Expr) -> bool {
+        let value = ungroup(value);
+        let bare = match &value.kind {
+            ExprKind::Literal(Value::String(name)) => {
+                if !TYPE_NAMES.contains(&name.as_str()) {
+                    self.push_error(Diagnostic::error(value.range.clone(), unknown_type(name)));
+                }
+                return true;
+            }
+            ExprKind::Literal(Value::Null) => "null",
+            ExprKind::Name(word)
+                if TYPE_NAMES.contains(&word.as_str()) && !self.nodes.contains_key(word) =>
+            {
+                word
+            }
+            _ => return true,
+        };
+        self.push_error(Diagnostic {
+            fix: Some(Fix {
+                range: value.range.clone(),
+                replacement: format!("\"{bare}\""),
+            }),
+            ..Diagnostic::error(
+                value.range.clone(),
+                format!("A type is written in quotes: is \"{bare}\""),
+            )
+        });
+        // `null` is still a value; a bare word is no statement.
+        bare == "null"
     }
     fn binding(&mut self, expr: &Expr, cleanup: bool) -> Option<Binding> {
         let value = match &expr.kind {
@@ -1404,6 +1441,21 @@ pub(crate) fn value_type_from(name: &str) -> ValueType {
         "array" => ValueType::Array,
         _ => ValueType::Any,
     }
+}
+/// The types a type check (`is`) can name: those of a JSON value.
+pub(crate) const TYPE_NAMES: [&str; 6] = ["string", "number", "boolean", "object", "array", "null"];
+/// A type name written in a type check that is none of [`TYPE_NAMES`]. The
+/// name is the source's own text, not a value read from a run; a long one is
+/// cut so the message stays one line.
+fn unknown_type(name: &str) -> String {
+    const LIMIT: usize = 40;
+    let mut shown: String = name.chars().take(LIMIT).collect();
+    if name.chars().nth(LIMIT).is_some() {
+        shown.push('…');
+    }
+    format!(
+        "Unknown type \"{shown}\". A type is \"string\", \"number\", \"boolean\", \"object\", \"array\" or \"null\"."
+    )
 }
 pub(crate) fn predicate(name: &str) -> Predicate {
     match name {

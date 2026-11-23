@@ -19,6 +19,8 @@ pub struct Diagnostic {
     pub range: Range<usize>,
     pub severity: Severity,
     /// Static descriptions only: never echo literal values or source fragments.
+    /// One exception names what was written: the type of a type check that
+    /// is no type (LANG-22), a word of at most 40 characters shown.
     pub message: String,
     pub fix: Option<Fix>,
 }
