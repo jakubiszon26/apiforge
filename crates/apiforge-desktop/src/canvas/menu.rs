@@ -57,7 +57,37 @@ pub struct ActionMenu {
     pub on_line: bool,
     /// Opened on a step of the folder window's board: the menu offers *Move
     /// earlier* and *Move later* for it (DIAG-06b).
-    pub moves: Option<String>,
+    pub moves: Option<Moves>,
+}
+
+/// *Move earlier* and *Move later* for a step, and why each is refused,
+/// worked out once when its menu opens (DIAG-06b): the board checks the
+/// move again when it is taken.
+pub struct Moves {
+    id: String,
+    handle: String,
+    earlier: Option<String>,
+    later: Option<String>,
+}
+
+impl Moves {
+    pub fn of(graph: &Graph, project: &Project, id: &str) -> Self {
+        let refused = |later| {
+            apiforge_core::edit::move_by_one(graph, project, id, later)
+                .err()
+                .map(|error| error.to_string())
+        };
+        Self {
+            id: id.to_owned(),
+            handle: graph
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .map_or_else(String::new, |node| node.handle.clone()),
+            earlier: refused(false),
+            later: refused(true),
+        }
+    }
 }
 
 /// The entry that writes a check of a branch after its `if` (DIAG-06d).
@@ -155,11 +185,17 @@ impl ActionMenu {
                 Block::Variable,
             ]
         };
+        // On a line, only a step: the line runs between steps (DIAG-06b).
+        let on_line = |block: &Block| {
+            !self.on_line
+                || (apiforge_core::chain::is_step(block.kind()) && block.kind() != NodeKind::Start)
+        };
         let mut actions: Vec<Action> = blocks
             .iter()
             .copied()
             .chain([Block::Export])
             .filter(|block| block.offered(component.is_some()))
+            .filter(on_line)
             .map(|block| Action {
                 block,
                 name: block.label().to_owned(),
@@ -295,33 +331,44 @@ impl ActionMenu {
                         }
                         // First, above the steps the menu adds, where the
                         // menu of a card low on the board still shows it.
-                        if let Some(id) = &self.moves {
-                            let handle = graph
-                                .nodes
-                                .iter()
-                                .find(|node| &node.id == id)
-                                .map_or("", |node| node.handle.as_str());
-                            for (later, icon, label, keys) in [
-                                (false, Icon::ChevronUp, MOVE_EARLIER, "Alt+↑"),
-                                (true, Icon::ChevronDown, MOVE_LATER, "Alt+↓"),
+                        if let Some(moves) = &self.moves {
+                            for (later, icon, label, keys, refused) in [
+                                (false, Icon::ChevronUp, MOVE_EARLIER, "Alt+↑", &moves.earlier),
+                                (true, Icon::ChevronDown, MOVE_LATER, "Alt+↓", &moves.later),
                             ] {
-                                let refused =
-                                    apiforge_core::edit::move_by_one(graph, project, id, later)
-                                        .err()
-                                        .map(|error| error.to_string());
+                                // The keys stand right in the entry, seen
+                                // without a hover.
                                 let entry = ui
-                                    .add_enabled(
-                                        refused.is_none(),
-                                        crate::widgets::action(icon, label).quiet(),
-                                    )
-                                    .on_hover_text(format!(
-                                        "Run `{handle}` one step {} in its braces, with its checks. {keys}",
-                                        if later { "later" } else { "earlier" }
-                                    ))
-                                    .on_disabled_hover_text(refused.unwrap_or_default());
+                                    .horizontal(|ui| {
+                                        let entry = ui
+                                            .add_enabled(
+                                                refused.is_none(),
+                                                crate::widgets::action(icon, label).quiet(),
+                                            )
+                                            .on_hover_text(format!(
+                                                "Run `{}` one step {} in its braces, with its checks. {keys}",
+                                                moves.handle,
+                                                if later { "later" } else { "earlier" }
+                                            ))
+                                            .on_disabled_hover_text(
+                                                refused.clone().unwrap_or_default(),
+                                            );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    RichText::new(keys)
+                                                        .size(11.0)
+                                                        .color(theme::MUTED),
+                                                );
+                                            },
+                                        );
+                                        entry
+                                    })
+                                    .inner;
                                 if entry.clicked() {
                                     outcome = Outcome::Add(Command::MoveStep {
-                                        id: id.clone(),
+                                        id: moves.id.clone(),
                                         later,
                                     });
                                 }
@@ -381,9 +428,6 @@ impl ActionMenu {
                                                 y: node.position.y + 20.0,
                                             },
                                         );
-                                        let step = apiforge_core::chain::is_step(
-                                            action.block.kind(),
-                                        ) && action.block.kind() != NodeKind::Start;
                                         outcome = Outcome::Add(if self.bar {
                                             Command::AddStep {
                                                 block: action.block,
@@ -391,7 +435,7 @@ impl ActionMenu {
                                                 position,
                                             }
                                         } else if let Some(after) =
-                                            self.source.clone().filter(|_| self.on_line && step)
+                                            self.source.clone().filter(|_| self.on_line)
                                         {
                                             // On the line it was opened on
                                             // (DIAG-06b), as a step dropped
@@ -412,7 +456,7 @@ impl ActionMenu {
                                         });
                                     }
                                 }
-                                if let Some(context) = library {
+                                if let Some(context) = library.filter(|_| !self.on_line) {
                                     let matches = |text: &str| text.to_lowercase().contains(&query);
                                     let mut actions = Vec::new();
                                     ui.add_space(6.0);

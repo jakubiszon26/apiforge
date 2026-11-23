@@ -200,6 +200,17 @@ impl FolderApp {
         }
         let mode = self.workbench.mode;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
+        // An edit that is not the delete, made anywhere, ends its notice
+        // (DIAG-06b).
+        if !canvas.has_notice()
+            || !self
+                .notice_models
+                .get(document_id)
+                .is_some_and(|at_delete| Arc::ptr_eq(at_delete, &model))
+        {
+            canvas.clear_notice();
+            self.notice_models.remove(document_id);
+        }
         let mut chosen = cleanup;
         let commands = ui
             .scope(|ui| {
@@ -592,9 +603,18 @@ impl FolderApp {
                 self.apply_move(document_id, model, cleanup, placed);
                 None
             }
-            // *Undo* on the notice after a delete (DIAG-06b).
+            // *Undo* on the notice after a delete (DIAG-06b): only while the
+            // document is still at the delete, never an edit after it.
             Command::Undo => {
-                self.step_model_history(document_id, true);
+                let at_delete = self.notice_models.remove(document_id);
+                if at_delete
+                    .zip(self.shared_model(document_id))
+                    .is_some_and(|(at_delete, now)| Arc::ptr_eq(&at_delete, &now))
+                {
+                    self.step_model_history(document_id, true);
+                } else if let Some(canvas) = self.canvases.get_mut(document_id) {
+                    canvas.clear_notice();
+                }
                 None
             }
             // After the selection, in its braces (DIAG-06a).
@@ -694,9 +714,11 @@ impl FolderApp {
                         .is_some_and(|(current, now)| !Arc::ptr_eq(current, now));
                     if applied
                         && let Some(text) = joined
+                        && let Some(now) = self.shared_model(document_id)
                         && let Some(canvas) = self.canvases.get_mut(document_id)
                     {
                         canvas.set_notice(text);
+                        self.notice_models.insert(document_id.to_owned(), now);
                     }
                     None
                 }
@@ -1492,9 +1514,12 @@ impl Header<'_> {
 /// hold one step and it stood between two steps of its braces, which now
 /// follow one another, the sentence that says so. `None` for the first or
 /// the last step of its braces, for a check, value, variable or export, and
-/// for several steps at once.
+/// for several steps at once. Start is no step here, as for a move by one.
 fn joined_after_delete(graph: &Graph, ids: &[String], gone: &[String]) -> Option<String> {
-    use apiforge_core::chain::{braces, is_step};
+    use apiforge_core::chain::braces;
+    let is_step = |kind: apiforge_core::model::NodeKind| {
+        apiforge_core::chain::is_step(kind) && kind != apiforge_core::model::NodeKind::Start
+    };
     let mut deleted = graph
         .nodes
         .iter()

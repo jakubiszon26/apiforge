@@ -65,6 +65,9 @@ const INLINE_EDIT_ZOOM: f32 = 0.8;
 const SOCKET_HIT: f32 = 10.0;
 /// The side of the `+` on a line of a chain (DIAG-06b).
 const PLUS_SIZE: f32 = 20.0;
+/// The shortest segment of a line, on screen, that takes a `+`: the `+`
+/// and 14 px clear at each end for the socket there (DIAG-06b).
+const PLUS_SEGMENT: f32 = PLUS_SIZE + 28.0;
 
 /// The `+` on the line of a chain under the pointer (DIAG-06b): the line,
 /// by its source, port and target, and where the `+` stands on screen.
@@ -102,6 +105,9 @@ fn clip_segment(a: Pos2, b: Pos2, rect: Rect) -> Option<(Pos2, Pos2)> {
     }
     (low <= high).then(|| (a + along * low, a + along * high))
 }
+
+/// The room beside the notice's sentence for its *Undo* (DIAG-06b).
+const NOTICE_UNDO_ROOM: f32 = 120.0;
 
 /// The fill of the reason at the pointer while a carried wire is refused
 /// (DIAG-06b), the board banner's.
@@ -1594,9 +1600,21 @@ impl Canvas {
         self.error = None;
     }
 
+    /// Whether the board shows the notice after a delete (DIAG-06b).
+    pub fn has_notice(&self) -> bool {
+        self.notice.is_some()
+    }
+
+    /// Ends the notice after a delete (DIAG-06b).
+    pub fn clear_notice(&mut self) {
+        self.notice = None;
+        self.notice_drawn = None;
+    }
+
     /// The notice goes with the next action: a press of the pointer away
     /// from it, a key or typed text, except a key that activates its *Undo*
-    /// while it has the keyboard (DIAG-06b).
+    /// while it has the keyboard (DIAG-06b). Tab and Shift+Tab, which bring
+    /// the keyboard to *Undo*, are no action.
     fn tend_notice(&mut self, ui: &egui::Ui) {
         if self.notice.is_none() {
             return;
@@ -1611,6 +1629,7 @@ impl Canvas {
                 egui::Event::PointerButton {
                     pressed: true, pos, ..
                 } => !rect.contains(*pos),
+                egui::Event::Key { key: Key::Tab, .. } => false,
                 egui::Event::Key { pressed: true, .. } => !focused,
                 egui::Event::Text(_) | egui::Event::Paste(_) => true,
                 _ => false,
@@ -2514,7 +2533,7 @@ impl Canvas {
                     && apiforge_core::chain::is_step(card.kind)
                     && card.kind != NodeKind::Start
                 {
-                    menu.moves = Some(card.id.clone());
+                    menu.moves = Some(menu::Moves::of(input.graph, input.project, &card.id));
                 }
                 self.menu = Some(menu);
             }
@@ -3037,7 +3056,7 @@ impl Canvas {
             }
         }
 
-        self.chain_plus(&board_ui, overlays.board, camera, pointer, input);
+        self.chain_plus(&board_ui, overlays.board, &cards, camera, pointer, input);
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(
             &board_ui,
@@ -3095,7 +3114,7 @@ impl Canvas {
                 input,
                 &mut commands,
             );
-            self.handle_keys(ui, input, &mut commands);
+            self.handle_keys(ui, overlays.board, input, &mut commands);
         } else {
             self.handle_escape(ui, input, &mut commands);
         }
@@ -4096,12 +4115,16 @@ impl Canvas {
 
     /// The `+` on the line of a chain under the pointer (DIAG-06b): in the
     /// middle of the part of the line's nearest segment in view, while the
-    /// pointer is within reach of the line or on the `+`. Activated, it
-    /// opens *Add step*, which puts a step on that line, in its braces.
+    /// pointer is within reach of the line or on the `+`. A segment shorter
+    /// on screen than [`PLUS_SEGMENT`] gives way to the line's longest that
+    /// is not; a `+` that would cover a card or a socket is not offered, nor
+    /// one on a line with no such segment. Activated, it opens *Add step*,
+    /// which puts a step on that line, in its braces.
     fn chain_plus(
         &mut self,
         ui: &egui::Ui,
         board: Rect,
+        cards: &[Card],
         camera: Camera,
         pointer: Option<Pos2>,
         input: &Input<'_>,
@@ -4120,23 +4143,65 @@ impl Canvas {
         let nearest = self
             .chain_lines
             .iter()
-            .flat_map(|(source, port, target, points)| {
-                points.windows(2).filter_map(move |pair| {
-                    let (a, b) = (camera.to_screen(pair[0]), camera.to_screen(pair[1]));
-                    let distance = routing::distance_to_segment(pointer, a, b);
-                    (distance <= REACH).then_some((distance, (source, port, target, a, b)))
-                })
+            .enumerate()
+            .flat_map(|(line, (.., points))| {
+                points
+                    .windows(2)
+                    .enumerate()
+                    .filter_map(move |(segment, pair)| {
+                        let (a, b) = (camera.to_screen(pair[0]), camera.to_screen(pair[1]));
+                        let distance = routing::distance_to_segment(pointer, a, b);
+                        (distance <= REACH).then_some((distance, line, segment))
+                    })
             })
-            .min_by(|x, y| x.0.total_cmp(&y.0))
-            .and_then(|(_, (source, port, target, a, b))| {
-                let (a, b) = clip_segment(a, b, view)?;
-                Some(Plus {
-                    source: source.clone(),
-                    port: port.clone(),
-                    target: target.clone(),
-                    centre: a + (b - a) * 0.5,
+            .min_by(|x, y| x.0.total_cmp(&y.0));
+        let nearest = nearest.and_then(|(_, line, segment)| {
+            let (source, port, target, points) = &self.chain_lines[line];
+            // What the `+` must leave clear: every card, a little around
+            // it, and every socket of the order.
+            let hit = (SOCKET_HIT * camera.zoom).max(3.0) * 2.0;
+            let clear = |centre: Pos2| {
+                let plus = Rect::from_center_size(centre, Vec2::splat(PLUS_SIZE));
+                cards.iter().all(|card| {
+                    !plus.expand(4.0).intersects(camera.rect(card.rect()))
+                        && [card.input_anchor(ORDER_PORT, &[])]
+                            .into_iter()
+                            .chain(
+                                card.order_outputs()
+                                    .into_iter()
+                                    .chain([ORDER_PORT])
+                                    .map(|port| card.output_anchor(port)),
+                            )
+                            .flatten()
+                            .all(|socket| {
+                                !plus.intersects(Rect::from_center_size(
+                                    camera.to_screen(socket),
+                                    Vec2::splat(hit),
+                                ))
+                            })
                 })
-            });
+            };
+            let offered = |pair: &[Pos2]| {
+                let (a, b) =
+                    clip_segment(camera.to_screen(pair[0]), camera.to_screen(pair[1]), view)?;
+                let centre = a + (b - a) * 0.5;
+                (a.distance(b) >= PLUS_SEGMENT && clear(centre)).then_some((a.distance(b), centre))
+            };
+            let centre = offered(&points[segment..segment + 2])
+                .or_else(|| {
+                    points
+                        .windows(2)
+                        .filter_map(offered)
+                        .max_by(|x, y| x.0.total_cmp(&y.0))
+                })?
+                .1;
+            Some(Plus {
+                source: source.clone(),
+                port: port.clone(),
+                target: target.clone(),
+                centre,
+            })
+        });
         let kept = self.plus.take().filter(|plus| {
             plus.rect().contains(pointer)
                 && self.chain_lines.iter().any(|(source, port, target, _)| {
@@ -4577,7 +4642,13 @@ impl Canvas {
         self.drag = None;
     }
 
-    fn handle_keys(&mut self, ui: &egui::Ui, input: &Input<'_>, commands: &mut Vec<Command>) {
+    fn handle_keys(
+        &mut self,
+        ui: &egui::Ui,
+        board: Rect,
+        input: &Input<'_>,
+        commands: &mut Vec<Command>,
+    ) {
         // Keys belong to text fields while one has focus.
         if ui.ctx().egui_wants_keyboard_input()
             || ui.ctx().memory(|memory| memory.top_modal_layer().is_some())
@@ -4594,8 +4665,19 @@ impl Canvas {
             commands.push(Command::TidyUp(input.selection.to_vec()));
         }
         // Alt+↑ and Alt+↓ move the one selected step by one in its braces
-        // (DIAG-06b); a text field with the keyboard keeps them (above).
+        // (DIAG-06b) while the board has the keyboard: nothing has it, or
+        // something on the board. A text field keeps them (above).
+        let on_board = ui
+            .ctx()
+            .memory(|memory| memory.focused())
+            .is_none_or(|focused| {
+                ui.ctx()
+                    .read_response(focused)
+                    .is_some_and(|response| board.contains_rect(response.rect))
+            });
         if input.moves
+            && !input.read_only
+            && on_board
             && let [id] = input.selection
             && input.graph.nodes.iter().any(|node| {
                 &node.id == id
@@ -5084,7 +5166,11 @@ impl Canvas {
                     .corner_radius(8)
                     .inner_margin(egui::Margin::symmetric(12, 6))
                     .show(ui, |ui| {
-                        let width = (overlays.board.width() - 160.0).clamp(160.0, 520.0);
+                        // The sentence wraps at `width`; *Undo* keeps its
+                        // own width beside it, wider than the area the
+                        // last frame measured.
+                        let width = (overlays.board.width() - 240.0).clamp(160.0, 520.0);
+                        ui.set_max_width(width + NOTICE_UNDO_ROOM);
                         ui.horizontal(|ui| {
                             // As high as *Undo*, so that one line of the
                             // sentence stands level with it.
@@ -5150,11 +5236,9 @@ impl Canvas {
                         // readers (DIAG-06e), wraps within the board.
                         let width = (overlays.board.width() - 80.0).clamp(160.0, 520.0);
                         ui.horizontal_top(|ui| {
-                            // As high as *Undo*, so that one line of the
-                            // sentence stands level with it.
                             ui.allocate_ui_with_layout(
-                                vec2(width, ui.spacing().interact_size.y),
-                                egui::Layout::left_to_right(egui::Align::Center),
+                                vec2(width, 0.0),
+                                egui::Layout::top_down(egui::Align::LEFT),
                                 |ui| {
                                     ui.add(
                                         egui::Label::new(
