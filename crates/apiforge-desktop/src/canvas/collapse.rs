@@ -291,10 +291,11 @@ pub fn singles(
 }
 
 /// A check as the line of its subject `subject` writes it (LAY-30): the
-/// operands as a card's line prints a reference, the subject's own name
-/// left out, and the sign the script prints (`status == 409`,
-/// `body.items[0].id == first.body.id`, `nonempty body.items`). `None` for
-/// a check the line does not write: a *Data condition* keeps the count.
+/// predicate as a card writes it (DIAG-02), the subject's own name left
+/// out, and its leading `body.` when the check reads no other step
+/// (`status == 409`, `body.items[0].id == first.body.id`, `nonempty
+/// items`). `None` for a check the line does not write: a *Data
+/// condition* keeps the count.
 pub fn written(
     graph: &Graph,
     project: &apiforge_core::format::Project,
@@ -309,27 +310,7 @@ pub fn written(
         project,
         request: None,
     };
-    let operand = |name: &str| {
-        check.inputs.get(name).map_or_else(
-            || "?".to_owned(),
-            |binding| super::layout::own_source_text(binding, scope, graph, subject),
-        )
-    };
-    let predicate = apiforge_core::graph::predicate(check);
-    let sign = apiforge_script::predicate_symbol(predicate);
-    let mut text = if predicate.takes_expected() {
-        format!("{} {sign} {}", operand("actual"), operand("expected"))
-    } else {
-        format!("{sign} {}", operand("actual"))
-    };
-    if predicate == apiforge_core::model::Predicate::Approximately {
-        let tolerance = check.config.tolerance.unwrap_or(0.0);
-        text.push_str(&format!(
-            " within {}",
-            apiforge_core::js::number_to_string(tolerance)
-        ));
-    }
-    Some(text)
+    Some(super::layout::check_text(check, scope, graph, Some(subject)).text())
 }
 
 #[cfg(test)]
@@ -609,11 +590,12 @@ mod tests {
         );
         assert_eq!(
             line(&has_floors, "floors").as_deref(),
-            Some("nonempty body.items")
+            Some("nonempty items"),
+            "under its one step a check leaves `body.` out (DIAG-02)"
         );
         assert_eq!(
             line(&has_screen, "equipment").as_deref(),
-            Some(r#"body.items contains "screen""#)
+            Some(r#"items contains "screen""#)
         );
     }
 }
