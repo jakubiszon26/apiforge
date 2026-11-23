@@ -722,7 +722,7 @@ impl FolderApp {
                 };
                 // A check folded into its subject is found there: the row
                 // selects the subject and opens its checks (LAY-11).
-                self.select_step(id, &model, node, cleanup);
+                self.select_on_board(id, &model, node, cleanup);
             }
             Action::ExportReport => {
                 if let Ok(text) = serde_json::to_string_pretty(result) {

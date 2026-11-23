@@ -841,7 +841,7 @@ fn page_range(total: usize, page: usize) -> std::ops::Range<usize> {
 /// A value as its row writes it: a scalar as the language writes it, at
 /// most `limit` characters and an ellipsis, an object or a list as its type
 /// and size. A huge text is cut before it is written, not after.
-fn tree_preview(value: &Value, limit: usize) -> String {
+pub(super) fn tree_preview(value: &Value, limit: usize) -> String {
     match value {
         Value::Array(items) => format!("array · {}", items.len()),
         Value::Object(fields) => format!("object · {}", fields.len()),
@@ -909,7 +909,7 @@ fn deepest(
 }
 
 /// A value's colour by its type.
-fn tree_colour(value: &Value) -> egui::Color32 {
+pub(super) fn tree_colour(value: &Value) -> egui::Color32 {
     match value {
         Value::String(_) => theme::VALUE_STRING,
         Value::Number(_) => theme::VALUE_NUMBER,

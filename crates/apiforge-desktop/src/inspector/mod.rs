@@ -54,6 +54,9 @@ pub enum Action {
     },
     /// Show this block in the code panel, by handle.
     Reveal(String),
+    /// Select the step with this id, as a click on its card does: a check's
+    /// card in the *Checks* list (DIAG-15).
+    Select(String),
     /// The selected step's own switch of its checks, set to differ from the
     /// board's setting or not (LAY-11, LAY-30): *Expand checks here* or
     /// *Collapse checks here*.
@@ -677,7 +680,7 @@ impl Inspector {
                     &mut state.search,
                     focus_search,
                     &fields.fields,
-                    data.value.is_some(),
+                    &data,
                     &state.port,
                     (ctx.content_rect().height() - 280.0).clamp(60.0, 320.0),
                 );

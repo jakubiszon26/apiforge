@@ -874,11 +874,17 @@ impl FolderApp {
 
     /// Selects `node` and opens the Inspector on its *Checks* list (LAY-11).
     fn show_checks(&mut self, document_id: &str, node: String) {
+        self.select_step(document_id, node);
+        self.inspector.open_checks();
+    }
+
+    /// Selects `node` alone, as a click on its card does; the board brings
+    /// a newly selected card into view (UX-18).
+    fn select_step(&mut self, document_id: &str, node: String) {
         self.new_inputs.remove(document_id);
         self.component_settings.remove(document_id);
         self.selections.insert(document_id.to_owned(), vec![node]);
         self.selected_inputs.remove(document_id);
-        self.inspector.open_checks();
     }
 
     /// Draws every board at `density` and remembers it as *Compact cards*.
@@ -2047,10 +2053,17 @@ impl FolderApp {
         index
     }
 
-    /// Selects the step `node` of `document_id`, on the board that holds it:
-    /// a check folded into its subject is found there, the subject selected
-    /// with its checks open (LAY-11).
-    fn select_step(&mut self, document_id: &str, model: &Document, node: String, cleanup: bool) {
+    /// Selects the step `node` of `document_id` on the board that holds it,
+    /// from a results row or a field's menu (DIAG-12): a check folded into
+    /// its subject is found there, the subject selected with its checks open
+    /// (LAY-11); any other step is selected as a click on its card does.
+    fn select_on_board(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        node: String,
+        cleanup: bool,
+    ) {
         if let Some(tab) = self.workbench.tab_mut(document_id) {
             tab.cleanup = cleanup;
         }
@@ -2059,9 +2072,7 @@ impl FolderApp {
         });
         match subject {
             Some(subject) => self.show_checks(document_id, subject),
-            None => {
-                self.selections.insert(document_id.into(), vec![node]);
-            }
+            None => self.select_step(document_id, node),
         }
     }
 

@@ -2241,6 +2241,8 @@ impl App {
         let in_scenario = self.editor.draft().is_none();
         let stale = self.is_run_stale();
         let phase = self.editor.phase();
+        // Why the Inspector's actions are disabled, on their hover (DIAG-09).
+        let locked = self.document_locked();
         let actions = {
             let run = in_scenario.then_some(self.run.as_ref()).flatten();
             let step = (in_scenario && !stale)
@@ -2266,7 +2268,8 @@ impl App {
                 step,
                 // The workspace window shows every check card.
                 expand_here: None,
-                read_only: None,
+                read_only: locked
+                    .then_some("Board is read-only while code changes need attention."),
                 // It keeps its behaviour: fields are marked in the folder
                 // window (DIAG-12).
                 checks: None,
@@ -2278,11 +2281,18 @@ impl App {
                 self.inspector_action(action);
                 continue;
             }
+            // Selecting is navigation, allowed while the document is locked.
+            if let inspector::Action::Select(step) = action {
+                self.editor.selection = vec![step];
+                continue;
+            }
             if self.document_locked() {
                 continue;
             }
             match action {
-                inspector::Action::Reveal(_) => unreachable!("handled above"),
+                inspector::Action::Reveal(_) | inspector::Action::Select(_) => {
+                    unreachable!("handled above")
+                }
                 inspector::Action::UpdateNode(updated) => {
                     let mut graph = self.editor.graph().clone();
                     if let Some(slot) = graph

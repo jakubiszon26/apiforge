@@ -63,6 +63,9 @@ Tests in `folder/acceptance_tests/diag15.rs`.
 
 1. The *Checks* tab of a request shows *Add check* as its first line,
    with no check and with checks; a step with no output shows none.
+   With checks, *Add check* shares that line with the count, and where
+   its words do not fit it shows only + with its name on hover
+   (amended by the owner on 2026-11-23, recorded on #547).
 2. *Add check* → `total` → *total is a number* adds the check DIAG-08's
    ✓ adds from that row: same line in the file, one undo step, the
    check selected. Before a run it writes from the sample (DIAG-09);
