@@ -1134,6 +1134,8 @@ fn tree_row(
                 .show_tooltip_when_elided(false),
         )
     });
+    // A name that can be dragged takes keyboard focus, so it is named.
+    let field = widgets::named(field, name);
     if drag {
         field.dnd_set_drag_payload(Payload::Variable {
             label: shown.to_owned(),
