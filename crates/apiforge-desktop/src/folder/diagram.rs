@@ -1113,6 +1113,7 @@ impl FolderApp {
                     self.inspector.show(
                         ui,
                         &inspector::Context {
+                            document: egui::Id::new(("document", &project_id, document_id)),
                             node: &node,
                             graph: reference,
                             board: graph,

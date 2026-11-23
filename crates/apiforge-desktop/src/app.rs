@@ -2252,6 +2252,7 @@ impl App {
                 })
                 .flatten();
             let context = inspector::Context {
+                document: egui::Id::new(self.code_context()),
                 node: &node,
                 graph: &reference,
                 board: self.editor.graph(),

@@ -464,30 +464,55 @@ fn check_sentence(subject: &str, check: &FieldCheck) -> String {
     }
 }
 
-/// A JSON value as a tree of fields with "Check" and "To variable" actions. Field
-/// names can be dragged onto arguments as a reference to `node`'s `port`.
-/// `read_only` says why the actions are disabled, on their hover (DIAG-09).
+/// A JSON value as a tree of fields, one row a field (DIAG-10): its fold
+/// mark, its own name, its value as the language writes it and coloured by
+/// its type, and ✓ (*Add a check*) and {} (*Assign to variable*). The first
+/// row is the output itself, named `heading`. Field names can be dragged
+/// onto arguments as a reference to `node`'s `port`. `read_only` says why
+/// the actions are disabled, on their hover (DIAG-09). What is folded or
+/// opened is kept per field of `document`.
 pub fn json_tree(
     ui: &mut Ui,
+    document: Id,
     node: &str,
     port: &str,
+    heading: &str,
     value: &Value,
     read_only: Option<&str>,
 ) -> Option<TreeAction> {
-    let mut action = None;
-    let mut budget = JSON_ROWS_PER_FRAME;
-    tree_row(
-        ui,
+    let mut tree = Tree {
+        document,
         node,
         port,
+        read_only,
+        step: TREE_INDENT,
+    };
+    // 14 px a level wherever the panel has room; where the deepest row shown
+    // would leave its name and value less than they need before ✓ and {},
+    // every level steps in by the same smaller amount.
+    let mut walked = JSON_ROWS_PER_FRAME;
+    let deepest = deepest(ui.ctx(), &tree, value, &JsonPath::root(), 0, &mut walked);
+    if deepest > 0 {
+        let spare =
+            ui.available_width() - TREE_ACTIONS - TREE_GAP - TREE_TEXT_MIN - TREE_GAP - TREE_FOLD;
+        tree.step = TREE_INDENT.min(spare.max(0.0) / deepest as f32);
+    }
+    let mut action = None;
+    let mut budget = JSON_ROWS_PER_FRAME;
+    let spacing = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = TREE_ROW_GAP;
+    tree_row(
+        ui,
+        &tree,
         value,
         &JsonPath::root(),
+        heading,
         0,
         true,
-        read_only,
         &mut action,
         &mut budget,
     );
+    ui.spacing_mut().item_spacing.y = spacing;
     if budget == 0 {
         widgets::hint(
             ui,
@@ -497,24 +522,163 @@ pub fn json_tree(
     action
 }
 
+/// What every row of one tree shares.
+struct Tree<'a> {
+    document: Id,
+    node: &'a str,
+    port: &'a str,
+    read_only: Option<&'a str>,
+    /// How far a child's row starts right of its parent's.
+    step: f32,
+}
+
+impl Tree<'_> {
+    /// Where the field at `path` keeps whether it is open, per field of the
+    /// step's output in its document, not per frame of the panel: a branch
+    /// opened stays open while another step is selected.
+    fn branch(&self, path: &str) -> Id {
+        self.document
+            .with(("json-branch", self.node, self.port, path))
+    }
+}
+
 const JSON_ROWS_PER_FRAME: usize = 400;
 const JSON_PAGE_SIZE: usize = 100;
+
+/// A row's height: one line, the height of ✓ and {}.
+const TREE_ROW: f32 = 26.0;
+/// The space between two rows.
+const TREE_ROW_GAP: f32 = 2.0;
+/// How far a child's row starts right of its parent's, at every level the
+/// panel has room for.
+const TREE_INDENT: f32 = 14.0;
+/// What a row's name and value keep at least before ✓ and {}: the indent
+/// gives way before they do.
+const TREE_TEXT_MIN: f32 = 64.0;
+/// The most of a value a row lays out on its one line: more than the widest
+/// panel shows.
+const TREE_CUT_CHARS: usize = 200;
+/// The most of a value a row lays out opened, or shows in its hover.
+const TREE_WHOLE_CHARS: usize = 4000;
+/// The width of the fold mark.
+const TREE_FOLD: f32 = 14.0;
+/// The space between a row's parts.
+const TREE_GAP: f32 = 8.0;
+/// ✓ and {} are two compact buttons 2 px apart.
+const TREE_BUTTON: f32 = 26.0;
+const TREE_ACTIONS: f32 = 2.0 * TREE_BUTTON + 2.0;
+/// Names and values sit a point above the row's middle, so that the middle
+/// of their small letters meets the middle of ✓ and {}.
+const TREE_TEXT_LIFT: f32 = 1.0;
 
 fn page_range(total: usize, page: usize) -> std::ops::Range<usize> {
     let start = page.min(total.saturating_sub(1) / JSON_PAGE_SIZE) * JSON_PAGE_SIZE;
     start..(start + JSON_PAGE_SIZE).min(total)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn tree_row(
-    ui: &mut Ui,
-    node: &str,
-    port: &str,
+/// A value as its row writes it: a scalar as the language writes it, at
+/// most `limit` characters and an ellipsis, an object or a list as its type
+/// and size. A huge text is cut before it is written, not after.
+fn tree_preview(value: &Value, limit: usize) -> String {
+    match value {
+        Value::Array(items) => format!("array · {}", items.len()),
+        Value::Object(fields) => format!("object · {}", fields.len()),
+        Value::String(text) if text.len() > limit => {
+            let head: String = text.chars().take(limit).collect();
+            crate::labels::truncate(&json_stringify(&Value::String(head)), limit)
+        }
+        scalar => crate::labels::truncate(&json_stringify(scalar), limit),
+    }
+}
+
+/// The deepest level among the rows `value` shows from `depth`: its open
+/// branches on their shown page, to ten levels and within `budget` rows.
+fn deepest(
+    ctx: &egui::Context,
+    tree: &Tree<'_>,
     value: &Value,
     path: &JsonPath,
     depth: usize,
+    budget: &mut usize,
+) -> usize {
+    if *budget == 0 {
+        return depth;
+    }
+    *budget -= 1;
+    let count = match value {
+        Value::Array(items) => items.len(),
+        Value::Object(fields) => fields.len(),
+        _ => 0,
+    };
+    if count == 0 || depth >= 10 {
+        return depth;
+    }
+    let id = tree.branch(&path.to_string());
+    let (open, page) = ctx.data(|data| {
+        (
+            data.get_temp::<bool>(id).unwrap_or(depth == 0),
+            data.get_temp::<usize>(id.with("page")).unwrap_or(0),
+        )
+    });
+    if !open {
+        return depth;
+    }
+    let range = page_range(count, page);
+    let mut found = depth;
+    match value {
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate().take(range.end).skip(range.start) {
+                let mut child = path.clone();
+                child.push_index(index);
+                found = found.max(deepest(ctx, tree, item, &child, depth + 1, budget));
+            }
+        }
+        Value::Object(fields) => {
+            for (key, item) in fields.iter().take(range.end).skip(range.start) {
+                let mut child = path.clone();
+                child.push_key(key.clone());
+                found = found.max(deepest(ctx, tree, item, &child, depth + 1, budget));
+            }
+        }
+        _ => {}
+    }
+    found
+}
+
+/// A value's colour by its type.
+fn tree_colour(value: &Value) -> egui::Color32 {
+    match value {
+        Value::String(_) => theme::VALUE_STRING,
+        Value::Number(_) => theme::VALUE_NUMBER,
+        Value::Bool(_) | Value::Null => theme::VALUE_LITERAL,
+        Value::Array(_) | Value::Object(_) => theme::MUTED,
+    }
+}
+
+/// What `add` adds, laid out exactly over `rect` of `ui`.
+fn put_at(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    add: impl FnOnce(&mut Ui) -> egui::Response,
+) -> egui::Response {
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Min)),
+        add,
+    )
+    .inner
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tree_row(
+    ui: &mut Ui,
+    tree: &Tree<'_>,
+    value: &Value,
+    path: &JsonPath,
+    name: &str,
+    depth: usize,
     supported: bool,
-    read_only: Option<&str>,
     action: &mut Option<TreeAction>,
     budget: &mut usize,
 ) {
@@ -523,110 +687,237 @@ fn tree_row(
     }
     *budget -= 1;
     let text = path.to_string();
-    let preview = match value {
-        Value::Array(items) => format!("array · {}", items.len()),
-        Value::Object(fields) => format!("object · {}", fields.len()),
-        scalar => crate::labels::truncate(&json_stringify(scalar), 60),
-    };
     let child_count = match value {
         Value::Array(items) => items.len(),
         Value::Object(fields) => fields.len(),
         _ => 0,
     };
-    let state_id = ui.id().with(("json-branch", node, port, &text));
+    let state_id = tree.branch(&text);
     let mut open = ui
         .ctx()
         .data(|data| data.get_temp::<bool>(state_id))
         .unwrap_or(depth == 0);
-    ui.horizontal(|ui| {
-        ui.add_space(depth.min(4) as f32 * 8.0);
-        if child_count > 0
-            && ui
-                .small_button(if open { "▾" } else { "▸" })
-                .on_hover_text(if open {
-                    "Collapse field"
-                } else {
-                    "Expand field"
-                })
-                .clicked()
-        {
-            open = !open;
-            ui.ctx().data_mut(|data| data.insert_temp(state_id, open));
-        }
+    let whole_id = state_id.with("whole");
+    let whole = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(whole_id))
+        .unwrap_or(false);
 
-        let label = if text.is_empty() {
-            "$".to_owned()
-        } else {
-            text.clone()
-        };
-        let field = ui.add(
-            egui::Label::new(RichText::new(&label).monospace().color(theme::LINK))
-                .sense(egui::Sense::click_and_drag())
-                .truncate(),
-        );
-        if supported {
-            field.dnd_set_drag_payload(Payload::Variable {
-                label: if text.is_empty() {
-                    port.to_owned()
-                } else {
-                    text.clone()
-                },
-                binding: Binding::reference(node, port, text.clone()),
-            });
-        }
-        let field = field.on_hover_text(format!(
-            "{label}\n{} · drag onto an argument",
-            type_name(Some(value))
-        ));
-        let _ = field;
-    });
-    ui.horizontal(|ui| {
-        // Actions have a fixed budget; a long value gets ellipsised rather than
-        // pushing the buttons outside the inspector.
-        ui.add_sized(
-            [(ui.available_width() - 68.0).max(24.0), 22.0],
-            egui::Label::new(RichText::new(&preview).size(11.0).color(theme::MUTED)).truncate(),
+    // Where the row's parts go: ✓ and {} at the panel's right edge, always;
+    // the name keeps what it needs up to most of the room left of them, the
+    // value takes the rest. Both are cut where they do not fit.
+    let width = ui.available_width();
+    let left = ui.cursor().min.x;
+    let actions_x = left + (width - TREE_ACTIONS).max(0.0);
+    let fold_x = left + depth as f32 * tree.step;
+    let name_x = fold_x + TREE_FOLD + TREE_GAP;
+    let room = (actions_x - TREE_GAP - name_x).max(0.0);
+    let name_text = if depth == 0 {
+        RichText::new(name)
+            .size(theme::FONT_BODY)
+            .color(theme::TEXT)
+    } else {
+        RichText::new(name)
+            .monospace()
+            .size(theme::FONT_LABEL)
+            .color(theme::LINK)
+    };
+    let name_galley = egui::WidgetText::from(name_text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        (room * 0.6).max(room.min(24.0)),
+        egui::FontSelection::Default,
+    );
+    let value_x = name_x + name_galley.size().x + TREE_GAP;
+    let value_room = (actions_x - TREE_GAP - value_x).max(0.0);
+    let value_text = |limit: usize| {
+        RichText::new(tree_preview(value, limit))
+            .monospace()
+            .size(theme::FONT_LABEL)
+            .color(tree_colour(value))
+    };
+    let cut_galley = egui::WidgetText::from(value_text(TREE_CUT_CHARS)).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        value_room,
+        egui::FontSelection::Default,
+    );
+    let line = cut_galley.size().y;
+    // A value cut at the panel's edge opens over as many lines as it needs
+    // on a click, and a second click cuts it again (DIAG-10, proposal 1).
+    let cut = cut_galley.elided;
+    let whole = whole && cut;
+    let value_galley = if whole {
+        egui::WidgetText::from(value_text(TREE_WHOLE_CHARS)).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Wrap),
+            value_room,
+            egui::FontSelection::Default,
         )
-        .on_hover_text(&preview);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Where the step takes no edit both are disabled, and say why
-            // (DIAG-09).
-            let why = |response: egui::Response| match read_only {
-                Some(why) => response.on_disabled_hover_text(why),
-                None => response,
-            };
-            if why(ui.add_enabled(
+    } else {
+        cut_galley
+    };
+    let height = TREE_ROW.max(value_galley.size().y + TREE_ROW - line);
+    let (row, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let middle = row.top() + TREE_ROW / 2.0;
+
+    // A thin guide line through the row for each level it is nested in,
+    // under the fold mark of that level's row.
+    for level in 0..depth {
+        let x = left + level as f32 * tree.step + TREE_FOLD / 2.0;
+        ui.painter().line_segment(
+            [
+                egui::pos2(x, row.top() - TREE_ROW_GAP),
+                egui::pos2(x, row.bottom()),
+            ],
+            egui::Stroke::new(1.0, theme::BORDER),
+        );
+    }
+
+    let mut row_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(state_id)
+            .max_rect(row)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    let row_ui = &mut row_ui;
+
+    if child_count > 0 {
+        let mark = egui::Rect::from_center_size(
+            egui::pos2(fold_x + TREE_FOLD / 2.0, middle),
+            egui::vec2(TREE_FOLD, 20.0),
+        );
+        let label = if open {
+            "Collapse field"
+        } else {
+            "Expand field"
+        };
+        let toggle = row_ui.interact(mark, state_id.with("fold"), egui::Sense::click());
+        toggle.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+        row_ui.painter().text(
+            mark.center(),
+            egui::Align2::CENTER_CENTER,
+            if open { "▾" } else { "▸" },
+            egui::FontId::proportional(theme::FONT_LABEL),
+            if toggle.hovered() {
+                theme::TEXT
+            } else {
+                theme::MUTED
+            },
+        );
+        if toggle.on_hover_text(label).clicked() {
+            open = !open;
+            row_ui
+                .ctx()
+                .data_mut(|data| data.insert_temp(state_id, open));
+        }
+    }
+
+    let shown = if text.is_empty() { tree.port } else { &text };
+    let kind = type_name(Some(value));
+    let name_rect = egui::Rect::from_min_size(
+        egui::pos2(name_x, middle - TREE_TEXT_LIFT - name_galley.size().y / 2.0),
+        name_galley.size(),
+    );
+    let field = put_at(row_ui, name_rect, |ui| {
+        ui.add(
+            egui::Label::new(name_galley)
+                .sense(egui::Sense::click_and_drag())
+                .show_tooltip_when_elided(false),
+        )
+    });
+    if supported {
+        field.dnd_set_drag_payload(Payload::Variable {
+            label: shown.to_owned(),
+            binding: Binding::reference(tree.node, tree.port, text.clone()),
+        });
+    }
+    field.on_hover_text(format!("{shown}\n{kind} · drag onto an argument"));
+
+    let value_rect = egui::Rect::from_min_size(
+        egui::pos2(value_x, middle - TREE_TEXT_LIFT - line / 2.0),
+        value_galley.size(),
+    );
+    let shown_value = put_at(row_ui, value_rect, |ui| {
+        ui.add(
+            egui::Label::new(value_galley)
+                .sense(if cut {
+                    egui::Sense::click()
+                } else {
+                    egui::Sense::hover()
+                })
+                .show_tooltip_when_elided(false),
+        )
+    });
+    // Pointing at a cut value shows it whole, up to as much as it opens to,
+    // written only while the hover is shown.
+    if cut
+        && shown_value
+            .on_hover_ui(|ui| {
+                ui.label(
+                    RichText::new(tree_preview(value, TREE_WHOLE_CHARS))
+                        .monospace()
+                        .size(theme::FONT_LABEL),
+                );
+            })
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+    {
+        row_ui
+            .ctx()
+            .data_mut(|data| data.insert_temp(whole_id, !whole));
+    }
+
+    // ✓ and {}, on every row, on its first line: beside the name when the
+    // value is open over several. Where the step takes no edit both are
+    // disabled, and say why (DIAG-09).
+    let why = |response: egui::Response| match tree.read_only {
+        Some(why) => response.on_disabled_hover_text(why),
+        None => response,
+    };
+    let button = |x: f32| {
+        egui::Rect::from_center_size(
+            egui::pos2(x + TREE_BUTTON / 2.0, middle),
+            egui::vec2(TREE_BUTTON, TREE_BUTTON),
+        )
+    };
+    // The ✓ opens the menu Add a check (DIAG-08).
+    let check = why(put_at(row_ui, button(actions_x), |ui| {
+        ui.add_enabled(
+            supported,
+            widgets::icon_button(Icon::Check, "Add a check").compact(),
+        )
+    }));
+    if let Some(check) = check_menu(&check, shown, value) {
+        *action = Some(TreeAction::Check {
+            path: text.clone(),
+            check,
+        });
+    }
+    let variable = why(put_at(
+        row_ui,
+        button(actions_x + TREE_BUTTON + 2.0),
+        |ui| {
+            ui.add_enabled(
                 supported,
                 widgets::icon_button(Icon::Variable, "Assign to variable").compact(),
-            ))
-            .clicked()
-            {
-                *action = Some(TreeAction::Assign { path: text.clone() });
-            }
-            // The ✓ opens the menu Add a check (DIAG-08).
-            let check = why(ui.add_enabled(
-                supported,
-                widgets::icon_button(Icon::Check, "Add a check").compact(),
-            ));
-            let subject = if text.is_empty() { port } else { text.as_str() };
-            if let Some(check) = check_menu(&check, subject, value) {
-                *action = Some(TreeAction::Check {
-                    path: text.clone(),
-                    check,
-                });
-            }
-        });
-    });
-    ui.add_space(3.0);
+            )
+        },
+    ));
+    if variable.clicked() {
+        *action = Some(TreeAction::Assign { path: text.clone() });
+    }
+
     if !open || child_count == 0 {
         return;
     }
+    // What stands among the children starts where their names do.
+    let inset = (depth + 1) as f32 * tree.step + TREE_FOLD + TREE_GAP;
     if depth >= 10 {
-        if matches!(value, Value::Array(items) if !items.is_empty())
-            || matches!(value, Value::Object(fields) if !fields.is_empty())
-        {
+        ui.horizontal(|ui| {
+            ui.add_space(inset);
             widgets::hint(ui, "Nested deeper than 10 levels.");
-        }
+        });
         return;
     }
     let page_key = state_id.with("page");
@@ -639,6 +930,7 @@ fn tree_row(
     page = range.start / JSON_PAGE_SIZE;
     if child_count > JSON_PAGE_SIZE {
         ui.horizontal(|ui| {
+            ui.add_space(inset);
             if ui
                 .add_enabled(
                     range.start > 0,
@@ -675,13 +967,12 @@ fn tree_row(
                 child.push_index(index);
                 tree_row(
                     ui,
-                    node,
-                    port,
+                    tree,
                     item,
                     &child,
+                    &format!("[{index}]"),
                     depth + 1,
                     supported,
-                    read_only,
                     action,
                     budget,
                 );
@@ -696,13 +987,12 @@ fn tree_row(
                 child.push_key(key.clone());
                 tree_row(
                     ui,
-                    node,
-                    port,
+                    tree,
                     item,
                     &child,
+                    key,
                     depth + 1,
                     supported && !reserved(key),
-                    read_only,
                     action,
                     budget,
                 );
@@ -745,18 +1035,24 @@ mod tree_tests {
         let value = serde_json::json!({"nested": vec![serde_json::json!({"x": [1,2,3]}); 1000]});
         let mut visited = 0;
         let mut limited = 0;
+        let tree = Tree {
+            document: Id::new("document"),
+            node: "n",
+            port: "body",
+            read_only: None,
+            step: TREE_INDENT,
+        };
         let mut output = context.run_ui(Default::default(), |ui| {
             let mut budget = JSON_ROWS_PER_FRAME;
             let mut action = None;
             tree_row(
                 ui,
-                "n",
-                "body",
+                &tree,
                 &value,
                 &JsonPath::root(),
+                "Response",
                 0,
                 true,
-                None,
                 &mut action,
                 &mut budget,
             );
@@ -764,13 +1060,12 @@ mod tree_tests {
             let mut budget = 1;
             tree_row(
                 ui,
-                "n",
-                "body",
+                &tree,
                 &value,
                 &JsonPath::root(),
+                "Response",
                 0,
                 true,
-                None,
                 &mut action,
                 &mut budget,
             );
@@ -782,6 +1077,56 @@ mod tree_tests {
             "root and nested summary, without visiting the closed subtree"
         );
         assert_eq!(limited, 0);
+    }
+
+    #[test]
+    fn a_huge_text_is_cut_before_it_is_written() {
+        let huge = serde_json::json!("A".repeat(1_000_000));
+        for limit in [TREE_CUT_CHARS, TREE_WHOLE_CHARS] {
+            let shown = tree_preview(&huge, limit);
+            assert_eq!(shown.chars().count(), limit + 1, "{limit} and an ellipsis");
+            assert!(shown.starts_with("\"AAA") && shown.ends_with('…'));
+        }
+        let short = serde_json::json!("o-1042");
+        assert_eq!(tree_preview(&short, TREE_CUT_CHARS), "\"o-1042\"");
+    }
+
+    #[test]
+    fn two_documents_whose_steps_share_an_id_keep_their_folding_apart() {
+        let context = egui::Context::default();
+        let value = serde_json::json!({"customer": {"name": "Anna", "email": "a@b.test"}});
+        let tree = |document: &str| Tree {
+            document: Id::new(document),
+            node: "node-1",
+            port: "body",
+            read_only: None,
+            step: TREE_INDENT,
+        };
+        context.data_mut(|data| data.insert_temp(tree("first").branch("customer"), true));
+        let mut visited = Vec::new();
+        let mut output = context.run_ui(Default::default(), |ui| {
+            for document in ["first", "second"] {
+                let mut budget = JSON_ROWS_PER_FRAME;
+                tree_row(
+                    ui,
+                    &tree(document),
+                    &value,
+                    &JsonPath::root(),
+                    "Response",
+                    0,
+                    true,
+                    &mut None,
+                    &mut budget,
+                );
+                visited.push(JSON_ROWS_PER_FRAME - budget);
+            }
+        });
+        output.textures_delta.clear();
+        assert_eq!(
+            visited,
+            [4, 2],
+            "customer is open in the first document only"
+        );
     }
 }
 
