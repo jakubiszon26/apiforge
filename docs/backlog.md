@@ -545,9 +545,10 @@ the order of work.
 
 AB-01 [#537](https://github.com/jakubiszon26/apiforge/issues/537), v0.1.0 against v0.2.0 on eight tester's tasks driven by
 agents ([ticket](tickets/AB-01.md)), runs beside these tickets: the owner
-approved the method and the timing on 2026-11-21 — now, before
-`v0.2.1-rc.1`, so that a regression that blocks a task can still enter
-0.2.1. Round 1 is `ready:opus`; it changes nothing in the product.
+approved the method and the timing on 2026-11-21. Round 1 (T1, T2) is
+done and classed: no class 1, R1 #547 class 2 into REQ, R2 #548 class 3.
+Rounds 2 to 4 compare v0.1.0 with `v0.2.1-rc.2` (owner, 2026-11-23);
+round 2 is `ready:opus`; it changes nothing in the product.
 
 ## Next sprint: REQ (not started)
 
