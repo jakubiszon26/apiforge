@@ -1436,10 +1436,9 @@ fn tree_row(
             action,
         );
     }
+    // Every row with a mark is recorded, also where its end hides it.
     #[cfg(test)]
-    if let Some(mark) = &mark
-        && matches!(end, End::Column | End::Words { .. } | End::Icons)
-    {
+    if let Some(mark) = &mark {
         super::marks::record(super::marks::DrawnMark {
             results: tree.results.is_some(),
             port: tree.port.to_owned(),
@@ -1448,6 +1447,7 @@ fn tree_row(
             inside: mark.inside,
             tone: mark.tone,
             icon: !matches!(end, End::Words { .. }),
+            shown: matches!(end, End::Column | End::Words { .. } | End::Icons),
         });
     }
 

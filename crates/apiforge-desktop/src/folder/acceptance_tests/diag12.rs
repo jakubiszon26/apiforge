@@ -5,6 +5,7 @@
 //! *1 failed* in the colour of the outcome; the menu of ✓ lists the field's
 //! checks first, then *Add a check*; checks only, on the field the check
 //! names. On the board's fixture `cart`.
+use super::mcp08b::contains;
 use super::*;
 use crate::inspector::{CheckIndex, DrawnMark, MarkTone, Marks};
 use crate::testing::MINIMUM;
@@ -172,9 +173,9 @@ fn drawn_on<'a>(
     port: &str,
     path: &str,
 ) -> Option<&'a DrawnMark> {
-    marks
-        .iter()
-        .find(|mark| mark.results == results && mark.port == port && mark.path == path)
+    marks.iter().find(|mark| {
+        mark.shown && mark.results == results && mark.port == port && mark.path == path
+    })
 }
 
 /// The rows of `cart` marked and not marked by [`CHECKS`] (criterion 1).
@@ -580,6 +581,134 @@ fn diag12_criterion_5_run_results_take_the_outcome() {
             "{path} is neutral where none ran"
         );
     }
+}
+
+/// Review round (2026-11-23): a stale report keeps its marks. After an
+/// edit the run's marks still stand on *Check*, in the colour of the run;
+/// their menu lists the field's checks, a check the run does not know
+/// *Not run*, and offers neither *Add a check* nor *To variable*.
+/// Choosing that check selects it on the board and leaves the step's
+/// results in the details pane.
+#[test]
+fn diag12_review_a_stale_report_keeps_its_marks() {
+    let (_project, mut harness, id) = opened(WIDE, &source(CHECKS, ""));
+    run(&mut harness);
+    // An edit after the run: a check of total the run does not know.
+    let edited = source(
+        &format!("{CHECKS}  total_exists = assert exists cart.body.total\n"),
+        "",
+    );
+    app(&mut harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited, CODE)
+        .unwrap();
+    settle(&mut harness);
+    assert!(
+        folder(&harness).fresh_run(&id).is_none(),
+        "the edit makes the report stale"
+    );
+    results_on(&mut harness, "cart");
+    let marks = drawn(&mut harness);
+    let total = drawn_on(&marks, true, "body", "total").expect("total keeps its mark");
+    assert_eq!(
+        (total.tone, total.words.as_str()),
+        (MarkTone::NotRun, "3 checks"),
+        "a check the run does not know is not run"
+    );
+    let paid = drawn_on(&marks, true, "body", "paid").expect("paid keeps its mark");
+    assert_eq!(
+        (paid.tone, paid.words.as_str()),
+        (MarkTone::Failed, "1 failed")
+    );
+    assert!(
+        drawn_on(&marks, true, "body", "id").is_none(),
+        "id has no check"
+    );
+
+    // The menu lists the checks and adds nothing.
+    let row = name_right_of(&harness, "total", details(&harness));
+    assert!(
+        on_row(&harness, row, "To variable").is_none(),
+        "a stale report offers no variable"
+    );
+    results_check(&harness, "total").click();
+    settle(&mut harness);
+    assert!(has_label(&harness, MENU), "the mark opens its menu");
+    for check in TOTAL {
+        assert!(in_menu(&harness, check).is_some(), "the menu lists {check}");
+    }
+    assert!(
+        in_menu(&harness, "ADD A CHECK").is_none() && in_menu(&harness, "total exists").is_none(),
+        "a stale report adds no check"
+    );
+    let before = graph(&harness, &id);
+    in_menu(&harness, "exists total")
+        .expect("the menu lists the check added since the run")
+        .click();
+    harness.remove_cursor();
+    settle(&mut harness);
+    assert_eq!(graph(&harness, &id).nodes.len(), before.nodes.len());
+    assert_selected(&harness, &id, "total_exists", "cart");
+    // The details pane keeps the step the menu was opened on.
+    assert!(
+        !contains(&harness, "Results will appear while the scenario runs."),
+        "the details pane keeps cart's results"
+    );
+    assert!(
+        name_right_of(&harness, "total", details(&harness)).left() > details(&harness),
+        "cart's fields stay in the details pane"
+    );
+}
+
+/// Review round (2026-11-23): where the board takes no edit, the marked ✓
+/// in the Inspector stays enabled: its menu lists the field's checks, a
+/// click selects one, and only *Add a check* is disabled.
+#[test]
+fn diag12_review_a_read_only_inspector_lists_the_checks() {
+    let (_project, mut harness, id) = opened(WIDE, &source(CHECKS, ""));
+    output_data(&mut harness, &id, "cart");
+    let broken = format!("{}\n}}\n", source_of(&harness, &id));
+    app(&mut harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &broken, CODE)
+        .unwrap();
+    settle(&mut harness);
+    assert!(
+        !folder(&harness).snapshot(&id).unwrap().editable,
+        "the board takes no edit"
+    );
+    assert!(
+        !check_on(&harness, "total").accesskit_node().is_disabled(),
+        "the marked ✓ is enabled"
+    );
+    assert!(
+        check_on(&harness, "id").accesskit_node().is_disabled(),
+        "an unmarked ✓ stays disabled"
+    );
+    let before = graph(&harness, &id);
+    check_on(&harness, "total").click();
+    settle(&mut harness);
+    assert!(has_label(&harness, MENU), "the marked ✓ opens its menu");
+    let offered = in_menu(&harness, "total exists").expect("the menu shows Add a check");
+    assert!(
+        offered.accesskit_node().is_disabled(),
+        "Add a check is disabled"
+    );
+    in_menu(&harness, TOTAL[1])
+        .expect("the menu lists total == 172.5")
+        .click();
+    harness.remove_cursor();
+    settle(&mut harness);
+    assert_eq!(
+        graph(&harness, &id).nodes.len(),
+        before.nodes.len(),
+        "choosing a check adds nothing"
+    );
+    assert_selected(&harness, &id, "total_value", "cart");
 }
 
 /// The marks Run results' tree of `cart`'s body draws at `width`, with the

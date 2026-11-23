@@ -442,6 +442,9 @@ pub struct DrawnMark {
     pub tone: MarkTone,
     /// The mark is an icon, without words.
     pub icon: bool,
+    /// The row's end draws the mark: not behind *Check added* or an end
+    /// that draws nothing.
+    pub shown: bool,
 }
 
 #[cfg(test)]
