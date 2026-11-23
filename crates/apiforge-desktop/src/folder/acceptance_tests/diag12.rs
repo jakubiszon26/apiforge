@@ -406,7 +406,7 @@ fn diag12_criterion_4_the_menu_lists_the_checks_first() {
     let first = in_menu(&harness, TOTAL[0]).expect("the menu lists total is \"number\"");
     let second = in_menu(&harness, TOTAL[1]).expect("the menu lists total == 172.5");
     let add = in_menu(&harness, "ADD A CHECK").expect("the menu still adds a check");
-    let offered = in_menu(&harness, "total exists").expect("the menu offers total exists");
+    let offered = in_menu(&harness, "exists total").expect("the menu offers exists total");
     assert!(
         first.rect().bottom() <= second.rect().top() + 1.0
             && second.rect().bottom() <= add.rect().top()
@@ -429,14 +429,14 @@ fn diag12_criterion_4_the_menu_lists_the_checks_first() {
     let before = graph(&harness, &id);
     check_on(&harness, "total").click();
     settle(&mut harness);
-    in_menu(&harness, "total exists")
-        .expect("the menu offers total exists")
+    in_menu(&harness, "exists total")
+        .expect("the menu offers exists total")
         .click();
     harness.remove_cursor();
     settle(&mut harness);
     let after = graph(&harness, &id);
     let new = added(&before, &after);
-    assert_eq!(new.len(), 1, "total exists adds one check: {new:?}");
+    assert_eq!(new.len(), 1, "exists total adds one check: {new:?}");
     assert_eq!(new[0].kind, NodeKind::Assert);
     output_data(&mut harness, &id, "cart");
     assert_eq!(
@@ -650,7 +650,7 @@ fn diag12_review_a_stale_report_keeps_its_marks() {
         assert!(in_menu(&harness, check).is_some(), "the menu lists {check}");
     }
     assert!(
-        in_menu(&harness, "ADD A CHECK").is_none() && in_menu(&harness, "total exists").is_none(),
+        in_menu(&harness, "ADD A CHECK").is_none() && in_menu(&harness, "nonempty total").is_none(),
         "a stale report adds no check"
     );
     let before = graph(&harness, &id);
@@ -708,7 +708,7 @@ fn diag12_review_a_read_only_inspector_lists_the_checks() {
     check_on(&harness, "total").click();
     settle(&mut harness);
     assert!(has_label(&harness, MENU), "the marked ✓ opens its menu");
-    let offered = in_menu(&harness, "total exists").expect("the menu shows Add a check");
+    let offered = in_menu(&harness, "exists total").expect("the menu shows Add a check");
     assert!(
         offered.accesskit_node().is_disabled(),
         "Add a check is disabled"
@@ -877,8 +877,8 @@ fn diag12_criterion_7_marks_follow_the_edits() {
     // Adding a check.
     check_on(&harness, "id").click();
     settle(&mut harness);
-    in_menu(&harness, "id exists")
-        .expect("the menu offers id exists")
+    in_menu(&harness, "exists id")
+        .expect("the menu offers exists id")
         .click();
     harness.remove_cursor();
     settle(&mut harness);

@@ -761,7 +761,7 @@ fn diag10_criterion_8_the_heading_is_the_row() {
         .click();
     settle(&mut harness);
     harness
-        .query_by_label("body is an object")
+        .query_by_label("body is \"object\"")
         .expect("the menu of Response checks the whole body")
         .click();
     harness.hover_at(egui::pos2(480.0, 3.0));
