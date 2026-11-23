@@ -1814,6 +1814,24 @@ mod tests {
         );
         assert!(TypedPath::of("   ", &listed, &sample).is_none());
     }
+
+    #[test]
+    fn a_typed_path_through_a_reserved_key_is_refused() {
+        let value = serde_json::json!({ "constructor": 1, "items": [{ "price": 1 }] });
+        let sample = response::Source {
+            value: Some(value),
+            origin: "Sample data".into(),
+            observed: false,
+        };
+        for text in ["__proto__", "constructor", "items[0].prototype", "[\"__proto__\"].a"] {
+            let typed = TypedPath::of(text, &[], &sample).unwrap();
+            assert_eq!(
+                typed.path,
+                Err("Not a path: __proto__, constructor and prototype are never read"),
+                "{text}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

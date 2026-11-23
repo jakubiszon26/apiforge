@@ -12,6 +12,7 @@
 use super::lay23::select;
 use super::*;
 use egui_kittest::kittest::{NodeT, Queryable};
+use std::time::{Duration, Instant};
 
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
 
@@ -54,6 +55,8 @@ const NO_MATCH_HINT: &str = "No field of the sample matches.";
 const NEXT_RUN: &str = "A typed path · checked against the response on the next run";
 const NOT_IN_SAMPLE: &str = "A typed path · not in the sample";
 const NOT_A_PATH: &str = "Not a path: brackets hold a number or a quoted name, as in items[0]";
+const RESERVED: &str = "Not a path: __proto__, constructor and prototype are never read";
+const NOT_IN_SIMULATED: &str = "A typed path · not in the last simulated response";
 
 /// `text` as the demo shop's scenario, open on the board at `size`, the
 /// check `cart_id` selected.
@@ -306,12 +309,19 @@ fn diag16_a_typed_path_the_sample_does_not_have_is_taken() {
     press_return(&mut harness);
     let expected = WITH_SAMPLE.replace("assert cart.body ==", "assert cart.body.coupon ==");
     assert_eq!(source_of(&harness, &id), expected, "taken");
+    // The check's line, where a diagnostic about the typed path would sit.
+    let start = expected.find("  cart_id").unwrap();
+    let end = start + expected[start..].find('\n').unwrap();
     let session = folder(&harness).session.as_ref().unwrap();
     let document = session.document(&id).unwrap();
     assert_eq!(
         document
             .diagnostics()
             .iter()
+            .filter(|diagnostic| {
+                diagnostic.range.start < end && start < diagnostic.range.end
+                    || diagnostic.message.contains("coupon")
+            })
             .map(|diagnostic| diagnostic.message.clone())
             .collect::<Vec<_>>(),
         Vec::<String>::new(),
@@ -372,13 +382,134 @@ fn diag16_the_expected_value_picker_refuses_what_is_not_a_path() {
 #[test]
 fn diag16_the_line_under_the_title_says_no_sample_yet() {
     let (_project, mut harness, _id) = window(NO_SAMPLE, WIDE);
+    harness
+        .get_by_label(&format!("{ACTUAL} step"))
+        .scroll_to_me();
+    step(&mut harness);
+    // Only the dialog's line changes: the Inspector keeps its hint.
+    assert!(
+        has_text(&harness, "Sample data"),
+        "the Response field hint is unchanged"
+    );
+    assert!(!has_text(&harness, "No sample yet"), "outside the dialog");
     open_dialog(&mut harness, ACTUAL);
     assert!(has_text(&harness, "No sample yet"));
-    assert!(!has_text(&harness, "Sample data"), "not Sample data");
 
     let (_project, mut harness, _id) = window(WITH_SAMPLE, WIDE);
     open_dialog(&mut harness, ACTUAL);
     assert!(has_text(&harness, "Sample data"), "a sample is Sample data");
+}
+
+// Review round (2026-11-23) --------------------------------------------------
+
+/// A text that is not a path takes nothing on Return, even when listed
+/// fields match it.
+#[test]
+fn diag16_return_on_a_text_that_is_not_a_path_takes_nothing_even_with_matches() {
+    let (_project, mut harness, id) = window(WITH_SAMPLE, WIDE);
+    open_dialog(&mut harness, ACTUAL);
+    type_search(&mut harness, "items[");
+    let rows = field_rows(&harness);
+    assert!(!rows.is_empty(), "listed fields match items[: {rows:?}");
+    assert!(use_row(&harness, "items[").is_some_and(|(_, enabled, _)| !enabled));
+    press_return(&mut harness);
+    assert!(has_text(&harness, TITLE), "the dialog stays");
+    assert_eq!(source_of(&harness, &id), WITH_SAMPLE, "nothing is written");
+}
+
+/// `__proto__`, `constructor` and `prototype` are never read by a path:
+/// the row is disabled with the reason.
+#[test]
+fn diag16_a_reserved_key_is_a_disabled_row() {
+    for typed in ["constructor", "items[0].__proto__", "[\"prototype\"]"] {
+        let (_project, mut harness, id) = window(WITH_SAMPLE, WIDE);
+        open_dialog(&mut harness, ACTUAL);
+        type_search(&mut harness, typed);
+        let (name, enabled, _) = use_row(&harness, typed).expect("a Use row");
+        assert!(!enabled, "the row is disabled: {name}");
+        assert!(name.contains(RESERVED), "it says why: {name}");
+        press_return(&mut harness);
+        assert!(has_text(&harness, TITLE), "the dialog stays");
+        assert_eq!(source_of(&harness, &id), WITH_SAMPLE, "nothing is written");
+    }
+}
+
+/// Return with Shift, Ctrl or Alt held takes nothing.
+#[test]
+fn diag16_only_a_plain_return_takes_a_row() {
+    let (_project, mut harness, id) = window(NO_SAMPLE, WIDE);
+    open_dialog(&mut harness, ACTUAL);
+    type_search(&mut harness, "id");
+    for modifiers in [
+        egui::Modifiers::SHIFT,
+        egui::Modifiers::COMMAND,
+        egui::Modifiers::ALT,
+    ] {
+        harness.key_press_modifiers(modifiers, egui::Key::Enter);
+        step(&mut harness);
+        assert!(has_text(&harness, TITLE), "{modifiers:?}: the dialog stays");
+        assert_eq!(source_of(&harness, &id), NO_SAMPLE, "{modifiers:?}");
+    }
+}
+
+/// Return in an empty or blank search takes nothing and the search keeps the
+/// focus: what is typed next goes into it.
+#[test]
+fn diag16_return_in_an_empty_search_keeps_the_focus() {
+    let (_project, mut harness, id) = window(NO_SAMPLE, WIDE);
+    open_dialog(&mut harness, ACTUAL);
+    press_return(&mut harness);
+    type_search(&mut harness, " ");
+    press_return(&mut harness);
+    assert!(has_text(&harness, TITLE), "the dialog stays");
+    assert_eq!(source_of(&harness, &id), NO_SAMPLE, "nothing is written");
+    type_search(&mut harness, "id");
+    assert!(
+        use_row(&harness, "id").is_some(),
+        "the search kept the focus and took the typing"
+    );
+}
+
+/// The row shows the path it writes; what was typed is its hint.
+#[test]
+fn diag16_the_row_shows_the_canonical_path_it_writes() {
+    let (_project, mut harness, id) = window(NO_SAMPLE, WIDE);
+    open_dialog(&mut harness, ACTUAL);
+    type_search(&mut harness, "data.[0]");
+    let (name, enabled, _) = use_row(&harness, "data[0]").expect("a row Use \"data[0]\"");
+    assert!(enabled, "{name}");
+    assert!(
+        name.contains("data.[0]"),
+        "the typed text is the hint: {name}"
+    );
+    press_return(&mut harness);
+    assert_eq!(
+        source_of(&harness, &id),
+        NO_SAMPLE.replace("assert cart.body ==", "assert cart.body.data[0] ==")
+    );
+}
+
+fn simulate(harness: &mut FolderHarness) {
+    choose(harness, "Run simulation");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while folder(harness).runs.handle.is_some() {
+        assert!(Instant::now() < deadline, "the run must finish");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    settle(harness);
+}
+
+/// After a simulation the row does not speak of the API's response.
+#[test]
+fn diag16_after_a_simulation_the_row_says_the_response_was_simulated() {
+    let (_project, mut harness, id) = window(WITH_SAMPLE, WIDE);
+    simulate(&mut harness);
+    select(&mut harness, &id, &["cart_id"]);
+    open_dialog(&mut harness, ACTUAL);
+    type_search(&mut harness, "coupon");
+    let (name, _, _) = use_row(&harness, "coupon").expect("a row Use \"coupon\"");
+    assert!(name.contains(NOT_IN_SIMULATED), "{name}");
 }
 
 // Criterion 8 ----------------------------------------------------------------
