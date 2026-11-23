@@ -15,6 +15,9 @@ use serde_json::Value;
 pub struct Source {
     pub value: Option<Value>,
     pub origin: String,
+    /// The mode of the last run the value comes from; `None` when it is
+    /// the saved sample.
+    pub run: Option<RunMode>,
 }
 
 /// The value an output would have according to saved samples.
@@ -89,10 +92,12 @@ pub fn source(node: &Node, port: &str, project: &Project, run: Option<&RunResult
                     RunMode::Simulation => "simulation",
                 }
             ),
+            run: Some(mode),
         },
         None => Source {
             value: sample_output(node, port, project),
             origin: "Sample data".into(),
+            run: None,
         },
     }
 }
