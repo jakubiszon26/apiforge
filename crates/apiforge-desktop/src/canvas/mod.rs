@@ -22,7 +22,7 @@ pub use collapse::collapsible;
 pub(crate) use edge::{DrawnEdge, Side};
 pub use layout::{Card, CardDensity, Chip, check_text, own_step, parse_inline};
 #[cfg(test)]
-pub use layout::{CheckText, fit_title};
+pub use layout::{CheckText, Part, PartRole, fit_title};
 /// The halo of a related step, which a test compares with the selection's.
 #[cfg(test)]
 pub(crate) use paint::RELATED;

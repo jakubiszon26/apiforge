@@ -387,6 +387,8 @@ pub struct CheckTitle {
     pub rows: Vec<Vec<Part>>,
     /// What the rows say, cut where they had to be.
     pub shown: String,
+    /// The title in one row, below 75 %: what it shows, not its rows joined.
+    pub line: Vec<Part>,
     pub label: Option<String>,
     pub handle: String,
     /// The step the check hangs under, by node id, and its name.
@@ -508,16 +510,6 @@ impl Card {
         density: CardDensity,
     ) -> Self {
         let mut card = Self::build_full(node, reference_graph, project);
-        if node.kind == NodeKind::Assert && density == CardDensity::Full {
-            // A full check card's subtitle names its subject and predicate,
-            // in the words of the compact card's line (LAY-09, LAY-21).
-            let scope = Scope {
-                nodes: &reference_graph.nodes,
-                project,
-                request: Some(node),
-            };
-            card.subtitle = Some(satellite_line(node, scope, reference_graph).0);
-        }
         if density == CardDensity::Compact && compacts(node.kind) {
             card.compact = Some(compact(&card, node, reference_graph, project));
         }
@@ -572,6 +564,11 @@ impl Card {
             (NodeKind::Component, Some(revision)) => format!("{} · r{revision}", node.kind.label()),
             _ => node.kind.label().to_owned(),
         };
+        let scope = Scope {
+            nodes: &reference_graph.nodes,
+            project,
+            request: Some(node),
+        };
         let subtitle = match node.kind {
             NodeKind::Request => Some(format!(
                 "{}  {}",
@@ -582,21 +579,16 @@ impl Card {
                 ),
                 node.inputs
                     .get(URL_INPUT)
-                    .and_then(|url| print_template(
-                        url,
-                        Scope {
-                            nodes: &reference_graph.nodes,
-                            project,
-                            request: Some(node),
-                        }
-                    ))
+                    .and_then(|url| print_template(url, scope))
                     .filter(|url| !url.is_empty())
                     .unwrap_or_else(|| "…".to_owned())
             )),
-            NodeKind::Condition => Some(condition_subtitle(node)),
+            // A full card has no line under its title naming the step, so
+            // its predicate keeps the names (LAY-09, LAY-21, DIAG-02).
+            NodeKind::Condition => Some(condition_subtitle(node, scope, reference_graph)),
             NodeKind::Value => value_subtitle(node),
             NodeKind::Assert | NodeKind::If => {
-                Some(apiforge_script::predicate_symbol(predicate(node)).to_owned())
+                Some(check_text(node, scope, reference_graph, None).text())
             }
             _ => None,
         };
@@ -1049,7 +1041,7 @@ fn compact(card: &Card, node: &Node, reference_graph: &Graph, project: &Project)
             // every value, with the sockets of the inputs a wire feeds and of
             // the outputs a step reads. An input with a literal value, or
             // none, takes a wire through the tray.
-            let (mut text, full, missing) = satellite_line(node, scope, reference_graph);
+            let (mut text, full, missing) = satellite_line(node, scope, reference_graph, true);
             // A check is titled by its predicate, and its line is its handle
             // and the step it hangs under (DIAG-02, decision 2 = A).
             if node.kind == NodeKind::Assert {
@@ -1064,6 +1056,7 @@ fn compact(card: &Card, node: &Node, reference_graph: &Graph, project: &Project)
                 title = Some(CheckTitle {
                     rows: fitted.rows,
                     shown: fitted.shown,
+                    line: fitted.line,
                     label: node.label.clone(),
                     handle: node.handle.clone(),
                     subject: own.map(|id| {
@@ -1173,8 +1166,15 @@ impl Pending {
 }
 
 /// The one line of a satellite card, the same at every zoom; what it stands
-/// for in full, for the tooltip; and whether it names a missing input.
-fn satellite_line(node: &Node, scope: Scope<'_>, graph: &Graph) -> (String, String, bool) {
+/// for in full, for the tooltip; and whether it names a missing input. A
+/// check leaves its step's name out only where `beside` the card names the
+/// step (DIAG-02).
+fn satellite_line(
+    node: &Node,
+    scope: Scope<'_>,
+    graph: &Graph,
+    beside: bool,
+) -> (String, String, bool) {
     match node.kind {
         NodeKind::Value => {
             let text = node.inputs.get(VALUE_INPUT).map_or_else(
@@ -1188,11 +1188,15 @@ fn satellite_line(node: &Node, scope: Scope<'_>, graph: &Graph) -> (String, Stri
             let joined = written.text();
             match condition_predicates(node).as_slice() {
                 [_] => (joined.clone(), joined, written.missing),
-                _ => (condition_subtitle(node), joined, written.missing),
+                _ => (
+                    condition_subtitle(node, scope, graph),
+                    joined,
+                    written.missing,
+                ),
             }
         }
         _ => {
-            let own = own_step(node, graph);
+            let own = own_step(node, graph).filter(|_| beside);
             let written = check_text(node, scope, graph, own);
             let text = written.text();
             (text.clone(), text, written.missing)
@@ -1232,6 +1236,9 @@ pub struct Part {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CheckText {
     pub parts: Vec<Part>,
+    /// The part that is the (first) actual operand, the one a title too
+    /// long is shortened in.
+    pub actual: Option<usize>,
     /// An operand is missing: the text names its input instead.
     pub missing: bool,
 }
@@ -1239,6 +1246,20 @@ pub struct CheckText {
 impl CheckText {
     pub fn text(&self) -> String {
         self.parts.iter().map(|part| part.text.as_str()).collect()
+    }
+
+    /// The text with every value written in the check cut at `limit`
+    /// characters, for a list that has no hover (the Inspector).
+    pub fn capped(&self, limit: usize) -> String {
+        self.parts
+            .iter()
+            .map(|part| match part.role {
+                PartRole::Text | PartRole::Number | PartRole::Literal | PartRole::Data => {
+                    labels::truncate(&part.text, limit)
+                }
+                _ => part.text.clone(),
+            })
+            .collect()
     }
 
     fn push(&mut self, text: impl Into<String>, role: PartRole) {
@@ -1268,10 +1289,12 @@ pub fn own_step<'a>(check: &'a Node, graph: &'a Graph) -> Option<&'a str> {
 
 /// The predicate of `check` in the signs of the code (DIAG-02): a
 /// comparison, an `if`'s condition, or the comparisons of a *Data
-/// condition* joined by `and` or `or`. A reference to the step `own` leaves
-/// its name out (`weight_31.status` → `status`), and, when the check reads
-/// no other step, the leading `body.` too (`error.code`); only a comparison
-/// check does this. A missing operand is named by its input.
+/// condition* joined by `and` or `or`; a calculation in an operand takes
+/// the code's signs too (`price * 2`). A reference to the step `own`
+/// leaves its name out (`weight_31.status` → `status`), and, when the check
+/// reads no other step, the leading `body.` too (`error.code`), unless the
+/// next name is one of the step's outputs (`body.status`); only a
+/// comparison check does this. A missing operand is named by its input.
 pub fn check_text(check: &Node, scope: Scope<'_>, graph: &Graph, own: Option<&str>) -> CheckText {
     let own = own
         .filter(|_| check.kind == NodeKind::Assert)
@@ -1303,7 +1326,7 @@ pub fn check_text(check: &Node, scope: Scope<'_>, graph: &Graph, own: Option<&st
             },
         ),
         Some(binding) => text.push(
-            source_text_of(binding, scope, graph, 0, own),
+            source_text_of(binding, scope, graph, 0, own, Notation::Code),
             PartRole::Operand,
         ),
     };
@@ -1330,8 +1353,14 @@ pub fn check_text(check: &Node, scope: Scope<'_>, graph: &Graph, own: Option<&st
         let sign = apiforge_script::predicate_symbol(*predicate);
         if !predicate.takes_expected() {
             text.push(format!("{sign} "), PartRole::Sign);
+            if index == 0 {
+                text.actual = Some(text.parts.len());
+            }
             operand(&mut text, actual);
             continue;
+        }
+        if index == 0 {
+            text.actual = Some(text.parts.len());
         }
         operand(&mut text, actual);
         text.push(format!(" {sign} "), PartRole::Sign);
@@ -1348,30 +1377,36 @@ pub fn check_text(check: &Node, scope: Scope<'_>, graph: &Graph, own: Option<&st
 }
 
 /// A check's title as a card writes it (DIAG-02): what it shows, cut where
-/// it had to be, and that text in rows.
+/// it had to be, that text in rows, and in one row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Title {
     pub shown: String,
     pub rows: Vec<Vec<Part>>,
+    pub line: Vec<Part>,
 }
 
 /// `text` in rows of at most `per_row` characters, wrapped at spaces, in
 /// at most `max_rows` rows (DIAG-02, criterion 4). A text too long is cut
-/// inside its first operand's path, its first and last names kept
-/// (`error…message.text`); one still too long is cut at its end, so the
-/// start of the expected value always shows.
+/// inside its actual operand's path, its first and last names kept
+/// (`error…message.text`), the path split at the dots outside brackets and
+/// quotes; one still too long is cut at its end, so the start of the
+/// expected value always shows.
 pub fn fit_title(text: &CheckText, per_row: usize, max_rows: usize) -> Title {
     let per_row = per_row.max(2);
     let max_rows = max_rows.max(1);
     let fits = |parts: &[Part]| wrap(&characters(parts), per_row).len() <= max_rows;
     let mut parts = text.parts.clone();
     if !fits(&parts) {
-        let path = parts
-            .iter()
-            .position(|part| part.role == PartRole::Operand)
-            .filter(|&index| !parts[index].text.contains(' '));
+        let path = text.actual.filter(|&index| {
+            parts
+                .get(index)
+                .is_some_and(|part| part.role == PartRole::Operand && !part.text.contains(' '))
+        });
         if let Some(index) = path {
-            let segments: Vec<String> = parts[index].text.split('.').map(str::to_owned).collect();
+            let segments: Vec<String> = path_names(&parts[index].text)
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
             // From one name left out to all but the first and the last.
             for kept in (1..segments.len().saturating_sub(1)).rev() {
                 parts[index].text = format!(
@@ -1387,7 +1422,7 @@ pub fn fit_title(text: &CheckText, per_row: usize, max_rows: usize) -> Title {
     }
     let characters = characters(&parts);
     let mut rows = wrap(&characters, per_row);
-    let mut shown: String = characters.iter().map(|(c, _)| c).collect();
+    let mut end = characters.len();
     let cut = rows.len() > max_rows;
     if cut {
         rows.truncate(max_rows);
@@ -1396,21 +1431,53 @@ pub fn fit_title(text: &CheckText, per_row: usize, max_rows: usize) -> Title {
         while last.end > last.start && characters[last.end - 1].0 == ' ' {
             last.end -= 1;
         }
-        shown = characters[..last.end].iter().map(|(c, _)| c).collect();
-        shown.push('…');
+        end = last.end;
     }
+    let mut shown: String = characters[..end].iter().map(|(c, _)| c).collect();
+    let mut line = group(&characters[..end]);
     let mut rows: Vec<Vec<Part>> = rows
         .iter()
         .map(|range| group(&characters[range.clone()]))
         .collect();
-    if cut && let Some(row) = rows.last_mut() {
-        let role = row.last().map_or(PartRole::Operand, |part| part.role);
-        row.push(Part {
-            text: "…".into(),
-            role,
-        });
+    if cut {
+        shown.push('…');
+        for row in [rows.last_mut(), Some(&mut line)].into_iter().flatten() {
+            let role = row.last().map_or(PartRole::Operand, |part| part.role);
+            row.push(Part {
+                text: "…".into(),
+                role,
+            });
+        }
     }
-    Title { shown, rows }
+    Title { shown, rows, line }
+}
+
+/// The names of a path, split at its dots outside brackets and quotes
+/// (`rows["a.b"].text` → `rows["a.b"]`, `text`).
+fn path_names(path: &str) -> Vec<&str> {
+    let mut names = Vec::new();
+    let (mut start, mut depth) = (0, 0usize);
+    let (mut quote, mut escaped) = (None, false);
+    for (index, c) in path.char_indices() {
+        match quote {
+            Some(_) if escaped => escaped = false,
+            Some(_) if c == '\\' => escaped = true,
+            Some(open) if c == open => quote = None,
+            Some(_) => {}
+            None => match c {
+                '"' | '\'' => quote = Some(c),
+                '[' => depth += 1,
+                ']' => depth = depth.saturating_sub(1),
+                '.' if depth == 0 => {
+                    names.push(&path[start..index]);
+                    start = index + 1;
+                }
+                _ => {}
+            },
+        }
+    }
+    names.push(&path[start..]);
+    names
 }
 
 /// Each character of `parts` with its role.
@@ -1470,7 +1537,16 @@ fn wrap(characters: &[(char, PartRole)], per_row: usize) -> Vec<std::ops::Range<
 /// signs (`promoted.promotion.price × 2 + second.price`). `outer` is the
 /// binding strength of the operator around it, for brackets.
 fn source_text(binding: &Binding, scope: Scope<'_>, graph: &Graph, outer: u8) -> String {
-    source_text_of(binding, scope, graph, outer, None)
+    source_text_of(binding, scope, graph, outer, None, Notation::Board)
+}
+
+/// The signs a calculation is written with: the board's (`×`, `≥`), as a
+/// Value card writes it, or the code's (`*`, `>=`), as a check's predicate
+/// does (DIAG-02, ruling 4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Notation {
+    Board,
+    Code,
 }
 
 /// The step a check's text leaves the name of out (LAY-30, DIAG-02), and
@@ -1487,6 +1563,7 @@ fn source_text_of(
     graph: &Graph,
     outer: u8,
     own: Option<Own<'_>>,
+    notation: Notation,
 ) -> String {
     use apiforge_core::operator::Operator as O;
     match binding {
@@ -1498,20 +1575,29 @@ fn source_text_of(
                 .unwrap_or_else(|| labels::binding(binding, graph));
             match (binding, own) {
                 (Binding::Reference { node_id, .. }, Some(own)) if node_id == own.id => {
-                    let handle = scope
-                        .nodes
-                        .iter()
-                        .find(|node| &node.id == node_id)
-                        .map_or("", |node| node.handle.as_str());
+                    let step = scope.nodes.iter().find(|node| &node.id == node_id);
+                    let handle = step.map_or("", |node| node.handle.as_str());
                     let rest = match text.strip_prefix(handle) {
                         Some(rest) if !handle.is_empty() && rest.starts_with('.') => &rest[1..],
                         Some(rest) if !handle.is_empty() && rest.starts_with('[') => rest,
                         _ => return text,
                     };
                     // Under its one step a check's path starts at the
-                    // response's fields (DIAG-02).
+                    // response's fields (DIAG-02), unless the first is named
+                    // like one of the step's outputs: `body.status` never
+                    // reads as `status`.
+                    let output = |field: &str| {
+                        let name = field.split(['.', '[']).next().unwrap_or(field);
+                        step.is_some_and(|step| {
+                            apiforge_core::graph::output_ports(step, scope.project)
+                                .iter()
+                                .any(|port| port.name == name)
+                        })
+                    };
                     match rest.strip_prefix("body.") {
-                        Some(field) if own.body && !field.is_empty() => field.to_owned(),
+                        Some(field) if own.body && !field.is_empty() && !output(field) => {
+                            field.to_owned()
+                        }
                         _ => rest.to_owned(),
                     }
                 }
@@ -1529,7 +1615,7 @@ fn source_text_of(
                 .iter()
                 .map(|(key, field)| format!(
                     "{key}: {}",
-                    source_text_of(field, scope, graph, 0, own)
+                    source_text_of(field, scope, graph, 0, own, notation)
                 ))
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -1538,12 +1624,12 @@ fn source_text_of(
             "[{}]",
             items
                 .iter()
-                .map(|item| source_text_of(item, scope, graph, 0, own))
+                .map(|item| source_text_of(item, scope, graph, 0, own, notation))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
         Binding::Expression { operator, inputs } => {
-            let binary = match operator {
+            let board = match operator {
                 O::Or => Some(("or", 1)),
                 O::And => Some(("and", 2)),
                 O::Equals => Some(("=", 3)),
@@ -1559,12 +1645,19 @@ fn source_text_of(
                 O::Modulo => Some(("mod", 5)),
                 _ => None,
             };
+            // The code's sign binds as the board's does: the brackets stay.
+            let binary = match notation {
+                Notation::Board => board,
+                Notation::Code => board.and_then(|(_, strength)| {
+                    apiforge_script::binary_symbol(*operator).map(|sign| (sign, strength))
+                }),
+            };
             match (binary, inputs.get("left"), inputs.get("right")) {
                 (Some((sign, strength)), Some(left), Some(right)) if inputs.len() == 2 => {
                     let text = format!(
                         "{} {sign} {}",
-                        source_text_of(left, scope, graph, strength, own),
-                        source_text_of(right, scope, graph, strength + 1, own)
+                        source_text_of(left, scope, graph, strength, own, notation),
+                        source_text_of(right, scope, graph, strength + 1, own, notation)
                     );
                     if strength < outer {
                         format!("({text})")
@@ -1579,7 +1672,7 @@ fn source_text_of(
                         .unwrap_or_else(|| operator.label().to_owned());
                     let arguments: Vec<String> = inputs
                         .values()
-                        .map(|input| source_text_of(input, scope, graph, 0, own))
+                        .map(|input| source_text_of(input, scope, graph, 0, own, notation))
                         .collect();
                     format!("{name}({})", arguments.join(", "))
                 }
@@ -1790,16 +1883,18 @@ fn overview_line(
                 project,
                 request: Some(node),
             };
-            Some(satellite_line(node, scope, reference_graph).0)
+            // No line names the step at Overview: the names stay.
+            Some(satellite_line(node, scope, reference_graph, false).0)
         }
         _ => None,
     }
 }
 
-/// The predicate of a single check, or how many checks must hold.
-fn condition_subtitle(node: &Node) -> String {
+/// The predicate of a single check as the code writes it, or how many
+/// checks must hold.
+fn condition_subtitle(node: &Node, scope: Scope<'_>, graph: &Graph) -> String {
     match condition_predicates(node).as_slice() {
-        [single] => apiforge_script::predicate_symbol(*single).to_owned(),
+        [_] => check_text(node, scope, graph, None).text(),
         checks => match node.config.match_mode {
             Some(apiforge_core::model::Match::Any) => format!("any of {} checks", checks.len()),
             _ => format!("all {} checks", checks.len()),

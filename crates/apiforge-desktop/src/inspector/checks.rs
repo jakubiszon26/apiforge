@@ -101,7 +101,9 @@ impl Names<'_> {
 
     /// What the check holds, as its card writes it (DIAG-02): the signs of
     /// the code, the step's name and leading `body.` left out under the one
-    /// step it reads.
+    /// step it reads, which the Inspector is of and the row's sources name
+    /// in full. A long value written in the check is cut at 80 characters,
+    /// as the list has no hover.
     fn sentence(&self, node: &Node) -> String {
         let scope = Scope {
             nodes: &self.nodes.nodes,
@@ -109,7 +111,7 @@ impl Names<'_> {
             request: Some(node),
         };
         let own = crate::canvas::own_step(node, self.nodes);
-        crate::canvas::check_text(node, scope, self.nodes, own).text()
+        crate::canvas::check_text(node, scope, self.nodes, own).capped(80)
     }
 
     /// Everything the check reads, once each, in the order it reads it.

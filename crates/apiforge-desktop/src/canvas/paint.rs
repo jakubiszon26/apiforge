@@ -571,6 +571,8 @@ pub struct DrawnText {
     pub kind: TextKind,
     pub size: f32,
     pub color: Color32,
+    /// The font family it is drawn in.
+    pub family: egui::FontFamily,
     pub text: String,
     /// Where the text is on screen, as far as its cell shows it.
     pub rect: Rect,
@@ -758,6 +760,7 @@ impl Drawn {
                 kind,
                 size: font.size,
                 color,
+                family: font.family.clone(),
                 text: text.to_owned(),
                 rect: shown,
             });
@@ -802,6 +805,7 @@ impl Drawn {
             kind,
             size: font.size,
             color: theme::TEXT,
+            family: font.family.clone(),
             text: parts.iter().map(|part| part.text.as_str()).collect(),
             rect: Rect::from_min_size(at, galley.size())
                 .intersect(rect)
@@ -2055,7 +2059,14 @@ pub fn compact_card(
         );
     }
     if let Some(title) = title {
-        let font = FontId::monospace(min_on_screen(TITLE_TEXT, z, LINE_MIN));
+        // The predicate is bold where it is the title, as in the mock-up;
+        // under a label it is the line under it (DIAG-02).
+        let size = min_on_screen(TITLE_TEXT, z, LINE_MIN);
+        let font = if title.label.is_none() {
+            FontId::new(size, theme::bold_mono_family())
+        } else {
+            FontId::monospace(size)
+        };
         let kind = TextKind::Line;
         // Where the rows are lower than the smallest text, below 75 %, the
         // title is one row cut with `…`, whole on hover; a label keeps the
@@ -2072,20 +2083,12 @@ pub fn compact_card(
                 );
             }
         } else if title.label.is_none() {
-            let mut joined: Vec<Part> = Vec::new();
-            for row in &title.rows {
-                if !joined.is_empty() {
-                    joined.push(Part {
-                        text: " ".into(),
-                        role: PartRole::Sign,
-                    });
-                }
-                joined.extend(row.iter().cloned());
-            }
+            // The title as shown, not its rows joined: a row broken inside
+            // a word must not read as two words.
             drawn.parts(
                 &clipped,
                 cell(TITLE_LEFT, 6.0, WIDTH - TITLE_RIGHT, COMPACT_HEADER),
-                &joined,
+                &title.line,
                 kind,
                 font,
             );
@@ -2721,18 +2724,21 @@ mod tests {
         let context = egui::Context::default();
         theme::apply(&context);
         let mut output = context.run_ui(egui::RawInput::default(), |ui| {
-            let galley = ui.painter().layout_no_wrap(
-                "m".repeat(title_per_row()),
-                FontId::monospace(TITLE_TEXT),
-                theme::TEXT,
-            );
-            assert!(
-                galley.size().x <= WIDTH - TITLE_LEFT - TITLE_RIGHT,
-                "{} characters take {} px",
-                title_per_row(),
-                galley.size().x
-            );
-            assert!(galley.size().y <= TITLE_ROW + 0.5, "{:?}", galley.size());
+            // The regular face, and the bold one of a title (DIAG-02).
+            for family in [egui::FontFamily::Monospace, theme::bold_mono_family()] {
+                let galley = ui.painter().layout_no_wrap(
+                    "m".repeat(title_per_row()),
+                    FontId::new(TITLE_TEXT, family.clone()),
+                    theme::TEXT,
+                );
+                assert!(
+                    galley.size().x <= WIDTH - TITLE_LEFT - TITLE_RIGHT,
+                    "{} characters of {family:?} take {} px",
+                    title_per_row(),
+                    galley.size().x
+                );
+                assert!(galley.size().y <= TITLE_ROW + 0.5, "{:?}", galley.size());
+            }
         });
         output.textures_delta.clear();
     }
