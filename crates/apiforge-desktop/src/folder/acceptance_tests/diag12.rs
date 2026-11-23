@@ -52,6 +52,8 @@ const STATUS: &str = "status == 201";
 const CHECK: &str = "Add a check";
 const RESULTS_CHECK: &str = "Check";
 const MENU: &str = "Add a check menu";
+/// The mark alone, where the results take no check (review round).
+const CHECKS_OF_FIELD: &str = "Checks of this field";
 
 /// `text` as the demo shop's scenario, on its board at `size`, never run.
 fn opened(size: egui::Vec2, text: &str) -> (tempfile::TempDir, FolderHarness, String) {
@@ -628,13 +630,20 @@ fn diag12_review_a_stale_report_keeps_its_marks() {
         "id has no check"
     );
 
-    // The menu lists the checks and adds nothing.
+    // The menu lists the checks and adds nothing: the mark is named for
+    // the checks, so no field offers *Check* (UX-01 criterion 2).
     let row = name_right_of(&harness, "total", details(&harness));
     assert!(
         on_row(&harness, row, "To variable").is_none(),
         "a stale report offers no variable"
     );
-    results_check(&harness, "total").click();
+    assert!(
+        on_row(&harness, row, RESULTS_CHECK).is_none(),
+        "a stale report offers no Check"
+    );
+    on_row(&harness, row, CHECKS_OF_FIELD)
+        .expect("the mark on total is named for its checks")
+        .click();
     settle(&mut harness);
     assert!(has_label(&harness, MENU), "the mark opens its menu");
     for check in TOTAL {
