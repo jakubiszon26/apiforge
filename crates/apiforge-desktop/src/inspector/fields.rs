@@ -1216,8 +1216,10 @@ impl End {
             }
             Self::Mark { width, words } => {
                 let mark = mark?;
+                // Named for the checks: these results offer no Check
+                // (UX-01).
                 let check = put_at(ui, at(x, width), |ui| {
-                    super::marks::button(ui, "Check", mark, words, width)
+                    super::marks::button(ui, "Checks of this field", mark, words, width)
                 })
                 .on_hover_text(&mark.said);
                 return check_menu_with(&check, shown, value, &mark.listed, Adding::Hidden)
