@@ -480,13 +480,88 @@ pub fn json_tree(
     value: &Value,
     read_only: Option<&str>,
 ) -> Option<TreeAction> {
-    let mut tree = Tree {
-        document,
-        node,
+    draw_tree(
+        ui,
+        Tree {
+            document,
+            node,
+            port,
+            read_only,
+            step: TREE_INDENT,
+            results: None,
+        },
+        heading,
+        value,
+    )
+}
+
+/// How Run results' rows of a value open before one is folded or opened by
+/// hand (REP-08); in the Inspector the first row opens, the others are
+/// folded (DIAG-10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Opening {
+    /// The rows above the level given open, the others folded: Run results'
+    /// for a large value (REP-08).
+    Levels(usize),
+    /// Every row open: Run results' (REP-08).
+    Leaves,
+    /// Every row folded: Run results' after *Collapse all* (REP-08).
+    Closed,
+}
+
+impl Opening {
+    /// Whether a row `depth` levels under the first opens.
+    pub fn open(self, depth: usize) -> bool {
+        match self {
+            Self::Levels(levels) => depth < levels,
+            Self::Leaves => true,
+            Self::Closed => false,
+        }
+    }
+}
+
+/// What Run results' rows do that the Inspector's do not (REP-08 on
+/// DIAG-10's row): they open by `opening`; *Check* and *To variable* keep
+/// their words where the panel has room and follow the value; a field
+/// checked from these results reads *Check added* (UX-01).
+#[derive(Clone, Copy)]
+pub struct Results<'a> {
+    pub opening: Opening,
+    /// The rows name fields of the step's outputs, which can be checked.
+    pub fields: bool,
+    /// *Check* and *To variable* are offered, and names can be dragged: the
+    /// document can be edited.
+    pub offers: bool,
+    /// Whether the field at a path was checked from these results.
+    pub checked: &'a dyn Fn(&str) -> bool,
+}
+
+/// [`json_tree`]'s rows in Run results: `value` of `node`'s `port`, its
+/// first row named by the port.
+pub fn results_tree(
+    ui: &mut Ui,
+    document: Id,
+    node: &str,
+    port: &str,
+    value: &Value,
+    results: Results<'_>,
+) -> Option<TreeAction> {
+    draw_tree(
+        ui,
+        Tree {
+            document,
+            node,
+            port,
+            read_only: None,
+            step: TREE_INDENT,
+            results: Some(results),
+        },
         port,
-        read_only,
-        step: TREE_INDENT,
-    };
+        value,
+    )
+}
+
+fn draw_tree(ui: &mut Ui, mut tree: Tree<'_>, heading: &str, value: &Value) -> Option<TreeAction> {
     // 14 px a level wherever the panel has room; where the deepest row shown
     // would leave its name and value less than they need before ✓ and {},
     // every level steps in by the same smaller amount.
@@ -530,6 +605,8 @@ struct Tree<'a> {
     read_only: Option<&'a str>,
     /// How far a child's row starts right of its parent's.
     step: f32,
+    /// Run results' rows (REP-08); `None` in the Inspector.
+    results: Option<Results<'a>>,
 }
 
 impl Tree<'_> {
@@ -539,6 +616,13 @@ impl Tree<'_> {
     fn branch(&self, path: &str) -> Id {
         self.document
             .with(("json-branch", self.node, self.port, path))
+    }
+
+    /// Whether a row `depth` levels under the first opens before it is
+    /// folded or opened by hand.
+    fn opens(&self, depth: usize) -> bool {
+        self.results
+            .map_or(depth == 0, |results| results.opening.open(depth))
     }
 }
 
@@ -567,6 +651,8 @@ const TREE_GAP: f32 = 8.0;
 /// ✓ and {} are two compact buttons 2 px apart.
 const TREE_BUTTON: f32 = 26.0;
 const TREE_ACTIONS: f32 = 2.0 * TREE_BUTTON + 2.0;
+/// The space between Run results' *Check* and *To variable*.
+const TREE_WORD_GAP: f32 = 4.0;
 /// Names and values sit a point above the row's middle, so that the middle
 /// of their small letters meets the middle of ✓ and {}.
 const TREE_TEXT_LIFT: f32 = 1.0;
@@ -616,7 +702,8 @@ fn deepest(
     let id = tree.branch(&path.to_string());
     let (open, page) = ctx.data(|data| {
         (
-            data.get_temp::<bool>(id).unwrap_or(depth == 0),
+            data.get_temp::<bool>(id)
+                .unwrap_or_else(|| tree.opens(depth)),
             data.get_temp::<usize>(id.with("page")).unwrap_or(0),
         )
     });
@@ -670,6 +757,212 @@ fn put_at(
     .inner
 }
 
+/// ✓ and {} of the Inspector's row, at its right edge (DIAG-10).
+#[allow(clippy::too_many_arguments)]
+fn inspector_actions(
+    row_ui: &mut Ui,
+    tree: &Tree<'_>,
+    actions_x: f32,
+    middle: f32,
+    shown: &str,
+    value: &Value,
+    text: &str,
+    supported: bool,
+    action: &mut Option<TreeAction>,
+) {
+    // ✓ and {}, on every row, on its first line: beside the name when the
+    // value is open over several. Where the step takes no edit both are
+    // disabled, and say why (DIAG-09).
+    let why = |response: egui::Response| match tree.read_only {
+        Some(why) => response.on_disabled_hover_text(why),
+        None => response,
+    };
+    let button = |x: f32| {
+        egui::Rect::from_center_size(
+            egui::pos2(x + TREE_BUTTON / 2.0, middle),
+            egui::vec2(TREE_BUTTON, TREE_BUTTON),
+        )
+    };
+    // The ✓ opens the menu Add a check (DIAG-08).
+    let check = why(put_at(row_ui, button(actions_x), |ui| {
+        ui.add_enabled(
+            supported,
+            widgets::icon_button(Icon::Check, "Add a check").compact(),
+        )
+    }));
+    if let Some(check) = check_menu(&check, shown, value) {
+        *action = Some(TreeAction::Check {
+            path: text.to_owned(),
+            check,
+        });
+    }
+    let variable = why(put_at(
+        row_ui,
+        button(actions_x + TREE_BUTTON + 2.0),
+        |ui| {
+            ui.add_enabled(
+                supported,
+                widgets::icon_button(Icon::Variable, "Assign to variable").compact(),
+            )
+        },
+    ));
+    if variable.clicked() {
+        *action = Some(TreeAction::Assign {
+            path: text.to_owned(),
+        });
+    }
+}
+
+/// How a row of Run results ends (REP-08 on DIAG-10's row, UX-01).
+enum End {
+    /// The Inspector's ✓ and {}.
+    Column,
+    /// *Check* and *To variable* in words.
+    Words { check: f32, variable: f32 },
+    /// *Check* and *To variable* as icons, where the words have no room.
+    Icons,
+    /// *Check added*: the field was checked from these results.
+    Added(f32),
+    /// A reserved name, which a check cannot read.
+    Custom(f32),
+    /// Nothing: a value that is not a step's output, or results the
+    /// document no longer takes edits from.
+    Nothing,
+}
+
+const CHECK_ADDED: &str = "Check added";
+const CUSTOM_KEY: &str = "custom key";
+
+impl End {
+    /// The end of the row of the field at `path`, which leaves `room` from
+    /// its name to the panel's edge.
+    fn of(ui: &Ui, tree: &Tree<'_>, path: &str, supported: bool, room: f32) -> Self {
+        let Some(results) = tree.results else {
+            return Self::Column;
+        };
+        let text = |text: &str, size: f32| {
+            ui.painter()
+                .layout_no_wrap(
+                    text.to_owned(),
+                    egui::FontId::proportional(size),
+                    theme::TEXT,
+                )
+                .size()
+                .x
+        };
+        // A compact action button's natural width.
+        let word = |label: &str| 20.0 + 14.0 + 6.0 + text(label, theme::FONT_LABEL);
+        if !results.fields {
+            Self::Nothing
+        } else if supported && (results.checked)(path) {
+            Self::Added(14.0 + 4.0 + text(CHECK_ADDED, theme::FONT_LABEL))
+        } else if !results.offers {
+            Self::Nothing
+        } else if !supported {
+            Self::Custom(text(CUSTOM_KEY, 11.0))
+        } else {
+            let (check, variable) = (word("Check"), word("To variable"));
+            if room - TREE_TEXT_MIN - TREE_GAP >= check + TREE_WORD_GAP + variable {
+                Self::Words { check, variable }
+            } else {
+                Self::Icons
+            }
+        }
+    }
+
+    fn width(&self) -> f32 {
+        match *self {
+            Self::Column | Self::Icons => TREE_ACTIONS,
+            Self::Words { check, variable } => check + TREE_WORD_GAP + variable,
+            Self::Added(width) | Self::Custom(width) => width,
+            Self::Nothing => 0.0,
+        }
+    }
+
+    /// Draws the end from `x` on the row whose middle is `middle`.
+    fn show(
+        &self,
+        ui: &mut Ui,
+        x: f32,
+        middle: f32,
+        shown: &str,
+        value: &Value,
+        path: &str,
+    ) -> Option<TreeAction> {
+        let at = |x: f32, width: f32| {
+            egui::Rect::from_min_size(
+                egui::pos2(x, middle - TREE_BUTTON / 2.0),
+                egui::vec2(width, TREE_BUTTON),
+            )
+        };
+        let (check_width, variable_width, words) = match *self {
+            Self::Words { check, variable } => (check, variable, true),
+            Self::Icons => (TREE_BUTTON, TREE_BUTTON, false),
+            Self::Added(width) => {
+                // A check from these results waits for the next run; the
+                // edit is undone like any other (UX-01).
+                put_at(ui, at(x, width), |ui| {
+                    ui.horizontal_centered(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let (icon, _) =
+                            ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                        Icon::Check.paint(ui.painter(), icon, theme::SUCCESS);
+                        ui.label(
+                            RichText::new(CHECK_ADDED)
+                                .size(theme::FONT_LABEL)
+                                .color(theme::SUCCESS),
+                        );
+                    })
+                    .response
+                });
+                return None;
+            }
+            Self::Custom(width) => {
+                put_at(ui, at(x, width), |ui| {
+                    ui.horizontal_centered(|ui| {
+                        ui.label(RichText::new(CUSTOM_KEY).size(11.0).color(theme::MUTED))
+                            .on_hover_text("Reserved field name. Select the parent object instead.")
+                    })
+                    .inner
+                });
+                return None;
+            }
+            Self::Column | Self::Nothing => return None,
+        };
+        let button = |icon: Icon, label: &'static str| {
+            if words {
+                widgets::action(icon, label).compact().quiet()
+            } else {
+                widgets::icon_button(icon, label).compact()
+            }
+        };
+        let mut chosen = None;
+        // *Check* opens the menu Add a check (DIAG-08).
+        let check_hover = format!("Check {shown}");
+        let check = put_at(ui, at(x, check_width), |ui| {
+            ui.add(button(Icon::Check, "Check").hover(&check_hover))
+        });
+        if let Some(check) = check_menu(&check, shown, value) {
+            chosen = Some(TreeAction::Check {
+                path: path.to_owned(),
+                check,
+            });
+        }
+        let variable_hover = format!("Assign {shown} to a variable");
+        let variable = put_at(
+            ui,
+            at(x + check_width + TREE_WORD_GAP, variable_width),
+            |ui| ui.add(button(Icon::Variable, "To variable").hover(&variable_hover)),
+        );
+        if variable.clicked() {
+            chosen = Some(TreeAction::Assign {
+                path: path.to_owned(),
+            });
+        }
+        chosen
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn tree_row(
     ui: &mut Ui,
@@ -696,7 +989,7 @@ fn tree_row(
     let mut open = ui
         .ctx()
         .data(|data| data.get_temp::<bool>(state_id))
-        .unwrap_or(depth == 0);
+        .unwrap_or_else(|| tree.opens(depth));
     let whole_id = state_id.with("whole");
     let whole = ui
         .ctx()
@@ -705,14 +998,23 @@ fn tree_row(
 
     // Where the row's parts go: ✓ and {} at the panel's right edge, always;
     // the name keeps what it needs up to most of the room left of them, the
-    // value takes the rest. Both are cut where they do not fit.
+    // value takes the rest. Both are cut where they do not fit. In Run
+    // results the row ends in what [`End`] says, after the value and no
+    // further right than the panel's edge (REP-08).
     let width = ui.available_width();
     let left = ui.cursor().min.x;
-    let actions_x = left + (width - TREE_ACTIONS).max(0.0);
     let fold_x = left + depth as f32 * tree.step;
     let name_x = fold_x + TREE_FOLD + TREE_GAP;
+    let end = End::of(ui, tree, &text, supported, width - (name_x - left));
+    let actions_x = left
+        + (width - end.width()).max(0.0)
+        + if matches!(end, End::Nothing) {
+            TREE_GAP
+        } else {
+            0.0
+        };
     let room = (actions_x - TREE_GAP - name_x).max(0.0);
-    let name_text = if depth == 0 {
+    let name_text = if depth == 0 && tree.results.is_none() {
         RichText::new(name)
             .size(theme::FONT_BODY)
             .color(theme::TEXT)
@@ -819,21 +1121,30 @@ fn tree_row(
         egui::pos2(name_x, middle - TREE_TEXT_LIFT - name_galley.size().y / 2.0),
         name_galley.size(),
     );
+    // Run results' names are dragged only where the document takes the edit.
+    let drag = supported && tree.results.is_none_or(|results| results.offers);
     let field = put_at(row_ui, name_rect, |ui| {
         ui.add(
             egui::Label::new(name_galley)
-                .sense(egui::Sense::click_and_drag())
+                .sense(if drag {
+                    egui::Sense::click_and_drag()
+                } else {
+                    egui::Sense::hover()
+                })
                 .show_tooltip_when_elided(false),
         )
     });
-    if supported {
+    if drag {
         field.dnd_set_drag_payload(Payload::Variable {
             label: shown.to_owned(),
             binding: Binding::reference(tree.node, tree.port, text.clone()),
         });
+        field.on_hover_text(format!("{shown}\n{kind} · drag onto an argument"));
+    } else {
+        field.on_hover_text(format!("{shown}\n{kind}"));
     }
-    field.on_hover_text(format!("{shown}\n{kind} · drag onto an argument"));
 
+    let value_width = value_galley.size().x;
     let value_rect = egui::Rect::from_min_size(
         egui::pos2(value_x, middle - TREE_TEXT_LIFT - line / 2.0),
         value_galley.size(),
@@ -868,44 +1179,16 @@ fn tree_row(
             .data_mut(|data| data.insert_temp(whole_id, !whole));
     }
 
-    // ✓ and {}, on every row, on its first line: beside the name when the
-    // value is open over several. Where the step takes no edit both are
-    // disabled, and say why (DIAG-09).
-    let why = |response: egui::Response| match tree.read_only {
-        Some(why) => response.on_disabled_hover_text(why),
-        None => response,
-    };
-    let button = |x: f32| {
-        egui::Rect::from_center_size(
-            egui::pos2(x + TREE_BUTTON / 2.0, middle),
-            egui::vec2(TREE_BUTTON, TREE_BUTTON),
-        )
-    };
-    // The ✓ opens the menu Add a check (DIAG-08).
-    let check = why(put_at(row_ui, button(actions_x), |ui| {
-        ui.add_enabled(
-            supported,
-            widgets::icon_button(Icon::Check, "Add a check").compact(),
-        )
-    }));
-    if let Some(check) = check_menu(&check, shown, value) {
-        *action = Some(TreeAction::Check {
-            path: text.clone(),
-            check,
-        });
-    }
-    let variable = why(put_at(
-        row_ui,
-        button(actions_x + TREE_BUTTON + 2.0),
-        |ui| {
-            ui.add_enabled(
-                supported,
-                widgets::icon_button(Icon::Variable, "Assign to variable").compact(),
-            )
-        },
-    ));
-    if variable.clicked() {
-        *action = Some(TreeAction::Assign { path: text.clone() });
+    if tree.results.is_some() {
+        // Run results: right after the value, at most at the panel's edge.
+        let x = (value_x + value_width + TREE_GAP).min(actions_x);
+        if let Some(chosen) = end.show(row_ui, x, middle, shown, value, &text) {
+            *action = Some(chosen);
+        }
+    } else {
+        inspector_actions(
+            row_ui, tree, actions_x, middle, shown, value, &text, supported, action,
+        );
     }
 
     if !open || child_count == 0 {
@@ -1041,6 +1324,7 @@ mod tree_tests {
             port: "body",
             read_only: None,
             step: TREE_INDENT,
+            results: None,
         };
         let mut output = context.run_ui(Default::default(), |ui| {
             let mut budget = JSON_ROWS_PER_FRAME;
@@ -1101,6 +1385,7 @@ mod tree_tests {
             port: "body",
             read_only: None,
             step: TREE_INDENT,
+            results: None,
         };
         context.data_mut(|data| data.insert_temp(tree("first").branch("customer"), true));
         let mut visited = Vec::new();

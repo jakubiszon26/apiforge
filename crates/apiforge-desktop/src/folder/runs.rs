@@ -654,6 +654,11 @@ impl FolderApp {
             cleanup,
             project: executed.context(),
         };
+        // Tree or JSON is kept with the project's view on this computer
+        // (REP-08).
+        self.runs
+            .panel
+            .set_json_view(self.workbench.panels.results_json);
         let actions = self.runs.panel.show(
             ui,
             &crate::report::Context {
@@ -675,6 +680,11 @@ impl FolderApp {
                 graphs: Some(graphs),
             },
         );
+        let json = self.runs.panel.json_view();
+        if json != self.workbench.panels.results_json {
+            self.workbench.panels.results_json = json;
+            self.touched();
+        }
         for action in actions {
             self.folder_report_action(id, &result, stale, action);
         }
