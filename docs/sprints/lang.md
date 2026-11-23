@@ -239,7 +239,10 @@ After LANG, as the owner scheduled: EDIT-01 (#358), CLI-01 (#359), EDIT-02
 (#360) with EDIT-03 (#369). CLI-01 and LANG-13 both add a command; LANG-13
 adds only `apiforge fix`.
 
-Exit criteria of the second half are written by LANG-16.
+Exit criteria of the second half, its proposed order and the decisions it
+waits for are in [LANG-16](../tickets/LANG-16.md#exit-criteria-of-the-second-half)
+(analysis of 2026-11-23, **not yet approved**; the table above stands until
+the owner decides).
 
 ## The older tickets, placed
 
