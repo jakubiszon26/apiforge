@@ -299,6 +299,184 @@ fn diag06b_criterion_2_the_notice_goes_with_the_next_action() {
     assert_eq!(notice(&harness), None, "a key is an action");
 }
 
+/// Tab and Shift+Tab reach the notice's *Undo* without dismissing it, and
+/// Enter on it undoes the delete.
+#[test]
+fn diag06b_criterion_2_undo_from_the_keyboard() {
+    let (_project, mut harness, id) = booking_day();
+    let before = source_of(&harness, &id);
+    delete(&mut harness, &id, &["policy"]);
+    assert_eq!(notice(&harness).as_deref(), Some(POLICY_GONE));
+    let undo_focused = |harness: &FolderHarness| harness.get_by_label("Undo").is_focused();
+    let mut reached = false;
+    for _ in 0..400 {
+        harness.key_press(egui::Key::Tab);
+        harness.step();
+        assert_eq!(
+            notice(&harness).as_deref(),
+            Some(POLICY_GONE),
+            "Tab is no action"
+        );
+        if undo_focused(&harness) {
+            reached = true;
+            break;
+        }
+    }
+    assert!(reached, "Tab reaches *Undo*");
+    harness.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::Tab);
+    harness.step();
+    assert_eq!(
+        notice(&harness).as_deref(),
+        Some(POLICY_GONE),
+        "Shift+Tab is no action"
+    );
+    harness.key_press(egui::Key::Tab);
+    harness.step();
+    assert!(undo_focused(&harness), "back on *Undo*");
+    harness.key_press(egui::Key::Enter);
+    settle(&mut harness);
+    harness.step();
+    assert_eq!(source_of(&harness, &id), before, "Undo restores the step");
+    assert_eq!(notice(&harness), None, "the notice goes with Undo");
+}
+
+/// An edit that lands after the delete, not made on the board (an agent's
+/// write, a sync), ends the notice; its *Undo* never undoes that edit.
+#[test]
+fn diag06b_criterion_2_undo_only_the_delete() {
+    let (_project, mut harness, id) = booking_day();
+    delete(&mut harness, &id, &["policy"]);
+    assert_eq!(notice(&harness).as_deref(), Some(POLICY_GONE));
+    let deleted = source_of(&harness, &id);
+    assert_eq!(deleted.matches("year: 2026").count(), 1);
+    let edited = deleted.replace("year: 2026", "year: 2027");
+    let session = app(&mut harness).session.as_mut().unwrap();
+    session
+        .edit_source(&id, &edited, apiforge_project::Origin::SESSION)
+        .unwrap();
+    session.settle(&id).unwrap();
+    settle(&mut harness);
+    harness.step();
+    assert_eq!(source_of(&harness, &id), edited);
+    assert_eq!(notice(&harness), None, "the other edit ends the notice");
+    app(&mut harness).active_board_command(crate::canvas::Command::Undo);
+    settle(&mut harness);
+    harness.step();
+    assert_eq!(
+        source_of(&harness, &id),
+        edited,
+        "the notice's *Undo* does not undo the other edit"
+    );
+}
+
+/// Three steps after Start; nothing reads them.
+const AFTER_START: &str = r#"scenario "After start" {
+  begin = start
+  one = GET "/one" {
+    sample 200 {}
+  }
+  two = GET "/two" {
+    sample 200 {}
+  }
+  three = GET "/three" {
+    sample 200 {}
+  }
+}
+"#;
+
+/// Start is not a step the notice names: the first step after it is the
+/// first of its braces.
+#[test]
+fn diag06b_criterion_2_the_step_after_start_shows_none() {
+    let (_project, mut harness, id) = shop_with(AFTER_START);
+    delete(&mut harness, &id, &["one"]);
+    passes(&harness, &id);
+    assert_eq!(notice(&harness), None, "the first step after Start");
+    undone(&mut harness, &id, AFTER_START);
+    delete(&mut harness, &id, &["two"]);
+    assert_eq!(
+        notice(&harness).as_deref(),
+        Some("`two` deleted. `three` now follows `one`.")
+    );
+}
+
+/// Three steps after Start with long names; nothing reads them.
+const LONG_NAMES: &str = r#"scenario "Long names" {
+  begin = start
+  the_step_before_it_with_a_long_name = GET "/one" {
+    sample 200 {}
+  }
+  a_step_with_a_rather_long_name = GET "/two" {
+    sample 200 {}
+  }
+  another_step_with_a_long_name = GET "/three" {
+    sample 200 {}
+  }
+}
+"#;
+
+/// At 960 × 540 a long refusal in the banner wraps from the top of its
+/// frame, level with *Dismiss*; at 960 × 540 and 1600 × 1000 a long notice
+/// wraps inside its frame, beside the whole of *Undo*.
+#[test]
+fn diag06b_criterion_2_long_sentences_fit_at_960() {
+    let (_project, mut harness, id) = booking_day();
+    harness.set_size(MINIMUM);
+    settle(&mut harness);
+    let refusal = "`a_step_with_a_rather_long_name` reads `another_step_with_a_long_name.body.items`; it stays below `another_step_with_a_long_name`, and so does every check that reads it.";
+    app(&mut harness)
+        .canvases
+        .get_mut(&id)
+        .unwrap()
+        .set_error(refusal);
+    harness.step();
+    harness.step();
+    let text = harness.get_by_label(refusal).rect();
+    let dismiss = harness
+        .get_all_by_label("Dismiss")
+        .map(|node| node.rect())
+        .min_by(|a, b| {
+            a.center()
+                .distance(text.center())
+                .total_cmp(&b.center().distance(text.center()))
+        })
+        .expect("the banner's *Dismiss*");
+    assert!(text.height() > 24.0, "the refusal wraps: {text:?}");
+    assert!(
+        text.top() >= dismiss.top() - 0.5,
+        "the refusal starts at the top of its frame: {text:?} {dismiss:?}"
+    );
+    crate::testing::assert_within_window(&harness, &[refusal]);
+
+    drop(harness);
+    let long = "`a_step_with_a_rather_long_name` deleted. `another_step_with_a_long_name` now follows `the_step_before_it_with_a_long_name`.";
+    for size in [MINIMUM, WIDE] {
+        let (_project, mut harness, id) = shop_with(LONG_NAMES);
+        harness.set_size(size);
+        settle(&mut harness);
+        delete(&mut harness, &id, &["a_step_with_a_rather_long_name"]);
+        let text = harness.get_by_label(long).rect();
+        let frame = board(&harness, &id)
+            .debug_notice()
+            .expect("the notice is drawn");
+        assert!(text.height() > 24.0, "{size:?}: the notice wraps: {text:?}");
+        assert!(
+            frame.contains_rect(text),
+            "{size:?}: the notice stays inside its frame: {text:?} in {frame:?}"
+        );
+        let long_undo = harness.get_by_label("Undo").rect();
+        assert!(
+            frame.contains_rect(long_undo),
+            "{size:?}: *Undo* inside the frame"
+        );
+        assert!(
+            long_undo.width() >= 56.0,
+            "{size:?}: *Undo* keeps its width beside a long notice: {long_undo:?}"
+        );
+        crate::testing::assert_within_window(&harness, &[long, "Undo"]);
+    }
+}
+
 #[test]
 fn diag06b_criterion_2_the_last_step_or_a_check_shows_none() {
     let (_project, mut harness, id) = sign_in();
@@ -361,9 +539,27 @@ fn add_on(harness: &mut FolderHarness, id: &str, source: &str, target: &str) -> 
         "the `+` is at least 16 px: {rect:?}"
     );
     let before = graph(harness, id);
+    let data = [
+        "Value",
+        "Object",
+        "Variable",
+        "Comparison",
+        "Data condition",
+        "Export",
+    ];
+    let count = |harness: &FolderHarness, label: &str| harness.query_all_by_label(label).count();
+    let shown: Vec<usize> = data.iter().map(|label| count(harness, label)).collect();
     click_at(harness, rect.center(), egui::PointerButton::Primary, 1);
     harness.step();
     assert!(board(harness, id).debug_menu_open(), "*Add step* opens");
+    // Only steps go on a line: the menu offers no check, value or export.
+    for (label, shown) in data.iter().zip(shown) {
+        assert_eq!(
+            count(harness, label),
+            shown,
+            "the menu of the `+` offers no {label}"
+        );
+    }
     harness
         .get_all_by_label("HTTP request")
         .min_by(|a, b| {
@@ -439,6 +635,67 @@ fn diag06b_criterion_3_a_plus_in_braces() {
     undone(&mut harness, &id, &before);
 }
 
+/// Two steps so close that every segment of the line between them is
+/// shorter than 48 px: no `+` stands on it, and a press on the source's
+/// *Next* still starts a wire.
+#[test]
+fn diag06b_criterion_3_a_short_line_keeps_its_sockets() {
+    let (_project, mut harness, id) = booking_day();
+    let board_graph = graph(&harness, &id);
+    let (first, hold) = (id_of(&board_graph, "first"), id_of(&board_graph, "hold"));
+    let at = board_graph
+        .nodes
+        .iter()
+        .find(|node| node.id == first)
+        .unwrap()
+        .position
+        .clone();
+    let width = board(&harness, &id).debug_world(&first).unwrap().width();
+    app(&mut harness).active_board_command(crate::canvas::Command::Move(vec![(
+        hold,
+        apiforge_core::format::Position {
+            x: at.x + f64::from(width) + 30.0,
+            y: at.y,
+        },
+    )]));
+    settle(&mut harness);
+    show(&mut harness, &id, &["first", "hold"]);
+    let line = chain_line(&harness, &id, "first", "hold");
+    let points: Vec<Pos2> = board(&harness, &id)
+        .debug_wires()
+        .iter()
+        .find(|wire| wire.id == line)
+        .unwrap()
+        .points
+        .iter()
+        .map(|point| screen(&harness, &id, *point))
+        .collect();
+    let (a, b) = points
+        .windows(2)
+        .map(|pair| (pair[0], pair[1]))
+        .max_by(|x, y| x.0.distance(x.1).total_cmp(&y.0.distance(y.1)))
+        .expect("the line is drawn");
+    assert!(a.distance(b) < 48.0, "a short line: {points:?}");
+    harness.hover_at(a + (b - a) * 0.5);
+    harness.step();
+    harness.step();
+    assert!(
+        harness.query_by_label(&plus("first", "hold")).is_none(),
+        "no `+` on a line shorter than 48 px"
+    );
+    let from = centre(&harness, "Output __order of first");
+    press(&mut harness, from);
+    move_to(&mut harness, from, from + egui::vec2(0.0, 80.0));
+    harness.step();
+    assert!(
+        board(&harness, &id).debug_caption().is_some(),
+        "a wire is carried from the *Next* of `first`"
+    );
+    harness.key_press(egui::Key::Escape);
+    release(&mut harness, from + egui::vec2(0.0, 80.0));
+    harness.step();
+}
+
 // Criterion 4 ----------------------------------------------------------------
 
 /// Opens the menu of the card `handle` with the secondary button.
@@ -499,6 +756,16 @@ fn moved_by_menu(harness: &mut FolderHarness, id: &str, handle: &str, label: &st
 fn diag06b_criterion_4_move_later_and_earlier_from_the_menu() {
     let (_project, mut harness, id) = booking_day();
     let original = steps(&harness, &id);
+    // The keys stand in the entries, seen without a hover.
+    menu_of(&mut harness, &id, "hold");
+    for keys in ["Alt+↑", "Alt+↓"] {
+        assert!(
+            harness.query_by_label(keys).is_some(),
+            "{keys} stands in the open menu"
+        );
+    }
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
     let order = moved_by_menu(&mut harness, &id, "hold", MOVE_LATER);
     assert_eq!(
         order[position(&order, "first")..position(&order, "booked")],
@@ -630,6 +897,29 @@ fn diag06b_criterion_4_the_keys() {
             .query_by_label("`second` is already the first step in its braces.")
             .is_some()
     );
+}
+
+/// With the keyboard on a control outside the board, Alt+↑ and Alt+↓ move
+/// nothing.
+#[test]
+fn diag06b_criterion_4_the_keys_need_the_board() {
+    let (_project, mut harness, id) = booking_day();
+    let hold = id_of(&graph(&harness, &id), "hold");
+    app(&mut harness).selections.insert(id.clone(), vec![hold]);
+    settle(&mut harness);
+    harness.step();
+    let before = source_of(&harness, &id);
+    harness.get_by_label("Split").focus();
+    harness.step();
+    assert!(harness.get_by_label("Split").is_focused());
+    for key in [egui::Key::ArrowDown, egui::Key::ArrowUp] {
+        alt(&mut harness, key);
+        assert_eq!(
+            source_of(&harness, &id),
+            before,
+            "the board does not move a step while a control outside it has the keys"
+        );
+    }
 }
 
 #[test]

@@ -1211,6 +1211,13 @@ impl Canvas {
             .map(|(target, reason)| (target.as_str(), reason.as_str()))
     }
 
+    /// Where the last frame drew the notice after a delete, its frame
+    /// (DIAG-06b).
+    #[cfg(test)]
+    pub(crate) fn debug_notice(&self) -> Option<Rect> {
+        self.notice_drawn.map(|(rect, _)| rect)
+    }
+
     /// Where a step carried from the Library would land (DIAG-06c).
     #[cfg(test)]
     pub(crate) fn debug_drop_mark(&self) -> Option<&DropMark> {
