@@ -678,6 +678,25 @@ fn rep07a_criterion_8_the_keyboard_moves_and_folds() {
     assert!(selected(&harness).starts_with(&format!("{WEIGHT_31} · ")));
 }
 
+/// The owner's default of 2026-11-23: with no width remembered the list
+/// opens 440 px wide, at 960 × 540 as at 1600 × 1000, and the details keep
+/// their 400 px.
+#[test]
+fn rep07a_the_list_opens_440_px_wide() {
+    for size in [MINIMUM, WIDE] {
+        let (_project, mut harness, _) = labels_with(size, &failing());
+        assert_eq!(folder(&harness).preferences.run_list_width, None);
+        ran(&mut harness);
+        assert_eq!(list_width(&harness), 440.0, "{size:?}");
+        let window = harness.ctx.content_rect();
+        assert!(
+            window.right() - details(&harness) >= LEAST_DETAILS,
+            "{size:?}: the details keep {LEAST_DETAILS} px"
+        );
+        assert_within_window(&harness, &[RESIZE_LIST]);
+    }
+}
+
 /// The row of `weight_31`'s first check, `status == 422`.
 fn weight_31_status(harness: &FolderHarness) -> String {
     rows(harness)
