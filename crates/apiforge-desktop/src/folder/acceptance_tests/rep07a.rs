@@ -678,6 +678,140 @@ fn rep07a_criterion_8_the_keyboard_moves_and_folds() {
     assert!(selected(&harness).starts_with(&format!("{WEIGHT_31} · ")));
 }
 
+/// The row of `weight_31`'s first check, `status == 422`.
+fn weight_31_status(harness: &FolderHarness) -> String {
+    rows(harness)
+        .into_iter()
+        .find(|label| label.starts_with("status == 422 · ") && label.contains("weight_31_status"))
+        .unwrap_or_else(|| panic!("weight_31_status has a row: {:?}", rows(harness)))
+}
+
+/// Review of REP-07a: a check's row stays chosen while the board shows the
+/// request it is folded into (LAY-11), but the request chosen on the board
+/// afterwards chooses the request's row.
+#[test]
+fn rep07a_the_board_chooses_the_request_after_its_check() {
+    let (_project, mut harness, id) = labels_with(WIDE, &labels_text());
+    ran(&mut harness);
+    let (main, _, _) = graphs(&harness, &id);
+    let request = node(&main, "weight_31").id.clone();
+    let check = weight_31_status(&harness);
+    click_row(&mut harness, &check);
+    harness.step();
+    assert_eq!(
+        folder(&harness).selections.get(&id).cloned(),
+        Some(vec![request.clone()]),
+        "the board shows the request the check is folded into"
+    );
+    assert!(
+        selected(&harness).contains("weight_31_status"),
+        "the check's row stays chosen: {}",
+        selected(&harness)
+    );
+    // A click on the empty board, then on the request.
+    app(&mut harness).selections.insert(id.clone(), Vec::new());
+    settle(&mut harness);
+    app(&mut harness)
+        .selections
+        .insert(id.clone(), vec![request]);
+    settle(&mut harness);
+    assert!(
+        selected(&harness).starts_with(&format!("{WEIGHT_31} · ")),
+        "the request's row is chosen: {}",
+        selected(&harness)
+    );
+}
+
+/// Review of REP-07a: in a window too narrow for the remembered width the
+/// list is narrower; the width is remembered only when the edge was dragged
+/// and the width changed, so a drag that cannot widen the list keeps the
+/// remembered 700 px.
+#[test]
+fn rep07a_a_narrow_window_keeps_the_remembered_width() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("preferences.json");
+    let mut preferences = Preferences::at(Some(path.clone()));
+    preferences.run_list_width = Some(700.0);
+    preferences.save(crate::preferences::Preference::RunListWidth);
+
+    let (_project, mut harness, _) = labels_with(MINIMUM, &failing());
+    app(&mut harness).preferences = Preferences::at(Some(path.clone()));
+    ran(&mut harness);
+    let shown = list_width(&harness);
+    assert!(shown < 700.0, "960 px leaves no room for 700: {shown}");
+    drag_edge(&mut harness, 100.0);
+    assert_eq!(list_width(&harness), shown, "the list cannot widen");
+    assert_eq!(
+        Preferences::at(Some(path.clone())).run_list_width,
+        Some(700.0),
+        "a drag that changed nothing is not remembered"
+    );
+    drag_edge(&mut harness, -40.0);
+    let narrower = list_width(&harness);
+    assert!(
+        (shown - 40.0 - narrower).abs() < 2.0,
+        "{shown} → {narrower}"
+    );
+    let remembered = Preferences::at(Some(path))
+        .run_list_width
+        .expect("a width is remembered");
+    assert!(
+        (remembered - narrower).abs() < 0.5,
+        "a drag that narrowed the list is remembered: {remembered} vs {narrower}"
+    );
+}
+
+/// Review of REP-07a: *All* and *Failed* count the same thing, the run's
+/// steps as its summary counts them: every one, and those it counts as
+/// failed, blocked or not met.
+#[test]
+fn rep07a_all_and_failed_count_the_steps_of_the_summary() {
+    let (_project, mut harness, _) = labels_with(WIDE, &failing());
+    let result = ran(&mut harness);
+    let all = format!("All {}", result.steps.len());
+    assert!(
+        harness.query_by_label(&all).is_some(),
+        "{all}: every step of the run"
+    );
+    assert!(harness.query_by_label("1 failed").is_some());
+    assert!(harness.query_by_label("Failed 1").is_some());
+}
+
+/// Review of REP-07a: when a fold or *Failed* chosen without the pointer
+/// (assistive technology; a press of the pointer elsewhere takes the focus
+/// away) hides the focused row, the focus moves to the row of its request,
+/// or to the nearest row shown.
+#[test]
+fn rep07a_a_hidden_row_gives_its_focus_to_a_shown_one() {
+    let (_project, mut harness, _) = labels_with(WIDE, &failing());
+    ran(&mut harness);
+    let check = weight_31_status(&harness);
+    click_row(&mut harness, &check);
+    assert!(harness.get_by_label(&check).is_focused(), "a click focuses");
+    harness
+        .get_by_label(&format!("Fold the checks of {WEIGHT_31}"))
+        .click_accesskit();
+    settle(&mut harness);
+    let request = row(&harness, &format!("{WEIGHT_31} · "));
+    assert!(
+        harness.get_by_label(&request).is_focused(),
+        "the request takes the focus of its folded check"
+    );
+
+    let passed = row(&harness, "Weight 0 kg · ");
+    click_row(&mut harness, &passed);
+    assert!(harness.get_by_label(&passed).is_focused());
+    harness.get_by_label("Failed 1").click_accesskit();
+    settle(&mut harness);
+    let shown = rows(&harness);
+    let focused: Vec<String> = shown
+        .iter()
+        .filter(|label| harness.get_by_label(label).is_focused())
+        .cloned()
+        .collect();
+    assert_eq!(focused.len(), 1, "a row shown takes the focus: {shown:?}");
+}
+
 /// Design review: Run results of `labels` after a run with a failure, at
 /// its normal height and maximised, with *Failed* on, at both windows.
 #[test]

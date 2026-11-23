@@ -2314,6 +2314,114 @@ mod tests {
         assert!(graphs.node(inner).is_none(), "the revision is gone");
     }
 
+    /// Review of REP-07a: the list is arranged again when the graphs it
+    /// reads change in place, as the single-project window edits its
+    /// scenario: a check's row follows its predicate with no new run.
+    #[test]
+    fn the_list_reads_a_check_again_after_an_edit_in_place() {
+        use apiforge_core::model::Predicate;
+        let project = apiforge_core::demos::shop_project();
+        let mut scenario = project.scenarios[0].clone();
+        let at = scenario
+            .graph
+            .nodes
+            .iter()
+            .position(|node| node.kind == NodeKind::Assert)
+            .expect("the demo shop has a check");
+        let check = scenario.graph.nodes[at].id.clone();
+        let mut run = sample_run();
+        run.steps = scenario
+            .graph
+            .nodes
+            .iter()
+            .map(|node| StepResult::new(node, Phase::Main))
+            .collect();
+        let rows = flatten_steps(&run.steps);
+        let index = rows
+            .iter()
+            .position(|row| row.step.node_id == check)
+            .unwrap();
+        let mut arranged = list::Arranged::default();
+        let mut text = |scenario: &apiforge_core::format::Scenario| {
+            arranged.update(
+                &run,
+                &rows,
+                Some(RunGraphs {
+                    main: &scenario.graph,
+                    cleanup: Some(&scenario.cleanup),
+                    project: &project,
+                }),
+            );
+            arranged.entries[index].predicate.clone().unwrap()
+        };
+        let before = text(&scenario);
+        let edited = &mut scenario.graph.nodes[at].config.predicate;
+        *edited = Some(if *edited == Some(Predicate::NotEquals) {
+            Predicate::Equals
+        } else {
+            Predicate::NotEquals
+        });
+        let after = text(&scenario);
+        assert_ne!(before, after, "the row reads the edited predicate");
+    }
+
+    /// Review of REP-07a: above a list narrower than they are, *All*,
+    /// *Failed* and *Collapse checks* wrap and stay within its width, each
+    /// as wide as on a line with room for them.
+    #[test]
+    fn the_controls_above_a_narrow_list_stay_within_it() {
+        use egui_kittest::kittest::Queryable;
+        const LABELS: [&str; 3] = ["All 128", "Failed 37", "Collapse checks"];
+        let drawn = |width: f32| {
+            let area = std::rc::Rc::new(std::cell::Cell::new(egui::Rect::NOTHING));
+            let kept = area.clone();
+            let mut harness = egui_kittest::Harness::builder()
+                .with_size(egui::vec2(720.0, 240.0))
+                .build_ui(move |ui| {
+                    crate::theme::apply(ui.ctx());
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(width, 160.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(width);
+                            kept.set(ui.max_rect());
+                            let mut controls = Controls {
+                                steps: 128,
+                                failed: 37,
+                                failed_only: false,
+                                foldable: true,
+                                all_folded: false,
+                                below: true,
+                                chosen: None,
+                            };
+                            controls_above_list(ui, &mut controls);
+                        },
+                    );
+                });
+            harness.run();
+            crate::testing::assert_disjoint(&harness, &LABELS);
+            let rects: Vec<egui::Rect> = LABELS
+                .iter()
+                .map(|label| harness.get_by_label(label).rect())
+                .collect();
+            (area.get(), rects)
+        };
+        let (_, roomy) = drawn(640.0);
+        let (area, narrow) = drawn(LIST_LEAST_WIDTH);
+        for ((label, rect), room) in LABELS.iter().zip(&narrow).zip(&roomy) {
+            assert!(
+                rect.left() >= area.left() - 0.5 && rect.right() <= area.right() + 0.5,
+                "{label} at {rect:?} stays within the list {area:?}"
+            );
+            assert!(
+                (rect.width() - room.width()).abs() < 0.5,
+                "{label} keeps its width: {} vs {}",
+                rect.width(),
+                room.width()
+            );
+        }
+    }
+
     fn sample_run() -> RunResult {
         let mut child = step("inner-req", "Inner request", NodeKind::Request, Phase::Main);
         child.outputs.insert("status".into(), json!(200));

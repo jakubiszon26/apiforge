@@ -867,4 +867,21 @@ mod tests {
         assert_eq!(url_path("http://localhost:3333"), "/");
         assert_eq!(url_path("/orders/1"), "/orders/1");
     }
+
+    /// Review of REP-07a: `://` is a scheme's only at the start of the URL.
+    #[test]
+    fn a_url_path_reads_a_scheme_only_at_its_start() {
+        assert_eq!(
+            url_path("/login?next=https://example.test/home"),
+            "/login?next=https://example.test/home"
+        );
+        assert_eq!(
+            url_path("https://example.test/login?next=http://other.test/a"),
+            "/login?next=http://other.test/a"
+        );
+        assert_eq!(
+            url_path("{{env.base}}/redirect?to=http://x.test/y"),
+            "{{env.base}}/redirect?to=http://x.test/y"
+        );
+    }
 }
