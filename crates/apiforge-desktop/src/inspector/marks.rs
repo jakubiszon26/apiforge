@@ -18,6 +18,7 @@ use apiforge_core::{
 use eframe::egui::{self, Color32, Ui};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 thread_local! {
     /// How many indexes this thread built: one per edit, never one per
@@ -49,6 +50,9 @@ pub struct PortMarks {
 pub struct CheckIndex {
     checks: Vec<IndexedCheck>,
     ports: HashMap<(String, String), PortMarks>,
+    /// The document's steps and the project, which the menu *Add a check*
+    /// writes the checks it offers against (DIAG-19).
+    board: Option<(Graph, Arc<Project>)>,
 }
 
 fn is_check(node: &Node) -> bool {
@@ -71,6 +75,26 @@ impl CheckIndex {
             index.add(cleanup, &both, project);
         }
         index
+    }
+
+    /// [`Self::build`], keeping the document's steps and `project` for the
+    /// menu *Add a check*, which writes the checks it offers as their cards
+    /// will read them (DIAG-19).
+    pub fn build_with_board(main: &Graph, cleanup: Option<&Graph>, project: &Arc<Project>) -> Self {
+        let mut index = Self::build(main, cleanup, project);
+        let mut both = main.clone();
+        if let Some(cleanup) = cleanup {
+            both.nodes.extend(cleanup.nodes.iter().cloned());
+        }
+        index.board = Some((both, project.clone()));
+        index
+    }
+
+    /// The document's steps, Main's and Cleanup's, and the project.
+    pub fn board(&self) -> Option<(&Graph, &Project)> {
+        self.board
+            .as_ref()
+            .map(|(graph, project)| (graph, project.as_ref()))
     }
 
     /// How many indexes this thread has built.
