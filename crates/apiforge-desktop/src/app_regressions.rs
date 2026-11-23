@@ -727,3 +727,69 @@ fn a_component_draft_left_unsaved_shows_the_saved_definition_when_opened_again()
         "and the panel prints the saved definition, not the text it kept"
     );
 }
+
+/// DIAG-15, code review of 2026-11-23: while the code needs attention the
+/// Inspector takes no edit, but selecting is no edit: a check's card still
+/// selects its check, and the disabled *Add check* says why on its hover.
+#[test]
+fn diag15_a_card_selects_its_check_while_the_document_is_locked() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    const REASON: &str = "Board is read-only while code changes need attention.";
+    let mut harness = crate::testing::workspace_harness(egui::vec2(1600.0, 1000.0));
+    let app = harness.state_mut().as_mut().unwrap();
+    apply(
+        app,
+        "scenario \"Lock\" {\n  begin = start\n  cart = POST \"/carts\" {\n    \
+         sample 201 { total: 172.5 }\n  }\n  \
+         total_value = assert cart.body.total == 172.5\n}\n",
+    );
+    let id = |app: &App, handle: &str| {
+        app.editor
+            .graph()
+            .nodes
+            .iter()
+            .find(|node| node.handle == handle)
+            .unwrap_or_else(|| panic!("a step {handle}"))
+            .id
+            .clone()
+    };
+    let (cart, total) = (id(app, "cart"), id(app, "total_value"));
+    app.editor.selection = vec![cart];
+    app.inspector.open_checks();
+    app.buffers.typed(
+        &app.code_context(),
+        "scenario \"Lock\" { value =".into(),
+        Instant::now(),
+    );
+    app.settle_code();
+    assert!(app.document_locked(), "the document is locked");
+    harness.run();
+
+    let add = harness.get_by_label("Add check");
+    assert!(add.accesskit_node().is_disabled(), "Add check is disabled");
+    let at = add.rect().center();
+    let said = |harness: &crate::testing::WorkspaceHarness| {
+        harness.query_all_by_label_contains(REASON).count()
+    };
+    let elsewhere = said(&harness);
+    harness.hover_at(at);
+    let mut shown = false;
+    for _ in 0..120 {
+        harness.step();
+        if said(&harness) > elsewhere {
+            shown = true;
+            break;
+        }
+    }
+    assert!(shown, "pointing at Add check says why");
+    harness.remove_cursor();
+    harness.run();
+
+    harness.get_by_label("Check total_value").click();
+    harness.run();
+    assert_eq!(
+        harness.state().as_ref().unwrap().editor.selection,
+        vec![total],
+        "a click on the card selects the check"
+    );
+}

@@ -647,6 +647,143 @@ fn diag15_criterion_8_escape_keeps_the_selection() {
     );
 }
 
+/// Criterion 6 where the board takes no edit (code review, 2026-11-23):
+/// selecting is no edit, so a card still selects its check, by a click and
+/// by Return, while *Add check* stays disabled.
+#[test]
+fn diag15_criterion_6_a_card_selects_on_a_read_only_board() {
+    let (_project, mut harness, id) = opened(WIDE, &with(CHECKS));
+    let graph = graph(&harness, &id);
+    let cart = node(&graph, "cart").id.clone();
+    let total = node(&graph, "total_value").id.clone();
+    let status = node(&graph, "status_created").id.clone();
+    checks_tab(&mut harness, &id, "cart");
+    let broken = format!("{}\n}}\n", source_of(&harness, &id));
+    app(&mut harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &broken, CODE)
+        .unwrap();
+    settle(&mut harness);
+    assert!(
+        !folder(&harness).snapshot(&id).unwrap().editable,
+        "the board takes no edit"
+    );
+    assert!(
+        add_button(&harness)
+            .expect("Add check is still shown")
+            .accesskit_node()
+            .is_disabled(),
+        "Add check stays disabled"
+    );
+
+    harness.get_by_label("Check total_value").click();
+    settle(&mut harness);
+    assert_eq!(
+        selected(&mut harness, &id),
+        vec![total],
+        "a click selects on a read-only board"
+    );
+
+    app(&mut harness).show_checks(&id, cart);
+    settle(&mut harness);
+    harness.get_by_label("Check status_created").focus();
+    settle(&mut harness);
+    assert!(
+        harness.get_by_label("Check status_created").is_focused(),
+        "the card takes keyboard focus on a read-only board"
+    );
+    harness.key_press(egui::Key::Enter);
+    settle(&mut harness);
+    assert_eq!(
+        selected(&mut harness, &id),
+        vec![status],
+        "Return selects on a read-only board"
+    );
+}
+
+/// Criterion 3 at depth (code review, 2026-11-23): the menu opens fields
+/// ten levels deep and no deeper, so a field at the tenth level shows no
+/// fold mark that would do nothing.
+#[test]
+fn diag15_criterion_3_no_fold_mark_past_ten_levels() {
+    let mut nested = "1".to_owned();
+    for level in (1..=11).rev() {
+        nested = format!("{{ l{level}: {nested} }}");
+    }
+    let source = SOURCE.replace(
+        r#"{ id: "c-1", total: 172.5, paid: false, owner: { name: "Ann" }, items: ["coffee"], coupon: null }"#,
+        &nested,
+    );
+    let (_project, mut harness, id) = opened(WIDE, &source);
+    checks_tab(&mut harness, &id, "cart");
+    open_menu(&mut harness);
+    let path = |depth: usize| {
+        (1..=depth)
+            .map(|level| format!("l{level}"))
+            .collect::<Vec<_>>()
+            .join(".")
+    };
+    for depth in 1..=9 {
+        fold(&mut harness, &path(depth), "Expand");
+    }
+    assert_eq!(
+        get_row(&harness, &path(10)).value().as_deref(),
+        Some("object · 1"),
+        "the tenth level is listed"
+    );
+    assert!(
+        !shows(&harness, &format!("Expand {}", path(10))),
+        "a field at the tenth level has no fold mark"
+    );
+}
+
+/// Criterion 3's limit (code review, 2026-11-23): *Field display limit
+/// reached* shows only when a row is left out, not when exactly as many
+/// rows as the limit fit.
+#[test]
+fn diag15_criterion_3_the_limit_note_only_when_a_row_is_left_out() {
+    const NOTE: &str = "Field display limit reached";
+    // Response, 98 fields, the status: 100 rows; a, b and c open: 400.
+    let hundred = (0..100)
+        .map(|item| item.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut fields: Vec<String> = ["a", "b", "c", "d"]
+        .iter()
+        .map(|key| format!("{key}: [{hundred}]"))
+        .collect();
+    fields.extend((0..94).map(|key| format!("k{key}: {key}")));
+    let source = SOURCE.replace(
+        r#"{ id: "c-1", total: 172.5, paid: false, owner: { name: "Ann" }, items: ["coffee"], coupon: null }"#,
+        &format!("{{ {} }}", fields.join(", ")),
+    );
+    let (_project, mut harness, id) = opened(WIDE, &source);
+    checks_tab(&mut harness, &id, "cart");
+    open_menu(&mut harness);
+    for key in ["a", "b", "c"] {
+        fold(&mut harness, key, "Expand");
+    }
+    assert!(
+        row(&harness, "HTTP status").is_some(),
+        "the 400th row, the status, is listed"
+    );
+    assert!(
+        harness.query_all_by_label_contains(NOTE).next().is_none(),
+        "no row is left out, so no note"
+    );
+    fold(&mut harness, "d", "Expand");
+    assert!(
+        row(&harness, "HTTP status").is_none(),
+        "past the limit the last rows are left out"
+    );
+    assert!(
+        harness.query_all_by_label_contains(NOTE).next().is_some(),
+        "and the note says so"
+    );
+}
+
 /// Criterion 8: design review at 1600 × 1000 and 960 × 540, against the
 /// board `check-making.png`: the tab empty and with checks, the menu open
 /// on `total` with DIAG-08's menu beside it.
