@@ -865,11 +865,17 @@ impl FolderApp {
 
     /// Selects `node` and opens the Inspector on its *Checks* list (LAY-11).
     fn show_checks(&mut self, document_id: &str, node: String) {
+        self.select_step(document_id, node);
+        self.inspector.open_checks();
+    }
+
+    /// Selects `node` alone, as a click on its card does; the board brings
+    /// a newly selected card into view (UX-18).
+    fn select_step(&mut self, document_id: &str, node: String) {
         self.new_inputs.remove(document_id);
         self.component_settings.remove(document_id);
         self.selections.insert(document_id.to_owned(), vec![node]);
         self.selected_inputs.remove(document_id);
-        self.inspector.open_checks();
     }
 
     /// Draws every board at `density` and remembers it as *Compact cards*.

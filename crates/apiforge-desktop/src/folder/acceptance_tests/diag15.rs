@@ -162,12 +162,17 @@ fn get_row<'a>(harness: &'a FolderHarness, field: &'a str) -> egui_kittest::Node
 
 /// Opens or folds `field` in the menu by its fold mark.
 fn fold(harness: &mut FolderHarness, field: &str, mark: &str) {
+    fn node<'a>(harness: &'a FolderHarness, label: &'a str) -> egui_kittest::Node<'a> {
+        harness
+            .query_all_by_label(label)
+            .next()
+            .unwrap_or_else(|| panic!("the menu has {label}"))
+    }
     let label = format!("{mark} {field}");
-    harness
-        .query_all_by_label(&label)
-        .next()
-        .unwrap_or_else(|| panic!("the row {field} has {label}"))
-        .click();
+    // A row below the menu's edge is scrolled to first, as by hand.
+    node(harness, &label).scroll_to_me();
+    settle(harness);
+    node(harness, &label).click();
     settle(harness);
 }
 
@@ -210,11 +215,18 @@ fn diag15_criterion_1_add_check_is_the_first_line() {
     let button = add_button(&harness)
         .expect("the Checks tab of a step with checks has Add check")
         .rect();
-    for line in ["2 checks", "Check status_created", "Check total_value"] {
-        let rect = harness.get_by_label(line).rect();
+    // The first line is the count's: *Add check* shares it, so that three
+    // checks still fit the smallest window (criterion 7).
+    let count = harness.get_by_label("2 checks").rect();
+    assert!(
+        button.top() <= count.top() && button.bottom() >= count.center().y,
+        "Add check stands on the first line, the count's: {button:?} {count:?}"
+    );
+    for card in ["Check status_created", "Check total_value"] {
+        let rect = harness.get_by_label(card).rect();
         assert!(
             button.bottom() <= rect.top(),
-            "Add check stands above {line}: {button:?} {rect:?}"
+            "Add check stands above {card}: {button:?} {rect:?}"
         );
     }
 }

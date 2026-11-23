@@ -2274,11 +2274,18 @@ impl App {
                 self.inspector_action(action);
                 continue;
             }
+            // Selecting is navigation, allowed while the document is locked.
+            if let inspector::Action::Select(step) = action {
+                self.editor.selection = vec![step];
+                continue;
+            }
             if self.document_locked() {
                 continue;
             }
             match action {
-                inspector::Action::Reveal(_) => unreachable!("handled above"),
+                inspector::Action::Reveal(_) | inspector::Action::Select(_) => {
+                    unreachable!("handled above")
+                }
                 inspector::Action::UpdateNode(updated) => {
                     let mut graph = self.editor.graph().clone();
                     if let Some(slot) = graph
