@@ -2,13 +2,12 @@
 
 - Size: M · Owner review: 15 min · Risk: `visible UI`, `default` (two
   keys, if the owner chooses keys)
-- State: **Approved except one question** (the keys, on
-  [#491](https://github.com/jakubiszon26/apiforge/issues/491)); after
-  DIAG-06c (#490). Owner's answers of 2026-11-20 on #391: 8 = A, 11 = A,
-  12 = A. Not a condition of 0.2.0.
+- State: **Approved.** Owner's answers of 2026-11-20 on #391: 8 = A,
+  11 = A, 12 = A; the keys on #491 (2026-11-20): A, Alt+↑ and Alt+↓.
+  Built next by the owner's decision of 2026-11-23 (#582).
 - Issue [#491](https://github.com/jakubiszon26/apiforge/issues/491) ·
   LANG sprint · branch `feat/diag-06b-feedback-and-moves`
-- Analysis model: Fable 5.2 · Implementation model: —
+- Analysis model: Fable 5.2 · Implementation model: Opus 5.5
 
 ## Goal
 
