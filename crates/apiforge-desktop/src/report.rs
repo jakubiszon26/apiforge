@@ -7,25 +7,21 @@
 
 use crate::icons::Icon;
 use crate::{
-    dnd::Payload,
     labels,
     not_run::{self, NotRun},
     theme, widgets,
 };
 use apiforge_core::{
     edit::FieldCheck,
-    format::{Binding, Graph, Node, OptionalJson, Project},
+    format::{Graph, Node, OptionalJson, Project},
     graph::{component_definition, condition_predicates, predicate},
-    js::{json_stringify, type_name},
+    js::json_stringify,
     model::{ErrorPolicy, Match, NodeKind, Predicate},
-    path::JsonPath,
     run::{CauseEnds, Phase, RunMode, RunResult, RunStatus, StepResult, StepStatus},
 };
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
-use std::{borrow::Cow, collections::HashSet};
-
-const RESERVED_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
+use std::borrow::Cow;
 
 /// Requests from the report panel to the application.
 #[derive(Clone, Debug, PartialEq)]
@@ -324,6 +320,79 @@ pub fn resolve_selected<'a, 'b>(
         .or_else(|| rows.first())
 }
 
+/// What *Expand all* and *Collapse all* last chose (REP-08). It holds while
+/// another step is selected, so every step opens the same way, until the
+/// next run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Folding {
+    /// Neither: a value opens to its leaves, a large one to its second level.
+    #[default]
+    Default,
+    ExpandAll,
+    CollapseAll,
+}
+
+pub(crate) use crate::inspector::Opening;
+
+/// The most nodes a value opens to its leaves by default (REP-08).
+const OPEN_NODES: usize = 2000;
+
+/// How a value's rows open before one is folded by hand (REP-08): to its
+/// leaves, or to its second level when it has more than [`OPEN_NODES`]
+/// nodes or more open rows than are drawn at once, or to its first where
+/// even the second level's rows are not drawn at once (review round,
+/// 2026-11-23); *Expand all* opens any value to its leaves and *Collapse
+/// all* folds every row.
+pub(crate) fn opening(folding: Folding, value: &Value) -> Opening {
+    match folding {
+        Folding::ExpandAll => Opening::Leaves,
+        Folding::CollapseAll => Opening::Closed,
+        Folding::Default => by_default(value).0,
+    }
+}
+
+/// How a value opens with neither *Expand all* nor *Collapse all*, and
+/// whether it has more than [`OPEN_NODES`] nodes.
+fn by_default(value: &Value) -> (Opening, bool) {
+    let large = more_nodes_than(value, OPEN_NODES);
+    let opening = if !large && Opening::Leaves.drawn_whole(value) {
+        Opening::Leaves
+    } else if Opening::Levels(2).drawn_whole(value) {
+        Opening::Levels(2)
+    } else {
+        Opening::Levels(1)
+    };
+    (opening, large)
+}
+
+/// Whether `value` has more than `limit` nodes, the value itself included.
+fn more_nodes_than(value: &Value, limit: usize) -> bool {
+    fn walk(value: &Value, left: &mut usize) -> bool {
+        if *left == 0 {
+            return true;
+        }
+        *left -= 1;
+        match value {
+            Value::Array(items) => items.iter().any(|item| walk(item, left)),
+            Value::Object(fields) => fields.values().any(|item| walk(item, left)),
+            _ => false,
+        }
+    }
+    let mut left = limit;
+    walk(value, &mut left)
+}
+
+/// The most of a value's JSON text Run results lay out (REP-08); *Copy*
+/// takes all of it.
+const JSON_SHOWN_CHARS: usize = 100_000;
+
+/// The accessible names of the controls above a value (REP-08), distinct
+/// from every other control of the window (#235).
+pub(crate) const SHOW_TREE: &str = "Show as tree";
+pub(crate) const SHOW_JSON: &str = "Show as JSON";
+pub(crate) const COPY_JSON: &str = "Copy as JSON";
+const CHOOSE_A_FIELD: &str = "Choose a field → add a check";
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DetailTab {
     #[default]
@@ -396,7 +465,22 @@ pub struct ReportPanel {
     last_selected_node_id: Option<String>,
     selected_key: Option<String>,
     tab: DetailTab,
-    expanded: HashSet<String>,
+    /// *Expand all* or *Collapse all*, holding from step to step (REP-08).
+    folding: Folding,
+    /// Counts the choices of *Expand all* and *Collapse all*, and the runs:
+    /// the rows folded or opened by hand before the last one are forgotten.
+    epoch: u64,
+    /// The trees drawn since the last change of `epoch`, whose rows' state
+    /// is freed at the next.
+    trees: std::collections::HashSet<egui::Id>,
+    /// How each value of the run opens by default, and whether it is large,
+    /// per step, tab and port: counted once, not every frame.
+    openings: std::collections::HashMap<egui::Id, (Opening, bool)>,
+    /// The value is shown as JSON text instead of a tree (REP-08); the
+    /// folder window keeps it with the project's view.
+    json: bool,
+    /// The JSON text of the value shown, for the value it was written from.
+    json_text: Option<(egui::Id, std::sync::Arc<String>)>,
     /// This frame's `Context::checked`, for the value rows.
     checked: Vec<CheckedField>,
 }
@@ -418,7 +502,12 @@ impl Default for ReportPanel {
             last_selected_node_id: None,
             selected_key: None,
             tab: DetailTab::Outputs,
-            expanded: HashSet::new(),
+            folding: Folding::Default,
+            epoch: 0,
+            trees: Default::default(),
+            openings: Default::default(),
+            json: false,
+            json_text: None,
             checked: Vec::new(),
         }
     }
@@ -438,6 +527,17 @@ impl ReportPanel {
              highest, panel) {:?}",
             self.height, self.compact_height, self.drag, self.maximised, self.last_frame
         )
+    }
+
+    /// Whether values are shown as JSON text instead of a tree (REP-08).
+    pub fn json_view(&self) -> bool {
+        self.json
+    }
+
+    /// Shows values as JSON text, or as a tree, as the project's view keeps
+    /// it.
+    pub fn set_json_view(&mut self, json: bool) {
+        self.json = json;
     }
 
     /// Whether the open panel fills the window, so the caller draws nothing else.
@@ -483,7 +583,13 @@ impl ReportPanel {
 
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
-        self.sync_selection(context.run, context.selected_node_id);
+        if self.sync_selection(context.run, context.selected_node_id) {
+            // *Expand all* and *Collapse all* hold until the next run, whose
+            // values open as by default (review round, 2026-11-23).
+            self.folding = Folding::Default;
+            self.openings.clear();
+            self.forget_trees(ui.ctx());
+        }
         if self.checked != context.checked {
             self.checked = context.checked.to_vec();
         }
@@ -766,14 +872,16 @@ impl ReportPanel {
         actions
     }
 
-    fn sync_selection(&mut self, run: Option<&RunResult>, selected_node_id: Option<&str>) {
+    /// Follows the run and the board's selection; returns whether the run
+    /// changed.
+    fn sync_selection(&mut self, run: Option<&RunResult>, selected_node_id: Option<&str>) -> bool {
         let run_id = run.map(|run| run.id.as_str());
         let run_changed = self.last_run_id.as_deref() != run_id;
         let node_changed = self.last_selected_node_id.as_deref() != selected_node_id;
         if run_changed {
             self.last_run_id = run_id.map(str::to_owned);
             self.selected_key = None;
-            self.expanded.clear();
+            self.json_text = None;
         }
         if node_changed {
             self.last_selected_node_id = selected_node_id.map(str::to_owned);
@@ -789,7 +897,7 @@ impl ReportPanel {
                     Some(row.key.as_str()) == self.selected_key.as_deref() && row.root_id == node_id
                 })
             {
-                return;
+                return run_changed;
             }
             if let Some(item) = rows
                 .iter()
@@ -797,6 +905,16 @@ impl ReportPanel {
             {
                 self.selected_key = Some(item.key.clone());
             }
+        }
+        run_changed
+    }
+
+    /// Forgets the rows folded or opened by hand, and frees what their trees
+    /// kept in egui's memory: at a new run, *Expand all* or *Collapse all*.
+    fn forget_trees(&mut self, ctx: &egui::Context) {
+        self.epoch += 1;
+        for tree in self.trees.drain() {
+            crate::inspector::forget_results_tree(ctx, tree);
         }
     }
 
@@ -1084,33 +1202,86 @@ impl ReportPanel {
             comparison_box(ui, &expected, &step.actual);
         }
 
+        let outputs = format!("Outputs  {}", step.outputs.len());
+        let inputs = format!("Inputs  {}", step.inputs.len());
+        let hint = checkable && self.tab == DetailTab::Outputs;
+        // The controls above the value share the tabs' line where it has
+        // room for them, and take a line of their own under it otherwise.
+        let gap = ui.spacing().item_spacing.x;
+        let mut tabs =
+            widgets::tab_value_width(ui, &outputs) + widgets::tab_value_width(ui, &inputs) + gap;
+        if step.request.is_some() {
+            tabs += widgets::tab_value_width(ui, "HTTP request") + gap;
+        }
+        let hint_width = if hint {
+            text_width(ui, CHOOSE_A_FIELD, theme::FONT_LABEL) + gap
+        } else {
+            0.0
+        };
+        let one_line = ui.available_width() >= tabs + hint_width + bar_width(ui) + 16.0;
+        let mut copy = false;
         ui.horizontal(|ui| {
-            widgets::tab_value(
-                ui,
-                &mut self.tab,
-                DetailTab::Outputs,
-                format!("Outputs  {}", step.outputs.len()),
-            );
-            widgets::tab_value(
-                ui,
-                &mut self.tab,
-                DetailTab::Inputs,
-                format!("Inputs  {}", step.inputs.len()),
-            );
+            widgets::tab_value(ui, &mut self.tab, DetailTab::Outputs, &outputs);
+            widgets::tab_value(ui, &mut self.tab, DetailTab::Inputs, &inputs);
             if step.request.is_some() {
                 widgets::tab_value(ui, &mut self.tab, DetailTab::Request, "HTTP request");
             }
-            if checkable && self.tab == DetailTab::Outputs {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    widgets::hint(ui, "Choose a field → add a check");
-                });
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if one_line {
+                    copy = self.value_bar(ui);
+                    ui.add_space(8.0);
+                }
+                if hint {
+                    widgets::hint(ui, CHOOSE_A_FIELD);
+                }
+            });
         });
+        if !one_line {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), theme::CONTROL_HEIGHT),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| copy = self.value_bar(ui),
+            );
+        }
         ui.separator();
 
+        let json_id = egui::Id::new(("report-json", run_id, &selected.key, self.tab as u8));
+        let json = (copy || self.json).then(|| self.json_text(json_id, step));
+        if copy && let Some(text) = &json {
+            ui.ctx().copy_text(text.as_str().to_owned());
+        }
+        let json = json.filter(|_| self.json);
+        // What is folded or opened by hand is kept per step, tab and choice
+        // of Expand all or Collapse all.
+        let document = egui::Id::new((
+            "report-tree",
+            run_id,
+            selected.key.as_str(),
+            self.tab as u8,
+            self.epoch,
+        ));
+        self.trees.insert(document);
+        let folding = self.folding;
+        let checked = &self.checked;
+        let openings = &mut self.openings;
+        let tab = self.tab;
+        // How a port's value opens, counted once per run, step and tab.
+        let mut opens = |port: &str, value: &Value| match folding {
+            Folding::Default => *openings
+                .entry(egui::Id::new((
+                    "report-opening",
+                    run_id,
+                    selected.key.as_str(),
+                    tab as u8,
+                    port,
+                )))
+                .or_insert_with(|| by_default(value)),
+            folding => (opening(folding, value), false),
+        };
+
         ui.push_id(
-            ("report-detail", run_id, &selected.key, self.tab as u8),
-            |ui| match self.tab {
+            ("report-detail", run_id, &selected.key, tab as u8),
+            |ui| match tab {
                 DetailTab::Request => {
                     if let Some(request) = &step.request {
                         ui.horizontal(|ui| {
@@ -1118,23 +1289,37 @@ impl ReportPanel {
                             ui.label(RichText::new(&request.url).monospace().size(12.0));
                         });
                         ui.add_space(4.0);
-                        let headers = Value::Object(
-                            request
-                                .headers
-                                .iter()
-                                .map(|(k, v)| (k.clone(), Value::String(v.clone())))
-                                .collect::<Map<String, Value>>(),
-                        );
-                        let branch = format!("{run_id}:{}:request:headers", selected.key);
-                        self.value_tree(ui, &branch, "headers", &headers, None, false, actions);
+                        if let Some(text) = &json {
+                            json_text(ui, text);
+                            return;
+                        }
+                        let headers = request_headers(request);
+                        let none = |_: &str| false;
+                        let mut trees = vec![("headers", &headers)];
                         if let OptionalJson::Present(body) = &request.body {
-                            let branch = format!("{run_id}:{}:request:body", selected.key);
-                            self.value_tree(ui, &branch, "body", body, None, false, actions);
+                            trees.push(("body", body));
+                        }
+                        for (port, value) in trees {
+                            let (opening, large) = opens(port, value);
+                            large_line(ui, opening, large, port);
+                            crate::inspector::results_tree(
+                                ui,
+                                document,
+                                &step.node_id,
+                                port,
+                                value,
+                                crate::inspector::Results {
+                                    opening,
+                                    fields: false,
+                                    offers: false,
+                                    checked: &none,
+                                },
+                            );
                         }
                     }
                 }
                 DetailTab::Outputs | DetailTab::Inputs => {
-                    let map = if self.tab == DetailTab::Inputs {
+                    let map = if tab == DetailTab::Inputs {
                         &step.inputs
                     } else {
                         &step.outputs
@@ -1142,7 +1327,7 @@ impl ReportPanel {
                     if map.is_empty() {
                         widgets::hint(
                             ui,
-                            if self.tab == DetailTab::Inputs {
+                            if tab == DetailTab::Inputs {
                                 "No inputs for this step."
                             } else {
                                 "No outputs for this step."
@@ -1150,288 +1335,229 @@ impl ReportPanel {
                         );
                         return;
                     }
+                    if let Some(text) = &json {
+                        json_text(ui, text);
+                        return;
+                    }
                     // The rows of a checkable step's outputs name their field,
                     // so a checked one reads *Check added* (UX-01) even while
                     // the document cannot be edited; only an editable one
                     // offers *Check* and *To variable*.
-                    let fields = self.tab == DetailTab::Outputs && checkable;
+                    let fields = tab == DetailTab::Outputs && checkable;
                     for (port, value) in map {
-                        let branch = format!("{run_id}:{}:{}:{port}", selected.key, self.tab as u8);
-                        let target = fields.then_some((step.node_id.as_str(), port.as_str()));
-                        self.value_tree(ui, &branch, port, value, target, editable, actions);
+                        let is_checked = |path: &str| {
+                            checked.iter().any(|checked| {
+                                checked.node_id == step.node_id
+                                    && checked.port == *port
+                                    && checked.path == path
+                            })
+                        };
+                        let (opening, large) = opens(port, value);
+                        large_line(ui, opening, large, port);
+                        let chosen = crate::inspector::results_tree(
+                            ui,
+                            document,
+                            &step.node_id,
+                            port,
+                            value,
+                            crate::inspector::Results {
+                                opening,
+                                fields,
+                                offers: fields && editable,
+                                checked: &is_checked,
+                            },
+                        );
+                        actions.extend(chosen.map(|chosen| match chosen {
+                            crate::inspector::TreeAction::Check { path, check } => {
+                                Action::AssertField {
+                                    node_id: step.node_id.clone(),
+                                    port: port.clone(),
+                                    path,
+                                    check,
+                                }
+                            }
+                            crate::inspector::TreeAction::Assign { path } => Action::AssignField {
+                                node_id: step.node_id.clone(),
+                                port: port.clone(),
+                                path,
+                            },
+                        }));
                     }
                 }
             },
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn value_tree(
-        &mut self,
-        ui: &mut Ui,
-        branch_id: &str,
-        label: &str,
-        value: &Value,
-        interactive: Option<(&str, &str)>,
-        editable: bool,
-        actions: &mut Vec<Action>,
-    ) {
-        self.value_branch(
-            ui,
-            branch_id,
-            label,
-            value,
-            &JsonPath::root(),
-            0,
-            true,
-            interactive,
-            editable,
-            actions,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn value_branch(
-        &mut self,
-        ui: &mut Ui,
-        branch_id: &str,
-        label: &str,
-        value: &Value,
-        path: &JsonPath,
-        depth: usize,
-        valid_path: bool,
-        interactive: Option<(&str, &str)>,
-        editable: bool,
-        actions: &mut Vec<Action>,
-    ) {
-        let path_text = path.to_string();
-        let expandable = match value {
-            Value::Array(items) => !items.is_empty(),
-            Value::Object(fields) => !fields.is_empty(),
-            _ => false,
-        };
-        let key = format!("{branch_id}:{path_text}");
-        // Top-level ports start open; nested containers open on demand.
-        let is_open = if depth == 0 {
-            !self.expanded.contains(&format!("closed:{key}"))
-        } else {
-            self.expanded.contains(&key)
-        };
-
-        ui.horizontal(|ui| {
-            ui.add_space(depth as f32 * 14.0);
-            let toggle = if expandable {
-                if is_open { "▾" } else { "▸" }
-            } else {
-                "·"
-            };
+    /// *Tree | JSON*, *Expand all*, *Collapse all* and *Copy*, right to left
+    /// (REP-08). Returns whether *Copy* was clicked.
+    fn value_bar(&mut self, ui: &mut Ui) -> bool {
+        let copy = ui
+            .add(
+                widgets::action(Icon::Copy, "Copy")
+                    .compact()
+                    .quiet()
+                    .named(COPY_JSON)
+                    .hover("Copy the value as JSON"),
+            )
+            .clicked();
+        ui.add_enabled_ui(!self.json, |ui| {
             if ui
-                .add_enabled(
-                    expandable,
-                    egui::Button::new(RichText::new(toggle).size(11.0))
-                        .frame(false)
-                        .min_size(egui::vec2(16.0, 18.0)),
+                .add(
+                    widgets::action(Icon::ChevronRight, "Collapse all")
+                        .compact()
+                        .quiet(),
                 )
                 .clicked()
             {
-                let marker = if depth == 0 {
-                    format!("closed:{key}")
-                } else {
-                    key.clone()
-                };
-                if !self.expanded.remove(&marker) {
-                    self.expanded.insert(marker);
-                }
+                self.folding = Folding::CollapseAll;
+                self.forget_trees(ui.ctx());
             }
-
-            let can_drag = interactive.is_some() && editable && valid_path;
-            let key_color = if can_drag { theme::LINK } else { theme::TEXT };
-            let sense = if can_drag {
-                Sense::click_and_drag()
-            } else {
-                Sense::hover()
-            };
-            let key_response = widgets::named(
-                ui.add(
-                    egui::Label::new(RichText::new(label).monospace().size(12.0).color(key_color))
-                        .sense(sense)
-                        .truncate(),
-                ),
-                label,
-            );
-            if let Some((node_id, port)) = interactive
-                && can_drag
-            {
-                let drag_label = if path_text.is_empty() {
-                    port.to_owned()
-                } else {
-                    path_text.clone()
-                };
-                key_response.dnd_set_drag_payload(Payload::Variable {
-                    label: labels::truncate(&drag_label, 200),
-                    binding: Binding::reference(node_id, port, path_text.clone()),
-                });
-            }
-            let hover = if path_text.is_empty() {
-                format!("(whole value) · {}", type_name(Some(value)))
-            } else {
-                format!("{path_text} · {}", type_name(Some(value)))
-            };
-            key_response.on_hover_text(hover);
-
-            ui.label(RichText::new(":").color(theme::MUTED));
-            let summary = describe_value(value);
-            ui.add(
-                egui::Label::new(
-                    RichText::new(labels::truncate(&summary, 72))
-                        .monospace()
-                        .size(12.0)
-                        .color(theme::MUTED),
+            if ui
+                .add(
+                    widgets::action(Icon::ChevronDown, "Expand all")
+                        .compact()
+                        .quiet(),
                 )
-                .truncate(),
-            )
-            .on_hover_text(summary);
-
-            if let Some((node_id, port)) = interactive {
-                if valid_path
-                    && self.checked.iter().any(|checked| {
-                        checked.node_id == node_id
-                            && checked.port == port
-                            && checked.path == path_text
-                    })
-                {
-                    // A check from these results waits for the next run; the
-                    // edit is undone like any other (UX-01).
-                    let (icon, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), Sense::hover());
-                    Icon::Check.paint(ui.painter(), icon, theme::SUCCESS);
-                    ui.label(
-                        RichText::new("Check added")
-                            .size(theme::FONT_LABEL)
-                            .color(theme::SUCCESS),
-                    );
-                } else if !editable {
-                    // Stale or read-only results offer neither control.
-                } else if valid_path {
-                    let target_name = if path_text.is_empty() {
-                        label
-                    } else {
-                        path_text.as_str()
-                    };
-                    // *Check* opens the Inspector's menu Add a check (DIAG-08).
-                    let button = ui
-                        .add(widgets::action(Icon::Check, "Check").compact().quiet())
-                        .on_hover_text(format!("Check {target_name}"));
-                    if let Some(check) = crate::inspector::check_menu(&button, target_name, value) {
-                        actions.push(Action::AssertField {
-                            node_id: node_id.to_owned(),
-                            port: port.to_owned(),
-                            path: path_text.clone(),
-                            check,
-                        });
-                    }
-                    if ui
-                        .add(
-                            widgets::action(Icon::Variable, "To variable")
-                                .compact()
-                                .quiet(),
-                        )
-                        .on_hover_text(format!("Assign {target_name} to a variable"))
-                        .clicked()
-                    {
-                        actions.push(Action::AssignField {
-                            node_id: node_id.to_owned(),
-                            port: port.to_owned(),
-                            path: path_text.clone(),
-                        });
-                    }
-                } else {
-                    ui.label(RichText::new("custom key").size(11.0).color(theme::MUTED))
-                        .on_hover_text("Reserved field name. Select the parent object instead.");
-                }
+                .clicked()
+            {
+                self.folding = Folding::ExpandAll;
+                self.forget_trees(ui.ctx());
             }
         });
+        ui.add_space(8.0);
+        if ui
+            .add(
+                widgets::action(Icon::Code, "JSON")
+                    .compact()
+                    .toggle(self.json)
+                    .named(SHOW_JSON),
+            )
+            .clicked()
+        {
+            self.json = true;
+        }
+        if ui
+            .add(
+                widgets::action(Icon::Layers, "Tree")
+                    .compact()
+                    .toggle(!self.json)
+                    .named(SHOW_TREE),
+            )
+            .clicked()
+        {
+            self.json = false;
+        }
+        copy
+    }
 
-        if !expandable || !is_open {
-            return;
+    /// The JSON text of the value the tab shows, written once per value.
+    fn json_text(&mut self, id: egui::Id, step: &StepResult) -> std::sync::Arc<String> {
+        if let Some((kept, text)) = &self.json_text
+            && *kept == id
+        {
+            return text.clone();
         }
-        if depth >= 10 {
-            ui.horizontal(|ui| {
-                ui.add_space(16.0 + (depth + 1).min(5) as f32 * 14.0);
-                ui.label(
-                    RichText::new("Nested deeper than 10 levels (truncated).")
-                        .size(11.0)
-                        .color(theme::MUTED),
-                );
-            });
-            return;
+        let value = match self.tab {
+            DetailTab::Outputs => serde_json::to_value(&step.outputs),
+            DetailTab::Inputs => serde_json::to_value(&step.inputs),
+            DetailTab::Request => Ok(step.request.as_ref().map_or(Value::Null, |request| {
+                let mut sent = Map::new();
+                sent.insert("headers".into(), request_headers(request));
+                if let OptionalJson::Present(body) = &request.body {
+                    sent.insert("body".into(), body.clone());
+                }
+                Value::Object(sent)
+            })),
         }
-        match value {
-            Value::Array(items) => {
-                for (index, child) in items.iter().take(100).enumerate() {
-                    let mut child_path = path.clone();
-                    child_path.push_index(index);
-                    let child_label = index.to_string();
-                    self.value_branch(
-                        ui,
-                        branch_id,
-                        &child_label,
-                        child,
-                        &child_path,
-                        depth + 1,
-                        valid_path,
-                        interactive,
-                        editable,
-                        actions,
-                    );
-                }
-                if items.len() > 100 {
-                    ui.horizontal(|ui| {
-                        ui.add_space(16.0 + (depth + 1).min(5) as f32 * 14.0);
-                        ui.label(
-                            RichText::new(format!(
-                                "Showing the first 100 of {} items.",
-                                items.len()
-                            ))
-                            .size(11.0)
-                            .color(theme::MUTED),
-                        );
-                    });
-                }
-            }
-            Value::Object(fields) => {
-                for (field, child) in fields.iter().take(100) {
-                    let mut child_path = path.clone();
-                    child_path.push_key(field.clone());
-                    let child_valid = valid_path && is_supported_key(field);
-                    self.value_branch(
-                        ui,
-                        branch_id,
-                        field,
-                        child,
-                        &child_path,
-                        depth + 1,
-                        child_valid,
-                        interactive,
-                        editable,
-                        actions,
-                    );
-                }
-                if fields.len() > 100 {
-                    ui.horizontal(|ui| {
-                        ui.add_space(16.0 + (depth + 1).min(5) as f32 * 14.0);
-                        ui.label(
-                            RichText::new(format!(
-                                "Showing the first 100 of {} fields.",
-                                fields.len()
-                            ))
-                            .size(11.0)
-                            .color(theme::MUTED),
-                        );
-                    });
-                }
-            }
-            _ => {}
-        }
+        .unwrap_or(Value::Null);
+        let text = std::sync::Arc::new(
+            serde_json::to_string_pretty(&value).unwrap_or_else(|_| json_stringify(&value)),
+        );
+        self.json_text = Some((id, text.clone()));
+        text
+    }
+}
+
+/// A request's headers as the object the tree and the JSON show.
+fn request_headers(request: &apiforge_core::run::RequestSnapshot) -> Value {
+    Value::Object(
+        request
+            .headers
+            .iter()
+            .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+            .collect::<Map<String, Value>>(),
+    )
+}
+
+/// The width `text` takes at `size`.
+fn text_width(ui: &Ui, text: &str, size: f32) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::proportional(size),
+            theme::TEXT,
+        )
+        .size()
+        .x
+}
+
+/// The width of [`ReportPanel::value_bar`].
+fn bar_width(ui: &Ui) -> f32 {
+    let gap = ui.spacing().item_spacing.x;
+    ["Copy", "Collapse all", "Expand all", "JSON", "Tree"]
+        .into_iter()
+        .map(|label| 20.0 + 14.0 + 6.0 + text_width(ui, label, theme::FONT_LABEL) + gap)
+        .sum::<f32>()
+        + 8.0
+        + gap
+}
+
+/// The line over a value opened to its second or first level only
+/// (REP-08): `large`, it has more than [`OPEN_NODES`] nodes; otherwise more
+/// open rows than are drawn at once.
+fn large_line(ui: &mut Ui, opening: Opening, large: bool, port: &str) {
+    let Opening::Levels(levels) = opening else {
+        return;
+    };
+    let level = if levels >= 2 { "second" } else { "first" };
+    let why = if large {
+        format!("has more than {OPEN_NODES} values")
+    } else {
+        "has more values than are shown at once".to_owned()
+    };
+    widgets::hint(ui, format!("{port} {why} · opened to its {level} level"));
+}
+
+/// A value as indented JSON text that can be selected (REP-08), at most
+/// [`JSON_SHOWN_CHARS`] of it.
+fn json_text(ui: &mut Ui, text: &str) {
+    let shown = match text.char_indices().nth(JSON_SHOWN_CHARS) {
+        Some((end, _)) => &text[..end],
+        None => text,
+    };
+    egui::Frame::new()
+        .fill(theme::FIELD)
+        .stroke(Stroke::new(1.0, theme::BORDER))
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(
+                egui::Label::new(
+                    RichText::new(shown)
+                        .monospace()
+                        .size(theme::FONT_LABEL)
+                        .color(theme::TEXT),
+                )
+                .selectable(true)
+                .wrap(),
+            );
+        });
+    if shown.len() < text.len() {
+        widgets::hint(
+            ui,
+            format!("Showing the first {JSON_SHOWN_CHARS} characters · Copy takes all of them"),
+        );
     }
 }
 
@@ -1441,19 +1567,6 @@ fn checks_added(count: usize) -> String {
         "1 check added · it runs on the next run".into()
     } else {
         format!("{count} checks added · they run on the next run")
-    }
-}
-
-fn is_supported_key(key: &str) -> bool {
-    !RESERVED_KEYS.contains(&key)
-}
-
-fn describe_value(value: &Value) -> String {
-    match value {
-        Value::Null => "null".into(),
-        Value::Array(items) => format!("array ({})", items.len()),
-        Value::Object(fields) => format!("object ({})", fields.len()),
-        scalar => json_stringify(scalar),
     }
 }
 

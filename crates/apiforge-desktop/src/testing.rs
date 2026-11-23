@@ -354,7 +354,7 @@ pub fn assert_disjoint<State>(harness: &Harness<'_, State>, labels: &[&str]) {
 /// *Add a check* it opens (DIAG-08), the check it wrote before. The pointer
 /// then leaves for the header's empty top margin, so nothing stays hovered.
 pub fn check_field(harness: &mut FolderHarness, field: &str) {
-    let y = harness.get_by_label(field).rect().center().y;
+    let y = field_row(harness, field);
     harness
         .query_all_by_label("Check")
         .filter(|check| (check.rect().center().y - y).abs() < 8.0)
@@ -367,6 +367,17 @@ pub fn check_field(harness: &mut FolderHarness, field: &str) {
         .click();
     settle(harness);
     choose_equals(harness, field);
+}
+
+/// The middle of the topmost row named `field` in Run results. Since
+/// REP-08 a value opens to its leaves, so a name a nested field shares (the
+/// demo's `price` and `promotion.price`) is on more than one row.
+pub fn field_row(harness: &FolderHarness, field: &str) -> f32 {
+    harness
+        .query_all_by_label(field)
+        .map(|node| node.rect().center().y)
+        .min_by(f32::total_cmp)
+        .unwrap_or_else(|| panic!("a row named {field}"))
 }
 
 /// Chooses *equals ‹value›* in the open menu *Add a check* of `field`

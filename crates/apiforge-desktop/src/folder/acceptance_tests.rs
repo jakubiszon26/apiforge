@@ -7294,7 +7294,7 @@ mod ux01 {
     /// The controls on the row of `field` in the shown value tree: those of
     /// `names` whose centre is level with the field's label.
     fn on_row(harness: &FolderHarness, field: &str, names: &[&str]) -> Vec<String> {
-        let y = harness.get_by_label(field).rect().center().y;
+        let y = crate::testing::field_row(harness, field);
         names
             .iter()
             .filter(|name| {
