@@ -107,6 +107,6 @@ pub use reconcile::{Reconciled, reconcile, semantic};
 
 mod print;
 pub use print::{
-    predicate_symbol, print_component, print_folder_document, print_revision, print_scenario,
-    print_stored,
+    binary_symbol, predicate_symbol, print_component, print_folder_document, print_revision,
+    print_scenario, print_stored,
 };

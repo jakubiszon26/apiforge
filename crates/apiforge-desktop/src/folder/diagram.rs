@@ -90,16 +90,7 @@ impl FolderApp {
             && snapshot.conflict.is_none()
             && snapshot.unavailable.is_none();
         if !snapshot.editable && !snapshot.paused && !snapshot.busy && !rechecking {
-            let text = if snapshot.held {
-                "Unsaved work from an earlier session needs a decision in the code first."
-            } else if snapshot.analysis == AnalysisState::Pending {
-                "Checking the latest code…"
-            } else if snapshot.model_state == ModelState::LastValid {
-                "The code has errors. This is the last valid version; it is read-only until \
-                 the code is fixed."
-            } else {
-                "This diagram is read-only."
-            };
+            let text = read_only_reason(&snapshot);
             egui::Frame::new()
                 .fill(theme::ACCENT_SOFT)
                 .inner_margin(egui::Margin::symmetric(12, 6))
@@ -1155,6 +1146,7 @@ impl FolderApp {
                     self.inspector.show(
                         ui,
                         &inspector::Context {
+                            document: egui::Id::new(("document", &project_id, document_id)),
                             node: &node,
                             graph: reference,
                             board: graph,
@@ -1164,6 +1156,7 @@ impl FolderApp {
                             run: run.as_ref(),
                             step,
                             expand_here,
+                            read_only: (!snapshot.editable).then(|| read_only_reason(&snapshot)),
                         },
                     )
                 })
@@ -1181,6 +1174,8 @@ impl FolderApp {
         for action in actions {
             match action {
                 inspector::Action::Reveal(handle) => self.reveal_in_code(document_id, &handle),
+                // Selecting is navigation, which a read-only board allows too.
+                inspector::Action::Select(step) => self.select_step(document_id, step),
                 // A view kept on this computer, which changes no document
                 // (LAY-30).
                 inspector::Action::ExpandChecksHere(chosen) => {
@@ -1218,35 +1213,24 @@ impl FolderApp {
                         }
                     }
                 }
-                inspector::Action::AssertField { port, path, value } => {
-                    if let Some(run) = &run {
-                        self.folder_report_action(
-                            document_id,
-                            run,
-                            false,
-                            crate::report::Action::AssertField {
-                                node_id: node.id.clone(),
-                                port,
-                                path,
-                                value,
-                            },
-                        );
-                    }
-                }
-                inspector::Action::AssignField { port, path } => {
-                    if let Some(run) = &run {
-                        self.folder_report_action(
-                            document_id,
-                            run,
-                            false,
-                            crate::report::Action::AssignField {
-                                node_id: node.id.clone(),
-                                port,
-                                path,
-                            },
-                        );
-                    }
-                }
+                // The run's data or, before any run, the sample (DIAG-09).
+                inspector::Action::AssertField { port, path, check } => self.field_action(
+                    document_id,
+                    crate::report::Action::AssertField {
+                        node_id: node.id.clone(),
+                        port,
+                        path,
+                        check,
+                    },
+                ),
+                inspector::Action::AssignField { port, path } => self.field_action(
+                    document_id,
+                    crate::report::Action::AssignField {
+                        node_id: node.id.clone(),
+                        port,
+                        path,
+                    },
+                ),
                 inspector::Action::Error(message) => {
                     if let Some(canvas) = self.canvases.get_mut(document_id) {
                         canvas.set_error(message);
@@ -1347,6 +1331,26 @@ impl FolderApp {
 }
 
 /// The narrowest the file name is shortened to before the steps summary goes.
+/// Why the board takes no edit now: said above the board, which leaves out
+/// a pause and a save (UX-25), and on the hover of an Inspector action it
+/// disables (DIAG-09).
+fn read_only_reason(snapshot: &Snapshot) -> &'static str {
+    if snapshot.paused {
+        "Editing is paused here while another process holds the project."
+    } else if snapshot.busy {
+        "The project's files are being written. Try again in a moment."
+    } else if snapshot.held {
+        "Unsaved work from an earlier session needs a decision in the code first."
+    } else if snapshot.analysis == AnalysisState::Pending {
+        "Checking the latest code…"
+    } else if snapshot.model_state == ModelState::LastValid {
+        "The code has errors. This is the last valid version; it is read-only until \
+         the code is fixed."
+    } else {
+        "This diagram is read-only."
+    }
+}
+
 const NAME_MIN_WIDTH: f32 = 80.0;
 
 /// The document's part of the board's header row (KTLO-12): in Diagram the

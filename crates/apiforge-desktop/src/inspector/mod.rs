@@ -10,7 +10,9 @@ mod fields;
 mod response;
 pub mod source_change;
 
-pub use fields::{forget_field_text, type_combo};
+pub use fields::{
+    Opening, Results, TreeAction, forget_field_text, forget_results_tree, results_tree, type_combo,
+};
 pub use response::sample_output;
 
 use crate::icons::Icon;
@@ -36,10 +38,11 @@ pub enum Action {
     /// A change to ordering edges of the board.
     UpdateGraph(Graph),
     EditComponent,
+    /// A check of a field chosen in the menu *Add a check* (DIAG-08).
     AssertField {
         port: String,
         path: String,
-        value: serde_json::Value,
+        check: apiforge_core::edit::FieldCheck,
     },
     AssignField {
         port: String,
@@ -47,6 +50,9 @@ pub enum Action {
     },
     /// Show this block in the code panel, by handle.
     Reveal(String),
+    /// Select the step with this id, as a click on its card does: a check's
+    /// card in the *Checks* list (DIAG-15).
+    Select(String),
     /// The selected step's own switch of its checks, set to differ from the
     /// board's setting or not (LAY-11, LAY-30): *Expand checks here* or
     /// *Collapse checks here*.
@@ -58,6 +64,9 @@ pub enum Action {
 }
 
 pub struct Context<'a> {
+    /// The document the step is in: what the panel keeps per field of a
+    /// step, such as a branch of *Output data* opened, is kept per document.
+    pub document: Id,
     pub node: &'a Node,
     /// Nodes that bindings may reference.
     pub graph: &'a Graph,
@@ -73,6 +82,9 @@ pub struct Context<'a> {
     /// The switch of the step's own checks in the *Checks* list: `None`
     /// when the board folds no check into this step (LAY-11, LAY-30).
     pub expand_here: Option<crate::canvas::ChecksHere>,
+    /// Why the step takes no edit now, said on the hover of an action the
+    /// panel disables (DIAG-09); `None` while it takes edits.
+    pub read_only: Option<&'a str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -658,7 +670,7 @@ impl Inspector {
                     &mut state.search,
                     focus_search,
                     &fields.fields,
-                    data.value.is_some(),
+                    &data,
                     &state.port,
                     (ctx.content_rect().height() - 280.0).clamp(60.0, 320.0),
                 );
@@ -1341,14 +1353,19 @@ fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
 
 fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
     let node = context.node;
-    widgets::hint(
-        ui,
+    // Where the data comes from: a mark and a sentence (DIAG-10).
+    ui.horizontal(|ui| {
         if context.step.is_some() {
-            "Data from the last run. Editing the block does not update it."
+            // Neutral: the mark says where the data is from, not whether the
+            // step passed.
+            widgets::pill(ui, "Last run", theme::MUTED);
+            widgets::hint(ui, "Editing the step does not update it.");
         } else {
-            "Sample data — not from an API call."
-        },
-    );
+            widgets::pill(ui, "Sample", theme::WARNING);
+            widgets::hint(ui, "Not from an API call.");
+        }
+    });
+    ui.add_space(theme::SPACE_SM);
     let mut any = false;
     for port in output_ports(node, context.project) {
         let value = match context.step {
@@ -1356,14 +1373,25 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
             None => response::sample_output(node, &port.name, context.project),
         };
         let Some(value) = value else { continue };
+        if any {
+            ui.add_space(4.0);
+        }
         any = true;
-        widgets::section(ui, port.display_name());
-        if let Some(action) = fields::json_tree(ui, &node.id, &port.name, &value) {
+        // The output's heading is the first row of its tree.
+        if let Some(action) = fields::json_tree(
+            ui,
+            context.document,
+            &node.id,
+            &port.name,
+            port.display_name(),
+            &value,
+            context.read_only,
+        ) {
             actions.push(match action {
-                fields::TreeAction::Check { path, value } => Action::AssertField {
+                fields::TreeAction::Check { path, check } => Action::AssertField {
                     port: port.name.clone(),
                     path,
-                    value,
+                    check,
                 },
                 fields::TreeAction::Assign { path } => Action::AssignField {
                     port: port.name.clone(),

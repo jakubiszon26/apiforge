@@ -769,3 +769,135 @@ mod issue433 {
         );
     }
 }
+
+// DIAG-08 (#521) --------------------------------------------------------------
+
+/// The ✓ on a field of a step's data offers *equals ‹value›*, *is a ‹type›*,
+/// *exists* and *is not empty*; each is written as an ordinary check under
+/// the step, in the language's words.
+mod diag08 {
+    use super::*;
+    use apiforge_core::{
+        edit::{FieldCheck, add_check, field_assertion, field_check},
+        model::{NodeKind, Predicate},
+    };
+    use serde_json::{Value, json};
+
+    const SOURCE: &str = r#"scenario "A cart" {
+  begin = start
+  cart = POST "/carts" {
+    sample 201 { id: "c-1", total: 172.5, paid: false, owner: { name: "Ann" }, items: ["coffee"], coupon: null }
+  }
+}
+"#;
+
+    /// `SOURCE` with `checks` of `cart`'s body added as the window adds
+    /// them, written as a board edit writes them (LAY-34). The text passes
+    /// `check`: it lowers without an error.
+    fn written(checks: &[(&str, FieldCheck)]) -> String {
+        let (project, scenario) = lowered_scenario(SOURCE);
+        let cart = node_by_handle(&scenario.graph, "cart").clone();
+        let mut next = scenario.clone();
+        for (path, check) in checks {
+            let check = field_check(&cart, "body", path, check);
+            next.graph = add_check(&next.graph, &cart.id, check);
+        }
+        let text = apiforge_script::edit_folder_document(
+            &project,
+            SOURCE,
+            &Document::Scenario(scenario),
+            &Document::Scenario(next),
+        )
+        .expect("the edit is written");
+        lowered_scenario(&text);
+        text
+    }
+
+    /// `SOURCE` with `lines` written after `cart`, at the end of the flow.
+    fn with(lines: &str) -> String {
+        SOURCE.replace("  }\n}\n", &format!("  }}\n{lines}}}\n"))
+    }
+
+    /// Criterion 1: *is a number* from `total` is one check, written
+    /// `… = assert cart.body.total is "number"` under the step.
+    #[test]
+    fn diag08_criterion_1_type_check_from_a_field() {
+        let (_, scenario) = lowered_scenario(SOURCE);
+        let cart = node_by_handle(&scenario.graph, "cart").clone();
+        let check = field_check(&cart, "body", "total", &FieldCheck::Type("number".into()));
+        assert_eq!(check.kind, NodeKind::Assert);
+        assert_eq!(check.config.predicate, Some(Predicate::Type));
+        assert_eq!(
+            written(&[("total", FieldCheck::Type("number".into()))]),
+            with(
+                "  @label(\"Check total\")\n  \
+                 check_total = assert cart.body.total is \"number\"\n"
+            )
+        );
+    }
+
+    /// Criterion 2: the type offered is the type of the value shown, in the
+    /// language's six words, and the check it writes passes on that value.
+    #[test]
+    fn diag08_criterion_2_the_type_is_the_values() {
+        for (value, word) in [
+            (json!("c-1"), "string"),
+            (json!(172.5), "number"),
+            (json!(false), "boolean"),
+            (json!({ "name": "Ann" }), "object"),
+            (json!(["coffee"]), "array"),
+            (Value::Null, "null"),
+        ] {
+            assert_eq!(
+                FieldCheck::offered(&value),
+                [
+                    FieldCheck::Equals(value.clone()),
+                    FieldCheck::Type(word.into()),
+                    FieldCheck::Exists,
+                    FieldCheck::NotEmpty,
+                ],
+                "the checks offered for {value}"
+            );
+            assert_eq!(
+                Predicate::Type.check(Some(&value), Some(&json!(word)), 0.0),
+                Ok(true),
+                "{value} is a {word}"
+            );
+        }
+    }
+
+    /// Criterion 3: *exists* and *is not empty* write `assert exists …` and
+    /// `assert nonempty …`; *equals* writes what *Add comparison* wrote.
+    #[test]
+    fn diag08_criterion_3_the_other_checks() {
+        assert_eq!(
+            written(&[
+                ("total", FieldCheck::Equals(json!(172.5))),
+                ("id", FieldCheck::Exists),
+                ("items", FieldCheck::NotEmpty),
+            ]),
+            with(
+                "  @label(\"Check total\")\n  \
+                 check_total = assert cart.body.total == 172.5\n  \
+                 @label(\"Check id\")\n  \
+                 check_id = assert exists cart.body.id\n  \
+                 @label(\"Check items\")\n  \
+                 check_items = assert nonempty cart.body.items\n"
+            )
+        );
+        let (_, scenario) = lowered_scenario(SOURCE);
+        let cart = node_by_handle(&scenario.graph, "cart").clone();
+        let mut equals = field_check(&cart, "body", "total", &FieldCheck::Equals(json!(172.5)));
+        let mut before = field_assertion(&cart, "body", "total", &json!(172.5));
+        equals.id.clear();
+        before.id.clear();
+        assert_eq!(equals, before, "equals is the comparison of today");
+        for check in [FieldCheck::Exists, FieldCheck::NotEmpty] {
+            let node = field_check(&cart, "body", "id", &check);
+            assert!(
+                !node.inputs.contains_key("expected"),
+                "{check:?} expects nothing"
+            );
+        }
+    }
+}

@@ -118,6 +118,23 @@ Acceptable forms, in order of preference:
 3. **A labelled wireframe** (text or drawing) only for a screen that does not
    exist yet in any form, and only as the first round before form 1.
 
+**A comparison board** is how a choice between options is shown (the owner,
+2026-11-21, after the 0.2.1 mock-ups): one image per question with today's
+view and every option side by side, each panel captioned (*Today (v0.2.0)*,
+*A · …*, *B · …*), cropped to the element in question at the same scale in
+every panel so the difference is visible at a glance. The full-window
+captures at 960 × 540 and 1600 × 1000 stay beside it, as the check of how the
+recommended option sits in the whole window; the board does not replace
+them. Examples: `docs/qa/2026-11-21/UX-41/selection-failed-100.png`,
+`docs/qa/2026-11-21/UX-42/run-mode-live-960.png` on `mock/rel-0.2.1`.
+
+A board shows how options look, not what a task costs on each. When the
+question is about a gesture or a flow, the options can also be compared by
+agents doing one task in the real window on each of them: an
+[A/B round](ab-testing.md), for the tickets a sprint's plan names. Its table stands beside
+the board in the same quiz; it does not replace the board or the owner's
+choice.
+
 A mock-up is approved as a whole or sent back; approval is noted in the
 ticket's state. The implementation is then measured against the mock-up in the
 QA report.

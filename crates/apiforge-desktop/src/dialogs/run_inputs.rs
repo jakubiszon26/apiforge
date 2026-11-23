@@ -339,7 +339,7 @@ mod tests {
             serde_json::from_str::<Value>(&dialog.fields[2].text).unwrap(),
             json!({"a": 1})
         );
-        assert_eq!(dialog.fields[2].accessible_name(), "item · Object");
+        assert_eq!(dialog.fields[2].accessible_name(), "item · object");
     }
 
     #[test]
@@ -361,8 +361,8 @@ mod tests {
         assert_eq!(ready, [true, false, false, false]);
         assert_eq!(
             dialog.fields[0].accessible_name(),
-            "optional · Text · optional"
+            "optional · string · optional"
         );
-        assert_eq!(dialog.fields[1].accessible_name(), "required · Text");
+        assert_eq!(dialog.fields[1].accessible_name(), "required · string");
     }
 }

@@ -3,7 +3,10 @@
 use super::{
     Camera,
     collapse::Aggregate,
-    layout::{CHIP_HEIGHT, COMPACT_HEADER, Card, CardDetail, Chip, CompactRole, RowValue, WIDTH},
+    layout::{
+        CHIP_HEIGHT, COMPACT_HEADER, Card, CardDetail, Chip, CompactRole, Part, PartRole, RowValue,
+        TITLE_LEFT, TITLE_RIGHT, TITLE_ROW, TITLE_TEXT, WIDTH,
+    },
     routing::Routed,
 };
 use crate::{
@@ -78,7 +81,7 @@ pub fn wire(
     zoom: f32,
 ) {
     let color = match (selected, control, branch) {
-        (true, ..) => theme::ACCENT,
+        (true, ..) => theme::SELECTION,
         (_, true, Some(Branch::False)) => theme::BRANCH_NO,
         (_, true, Some(Branch::True)) => theme::BRANCH_YES,
         (_, true, None) => theme::CONTROL_WIRE,
@@ -181,14 +184,17 @@ fn carried(
 ///
 /// A bridge is a gap in the line with a small semicircle over it, so a crossing
 /// reads as one wire passing above the other instead of a junction.
+///
+/// Returns the wire's colour before it is dimmed or lightened.
 pub fn routed_wire(
     painter: &Painter,
     routed: &Routed,
     camera: Camera,
     selected: bool,
     dimmed: bool,
-) {
-    let mut color = wire_color(selected, routed.control, routed.branch);
+) -> Color32 {
+    let own = wire_color(selected, routed.control, routed.branch);
+    let mut color = own;
     if dimmed {
         // Not a wire of the selected step (LAY-10).
         color = color.gamma_multiply(WIRE_KEEP);
@@ -215,7 +221,7 @@ pub fn routed_wire(
         flatten(&routed.pieces, camera)
     };
     if line.len() < 2 {
-        return;
+        return own;
     }
     let hops: Vec<Pos2> = routed
         .bridges
@@ -261,6 +267,7 @@ pub fn routed_wire(
             color,
         );
     }
+    own
 }
 
 /// The name on an `@after` drawn from a folded check's subject (LAY-11):
@@ -410,7 +417,7 @@ const NUMBER_TEXT: f32 = 11.0;
 const BADGE: f32 = 20.0;
 
 /// The halo of a step related to the selected one (LAY-10): a teal that is
-/// not the selection's accent, the running blue or a status colour.
+/// not the selection's blue, the running blue or a status colour.
 pub const RELATED: Color32 = Color32::from_rgb(40, 160, 160);
 /// How much of a dimmed card is kept: the rest is the board showing through.
 pub const CARD_KEEP: f32 = 0.6;
@@ -505,29 +512,38 @@ fn dim(painter: &Painter, rect: Rect, radius: f32, look: Look, drawn: &mut Drawn
     painter
 }
 
-/// The selection's frame outside the card and its four handles.
+/// The selection's frame (UX-41): 2 px of the selection's blue on the
+/// card's edge, outside it, with a faint halo of two strokes beyond. No
+/// handles: a card is not resized. A failed card's red border is inside
+/// the edge, so both show.
 fn selection_frame(painter: &Painter, rect: Rect, radius: f32, drawn: &mut Drawn) {
+    let mut frame = DrawnFrame::default();
+    for (gap, share) in [(4.0, 0.10), (2.0, 0.18)] {
+        let color = theme::SELECTION.gamma_multiply(share);
+        painter.rect_stroke(
+            rect.expand(gap),
+            radius + gap,
+            Stroke::new(2.0, color),
+            StrokeKind::Outside,
+        );
+        frame.strokes.push(DrawnStroke {
+            gap,
+            width: 2.0,
+            color,
+        });
+    }
     painter.rect_stroke(
-        rect.expand(3.0),
-        radius + 3.0,
-        Stroke::new(2.5, theme::ACCENT),
+        rect,
+        radius,
+        Stroke::new(2.0, theme::SELECTION),
         StrokeKind::Outside,
     );
-    for corner in [
-        rect.left_top(),
-        rect.right_top(),
-        rect.left_bottom(),
-        rect.right_bottom(),
-    ] {
-        painter.rect(
-            Rect::from_center_size(corner, Vec2::splat(7.0)),
-            1.0,
-            theme::WHITE,
-            Stroke::new(1.5, theme::ACCENT),
-            StrokeKind::Inside,
-        );
-    }
-    drawn.handles = true;
+    frame.strokes.push(DrawnStroke {
+        gap: 0.0,
+        width: 2.0,
+        color: theme::SELECTION,
+    });
+    drawn.frame = Some(frame);
 }
 
 /// The soft halo around a related card: three widening strokes of its
@@ -600,6 +616,8 @@ pub struct DrawnText {
     pub kind: TextKind,
     pub size: f32,
     pub color: Color32,
+    /// The font family it is drawn in.
+    pub family: egui::FontFamily,
     pub text: String,
     /// Where the text is on screen, as far as its cell shows it.
     pub rect: Rect,
@@ -615,6 +633,27 @@ pub enum BadgeState {
     Running,
     /// A run is on and has not reached the step: the number, muted.
     Pending,
+}
+
+/// The selection's frame as a card drew it, which only a test build
+/// collects (UX-41).
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct DrawnFrame {
+    /// Its strokes around the card, in the order drawn.
+    pub strokes: Vec<DrawnStroke>,
+    /// The square handles drawn at the card's corners: none since UX-41.
+    pub handles: usize,
+}
+
+/// One stroke around a card, on screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct DrawnStroke {
+    /// From the card's edge to the stroke's inner side.
+    pub gap: f32,
+    pub width: f32,
+    pub color: Color32,
 }
 
 /// A badge as a card drew it, which only a test build collects.
@@ -653,6 +692,9 @@ pub struct CardRun<'a> {
     /// The steps the card's step, or a check folded into it, kept from
     /// running (LAY-19).
     pub cost: Option<Cost>,
+    /// The number of the step a check hangs under, for the line under its
+    /// title (DIAG-02).
+    pub subject: Option<usize>,
 }
 
 impl CardRun<'_> {
@@ -720,8 +762,8 @@ pub struct Drawn {
     pub badge: Option<DrawnBadge>,
     /// The card has the selection's frame.
     pub selected: bool,
-    /// The selection's handles at the corners (LAY-10).
-    pub handles: bool,
+    /// What the selection's frame drew (UX-41).
+    pub frame: Option<DrawnFrame>,
     /// The card is dimmed, and the colour painted over it to dim it.
     pub dimmed: bool,
     pub veil: Option<Color32>,
@@ -763,6 +805,7 @@ impl Drawn {
                 kind,
                 size: font.size,
                 color,
+                family: font.family.clone(),
                 text: text.to_owned(),
                 rect: shown,
             });
@@ -770,6 +813,71 @@ impl Drawn {
         #[cfg(not(test))]
         let _ = kind;
         label(painter, rect, text, font, color, align);
+    }
+
+    /// Draws a row of a check's title in `rect`, each part in its colour,
+    /// and notes it (DIAG-02).
+    fn parts(
+        &mut self,
+        painter: &Painter,
+        rect: Rect,
+        parts: &[Part],
+        kind: TextKind,
+        font: FontId,
+    ) {
+        if rect.width() < 2.0 || rect.height() < 2.0 {
+            return;
+        }
+        let mut job = egui::text::LayoutJob::default();
+        for part in parts {
+            job.append(
+                &part.text,
+                0.0,
+                egui::TextFormat {
+                    font_id: font.clone(),
+                    color: part_color(part.role),
+                    ..Default::default()
+                },
+            );
+        }
+        job.wrap.max_width = rect.width();
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        let galley = painter.layout_job(job);
+        let at = pos2(rect.left(), rect.center().y - galley.size().y / 2.0);
+        #[cfg(test)]
+        self.texts.push(DrawnText {
+            kind,
+            size: font.size,
+            color: theme::TEXT,
+            family: font.family.clone(),
+            text: parts.iter().map(|part| part.text.as_str()).collect(),
+            rect: Rect::from_min_size(at, galley.size())
+                .intersect(rect)
+                .intersect(painter.clip_rect()),
+        });
+        #[cfg(not(test))]
+        let _ = kind;
+        painter
+            .with_clip_rect(rect.intersect(painter.clip_rect()))
+            .galley(at, galley, theme::TEXT);
+    }
+}
+
+/// The height of a row of monospace text per point of its size:
+/// AdwaitaMono's ascent, descent and gap, 1250 of 1000 units.
+const TITLE_LINE_HEIGHT: f32 = 1.25;
+
+/// The colour of a piece of a check's title (DIAG-02): what it reads in the
+/// text's colour, a value written in it in the colour of its type, as
+/// *Output data* writes values (DIAG-10), and a missing operand in red.
+fn part_color(role: PartRole) -> Color32 {
+    match role {
+        PartRole::Operand | PartRole::Sign | PartRole::Data => theme::TEXT,
+        PartRole::Text => theme::VALUE_STRING,
+        PartRole::Number => theme::VALUE_NUMBER,
+        PartRole::Literal => theme::VALUE_LITERAL,
+        PartRole::Missing => theme::DANGER,
     }
 }
 
@@ -1205,14 +1313,14 @@ fn numbers_on_name_row(
 
 /// The border of a failed or blocked step: 2 px at every zoom, while the
 /// band keeps the step's own result (Q15 = A). The selection's frame is
-/// outside the card, so both show.
+/// outside the card's edge, so both show (UX-41).
 fn signal_border(painter: &Painter, rect: Rect, radius: f32, color: Color32) {
     painter.rect_stroke(rect, radius, Stroke::new(2.0, color), StrokeKind::Inside);
 }
 
 fn wire_color(selected: bool, control: bool, branch: Option<Branch>) -> Color32 {
     match (selected, control, branch) {
-        (true, ..) => theme::ACCENT,
+        (true, ..) => theme::SELECTION,
         (_, true, Some(Branch::False)) => theme::BRANCH_NO,
         (_, true, Some(Branch::True)) => theme::BRANCH_YES,
         (_, true, None) => theme::CONTROL_WIRE,
@@ -1472,7 +1580,7 @@ pub fn card(
         Color32::from_black_alpha(8),
     );
     painter.rect_filled(rect, radius, theme::WHITE);
-    // The selection's frame is drawn outside the card, with its handles.
+    // The selection's frame is drawn outside the card's edge.
     painter.rect_stroke(
         rect,
         radius,
@@ -1876,7 +1984,7 @@ pub fn compact_card(
         Color32::from_black_alpha(8),
     );
     painter.rect_filled(rect, radius, theme::WHITE);
-    // The selection's frame is drawn outside the card, with its handles.
+    // The selection's frame is drawn outside the card's edge.
     painter.rect_stroke(
         rect,
         radius,
@@ -1981,7 +2089,10 @@ pub fn compact_card(
         )),
         _ => name,
     };
-    if let Some(name) = name {
+    // A check is titled by its predicate, or by its `@label` with the
+    // predicate under it (DIAG-02).
+    let title = compact.title.as_ref().filter(|_| legible);
+    if let Some(name) = name.filter(|_| title.is_none_or(|title| title.label.is_some())) {
         drawn.label(
             &clipped,
             name,
@@ -1991,6 +2102,44 @@ pub fn compact_card(
             theme::TEXT,
             egui::Align::Min,
         );
+    }
+    if let Some(title) = title {
+        // The predicate is bold where it is the title, as in the mock-up;
+        // under a label it is the line under it (DIAG-02).
+        let size = min_on_screen(TITLE_TEXT, z, LINE_MIN);
+        let font = if title.label.is_none() {
+            FontId::new(size, theme::bold_mono_family())
+        } else {
+            FontId::monospace(size)
+        };
+        let kind = TextKind::Line;
+        // Where the rows are lower than the smallest text, below 75 %, the
+        // title is one row cut with `…`, whole on hover; a label keeps the
+        // header and its predicate is on hover only.
+        if font.size * TITLE_LINE_HEIGHT <= TITLE_ROW * z + 0.01 {
+            for (index, row) in title.rows.iter().enumerate() {
+                let (top, bottom) = title.row(index);
+                drawn.parts(
+                    &clipped,
+                    cell(TITLE_LEFT, top, WIDTH - TITLE_RIGHT, bottom),
+                    row,
+                    kind,
+                    font.clone(),
+                );
+            }
+        } else if title.label.is_none() {
+            // The title as shown, not its rows joined: a row broken inside
+            // a word must not read as two words.
+            drawn.parts(
+                &clipped,
+                cell(TITLE_LEFT, 6.0, WIDTH - TITLE_RIGHT, COMPACT_HEADER),
+                &title.line,
+                kind,
+                font,
+            );
+        }
+        #[cfg(test)]
+        drawn.lines.push(title.shown.clone());
     }
     if let Some(line) = overview {
         line.draw(&clipped, &mut drawn);
@@ -2046,6 +2195,36 @@ pub fn compact_card(
                 theme::MUTED,
                 egui::Align::Min,
             ),
+            // Under a check's title its handle and the step it hangs
+            // under, with that step's number (DIAG-02).
+            CompactRole::Line if compact.title.is_some() => {
+                let title = compact.title.as_ref().expect("a check's title");
+                // At Full right under the title; below, the line's whole
+                // row. Under a label the predicate takes the line.
+                area = match title.small_line().filter(|_| full) {
+                    Some((top, bottom)) => cell(TITLE_LEFT, top, WIDTH - TITLE_RIGHT, bottom),
+                    None => cell(
+                        TITLE_LEFT,
+                        row.top,
+                        WIDTH - TITLE_RIGHT,
+                        row.top + row.height,
+                    ),
+                };
+                let line = match (&title.subject, run.subject) {
+                    _ if title.label.is_some() => continue,
+                    (Some((_, name)), Some(number)) => {
+                        format!("{} · of {number} {name}", title.handle)
+                    }
+                    (Some((_, name)), None) => format!("{} · of {name}", title.handle),
+                    (None, _) => title.handle.clone(),
+                };
+                (
+                    Cow::Owned(line),
+                    FontId::proportional(min_on_screen(theme::FONT_META, z, LINE_MIN)),
+                    theme::MUTED,
+                    egui::Align::Min,
+                )
+            }
             CompactRole::Line => (
                 Cow::Borrowed(text.as_str()),
                 FontId::proportional(small),
@@ -2256,7 +2435,8 @@ pub fn trays(painter: &Painter, card: &Card, camera: Camera, inputs: bool, outpu
 ///
 /// A chip is deliberately not a card. It holds no arguments and no settings — it
 /// is the same value shown in another place — so it stays a pill with one name.
-pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
+/// Returns the chip's outline colour.
+pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) -> Color32 {
     let z = camera.zoom;
     let rect = camera.rect(chip.rect());
     let radius = (CHIP_HEIGHT / 2.0 * z).max(2.0);
@@ -2270,18 +2450,16 @@ pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
         radius,
         Color32::from_black_alpha(8),
     );
+    let outline = if selected {
+        theme::SELECTION
+    } else {
+        color.gamma_multiply(0.45)
+    };
     painter.rect(
         rect,
         radius,
         color.gamma_multiply(if selected { 0.22 } else { 0.12 }),
-        Stroke::new(
-            if selected { 1.7 } else { 1.0 },
-            if selected {
-                theme::ACCENT
-            } else {
-                color.gamma_multiply(0.45)
-            },
-        ),
+        Stroke::new(if selected { 1.7 } else { 1.0 }, outline),
         StrokeKind::Inside,
     );
     let clipped = painter.with_clip_rect(rect.shrink(1.0).intersect(painter.clip_rect()));
@@ -2315,6 +2493,7 @@ pub fn chip(painter: &Painter, chip: &Chip, camera: Camera, selected: bool) {
         );
     }
     socket(painter, camera.to_screen(chip.output_anchor()), false, z);
+    outline
 }
 
 /// Data sockets are round, control sockets square, so they differ beyond colour.
@@ -2427,6 +2606,7 @@ pub fn minimap(
     shapes: super::Shapes<'_>,
     camera: Camera,
     selection: &HashSet<&str>,
+    marks: &mut Vec<(String, Color32)>,
 ) -> Option<(Rect, Rect, f32)> {
     let rect = minimap_rect?;
     let bounds = shapes.bounds()?;
@@ -2443,7 +2623,8 @@ pub fn minimap(
     let map = |point: Pos2| inner.min + (point - bounds.min) * scale;
     for card in shapes.cards {
         let fill = if selection.contains(card.id.as_str()) {
-            theme::ACCENT
+            marks.push((card.id.clone(), theme::SELECTION));
+            theme::SELECTION
         } else {
             theme::MINIMAP
         };
@@ -2455,7 +2636,8 @@ pub fn minimap(
     }
     for chip in shapes.chips {
         let fill = if selection.contains(chip.id()) {
-            theme::ACCENT
+            marks.push((chip.id().to_owned(), theme::SELECTION));
+            theme::SELECTION
         } else {
             theme::VARIABLE.gamma_multiply(0.6)
         };
@@ -2578,6 +2760,34 @@ mod tests {
 
     /// The compact card and its trays (LAY-16) keep every label inside its cell
     /// at every zoom, and below the legible row height show only the title.
+    /// A check's title is wrapped by counting characters (DIAG-02): a full
+    /// row of the monospace font fits the title's width, and a row is as
+    /// high as the title's row.
+    #[test]
+    fn a_title_row_fits_its_cell() {
+        use super::super::layout::{TITLE_ROW, title_per_row};
+        let context = egui::Context::default();
+        theme::apply(&context);
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            // The regular face, and the bold one of a title (DIAG-02).
+            for family in [egui::FontFamily::Monospace, theme::bold_mono_family()] {
+                let galley = ui.painter().layout_no_wrap(
+                    "m".repeat(title_per_row()),
+                    FontId::new(TITLE_TEXT, family.clone()),
+                    theme::TEXT,
+                );
+                assert!(
+                    galley.size().x <= WIDTH - TITLE_LEFT - TITLE_RIGHT,
+                    "{} characters of {family:?} take {} px",
+                    title_per_row(),
+                    galley.size().x
+                );
+                assert!(galley.size().y <= TITLE_ROW + 0.5, "{:?}", galley.size());
+            }
+        });
+        output.textures_delta.clear();
+    }
+
     #[test]
     fn every_compact_card_label_stays_in_its_cell_from_25_to_160_percent() {
         let context = egui::Context::default();

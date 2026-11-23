@@ -62,12 +62,21 @@ fn select(harness: &mut FolderHarness, handle: &str) {
 }
 
 /// Opens the nested value of `field` in the shown value tree: the toggle on
-/// its row.
+/// its row, unless the row is open already, as Run results open a value to
+/// its leaves since REP-08 (#455).
 fn expand(harness: &mut FolderHarness, field: &str) {
     let y = harness.get_by_label(field).rect().center().y;
+    let on_row = |label: &str| {
+        harness
+            .query_all_by_label(label)
+            .any(|toggle| (toggle.rect().center().y - y).abs() < 13.0)
+    };
+    if on_row("Collapse field") {
+        return;
+    }
     harness
-        .query_all_by_label("▸")
-        .find(|toggle| (toggle.rect().center().y - y).abs() < 8.0)
+        .query_all_by_label("Expand field")
+        .find(|toggle| (toggle.rect().center().y - y).abs() < 13.0)
         .unwrap_or_else(|| panic!("the {field} row opens"))
         .click();
     settle(harness);

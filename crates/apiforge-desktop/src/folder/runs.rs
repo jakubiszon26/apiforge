@@ -654,6 +654,11 @@ impl FolderApp {
             cleanup,
             project: executed.context(),
         };
+        // Tree or JSON is kept with the project's view on this computer
+        // (REP-08).
+        self.runs
+            .panel
+            .set_json_view(self.workbench.panels.results_json);
         let actions = self.runs.panel.show(
             ui,
             &crate::report::Context {
@@ -675,6 +680,11 @@ impl FolderApp {
                 graphs: Some(graphs),
             },
         );
+        let json = self.runs.panel.json_view();
+        if json != self.workbench.panels.results_json {
+            self.workbench.panels.results_json = json;
+            self.touched();
+        }
         for action in actions {
             self.folder_report_action(id, &result, stale, action);
         }
@@ -735,11 +745,33 @@ impl FolderApp {
                     );
                 }
             }
+            Action::AssertField { .. } | Action::AssignField { .. } => {
+                self.field_action(id, action);
+            }
+        }
+    }
+
+    /// A check from the menu *Add a check* (DIAG-08) or *Assign to
+    /// variable* on a field of a step's data: the run's results or, before
+    /// any run, the step's sample (DIAG-09). Neither needs a run: the graph
+    /// that holds the step tells
+    /// the cleanup from the main flow. A check is counted against the
+    /// document's report only while that report is not stale (UX-01).
+    pub(super) fn field_action(&mut self, id: &str, action: crate::report::Action) {
+        use crate::report::Action;
+        let Some(snapshot) = self.snapshot(id) else {
+            return;
+        };
+        if !snapshot.editable {
+            return;
+        }
+        let Some(model) = snapshot.model else { return };
+        match action {
             Action::AssertField {
                 node_id,
                 port,
                 path,
-                value,
+                check,
             } => {
                 let cleanup = !graph_of(&model, false)
                     .nodes
@@ -751,7 +783,9 @@ impl FolderApp {
                     .runs
                     .reports
                     .get(id)
-                    .map_or(0, |report| self.freshness(report).checks());
+                    .map(|report| self.freshness(report))
+                    .filter(|freshness| *freshness != Freshness::Stale)
+                    .map(Freshness::checks);
                 if let Some(node) = graph.nodes.iter().find(|node| node.id == node_id) {
                     let context = self.context_project();
                     let parameters = parameters_of(&model);
@@ -765,8 +799,8 @@ impl FolderApp {
                         satellites: true,
                         lines: lines_of(&self.preferences),
                     };
-                    let pushed = board
-                        .push_check(&node_id, edit::field_assertion(node, &port, &path, &value));
+                    let pushed =
+                        board.push_check(&node_id, edit::field_check(node, &port, &path, &check));
                     // The check is counted when its edit applies, which may
                     // first ask about unattached comments (UX-35).
                     self.component_action(
@@ -774,16 +808,18 @@ impl FolderApp {
                         publication::Action::Model {
                             next: Box::new(with_graph(&model, cleanup, pushed.graph)),
                             selection: pushed.selection,
-                            check: Some(Box::new(PendingCheck {
-                                field: crate::report::CheckedField {
-                                    node_id,
-                                    port,
-                                    path,
-                                },
-                                cleanup,
-                                before,
-                                checks,
-                            })),
+                            check: checks.map(|checks| {
+                                Box::new(PendingCheck {
+                                    field: crate::report::CheckedField {
+                                        node_id,
+                                        port,
+                                        path,
+                                    },
+                                    cleanup,
+                                    before,
+                                    checks,
+                                })
+                            }),
                             moved: Vec::new(),
                             placed: false,
                         },
@@ -810,6 +846,7 @@ impl FolderApp {
                     )),
                 });
             }
+            _ => {}
         }
     }
 
@@ -887,6 +924,11 @@ impl FolderApp {
     }
 
     pub(super) fn review_legacy_runs(&mut self) {
+        #[cfg(test)]
+        if let Some(data) = self.legacy_data.clone() {
+            self.review_legacy_runs_from(&data);
+            return;
+        }
         let Some(data) = dirs::data_dir() else {
             self.notify("No application data directory is available.", true);
             return;

@@ -511,6 +511,45 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   LANG-04 #132). Their format questions return to the owner with the
   analyses.
 
+## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (closed)
+
+The owner tried the v0.2.0-rc.1 packages on 2026-11-21 and raised four
+findings; v0.2.0 was tagged as it was and these go to 0.2.1. LANG-22 is
+the planning model's, found while reproducing the second; DIAG-09 is
+#399, taken in with DIAG-08. The owner answered the eleven questions the
+same day, on the issues. The mock-ups are on `mock/rel-0.2.1`; the
+issues carry `sprint:0.2.1`. About 105 owner minutes. The table is in
+the order of work.
+
+- Decided the same day on a measurement: the switch the owner chose is
+  about 32 px short on a component's header at 960 px, so there the Run
+  button is ▶ alone
+  ([ticket](tickets/UX-42.md#the-measurement-and-question-12)); a release
+  candidate `v0.2.1-rc.1` comes first. DIAG-10, added and decided the same day, is the owner's fifth finding. Nothing waits for a decision.
+- Merged: DIAG-09 #399 (#529), UX-41 #519 (#527), UX-42 #520 (#530),
+  DEMO-01 #523 (#541), DIAG-08 #521 (#543), LANG-22 #522 (#528), DIAG-10
+  #531 (#554). The release candidate's pull request is REL-06 #524; after
+  it merges, the owner pushes `v0.2.1-rc.1`, tries its packages and then
+  pushes `v0.2.1`.
+
+| Issue | Ticket | Estimate |
+| --- | --- | --- |
+| [#519](https://github.com/jakubiszon26/apiforge/issues/519) | UX-41 The selected step no longer looks like an error: a blue frame, no handles; [ticket](tickets/UX-41.md) | S · 15 min · `visible UI` |
+| [#522](https://github.com/jakubiszon26/apiforge/issues/522) | LANG-22 A type check that cannot pass is reported when it is written; [ticket](tickets/LANG-22.md) | S · 10 min |
+| [#399](https://github.com/jakubiszon26/apiforge/issues/399) | DIAG-09 Add comparison and Assign to variable work before the first run; [ticket](tickets/DIAG-09.md) | S · 10 min · `visible UI` |
+| [#521](https://github.com/jakubiszon26/apiforge/issues/521) | DIAG-08 A check of a field's type in one step from the field; [ticket](tickets/DIAG-08.md); after DIAG-09 | S · 20 min · `visible UI` |
+| [#531](https://github.com/jakubiszon26/apiforge/issues/531) | DIAG-10 Output data reads as a tree: a field on one line; [ticket](tickets/DIAG-10.md); after DIAG-08 | S · 20 min · `visible UI`, `removal` |
+| [#523](https://github.com/jakubiszon26/apiforge/issues/523) | DEMO-01 The first-start project shows the 0.2.0 language; [ticket](tickets/DEMO-01.md); after LANG-22 and DIAG-08 only in that its scenario is what they are tried on | M · 30 min · `default`, `visible UI` |
+| [#520](https://github.com/jakubiszon26/apiforge/issues/520) | UX-42 The run mode is a switch in the header; [ticket](tickets/UX-42.md) | S · 20 min · `visible UI`, `removal` |
+| [#524](https://github.com/jakubiszon26/apiforge/issues/524) | REL-06 v0.2.1, a candidate first; [ticket](tickets/REL-06.md); last | S · 15 min |
+
+AB-01 [#537](https://github.com/jakubiszon26/apiforge/issues/537), v0.1.0 against v0.2.0 on eight tester's tasks driven by
+agents ([ticket](tickets/AB-01.md)), runs beside these tickets: the owner
+approved the method and the timing on 2026-11-21. Round 1 (T1, T2) is
+done and classed: no class 1, R1 #547 class 2 into REQ, R2 #548 class 3.
+Rounds 2 to 4 compare v0.1.0 with `v0.2.1-rc.2` (owner, 2026-11-23);
+round 2 is `ready:opus`; it changes nothing in the product.
+
 ## Next sprint: REQ (not started)
 
 Request and results. The owner's run of 2026-11-19 showed that a test made
@@ -544,6 +583,11 @@ criteria:
 - [ ] *Run to here* and *Send this request alone* work from that view; a
       live request is sent only under the permission an ordinary live run
       needs (REQ-04, REQ-05).
+- [ ] The mandatory scenario — POST, the id from the response, GET with
+      that id, an assertion, DELETE — is built and run twice in the window
+      with no hand editing of the `.afs` (owner, 2026-11-21; REQ-06,
+      [ticket](tickets/REQ-06.md)); agents run it first
+      ([A/B rounds](process/ab-testing.md)).
 - [ ] The owner does the task of REQ-06 on a release build, and the
       retrospective is written.
 
@@ -551,8 +595,11 @@ criteria:
 | --- | --- | --- | --- |
 | [#454](https://github.com/jakubiszon26/apiforge/issues/454) | FIX-01 A reference scenario of independent negative requests (`labels`) | S · 5 | merged in #485 (2026-11-20) |
 | [#145](https://github.com/jakubiszon26/apiforge/issues/145) | DIAG-02 A check reads the same everywhere and says what it compares | M · 15 · `visible UI`, `removal` | `ready:opus`; not open together with LAY-45, DIAG-06a or DIAG-06c (`canvas/`) |
-| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` |
-| [#381](https://github.com/jakubiszon26/apiforge/issues/381) | REP-07 Run results: a request with its checks under it | M · 25 · `visible UI`, `default` | `ready:opus` · after DIAG-02 and REP-08 |
+| [#455](https://github.com/jakubiszon26/apiforge/issues/455) | REP-08 Run results: a value opens expanded; Tree \| JSON; Expand all | S · 15 · `visible UI`, `default` | `ready:opus` · criterion 7: the row is DIAG-10's ([#531](https://github.com/jakubiszon26/apiforge/issues/531)) |
+| [#381](https://github.com/jakubiszon26/apiforge/issues/381) | REP-07 Run results: a request with its checks under it | M · 25 · `visible UI`, `default` | `ready:opus` · after DIAG-02, REP-08 and DIAG-12 ([#533](https://github.com/jakubiszon26/apiforge/issues/533)), whose index it uses |
+| [#533](https://github.com/jakubiszon26/apiforge/issues/533) | DIAG-12 A field of a response that a check already reads is marked | M · 20 · `visible UI` | decided 2026-11-23 ([ticket](tickets/DIAG-12.md)): the ✓ filled, checks only; `ready:opus` · after REP-08 merges, before REP-07 |
+| [#547](https://github.com/jakubiszon26/apiforge/issues/547) | DIAG-15 The Checks tab of a step can add a check | S · 15 · `visible UI` | class 2 of AB-01 round 1; decided 2026-11-23 ([ticket](tickets/DIAG-15.md)): a button, then a menu of fields; `ready:opus` |
+| [#550](https://github.com/jakubiszon26/apiforge/issues/550) | DIAG-16 Choose a response field takes a typed path | S · 10 · `visible UI` | decided 2026-11-23 ([ticket](tickets/DIAG-16.md)): a row *Use "…"*; `ready:opus`; the sprint is the owner's to name |
 | [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 The Steps view and the request beside its response: captures and decisions | S · 30 · `visible UI`, `default` | the planning model's; after LANG-13 |
 | [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01 Diagram → Steps | M · 30 · `visible UI` | waits for REQ-00's captures |
 | [#458](https://github.com/jakubiszon26/apiforge/issues/458) | REQ-02a The selected request and its response side by side | M · 30 · `visible UI` | waits for REQ-00's captures |
@@ -564,7 +611,10 @@ criteria:
 | [#465](https://github.com/jakubiszon26/apiforge/issues/465) | REQ-08 A new case duplicated from an existing one; run the failed ones again | S and M · 30 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REQ-01 and REQ-04 |
 | [#477](https://github.com/jakubiszon26/apiforge/issues/477) | REQ-09 Hints for repetition: the same host or header in every request, each with a fix | S · 10 · `visible UI` | accepted into scope 2026-11-20; to analyse; the header half after LANG-18 |
 | [#478](https://github.com/jakubiszon26/apiforge/issues/478) | REQ-10 A live response saved as the sample; Expect this response | M · 20 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REP-07 and REQ-02a |
-| [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the owner's own run | S · 10 | after the rest |
+| [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 A value of a response is used in a later request by choosing it | M · 20 · `visible UI` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
+| [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 A check made from a field offers what to compare with | S–M · 15 · `visible UI`, `default` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
+| [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 The window writes only what was set; [ticket](tickets/REQ-13.md) | S–M · 15 · `default` | in scope 2026-11-21; three questions open |
+| [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the mandatory scenario and the owner's own run; [ticket](tickets/REQ-06.md) | S · 10 | after the rest |
 
 REQ-07 to REQ-10 are the planning model's proposals
 ([plan, section 5](sprints/req.md#5-proposals-of-the-planning-model)).
@@ -584,6 +634,12 @@ Feature work resumes after KTLO exits. Candidates, unestimated:
   LANG-21a [#482](https://github.com/jakubiszon26/apiforge/issues/482), LANG-21b [#495](https://github.com/jakubiszon26/apiforge/issues/495). Cut from 0.2.0 on 2026-11-20;
   analysed and reviewed, each with its ticket file on its branch; taken
   only if users with 0.1.0 projects appear.
+- Three proposals of DIAG-10 the owner took into the backlog on
+  2026-11-21, each to analyse with a mock-up: DIAG-11 [#532](https://github.com/jakubiszon26/apiforge/issues/532),
+  *Copy value* and *Copy path* on a row of a response, with REP-04
+  [#148](https://github.com/jakubiszon26/apiforge/issues/148); DIAG-13 [#534](https://github.com/jakubiszon26/apiforge/issues/534), a filter by name above the tree;
+  DIAG-14 [#535](https://github.com/jakubiszon26/apiforge/issues/535), the component dialog's path picker takes the
+  row of Output data.
 - Panel widths carry over between projects opened in the same window: egui
   caches panel sizes under fixed IDs, so a restored per-project width loses
   to the cached one (project files, split code, diagnostics and, after

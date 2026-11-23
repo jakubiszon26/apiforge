@@ -75,6 +75,10 @@ pub struct PanelSizes {
     /// project on the library leaves the file as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub library_files: bool,
+    /// Whether Run results show a value as JSON text instead of a tree
+    /// (REP-08). Written only when set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub results_json: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -231,6 +235,7 @@ mod tests {
                 library: 260.0,
                 library_collapsed: true,
                 library_files: true,
+                results_json: true,
             }),
             expanded: vec!["flows".into(), "flows/nested".into()],
             ..WorkspaceState::new("project")

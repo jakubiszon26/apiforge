@@ -450,6 +450,10 @@ pub struct FolderApp {
     /// the marks to appear (UX-03).
     #[cfg(test)]
     marks_shown: Option<(String, Vec<usize>, Option<Duration>)>,
+    /// The application data directory *Review legacy runs* reads in place
+    /// of the person's own (UX-42); `None` reads the person's.
+    #[cfg(test)]
+    legacy_data: Option<PathBuf>,
 }
 
 /// What a paste shows once its edit is applied: its copies (UX-34).
@@ -636,6 +640,8 @@ impl FolderApp {
             marks_clock: None,
             #[cfg(test)]
             marks_shown: None,
+            #[cfg(test)]
+            legacy_data: None,
         }
     }
 
@@ -859,11 +865,17 @@ impl FolderApp {
 
     /// Selects `node` and opens the Inspector on its *Checks* list (LAY-11).
     fn show_checks(&mut self, document_id: &str, node: String) {
+        self.select_step(document_id, node);
+        self.inspector.open_checks();
+    }
+
+    /// Selects `node` alone, as a click on its card does; the board brings
+    /// a newly selected card into view (UX-18).
+    fn select_step(&mut self, document_id: &str, node: String) {
         self.new_inputs.remove(document_id);
         self.component_settings.remove(document_id);
         self.selections.insert(document_id.to_owned(), vec![node]);
         self.selected_inputs.remove(document_id);
-        self.inspector.open_checks();
     }
 
     /// Draws every board at `density` and remembers it as *Compact cards*.
@@ -1113,6 +1125,14 @@ impl FolderApp {
         self.consent = crate::consent::AgentConsent::in_configuration(directory);
         self.run_mode = crate::run_mode::RunModeStore::in_configuration(directory);
         self.say_consent();
+    }
+
+    /// Reads legacy runs from `directory`, as the application data
+    /// directory would hold them, instead of the person's own: a test seam
+    /// (UX-42).
+    #[cfg(test)]
+    pub(crate) fn use_legacy_data_directory(&mut self, directory: &std::path::Path) {
+        self.legacy_data = Some(directory.to_owned());
     }
 
     // ----- Frame -----------------------------------------------------------------

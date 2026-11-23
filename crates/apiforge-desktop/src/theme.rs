@@ -11,6 +11,11 @@ pub const BORDER: Color32 = Color32::from_rgb(228, 228, 228);
 pub const ACCENT: Color32 = Color32::from_rgb(224, 89, 39);
 pub const ACCENT_HOVER: Color32 = Color32::from_rgb(206, 76, 29);
 pub const ACCENT_PRESSED: Color32 = Color32::from_rgb(185, 66, 23);
+/// The selection on the board: a selected card's frame and its step's
+/// wires, a selected chip's outline, the selection on the minimap and the
+/// box a drag draws to select (UX-41). A blue that is none of a run's colours, so red always
+/// means failed.
+pub const SELECTION: Color32 = Color32::from_rgb(44, 108, 214);
 pub const LINK: Color32 = Color32::from_rgb(70, 106, 145);
 pub const FIELD: Color32 = Color32::from_rgb(244, 244, 244);
 pub const GRID: Color32 = Color32::from_rgb(215, 215, 215);
@@ -30,6 +35,11 @@ pub const ACCENT_SOFT: Color32 = Color32::from_rgb(251, 233, 221);
 /// (UX-02). White text on it reads at 6.3 : 1.
 pub const SIMULATION: Color32 = Color32::from_rgb(112, 76, 182);
 
+/// A value's colour by its type in the tree of a step's data (DIAG-10): a
+/// text, a number, and `true`, `false` and `null`.
+pub const VALUE_STRING: Color32 = Color32::from_rgb(46, 125, 78);
+pub const VALUE_NUMBER: Color32 = Color32::from_rgb(176, 92, 40);
+pub const VALUE_LITERAL: Color32 = Color32::from_rgb(112, 76, 182);
 pub const SPACE_SM: f32 = 8.0;
 pub const SPACE_MD: f32 = 12.0;
 pub const SPACE_LG: f32 = 16.0;
@@ -45,6 +55,12 @@ pub const COMPACT_SIDEBAR_WIDTH: f32 = 220.0;
 
 pub fn bold_family() -> egui::FontFamily {
     egui::FontFamily::Name("api-forge-bold".into())
+}
+
+/// The bold face of the monospace font, for a check card's title (DIAG-02).
+/// Its characters are as wide as the regular face's.
+pub fn bold_mono_family() -> egui::FontFamily {
+    egui::FontFamily::Name("api-forge-mono-bold".into())
 }
 
 pub fn apply(ctx: &egui::Context) {
@@ -72,6 +88,10 @@ pub fn apply(ctx: &egui::Context) {
         .or_default()
         .insert(0, "api-forge-mono".into());
     fonts.font_data.insert(
+        "api-forge-mono-bold".into(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/AdwaitaMono-Bold.ttf")).into(),
+    );
+    fonts.font_data.insert(
         "api-forge-symbols".into(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/DejaVuSans.ttf")).into(),
     );
@@ -88,6 +108,10 @@ pub fn apply(ctx: &egui::Context) {
     fonts.families.insert(
         bold_family(),
         vec!["api-forge-bold".into(), "api-forge-symbols".into()],
+    );
+    fonts.families.insert(
+        bold_mono_family(),
+        vec!["api-forge-mono-bold".into(), "api-forge-symbols".into()],
     );
     ctx.set_fonts(fonts);
     ctx.set_theme(egui::Theme::Light);

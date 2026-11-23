@@ -19,7 +19,7 @@ pub use migration::{
     CATALOGUE_FILE, CatalogueEntry, MigrationError, MigrationOutcome, PROJECTS_DIRECTORY,
     ProjectCatalogue, migrate_workspace,
 };
-pub use prepare::{as_written, prepare_project};
+pub use prepare::{as_written, prepare_files, prepare_project};
 pub use session::{
     CommitChange, CommitChangeKind, ConflictDecision, ConflictPreview, ConflictTarget, Declaration,
     DeletePreview, DraftStatus, Event, EventKind, ExternalChanges, ExternalCheck, ExternalConflict,

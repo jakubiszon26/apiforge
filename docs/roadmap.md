@@ -29,6 +29,7 @@ continues on the folder mode only.
 | --- | --- |
 | 0.1.0 | The first release, a pre-release: folder projects, the window, the command line and the MCP server; language 1, steps ordered with `@after` |
 | 0.2.0 | Language 2, the one-chain language of the LANG sprint ([REL-05](tickets/REL-05.md)) |
+| 0.2.1 | The owner's findings on the 0.2.0 packages: the new first-start demo, a type name checked when it is written, *Output data* as a tree with *Add a check*, the blue selection and the run mode switch ([REL-06](tickets/REL-06.md)); language 2 unchanged |
 
 What changes in a file from 0.1.0 to 0.2.0: the steps of a block run in the
 order they are written and `@after` is gone; a scenario or a component with a
@@ -40,7 +41,7 @@ looks first); 0.1.0 cannot open a converted project. Converting a project in
 parts, an agent's `fix` and the window's own update are on the backlog, as
 are the reason shown while a block is carried (DIAG-06b), bands (LAY-13) and a
 corridor for data lines (LAY-47). The known limits are listed in the
-[README](../README.md#known-limits-of-020).
+[README](../README.md#known-limits-of-021).
 
 ## Goals
 

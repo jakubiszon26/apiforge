@@ -1317,13 +1317,10 @@ mod mcp08a {
             .unwrap();
         assert!(!document.is_dirty() && !document.is_layout_dirty());
 
-        choose(&mut harness, "Run options");
         assert!(
             disabled(&harness, "Live"),
             "no live request is sent from an observing window"
         );
-        harness.key_press(Key::Escape);
-        settle(&mut harness);
         choose(&mut harness, "Run simulation");
         let report = finish_run(&mut harness);
         assert!(!report.steps.is_empty(), "the simulation still runs");
@@ -3157,8 +3154,8 @@ mod mcp08b {
             for mode in ["Code", "Diagram", "Split"] {
                 choose(&mut harness, mode);
                 let take = harness.get_by_label(TAKE_BACK).rect();
-                // UX-02: the run controls end with the chevron.
-                let run = harness.get_by_label("Run options").rect();
+                // UX-42: the run controls end with the Run button.
+                let run = harness.get_by_label("Run simulation").rect();
                 assert!(
                     (take.right() - run.right()).abs() <= 1.0,
                     "{mode} at {size:?}: Take back ends at {}, Run at {}",
@@ -4575,7 +4572,7 @@ mod mcp09 {
                     choose(&mut harness, mode);
                     assert!(has_label(&harness, BADGE), "{mode}: the badge");
                     assert_within_window(&harness, &[BADGE]);
-                    let mut labels = vec![BADGE, "Code", "Diagram", "Split", "Run options"];
+                    let mut labels = vec![BADGE, "Code", "Diagram", "Split", "Run mode"];
                     if observing {
                         labels.push("Observing");
                     }
@@ -7297,7 +7294,7 @@ mod ux01 {
     /// The controls on the row of `field` in the shown value tree: those of
     /// `names` whose centre is level with the field's label.
     fn on_row(harness: &FolderHarness, field: &str, names: &[&str]) -> Vec<String> {
-        let y = harness.get_by_label(field).rect().center().y;
+        let y = crate::testing::field_row(harness, field);
         names
             .iter()
             .filter(|name| {
@@ -7859,18 +7856,20 @@ mod ux01 {
 
 // ----- UX-02: the run mode is a setting ---------------------------------------
 
-/// UX-02 (#99): the window keeps a run mode per person and per project, the
-/// header's one Run button runs it and says which, and *Run options* is a
-/// chevron at the button's right (docs/tickets/UX-02.md). Every test uses
-/// the demo shop and a configuration directory of its own.
+/// UX-02 (#99): the window keeps a run mode per person and per project, and
+/// the header's one Run button runs it and says which
+/// (docs/tickets/UX-02.md). Since UX-42 the mode is chosen on the header's
+/// switch *Simulation | Live*, not in the chevron's menu; the menu's tests
+/// are UX-42's (`acceptance_tests/ux42.rs`). Every test uses the demo shop
+/// and a configuration directory of its own.
 mod ux02 {
-    use super::super::accessibility_tests::{open_by_keyboard, tab_order};
     use super::mcp08b::{agent, await_endpoint, await_until, contains, hand_over, read_only};
     use super::mcp09::{agent_holds, files, manifest_id, set_box, window};
     use super::*;
     use crate::testing::{MINIMUM, assert_disjoint, assert_within_window};
     use apiforge_core::run::RunMode;
     use apiforge_storage::project::HolderRole;
+    use egui::accesskit::Role;
     use egui_kittest::kittest::NodeT;
     use serde_json::{Value, json};
     use std::{
@@ -7881,16 +7880,10 @@ mod ux02 {
 
     const SIMULATE: &str = "Run simulation";
     const LIVE: &str = "Run live";
-    const OPTIONS: &str = "Run options";
-    const MENU: &str = "Run options menu";
-    const CAPTION: &str = "RUN MODE";
+    /// The header's run mode switch (UX-42) and its parts.
+    const SWITCH: &str = "Run mode";
     const SIMULATION_ITEM: &str = "Simulation";
     const LIVE_ITEM: &str = "Live";
-    const SIMULATION_HINT: &str = "Sample responses; no request is sent.";
-    const LIVE_HINT: &str = "Requests go to the project's API.";
-    const LINE: &str = "The Run button runs this mode until you change it.";
-    const REVIEW: &str = "Review legacy runs";
-    const ONE_OFF: &str = "Run live requests";
     const SIMULATE_HOVER: &str = "Simulate the selected scenario or component with sample responses, including unsaved valid code";
     const LIVE_HOVER: &str = "Send the requests of the selected scenario or component to the API, including unsaved valid code";
     const BADGE: &str = "Live allowed";
@@ -7908,29 +7901,20 @@ mod ux02 {
         configuration.join("apiforge").join("agent-consent.json")
     }
 
-    fn disabled(harness: &FolderHarness, label: &str) -> bool {
-        harness.get_by_label(label).accesskit_node().is_disabled()
+    /// Whether the switch's part `item` is disabled.
+    fn disabled(harness: &FolderHarness, item: &str) -> bool {
+        harness
+            .get_by_role_and_label(Role::RadioButton, item)
+            .accesskit_node()
+            .is_disabled()
     }
 
-    /// Opens the chevron's menu.
-    fn open_options(harness: &mut FolderHarness) {
-        choose(harness, OPTIONS);
-        assert!(has_label(harness, MENU), "the chevron opens {MENU}");
-    }
-
-    fn close_options(harness: &mut FolderHarness) {
-        if has_label(harness, MENU) {
-            harness.key_press(Key::Escape);
-            settle(harness);
-        }
-        assert!(!has_label(harness, MENU), "the menu closed");
-    }
-
-    /// Chooses `item`, *Simulation* or *Live*, in the chevron's menu.
+    /// Chooses `item`, *Simulation* or *Live*, on the header's switch.
     pub(super) fn choose_mode(harness: &mut FolderHarness, item: &str) {
-        open_options(harness);
-        choose(harness, item);
-        close_options(harness);
+        harness
+            .get_by_role_and_label(Role::RadioButton, item)
+            .click();
+        settle(harness);
     }
 
     /// Whether hovering the widget `label` shows a tooltip with `text`,
@@ -8027,12 +8011,12 @@ mod ux02 {
     fn ux02_criterion_1_simulation_is_one_violet() {
         assert_eq!(theme::SIMULATION, egui::Color32::from_rgb(112, 76, 182));
         assert_eq!(
-            super::super::chrome::run_button(false).primary_fill(),
+            super::super::chrome::run_button(false, false).primary_fill(),
             theme::SIMULATION,
             "Run simulation"
         );
         assert_eq!(
-            super::super::chrome::run_button(true).primary_fill(),
+            super::super::chrome::run_button(true, false).primary_fill(),
             theme::ACCENT,
             "Run live"
         );
@@ -8044,74 +8028,6 @@ mod ux02 {
             crate::report::mode_pill(RunMode::Live),
             ("LIVE API", theme::ACCENT)
         );
-    }
-
-    /// Criterion 2: the chevron *Run options* sits at the right of the Run
-    /// button and opens the menu: the caption, *Simulation* and *Live* with
-    /// their hints, the line, *Review legacy runs*; no *Run live requests*;
-    /// on a scenario's and on a component's tab.
-    #[test]
-    fn ux02_criterion_2_the_chevron_opens_the_menu() {
-        let configuration = tempfile::tempdir().unwrap();
-        let directory = shop();
-        let mut harness = window(directory.path(), MINIMUM, configuration.path());
-        let component = only(&harness, DocumentKind::Component);
-        for tab in [only(&harness, DocumentKind::Scenario), component] {
-            app(&mut harness).activate_tab(&tab);
-            settle(&mut harness);
-            let run = harness.get_by_label(SIMULATE).rect();
-            let chevron = harness
-                .get_by_role_and_label(egui::accesskit::Role::Button, OPTIONS)
-                .rect();
-            assert!(
-                chevron.left() >= run.right() && chevron.left() - run.right() <= 4.0,
-                "the chevron at the button's right: {run:?}, {chevron:?}"
-            );
-            assert!(
-                (chevron.center().y - run.center().y).abs() <= 1.0,
-                "on the button's row"
-            );
-            open_options(&mut harness);
-            for label in [
-                CAPTION,
-                SIMULATION_ITEM,
-                SIMULATION_HINT,
-                LIVE_ITEM,
-                LIVE_HINT,
-                LINE,
-                REVIEW,
-            ] {
-                assert!(has_label(&harness, label), "{label} in the menu");
-            }
-            assert!(!contains(&harness, ONE_OFF), "{ONE_OFF} is nowhere");
-            let order: Vec<f32> = [CAPTION, SIMULATION_ITEM, LIVE_ITEM, LINE, REVIEW]
-                .iter()
-                .map(|label| harness.get_by_label(label).rect().top())
-                .collect();
-            assert!(order.is_sorted(), "top to bottom: {order:?}");
-            close_options(&mut harness);
-        }
-    }
-
-    /// Criterion 2: the owner's "a little more left margin": *Simulation*
-    /// and *Live* start at least 8 px right of the RUN MODE caption.
-    #[test]
-    fn ux02_criterion_2_the_mode_items_are_indented() {
-        let configuration = tempfile::tempdir().unwrap();
-        let directory = shop();
-        for size in [MINIMUM, WIDE] {
-            let mut harness = window(directory.path(), size, configuration.path());
-            open_options(&mut harness);
-            let caption = harness.get_by_label(CAPTION).rect().left();
-            for item in [SIMULATION_ITEM, LIVE_ITEM] {
-                let left = harness.get_by_label(item).rect().left();
-                assert!(
-                    left >= caption + 8.0,
-                    "{item} at {left}, the caption at {caption}"
-                );
-            }
-            close_options(&mut harness);
-        }
     }
 
     /// Criterion 2, as amended by UX-25 (#233, the owner's decision A of
@@ -8260,10 +8176,8 @@ mod ux02 {
             "observing reads Run simulation"
         );
         assert!(!has_label(&harness, LIVE));
-        open_options(&mut harness);
         assert!(disabled(&harness, LIVE_ITEM), "Live is disabled");
         assert!(hover_shows(&mut harness, LIVE_ITEM, runs::LIVE_PAUSED));
-        close_options(&mut harness);
 
         choose(&mut harness, SIMULATE);
         let report = finish_run(&mut harness);
@@ -8288,8 +8202,7 @@ mod ux02 {
 
     /// Review round 1 of #244: while the window observes, *Simulation* is
     /// the mode shown, and clicking it is still the person's choice: the
-    /// stored *Live* becomes Simulation. Opening and closing the menu
-    /// writes nothing.
+    /// stored *Live* becomes Simulation.
     #[test]
     fn choosing_simulation_while_observing_replaces_a_stored_live() {
         let configuration = tempfile::tempdir().unwrap();
@@ -8308,14 +8221,6 @@ mod ux02 {
         let mut harness = window(root, WIDE, configuration.path());
         assert!(has_label(&harness, "Observing"));
         assert!(has_label(&harness, SIMULATE));
-        let before = fs::read(mode_file(configuration.path())).unwrap();
-        open_options(&mut harness);
-        close_options(&mut harness);
-        assert_eq!(
-            fs::read(mode_file(configuration.path())).unwrap(),
-            before,
-            "opening the menu writes nothing"
-        );
         choose_mode(&mut harness, SIMULATION_ITEM);
         assert_eq!(
             stored()["projects"][manifest_id(root)]["mode"],
@@ -8349,7 +8254,7 @@ mod ux02 {
         assert!(has_label(&harness, LIVE));
         assert!(has_label(&harness, BADGE), "the badge beside Run live");
         assert!(hover_shows(&mut harness, BADGE, BADGE_HOVER));
-        assert_disjoint(&harness, &[BADGE, LIVE, OPTIONS]);
+        assert_disjoint(&harness, &[BADGE, LIVE, SWITCH]);
         assert!(
             harness.get_by_label(BADGE).rect().right() < harness.get_by_label(LIVE).rect().left()
         );
@@ -8389,7 +8294,7 @@ mod ux02 {
                         choose(&mut harness, mode);
                         let mut labels = vec![
                             "Project", BADGE, "Code", "Diagram", "Split", "Save", "Save all",
-                            OPTIONS, run,
+                            SWITCH, run,
                         ];
                         if tab == &component {
                             labels.push("Publish");
@@ -8413,68 +8318,6 @@ mod ux02 {
             }
             drop(harness);
         }
-    }
-
-    /// Criterion 8: a tab that cannot run, a text file or none, keeps the
-    /// *Runs* menu with *Review legacy runs*, whatever the mode.
-    #[test]
-    fn ux02_criterion_8_the_runs_menu_is_unchanged() {
-        let configuration = tempfile::tempdir().unwrap();
-        let directory = shop();
-        fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
-        let mut harness = window(directory.path(), WIDE, configuration.path());
-        choose_mode(&mut harness, LIVE_ITEM);
-        app(&mut harness).open_text("README.md");
-        settle(&mut harness);
-        for case in ["a text file", "no tab"] {
-            if case == "no tab" {
-                let tabs: Vec<String> = folder(&harness)
-                    .workbench
-                    .tabs()
-                    .iter()
-                    .map(|tab| tab.document_id.clone())
-                    .collect();
-                for tab in tabs {
-                    app(&mut harness).close_tab(&tab);
-                }
-                settle(&mut harness);
-                assert!(folder(&harness).workbench.active().is_none(), "no tab");
-            }
-            for absent in [SIMULATE, LIVE, OPTIONS] {
-                assert!(!has_label(&harness, absent), "{case}: no {absent}");
-            }
-            choose(&mut harness, "Runs");
-            assert!(has_label(&harness, "Runs menu"), "{case}");
-            assert!(has_label(&harness, REVIEW), "{case}");
-            assert!(!has_label(&harness, LIVE_ITEM), "{case}: no mode");
-            harness.key_press(Key::Escape);
-            settle(&mut harness);
-        }
-    }
-
-    /// Criterion 9: Tab reaches the Run button, then the chevron, between
-    /// *Project* and *Code*; the chevron is a button named *Run options*
-    /// whose menu, opened from the keyboard, is named and reaches the modes.
-    #[test]
-    fn ux02_criterion_9_the_controls_are_accessible() {
-        let directory = shop();
-        let (context, mut app) = open(directory.path());
-        let visited = tab_order(&mut app, &context, 23);
-        let mut at = 0;
-        for name in ["Project", SIMULATE, OPTIONS, "Code"] {
-            at += visited[at..]
-                .iter()
-                .position(|visit| visit == name)
-                .unwrap_or_else(|| panic!("{name} after {at} in {visited:#?}"));
-        }
-        open_by_keyboard(&mut app, &context, OPTIONS);
-        let visited = tab_order(&mut app, &context, 3);
-        assert_eq!(visited[0], MENU, "{visited:?}");
-        assert!(
-            visited.iter().any(|name| name == SIMULATION_ITEM),
-            "{visited:?}"
-        );
-        frame(&mut app, &context, vec![key(Key::Escape, Modifiers::NONE)]);
     }
 }
 
@@ -10497,7 +10340,7 @@ mod ux32 {
         assert!(required.accesskit_node().is_disabled(), "forced on");
         assert!(contains(&harness, "An input without a default is required"));
         choose(&mut harness, TYPE);
-        choose(&mut harness, "Text");
+        choose(&mut harness, "string");
         harness.get_by_label(DEFAULT).focus();
         harness.step();
         harness.get_by_label(DEFAULT).type_text("\"EUR\"");
@@ -10623,7 +10466,7 @@ mod ux32 {
         assert!(has_label(&harness, "quantity * number = 2"), "the pill");
 
         choose(&mut harness, TYPE);
-        choose(&mut harness, "Text");
+        choose(&mut harness, "string");
         assert!(source_of(&harness, &id).contains("  input quantity: string = 2\n"));
         assert!(
             harness
@@ -10783,9 +10626,9 @@ mod ux32 {
         let before = source_of(&harness, &id);
         choose(&mut harness, QUANTITY);
         choose(&mut harness, TYPE);
-        choose(&mut harness, "List");
+        choose(&mut harness, "array");
         assert_eq!(source_of(&harness, &id), before, "the type is kept");
-        assert!(contains(&harness, "The default 1 is not a list"));
+        assert!(contains(&harness, "The default 1 is not an array"));
         type_over(&mut harness, DEFAULT, "true");
         assert!(contains(&harness, "The default is not a number"));
         assert!(source_of(&harness, &id).contains("  input quantity: number\n"));
@@ -11415,7 +11258,7 @@ mod ux30 {
     }
 
     /// Criterion 1: the dialog opens with the name focused and the file
-    /// named after it; it proposes `product` (Object · Product, required,
+    /// named after it; it proposes `product` (object · Product, required,
     /// from a wire outside the selection), `quantity` (Number, 1 becomes its
     /// default) and `expected` (Number, required) as inputs, and `cart`
     /// ticked with the check's `value` and `passed` unticked as outputs.
@@ -11443,7 +11286,7 @@ mod ux30 {
                 (
                     1,
                     "product",
-                    "Object",
+                    "object",
                     "Product",
                     true,
                     "Add to cart → product · a wire from outside the selection",
@@ -11451,7 +11294,7 @@ mod ux30 {
                 (
                     2,
                     "quantity",
-                    "Number",
+                    "number",
                     "No contract",
                     false,
                     "Add to cart → Quantity · the value 1 becomes its default",
@@ -11459,7 +11302,7 @@ mod ux30 {
                 (
                     3,
                     "expected",
-                    "Number",
+                    "number",
                     "No contract",
                     true,
                     "Promotional price → Expected value · a wire from outside the selection",
@@ -11494,7 +11337,7 @@ mod ux30 {
 
             assert_eq!(toggled(&harness, "Use output 1"), Some(Toggled::True));
             assert_eq!(field_value(&harness, "Output 1 name"), "cart");
-            assert_eq!(field_value(&harness, "Output 1 type"), "Object");
+            assert_eq!(field_value(&harness, "Output 1 type"), "object");
             assert_eq!(field_value(&harness, "Output 1 contract"), "Cart");
             assert!(has_label(&harness, "Add to cart → cart"));
             for (row, caption) in [
@@ -13008,7 +12851,8 @@ mod lay08 {
         settle(harness);
     }
 
-    /// Criterion 2: the checks of `cart` in words, each with its predicate,
+    /// Criterion 2: the checks of `cart`, each with its predicate (in the
+    /// signs of the code since DIAG-02),
     /// sources, status and moment; the check that reads `cart` and `receipt`
     /// under both, waiting for the later one.
     #[test]
@@ -13020,13 +12864,13 @@ mod lay08 {
             &harness,
             &[
                 "cart_created — Waiting for cart",
-                "cart.status equals 201",
+                "status == 201",
                 "Sources: cart.status",
                 "cart_total — Waiting for cart",
-                "cart.body.total is approximately expected_total",
+                "total ~= expected_total within 0.01",
                 "Sources: cart.body.total, expected_total",
                 "receipt_total — Waiting for receipt · Shared",
-                "receipt.body.total is approximately cart.body.total",
+                "receipt.body.total ~= cart.body.total within 0.01",
                 "Sources: receipt.body.total, cart.body.total",
                 "Shared with: receipt",
             ],
@@ -13038,7 +12882,7 @@ mod lay08 {
             &harness,
             &[
                 "receipt_total — Waiting for receipt",
-                "receipt.body.total is approximately cart.body.total",
+                "receipt.body.total ~= cart.body.total within 0.01",
                 "Sources: receipt.body.total, cart.body.total",
                 "Shared with: cart",
                 "Not run yet",
@@ -13164,7 +13008,7 @@ mod lay08 {
         let right = harness.get_by_label("Check cart_total").rect().right();
         for line in [
             "cart_total — Waiting for cart",
-            "cart.body.total is approximately expected_total",
+            "total ~= expected_total within 0.01",
             "Sources: cart.body.total, expected_total",
         ] {
             let rect = harness.get_by_label(line).rect();
@@ -13288,7 +13132,7 @@ mod lay20 {
                 "1 check",
                 "Check promo_priced",
                 "promo_priced — Waiting for promoted",
-                "promoted.product.promotion.price is greater than 0",
+                "promotion.price > 0",
                 "Sources: promoted.product.promotion.price",
                 "Not run yet",
             ],
@@ -13307,7 +13151,7 @@ mod lay20 {
             &[
                 "3 checks · 1 shared · 1 in Cleanup",
                 "cart_id_kept — Cleanup",
-                "cart.body.id equals \"c-1\"",
+                "id == \"c-1\"",
                 "Sources: cart.body.id",
             ],
         );
@@ -13367,7 +13211,7 @@ mod lay20 {
                 "1 check",
                 "Check gone",
                 "gone — Waiting for removed",
-                "removed.status equals 204",
+                "status == 204",
             ],
         );
         assert!(
@@ -13653,6 +13497,10 @@ mod ux18 {
         first(harness, right).scroll_to_me();
         settle(harness);
         first(harness, right).click();
+        // *Check* opens the menu Add a check (DIAG-08); *equals* is the
+        // check it wrote at once before.
+        settle(harness);
+        crate::testing::choose_equals(harness, "the field");
     }
 
     /// Criterion 3: *Check* on the rightmost step in Run results adds a card

@@ -15,6 +15,9 @@ use serde_json::Value;
 pub struct Source {
     pub value: Option<Value>,
     pub origin: String,
+    /// The mode of the last run the value comes from; `None` when it is
+    /// the saved sample.
+    pub run: Option<RunMode>,
 }
 
 /// The value an output would have according to saved samples.
@@ -89,10 +92,12 @@ pub fn source(node: &Node, port: &str, project: &Project, run: Option<&RunResult
                     RunMode::Simulation => "simulation",
                 }
             ),
+            run: Some(mode),
         },
         None => Source {
             value: sample_output(node, port, project),
             origin: "Sample data".into(),
+            run: None,
         },
     }
 }
@@ -102,16 +107,13 @@ pub fn fields(value: Option<&Value>) -> ResponseFields {
     collect_response_fields_bounded(value)
 }
 
+/// A field's type in the language's word (DIAG-08); `missing` where the
+/// field has no value.
 pub fn type_label(name: &str) -> &'static str {
-    match name {
-        "string" => "Text",
-        "number" => "Number",
-        "boolean" => "Yes / no",
-        "object" => "Object",
-        "array" => "List",
-        "null" => "Null",
-        _ => "Missing",
-    }
+    super::fields::TYPE_WORDS
+        .into_iter()
+        .find(|word| *word == name)
+        .unwrap_or("missing")
 }
 
 #[cfg(test)]
@@ -131,7 +133,7 @@ mod tests {
         let component = component_definition(&project, node).unwrap();
         let output = &apiforge_core::graph::component_outputs(component)[0].name;
         assert!(sample_output(node, output, &project).is_some());
-        assert_eq!(type_label("array"), "List");
+        assert_eq!(type_label("array"), "array");
         assert_eq!(fields(Some(&json!({"a": 1}))).fields.len(), 2);
     }
 }

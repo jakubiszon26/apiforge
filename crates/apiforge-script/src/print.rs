@@ -721,7 +721,9 @@ fn with_path(mut root: Expr, path: &str) -> Expr {
     }
     root
 }
-fn binary_symbol(operator: Operator) -> Option<&'static str> {
+/// The sign a binary operator is written with in the script: `==`, `>=`,
+/// `*`, `&&`; `None` for an operator written as a call.
+pub fn binary_symbol(operator: Operator) -> Option<&'static str> {
     Some(match operator {
         Operator::Add => "+",
         Operator::Subtract => "-",

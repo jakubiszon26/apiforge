@@ -521,8 +521,22 @@ impl Board<'_> {
         let source = source
             .as_ref()
             .map(|(node_id, port)| edit::OutputRef { node_id, port });
-        let added = edit::add_node(self.graph, block, position, definition, source)
+        // Main and its cleanup share one namespace of handles (DIAG-17): the
+        // handle is free on both boards, so the add is never refused for it.
+        let handle = self
+            .sibling
+            .map(|_| self.free_handle(&block.create(position.clone(), definition).handle));
+        let mut added = edit::add_node(self.graph, block, position, definition, source)
             .map_err(|error| error.to_string())?;
+        if let Some(handle) = handle
+            && let Some(node) = added
+                .graph
+                .nodes
+                .iter_mut()
+                .find(|node| node.id == added.node_id)
+        {
+            node.handle = handle;
+        }
         let mut graph = self.free_slot_for(added.graph, &added.node_id);
         if block == Block::Export
             && let Some(node) = graph.nodes.iter_mut().find(|node| node.id == added.node_id)
@@ -771,8 +785,23 @@ impl Board<'_> {
         (x < edge).then_some(edge)
     }
 
-    /// Adds a node and selects it, keeping it clear of occupied positions.
-    pub fn push_node(&self, node: Node) -> Edit {
+    /// `base`, or `base_2`, `base_3`, … – the first handle no step of this
+    /// board or of its sibling uses: Main and its cleanup share one
+    /// namespace of handles (DIAG-17).
+    fn free_handle(&self, base: &str) -> String {
+        apiforge_core::handle::unique_handle(base, |handle| {
+            self.graph
+                .nodes
+                .iter()
+                .chain(self.sibling.into_iter().flat_map(|graph| &graph.nodes))
+                .any(|node| node.handle == handle)
+        })
+    }
+
+    /// Adds a node and selects it, keeping it clear of occupied positions,
+    /// under a handle free on this board and its sibling.
+    pub fn push_node(&self, mut node: Node) -> Edit {
+        node.handle = self.free_handle(&node.handle);
         let id = node.id.clone();
         let mut graph = self.graph.clone();
         graph.nodes.push(node);
@@ -783,8 +812,11 @@ impl Board<'_> {
     }
 
     /// Adds a check on `subject` and selects it, in the braces the subject
-    /// stands in (#433), keeping it clear of occupied positions.
-    pub fn push_check(&self, subject: &str, check: Node) -> Edit {
+    /// stands in (#433), keeping it clear of occupied positions. A second
+    /// check of the same field takes the next free handle, `check_total_2`
+    /// (DIAG-08): the menu offers several checks of one field.
+    pub fn push_check(&self, subject: &str, mut check: Node) -> Edit {
+        check.handle = self.free_handle(&check.handle);
         let id = check.id.clone();
         Edit {
             graph: self.free_slot_for(edit::add_check(self.graph, subject, check), &id),
@@ -1362,5 +1394,33 @@ mod tests {
         let added = board.add_node(Block::Export, None, at, None).unwrap();
         let export = added.graph.nodes.last().unwrap();
         assert_eq!(export.position.x, f64::from(chip.max.x) + 60.0);
+    }
+
+    /// DIAG-17: Main and its cleanup share one namespace of handles, so an
+    /// operator added on one board takes a handle its sibling does not use.
+    #[test]
+    fn an_operator_takes_a_handle_free_on_the_sibling_board() {
+        use apiforge_core::{graph::create_operator_node, operator::Operator};
+        let project = apiforge_core::demos::shop_project();
+        let at = Position { x: 0.0, y: 0.0 };
+        let main = Graph {
+            nodes: vec![create_operator_node(Operator::Round, at.clone())],
+            ..Graph::default()
+        };
+        let cleanup = Graph::default();
+        let parameters = Vec::new();
+        let board = Board {
+            density: canvas::CardDensity::Full,
+            satellites: false,
+            lines: canvas::Lines::default(),
+            sibling: Some(&main),
+            graph: &cleanup,
+            reference: &cleanup,
+            project: &project,
+            parameters: &parameters,
+        };
+        let added = board.push_node(create_operator_node(Operator::Round, at));
+        let handle = &added.graph.nodes[0].handle;
+        assert_eq!(*handle, format!("{}_2", main.nodes[0].handle));
     }
 }

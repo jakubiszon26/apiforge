@@ -400,7 +400,6 @@ fn menus_opened_from_the_keyboard_are_named_and_reachable() {
     let (context, mut app) = open(directory.path());
     for (button, menu, first) in [
         ("Project", "Project menu", "Open Folder…"),
-        ("Run options", "Run options menu", "Simulation"),
         ("New", "New menu", "New scenario"),
     ] {
         open_by_keyboard(&mut app, &context, button);
@@ -652,7 +651,7 @@ fn the_run_inputs_dialog_names_every_control() {
     app.workbench.open(&id);
     app.request_run(&id, false);
     assert!(
-        exposes(&mut app, &context, "product · Object"),
+        exposes(&mut app, &context, "product · object"),
         "the dialog is open"
     );
     for mode in [Mode::Diagram, Mode::Split, Mode::Code] {

@@ -280,6 +280,17 @@ impl Completions {
                 self.rechecks = 0;
             }
         }
+        let popup_id = id.with("completion-popup");
+        // A click outside the focused field takes its focus while the field
+        // is laid out, before the list it opened sees the click; a click on
+        // the list gives the focus back, so the list handles it (DIAG-18).
+        if self.popup.is_some()
+            && ui.is_enabled()
+            && !output.response.has_focus()
+            && clicked_on(ui, popup_id)
+        {
+            ui.memory_mut(|memory| memory.request_focus(id));
+        }
         if !output.response.has_focus() || !ui.is_enabled() {
             self.popup = None;
             return false;
@@ -381,7 +392,7 @@ impl Completions {
                 ui.ctx().request_repaint();
                 Some(chosen)
             }
-            None => self.draw(ui, id.with("completion-popup"), context),
+            None => self.draw(ui, popup_id, context),
         };
         match chosen {
             Some(chosen) => {
@@ -442,6 +453,20 @@ impl Completions {
         let _ = area;
         chosen
     }
+}
+
+/// Whether a click this frame landed on the popup drawn as `popup_id`, as it
+/// was laid out last frame.
+fn clicked_on(ui: &Ui, popup_id: egui::Id) -> bool {
+    let layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+    ui.input(|input| {
+        input
+            .pointer
+            .any_click()
+            .then(|| input.pointer.interact_pos())
+            .flatten()
+    })
+    .is_some_and(|at| ui.ctx().layer_id_at(at) == Some(layer))
 }
 
 /// Where the popup goes and how large it may grow.

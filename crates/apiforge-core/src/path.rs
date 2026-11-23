@@ -93,6 +93,14 @@ impl JsonPath {
         self.segments.is_empty()
     }
 
+    /// Whether a segment is `__proto__`, `constructor` or `prototype`, which
+    /// [`Self::resolve`] never reads.
+    pub fn has_reserved_key(&self) -> bool {
+        self.segments
+            .iter()
+            .any(|key| RESERVED_KEYS.contains(&key.as_str()))
+    }
+
     /// Appends an object field.
     pub fn push_key(&mut self, key: impl Into<String>) {
         self.segments.push(key.into());
