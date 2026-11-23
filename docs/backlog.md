@@ -511,7 +511,7 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   LANG-04 #132). Their format questions return to the owner with the
   analyses.
 
-## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (planned; not started)
+## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (closed)
 
 The owner tried the v0.2.0-rc.1 packages on 2026-11-21 and raised four
 findings; v0.2.0 was tagged as it was and these go to 0.2.1. LANG-22 is
@@ -526,6 +526,11 @@ the order of work.
   button is ▶ alone
   ([ticket](tickets/UX-42.md#the-measurement-and-question-12)); a release
   candidate `v0.2.1-rc.1` comes first. DIAG-10, added and decided the same day, is the owner's fifth finding. Nothing waits for a decision.
+- Merged: DIAG-09 #399 (#529), UX-41 #519 (#527), UX-42 #520 (#530),
+  DEMO-01 #523 (#541), DIAG-08 #521 (#543), LANG-22 #522 (#528), DIAG-10
+  #531 (#554). The release candidate's pull request is REL-06 #524; after
+  it merges, the owner pushes `v0.2.1-rc.1`, tries its packages and then
+  pushes `v0.2.1`.
 
 | Issue | Ticket | Estimate |
 | --- | --- | --- |

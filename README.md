@@ -213,10 +213,28 @@ read. `--check` prints the same report without writing. The grammar and the roun
 contract are in [ADR 0005](docs/decisions/0005-scenario-language.md); the
 reference given to models is [docs/language/reference.md](docs/language/reference.md).
 
-## Version 0.2.0
+## Version 0.2.1
 
-The current version is 0.2.0, the first release of the scenario language
-version 2. The release notes on GitHub list the merged pull requests.
+The current version is 0.2.1, a patch release of 0.2.0 with what the owner
+found on the 0.2.0 packages; the scenario language is still version 2. The
+release notes on GitHub list the merged pull requests.
+
+### What changes from 0.2.0
+
+A first start in an empty data directory opens a new *Demo shop*: the
+scenario *Buy coffee on promotion*, which reads top to bottom as the language
+is written, beside *The cart refuses bad orders* and one component,
+`product`; a data directory that already holds a project is not touched. A
+type check whose type is not one of `string`, `number`, `boolean`, `object`,
+`array` and `null` is now an error when it is written, so a project of 0.2.0
+with such a check opens but does not run until the name is corrected; a
+failed type check says what it expected and what it got. In the Inspector,
+*Output data* reads as a tree with a field on each line, and its ✓ opens
+*Add a check* — equals, is a type, exists, is not empty — which, like *Assign
+to variable*, also works before the first run. A selected step has a blue
+frame instead of the red outline. The run mode is a *Simulation | Live*
+switch beside the Run button, and *Review legacy runs* moved to the Project
+menu.
 
 ### What changes from 0.1.0
 
@@ -232,7 +250,7 @@ version 2. The release notes on GitHub list the merged pull requests.
 - Under `on_error continue` a chain goes on after an error; only a missing
   value holds a step back.
 
-### Known limits of 0.2.0
+### Known limits of 0.2.1
 
 - A project is converted whole, by the command line only: not in parts,
   not by an agent over MCP and not from the window.
