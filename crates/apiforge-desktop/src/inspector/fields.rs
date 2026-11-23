@@ -1,5 +1,6 @@
 //! Form fields of the inspector.
 
+use super::marks::{Marks, RowMark, TreeMarks};
 use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
@@ -421,15 +422,63 @@ pub fn template_map(
 
 /// What the user chose in the output tree.
 pub enum TreeAction {
-    Check { path: String, check: FieldCheck },
-    Assign { path: String },
+    Check {
+        path: String,
+        check: FieldCheck,
+    },
+    Assign {
+        path: String,
+    },
+    /// A check of the field, chosen in the menu of its ✓ (DIAG-12).
+    Select {
+        check: String,
+    },
+}
+
+/// What the menu of ✓ offers under *Add a check*.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Adding {
+    /// The checks the field's value takes (DIAG-08).
+    Offered,
+    /// The same, disabled: the document takes no edit, and the menu opens
+    /// for the field's checks (DIAG-12).
+    Disabled,
+    /// Nothing: a stale or locked report lists the field's checks only.
+    Hidden,
+}
+
+/// What was chosen in the menu of ✓.
+pub enum MenuChoice {
+    /// A check to add, from *Add a check* (DIAG-08).
+    Add(FieldCheck),
+    /// A check of the field to select, from the list above it (DIAG-12).
+    Select(String),
 }
 
 /// The menu *Add a check* that `button` opens on a field showing `value`
 /// (DIAG-08): *equals ‹value›*, *is a ‹type›*, *exists*, *is not empty*,
 /// each read as a sentence about `subject` before it is written. The one
 /// place that draws it, for the Inspector's tree and Run results alike.
+// The Checks tab's *Add check* opens it on a field no tree draws (DIAG-15).
+#[allow(dead_code)]
 pub fn check_menu(button: &egui::Response, subject: &str, value: &Value) -> Option<FieldCheck> {
+    match check_menu_with(button, subject, value, &[], Adding::Offered) {
+        Some(MenuChoice::Add(check)) => Some(check),
+        _ => None,
+    }
+}
+
+/// [`check_menu`] on a field that `listed` checks already read: the menu
+/// lists them first, as DIAG-02 writes them and in Run results with their
+/// outcome, and a click selects one; *Add a check* follows as `adding`
+/// says (DIAG-12).
+pub fn check_menu_with(
+    button: &egui::Response,
+    subject: &str,
+    value: &Value,
+    listed: &[super::marks::Listed],
+    adding: Adding,
+) -> Option<MenuChoice> {
     let mut chosen = None;
     egui::Popup::menu(button).show(|ui| {
         // Escape closes the menu and leaves the selection under it.
@@ -438,15 +487,67 @@ pub fn check_menu(button: &egui::Response, subject: &str, value: &Value) -> Opti
         }
         widgets::name_menu(ui, "Add a check menu");
         ui.set_min_width(200.0);
+        if !listed.is_empty() {
+            widgets::caption(
+                ui,
+                if listed.len() == 1 {
+                    "CHECK OF THIS FIELD"
+                } else {
+                    "CHECKS OF THIS FIELD"
+                },
+            );
+            for check in listed {
+                let mut job = egui::text::LayoutJob::default();
+                job.append(
+                    &crate::labels::truncate(&check.text, 60),
+                    0.0,
+                    egui::TextFormat::simple(
+                        egui::FontId::monospace(theme::FONT_LABEL),
+                        theme::LINK,
+                    ),
+                );
+                if let Some((word, colour)) = check.outcome {
+                    job.append(
+                        word,
+                        12.0,
+                        egui::TextFormat::simple(
+                            egui::FontId::proportional(theme::FONT_META),
+                            colour,
+                        ),
+                    );
+                }
+                let item = widgets::named(ui.button(job), check.text.as_str());
+                if item.on_hover_text("Select this check").clicked() {
+                    chosen = Some(MenuChoice::Select(check.id.clone()));
+                    ui.close();
+                }
+            }
+            if adding == Adding::Hidden {
+                return;
+            }
+            ui.separator();
+        }
         widgets::caption(ui, "ADD A CHECK");
         for check in FieldCheck::offered(value) {
-            if ui.button(check_sentence(subject, &check)).clicked() {
-                chosen = Some(check);
+            let item = egui::Button::new(check_sentence(subject, &check));
+            if ui.add_enabled(adding == Adding::Offered, item).clicked() {
+                chosen = Some(MenuChoice::Add(check));
                 ui.close();
             }
         }
     });
     chosen
+}
+
+/// The action a choice in the menu of the field at `path` makes.
+fn menu_action(choice: MenuChoice, path: &str) -> TreeAction {
+    match choice {
+        MenuChoice::Add(check) => TreeAction::Check {
+            path: path.to_owned(),
+            check,
+        },
+        MenuChoice::Select(check) => TreeAction::Select { check },
+    }
 }
 
 /// A check of `subject` as the menu reads it: *total is a number*.
@@ -470,7 +571,9 @@ fn check_sentence(subject: &str, check: &FieldCheck) -> String {
 /// row is the output itself, named `heading`. Field names can be dragged
 /// onto arguments as a reference to `node`'s `port`. `read_only` says why
 /// the actions are disabled, on their hover (DIAG-09). What is folded or
-/// opened is kept per field of `document`.
+/// opened is kept per field of `document`. A field a check reads carries
+/// the mark of `marks` (DIAG-12).
+#[allow(clippy::too_many_arguments)]
 pub fn json_tree(
     ui: &mut Ui,
     document: Id,
@@ -479,6 +582,7 @@ pub fn json_tree(
     heading: &str,
     value: &Value,
     read_only: Option<&str>,
+    marks: Option<Marks<'_>>,
 ) -> Option<TreeAction> {
     draw_tree(
         ui,
@@ -489,6 +593,7 @@ pub fn json_tree(
             read_only,
             step: TREE_INDENT,
             results: None,
+            marks: marks.and_then(|marks| TreeMarks::new(marks, node, port)),
         },
         heading,
         value,
@@ -582,6 +687,9 @@ pub struct Results<'a> {
     pub offers: bool,
     /// Whether the field at a path was checked from these results.
     pub checked: &'a dyn Fn(&str) -> bool,
+    /// The checks of the document, which mark the fields they read in the
+    /// colour of their outcome (DIAG-12).
+    pub marks: Option<Marks<'a>>,
 }
 
 /// [`json_tree`]'s rows in Run results: `value` of `node`'s `port`, its
@@ -603,6 +711,10 @@ pub fn results_tree(
             read_only: None,
             step: TREE_INDENT,
             results: Some(results),
+            marks: results
+                .marks
+                .filter(|_| results.fields)
+                .and_then(|marks| TreeMarks::new(marks, node, port)),
         },
         port,
         value,
@@ -655,6 +767,8 @@ struct Tree<'a> {
     step: f32,
     /// Run results' rows (REP-08); `None` in the Inspector.
     results: Option<Results<'a>>,
+    /// The checks that read this output's fields (DIAG-12).
+    marks: Option<TreeMarks<'a>>,
 }
 
 impl Tree<'_> {
@@ -711,7 +825,7 @@ const TREE_FOLD: f32 = 14.0;
 /// The space between a row's parts.
 const TREE_GAP: f32 = 8.0;
 /// ✓ and {} are two compact buttons 2 px apart.
-const TREE_BUTTON: f32 = 26.0;
+pub(super) const TREE_BUTTON: f32 = 26.0;
 const TREE_ACTIONS: f32 = 2.0 * TREE_BUTTON + 2.0;
 /// The space between Run results' *Check* and *To variable*.
 const TREE_WORD_GAP: f32 = 4.0;
@@ -819,6 +933,34 @@ fn put_at(
     .inner
 }
 
+/// [`put_at`] in a scope enabled whatever its parent is: the marked ✓ of a
+/// panel that takes no edit, whose menu still selects a check (DIAG-12).
+/// egui keeps a child of a disabled `Ui` disabled, so the scope is a `Ui`
+/// of its own on the same layer, clipped as `ui` is.
+fn enabled_at(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    add: impl FnOnce(&mut Ui) -> egui::Response,
+) -> egui::Response {
+    if ui.is_enabled() {
+        return put_at(ui, rect, add);
+    }
+    let mut child = Ui::new(
+        ui.ctx().clone(),
+        ui.unique_id().with("enabled"),
+        egui::UiBuilder::new()
+            .layer_id(ui.layer_id())
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Min))
+            .accessibility_parent(ui.unique_id()),
+    );
+    child.set_clip_rect(ui.clip_rect().intersect(rect));
+    let response = add(&mut child);
+    // The space is the row's, as with [`put_at`].
+    ui.advance_cursor_after_rect(rect);
+    response
+}
+
 /// ✓ and {} of the Inspector's row, at its right edge (DIAG-10).
 #[allow(clippy::too_many_arguments)]
 fn inspector_actions(
@@ -830,6 +972,7 @@ fn inspector_actions(
     value: &Value,
     text: &str,
     supported: bool,
+    mark: Option<&RowMark>,
     action: &mut Option<TreeAction>,
 ) {
     // ✓ and {}, on every row, on its first line: beside the name when the
@@ -845,18 +988,40 @@ fn inspector_actions(
             egui::vec2(TREE_BUTTON, TREE_BUTTON),
         )
     };
-    // The ✓ opens the menu Add a check (DIAG-08).
-    let check = why(put_at(row_ui, button(actions_x), |ui| {
-        ui.add_enabled(
-            supported,
-            widgets::icon_button(Icon::Check, "Add a check").compact(),
-        )
-    }));
-    if let Some(check) = check_menu(&check, shown, value) {
-        *action = Some(TreeAction::Check {
-            path: text.to_owned(),
-            check,
-        });
+    // The ✓ opens the menu Add a check (DIAG-08); filled where a check
+    // reads the field, it names the checks and its menu lists them first
+    // (DIAG-12).
+    // Where the step takes no edit the marked ✓ stays enabled: its menu
+    // selects a check, which is no edit, and disables *Add a check*.
+    let check = match mark {
+        Some(mark) => {
+            let draw = |ui: &mut Ui| {
+                ui.add_enabled_ui(supported, |ui| {
+                    super::marks::button(ui, "Add a check", mark, false, TREE_BUTTON)
+                })
+                .inner
+            };
+            match tree.read_only {
+                Some(why) => enabled_at(row_ui, button(actions_x), draw)
+                    .on_hover_text(format!("{}\n\n{why}", mark.said)),
+                None => put_at(row_ui, button(actions_x), draw).on_hover_text(&mark.said),
+            }
+        }
+        None => why(put_at(row_ui, button(actions_x), |ui| {
+            ui.add_enabled(
+                supported,
+                widgets::icon_button(Icon::Check, "Add a check").compact(),
+            )
+        })),
+    };
+    let listed = mark.map_or(&[][..], |mark| &mark.listed);
+    let adding = if tree.read_only.is_some() {
+        Adding::Disabled
+    } else {
+        Adding::Offered
+    };
+    if let Some(choice) = check_menu_with(&check, shown, value, listed, adding) {
+        *action = Some(menu_action(choice, text));
     }
     let variable = why(put_at(
         row_ui,
@@ -887,6 +1052,10 @@ enum End {
     Added(f32),
     /// A reserved name, which a check cannot read.
     Custom(f32),
+    /// The mark of a field a check reads, alone: the results are stale or
+    /// the document takes no edit, so the menu lists the field's checks and
+    /// adds nothing (DIAG-12). In `words` where they have room.
+    Mark { width: f32, words: bool },
     /// Nothing: a value that is not a step's output, or results the
     /// document no longer takes edits from.
     Nothing,
@@ -896,7 +1065,7 @@ const CHECK_ADDED: &str = "Check added";
 const CUSTOM_KEY: &str = "custom key";
 
 /// The width `text` takes at `size`.
-fn text_width(ui: &Ui, text: &str, size: f32) -> f32 {
+pub(super) fn text_width(ui: &Ui, text: &str, size: f32) -> f32 {
     ui.painter()
         .layout_no_wrap(
             text.to_owned(),
@@ -921,7 +1090,7 @@ impl End {
         if results.offers {
             added.max(TREE_ACTIONS).max(Self::custom(ui))
         } else {
-            added
+            added.max(TREE_BUTTON)
         }
     }
 
@@ -935,7 +1104,14 @@ impl End {
 
     /// The end of the row of the field at `path`, which leaves `room` from
     /// its name to the panel's edge.
-    fn of(ui: &Ui, tree: &Tree<'_>, path: &str, supported: bool, room: f32) -> Self {
+    fn of(
+        ui: &Ui,
+        tree: &Tree<'_>,
+        path: &str,
+        supported: bool,
+        mark: Option<&RowMark>,
+        room: f32,
+    ) -> Self {
         let Some(results) = tree.results else {
             return Self::Column;
         };
@@ -946,11 +1122,31 @@ impl End {
         } else if supported && (results.checked)(path) {
             Self::Added(Self::added(ui))
         } else if !results.offers {
-            Self::Nothing
+            // The mark stays, with the checks in its menu (DIAG-12).
+            match mark {
+                Some(mark) => {
+                    let width = super::marks::words_width(ui, &mark.words);
+                    if room - TREE_TEXT_MIN - TREE_GAP >= width {
+                        Self::Mark { width, words: true }
+                    } else {
+                        Self::Mark {
+                            width: TREE_BUTTON,
+                            words: false,
+                        }
+                    }
+                }
+                None => Self::Nothing,
+            }
         } else if !supported {
             Self::Custom(Self::custom(ui))
         } else {
-            let (check, variable) = (word("Check"), word("To variable"));
+            // A marked field's *Check* reads *2 checks* or *1 failed*
+            // (DIAG-12).
+            let check = mark.map_or_else(
+                || word("Check"),
+                |mark| super::marks::words_width(ui, &mark.words),
+            );
+            let variable = word("To variable");
             if room - TREE_TEXT_MIN - TREE_GAP >= check + TREE_WORD_GAP + variable {
                 Self::Words { check, variable }
             } else {
@@ -963,12 +1159,13 @@ impl End {
         match *self {
             Self::Column | Self::Icons => TREE_ACTIONS,
             Self::Words { check, variable } => check + TREE_WORD_GAP + variable,
-            Self::Added(width) | Self::Custom(width) => width,
+            Self::Added(width) | Self::Custom(width) | Self::Mark { width, .. } => width,
             Self::Nothing => 0.0,
         }
     }
 
     /// Draws the end from `x` on the row whose middle is `middle`.
+    #[allow(clippy::too_many_arguments)]
     fn show(
         &self,
         ui: &mut Ui,
@@ -977,6 +1174,7 @@ impl End {
         shown: &str,
         value: &Value,
         path: &str,
+        mark: Option<&RowMark>,
     ) -> Option<TreeAction> {
         let at = |x: f32, width: f32| {
             egui::Rect::from_min_size(
@@ -1016,6 +1214,17 @@ impl End {
                 });
                 return None;
             }
+            Self::Mark { width, words } => {
+                let mark = mark?;
+                // Named for the checks: these results offer no Check
+                // (UX-01).
+                let check = put_at(ui, at(x, width), |ui| {
+                    super::marks::button(ui, "Checks of this field", mark, words, width)
+                })
+                .on_hover_text(&mark.said);
+                return check_menu_with(&check, shown, value, &mark.listed, Adding::Hidden)
+                    .map(|choice| menu_action(choice, path));
+            }
             Self::Column | Self::Nothing => return None,
         };
         let button = |icon: Icon, label: &'static str| {
@@ -1026,16 +1235,24 @@ impl End {
             }
         };
         let mut chosen = None;
-        // *Check* opens the menu Add a check (DIAG-08).
-        let check_hover = format!("Check {shown}");
-        let check = put_at(ui, at(x, check_width), |ui| {
-            ui.add(button(Icon::Check, "Check").hover(&check_hover))
-        });
-        if let Some(check) = check_menu(&check, shown, value) {
-            chosen = Some(TreeAction::Check {
-                path: path.to_owned(),
-                check,
-            });
+        // *Check* opens the menu Add a check (DIAG-08); on a marked field
+        // it reads *2 checks* or *1 failed* in the outcome's colour, names
+        // the checks and lists them first in its menu (DIAG-12).
+        let check = match mark {
+            Some(mark) => put_at(ui, at(x, check_width), |ui| {
+                super::marks::button(ui, "Check", mark, words, check_width)
+            })
+            .on_hover_text(&mark.said),
+            None => {
+                let check_hover = format!("Check {shown}");
+                put_at(ui, at(x, check_width), |ui| {
+                    ui.add(button(Icon::Check, "Check").hover(&check_hover))
+                })
+            }
+        };
+        let listed = mark.map_or(&[][..], |mark| &mark.listed);
+        if let Some(choice) = check_menu_with(&check, shown, value, listed, Adding::Offered) {
+            chosen = Some(menu_action(choice, path));
         }
         let variable_hover = format!("Assign {shown} to a variable");
         let variable = put_at(
@@ -1094,7 +1311,20 @@ fn tree_row(
     let left = ui.cursor().min.x;
     let fold_x = left + depth as f32 * tree.step;
     let name_x = fold_x + TREE_FOLD + TREE_GAP;
-    let end = End::of(ui, tree, &text, supported, width - (name_x - left));
+    // The mark of a field a check reads, or of a folded one with checked
+    // fields inside (DIAG-12).
+    let mark = tree
+        .marks
+        .as_ref()
+        .and_then(|marks| marks.row(&text, child_count > 0 && !open));
+    let end = End::of(
+        ui,
+        tree,
+        &text,
+        supported,
+        mark.as_ref(),
+        width - (name_x - left),
+    );
     let actions_x = left
         + (width - end.width()).max(0.0)
         + if matches!(end, End::Nothing) {
@@ -1272,13 +1502,39 @@ fn tree_row(
     if tree.results.is_some() {
         // Run results: right after the value, at most at the panel's edge.
         let x = (value_x + value_width + TREE_GAP).min(actions_x);
-        if let Some(chosen) = end.show(row_ui, x, middle, shown, value, &text) {
+        if let Some(chosen) = end.show(row_ui, x, middle, shown, value, &text, mark.as_ref()) {
             *action = Some(chosen);
         }
     } else {
         inspector_actions(
-            row_ui, tree, actions_x, middle, shown, value, &text, supported, action,
+            row_ui,
+            tree,
+            actions_x,
+            middle,
+            shown,
+            value,
+            &text,
+            supported,
+            mark.as_ref(),
+            action,
         );
+    }
+    // Every row with a mark is recorded, also where its end hides it.
+    #[cfg(test)]
+    if let Some(mark) = &mark {
+        super::marks::record(super::marks::DrawnMark {
+            results: tree.results.is_some(),
+            port: tree.port.to_owned(),
+            path: text.clone(),
+            words: mark.words.clone(),
+            inside: mark.inside,
+            tone: mark.tone,
+            icon: !matches!(end, End::Words { .. } | End::Mark { words: true, .. }),
+            shown: matches!(
+                end,
+                End::Column | End::Words { .. } | End::Icons | End::Mark { .. }
+            ),
+        });
     }
 
     if !open || child_count == 0 {
@@ -1415,6 +1671,7 @@ mod tree_tests {
             read_only: None,
             step: TREE_INDENT,
             results: None,
+            marks: None,
         };
         let mut output = context.run_ui(Default::default(), |ui| {
             let mut budget = JSON_ROWS_PER_FRAME;
@@ -1476,6 +1733,7 @@ mod tree_tests {
             read_only: None,
             step: TREE_INDENT,
             results: None,
+            marks: None,
         };
         context.data_mut(|data| data.insert_temp(tree("first").branch("customer"), true));
         let mut visited = Vec::new();

@@ -7,12 +7,16 @@ mod binding;
 mod checks;
 pub mod drafts;
 mod fields;
+mod marks;
 mod response;
 pub mod source_change;
 
 pub use fields::{
     Opening, Results, TreeAction, forget_field_text, forget_results_tree, results_tree, type_combo,
 };
+pub use marks::{CheckIndex, Marks, Outcomes};
+#[cfg(test)]
+pub use marks::{DrawnMark, MarkTone, debug_forget_marks, debug_marks};
 pub use response::sample_output;
 
 use crate::icons::Icon;
@@ -60,6 +64,9 @@ pub enum Action {
     /// *Read directly again* on a variable that holds a plain reference: its
     /// readers read the value and the variable goes (LAY-25).
     ReadDirectly,
+    /// A check of a field, chosen in the menu of its ✓ (DIAG-12): selects
+    /// the check, by node.
+    SelectCheck(String),
     Error(String),
 }
 
@@ -85,6 +92,9 @@ pub struct Context<'a> {
     /// Why the step takes no edit now, said on the hover of an action the
     /// panel disables (DIAG-09); `None` while it takes edits.
     pub read_only: Option<&'a str>,
+    /// The document's checks, which mark the fields of *Output data* they
+    /// read (DIAG-12); `None` marks nothing.
+    pub checks: Option<&'a CheckIndex>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1386,6 +1396,7 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
             port.display_name(),
             &value,
             context.read_only,
+            context.checks.map(|index| Marks { index, run: None }),
         ) {
             actions.push(match action {
                 fields::TreeAction::Check { path, check } => Action::AssertField {
@@ -1397,6 +1408,7 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
                     port: port.name.clone(),
                     path,
                 },
+                fields::TreeAction::Select { check } => Action::SelectCheck(check),
             });
         }
     }

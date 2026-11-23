@@ -1130,6 +1130,7 @@ impl FolderApp {
             .and_then(|canvas| canvas.checks_here(graph, in_cleanup, &node.id));
         // Adopt fields the session changed before the inspector reads them.
         self.sync_field_drafts(document_id, &project_id);
+        let checks = self.check_index(&model);
         let mut close = false;
         let actions = egui::Panel::right("folder-inspector")
             .default_size(360.0)
@@ -1157,6 +1158,7 @@ impl FolderApp {
                             step,
                             expand_here,
                             read_only: (!snapshot.editable).then(|| read_only_reason(&snapshot)),
+                            checks: Some(&checks),
                         },
                     )
                 })
@@ -1180,6 +1182,12 @@ impl FolderApp {
                 // (LAY-30).
                 inspector::Action::ExpandChecksHere(chosen) => {
                     self.choose_checks_here(document_id, &node.handle, chosen);
+                }
+                // A check chosen in a field's menu is selected, on the board
+                // that holds it (DIAG-12).
+                inspector::Action::SelectCheck(check) => {
+                    let cleanup = cleanup_holds(&model, &check);
+                    self.select_on_board(document_id, &model, check, cleanup);
                 }
                 _ if !snapshot.editable => {}
                 inspector::Action::UpdateNode(updated) => {
