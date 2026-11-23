@@ -5077,12 +5077,20 @@ impl Canvas {
                                 vec2(width, 0.0),
                                 egui::Layout::top_down(egui::Align::LEFT),
                                 |ui| {
-                                    ui.add(
+                                    let text = ui.add(
                                         egui::Label::new(
                                             egui::RichText::new(&message).color(theme::TEXT),
                                         )
                                         .wrap(),
                                     );
+                                    // A status a screen reader announces,
+                                    // named by its sentence.
+                                    ui.ctx().accesskit_node_builder(text.id, |node| {
+                                        node.set_role(egui::accesskit::Role::Status);
+                                        node.set_live(egui::accesskit::Live::Polite);
+                                        node.clear_value();
+                                        node.set_label(message.as_str());
+                                    });
                                 },
                             );
                             ui.separator();
