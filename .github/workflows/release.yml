@@ -387,12 +387,18 @@ jobs:
           packaging/appimage-window.sh "dist/$APPIMAGE" test-results/appimage-runner.png
 
       - name: Start the AppImage in a bare ubuntu:24.04 container
-        timeout-minutes: 8
+        # #557: the public archive timed out this step three times on
+        # 2026-11-23; the runner's Azure mirror serves the same packages, and
+        # apt retries a slow or refused download.
+        timeout-minutes: 15
         run: |
           docker run --rm -v "$PWD:/work" -w /work \
             -e APPIMAGE="$APPIMAGE" -e VERSION="$VERSION" \
             -e APPIMAGE_EXTRACT_AND_RUN=1 -e WGPU_BACKEND=vulkan -e WINIT_UNIX_BACKEND=x11 \
             ubuntu:24.04 bash -euo pipefail -c '
+              sed -i "s|http://archive.ubuntu.com/ubuntu|http://azure.archive.ubuntu.com/ubuntu|g" \
+                /etc/apt/sources.list.d/ubuntu.sources
+              printf "Acquire::Retries \"5\";\nAcquire::http::Timeout \"30\";\n" > /etc/apt/apt.conf.d/80-retries
               apt-get update
               DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
                 libfuse2t64 xvfb mesa-vulkan-drivers libvulkan1
