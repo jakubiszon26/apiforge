@@ -494,15 +494,19 @@ pub struct ReportPanel {
     list_width: f32,
     /// The width the host last gave, from the preferences.
     adopted_width: Option<f32>,
-    /// While the list's edge is dragged: where the press was and the width
-    /// then.
-    edge_grab: Option<(f32, f32)>,
+    /// While the list's edge is dragged: where the press was, the width
+    /// shown then and the width it had before it was fitted to the panel.
+    edge_grab: Option<(f32, f32, f32)>,
     /// The steps whose checks are folded, by row key; none after a run.
     folded: std::collections::HashSet<String>,
     /// *Failed*: only the steps with a failed, blocked or errored row.
     failed_only: bool,
     /// The row the keyboard moved to, which takes the focus when drawn.
     focus: Option<String>,
+    /// The node a row last asked the board to select: the board may answer
+    /// with the step the check is folded into (LAY-11), which leaves the
+    /// check's row chosen once.
+    asked: Option<String>,
     /// The list arranged for the run shown.
     arranged: list::Arranged,
 }
@@ -547,6 +551,7 @@ impl Default for ReportPanel {
             folded: Default::default(),
             failed_only: false,
             focus: None,
+            asked: None,
             arranged: Default::default(),
         }
     }
@@ -934,10 +939,20 @@ impl ReportPanel {
             // Every step's checks are shown after a run (REP-07).
             self.folded.clear();
             self.focus = None;
+            self.asked = None;
         }
-        if node_changed {
+        // What a row asked for is answered by the next change of the
+        // board's selection; the node itself may come first.
+        let asked = if node_changed {
             self.last_selected_node_id = selected_node_id.map(str::to_owned);
-        }
+            let asked = self.asked.take();
+            if asked.as_deref() == selected_node_id {
+                self.asked.clone_from(&asked);
+            }
+            asked
+        } else {
+            None
+        };
         if (run_changed || node_changed)
             && let (Some(run), Some(node_id)) = (run, selected_node_id)
         {
@@ -952,12 +967,14 @@ impl ReportPanel {
                 return run_changed;
             }
             // A check folded into its step on the board selects that step
-            // there (LAY-11); the check's row listed under it stays chosen
-            // (REP-07).
+            // there (LAY-11) when its row asks for it; the check's row
+            // listed under that step stays chosen (REP-07). A later choice
+            // of the step on the board chooses the step's row.
             if !run_changed
                 && let Some(index) = rows
                     .iter()
                     .position(|row| Some(row.key.as_str()) == self.selected_key.as_deref())
+                && asked.as_deref() == Some(rows[index].root_id.as_str())
                 && self.arranged.lines.iter().any(|line| {
                     line.row == index
                         && line.under.is_some_and(|head| {
@@ -1081,9 +1098,12 @@ impl ReportPanel {
         };
         let rows = flatten_steps(&run.steps);
         self.arranged.update(run, &rows, context.graphs);
-        // *Failed* counts what the summary counts in its groups (REP-07).
-        let failed = not_run::summary(&run.steps, ends)
-            .into_iter()
+        // *All* and *Failed* count the run's steps as its summary does:
+        // every one, and those of the groups *Failed* keeps (REP-07).
+        let groups = not_run::summary(&run.steps, ends);
+        let all = groups.iter().map(|(_, count)| count).sum::<usize>();
+        let failed = groups
+            .iter()
             .filter(|(group, _)| list::counted(*group))
             .map(|(_, count)| count)
             .sum::<usize>();
@@ -1100,15 +1120,7 @@ impl ReportPanel {
             .into_iter()
             .collect();
         let mut controls = Controls {
-            steps: self
-                .arranged
-                .lines
-                .iter()
-                .filter(|line| {
-                    let row = &rows[line.row];
-                    line.under.is_none() && row.depth == 0 && row.step.kind != NodeKind::Start
-                })
-                .count(),
+            steps: all,
             failed,
             failed_only: self.failed_only,
             foldable: !heads.is_empty(),
@@ -1173,7 +1185,7 @@ impl ReportPanel {
                 |ui| {
                     ui.set_width(width);
                     if controls.below {
-                        ui.horizontal(|ui| list_controls(ui, &mut controls));
+                        controls_above_list(ui, &mut controls);
                         ui.add_space(4.0);
                     }
                     self.step_list(ui, &rows, selected.as_ref(), ends, actions);
@@ -1242,21 +1254,30 @@ impl ReportPanel {
                 .input(|input| input.pointer.press_origin())
                 .or(edge.interact_pointer_pos())
                 .map_or(rect.center().x, |origin| origin.x);
-            self.edge_grab = Some((origin, width));
+            self.edge_grab = Some((origin, width, self.list_width));
         }
         if edge.dragged()
-            && let (Some((origin, from)), Some(pointer)) =
+            && let (Some((origin, from, before)), Some(pointer)) =
                 (self.edge_grab, edge.interact_pointer_pos())
         {
+            // Where the edge cannot go, the width is what it was: a window
+            // too narrow for it does not narrow it.
             let next = (from + pointer.x - origin).clamp(LIST_LEAST_WIDTH, widest);
+            let next = if (next - from).abs() < 0.5 {
+                before
+            } else {
+                next
+            };
             if (next - self.list_width).abs() > f32::EPSILON {
                 self.list_width = next;
                 ui.ctx().request_repaint();
             }
         }
-        if edge.drag_stopped() {
-            self.edge_grab = None;
-            self.list_width = self.list_width.clamp(LIST_LEAST_WIDTH, widest);
+        // Remembered only when the drag changed the width.
+        if edge.drag_stopped()
+            && let Some((_, _, before)) = self.edge_grab.take()
+            && (self.list_width - before).abs() >= 0.5
+        {
             actions.push(Action::RememberListWidth(self.list_width));
         }
         let engaged = edge.hovered() || edge.dragged();
@@ -1343,6 +1364,33 @@ impl ReportPanel {
         };
         let mut shown = visible(&self.folded);
 
+        // A focused row that a fold or *Failed* hides gives its focus to the
+        // step it is listed under, or else to the nearest row shown (REP-07).
+        if self.focus.is_none()
+            && let Some(focused) = ui.memory(|memory| memory.focused())
+            && let Some(at) = lines
+                .iter()
+                .position(|line| list::row_id(&rows[line.row].key) == focused)
+            && !shown.contains(&lines[at])
+        {
+            let head = lines[at]
+                .under
+                .filter(|head| shown.iter().any(|line| line.row == *head));
+            let nearest = || {
+                (1..lines.len()).find_map(|distance| {
+                    [at.checked_sub(distance), Some(at + distance)]
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|index| lines.get(index))
+                        .find(|line| shown.contains(line))
+                        .map(|line| line.row)
+                })
+            };
+            if let Some(target) = head.or_else(nearest) {
+                self.focus = Some(rows[target].key.clone());
+            }
+        }
+
         // The keyboard: up and down move between the rows, left and right
         // fold and open a step's checks (REP-07).
         let focused = ui.memory(|memory| memory.focused());
@@ -1388,6 +1436,7 @@ impl ReportPanel {
                 let row = &rows[target];
                 self.selected_key = Some(row.key.clone());
                 self.focus = Some(row.key.clone());
+                self.asked = Some(row.root_id.clone());
                 actions.push(Action::SelectNode(row.root_id.clone()));
             }
             shown = visible(&self.folded);
@@ -1446,6 +1495,7 @@ impl ReportPanel {
                     } else if drawn.row.clicked() {
                         drawn.row.request_focus();
                         self.selected_key = Some(row.key.clone());
+                        self.asked = Some(row.root_id.clone());
                         actions.push(Action::SelectNode(row.root_id.clone()));
                     }
                 }
@@ -1940,9 +1990,9 @@ pub(crate) fn mode_pill(mode: RunMode) -> (&'static str, Color32) {
 /// The list's controls above the run: *All | Failed* and *Collapse
 /// checks* (REP-07), and what was chosen in them.
 struct Controls {
-    /// The steps the list holds, its checks apart.
+    /// The run's steps, as its summary counts them.
     steps: usize,
-    /// The rows *Failed* keeps, as the summary counts them.
+    /// The steps of the summary's failed, blocked and not met groups.
     failed: usize,
     failed_only: bool,
     /// Some step has checks under it.
@@ -1994,6 +2044,26 @@ impl Controls {
 
 /// *All | Failed* and *Collapse checks*, left to right.
 fn list_controls(ui: &mut Ui, controls: &mut Controls) {
+    switch(ui, controls);
+    ui.add_space(8.0);
+    fold_control(ui, controls);
+}
+
+/// The controls above a list when the run's line has no room for them:
+/// on one line, or *Collapse checks* on a line of its own when the list is
+/// narrower than they are, so that none is cut (REP-07).
+fn controls_above_list(ui: &mut Ui, controls: &mut Controls) {
+    if controls.width(ui) <= ui.available_width() {
+        ui.horizontal(|ui| list_controls(ui, controls));
+    } else {
+        ui.horizontal(|ui| switch(ui, controls));
+        ui.add_space(2.0);
+        ui.horizontal(|ui| fold_control(ui, controls));
+    }
+}
+
+/// *All | Failed*: two buttons side by side.
+fn switch(ui: &mut Ui, controls: &mut Controls) {
     ui.spacing_mut().item_spacing.x = 0.0;
     if list::segment(ui, &controls.all_text(), !controls.failed_only, true).clicked() {
         controls.chosen = Some(Chosen::All);
@@ -2005,7 +2075,10 @@ fn list_controls(ui: &mut Ui, controls: &mut Controls) {
     if failed.inner.clicked() {
         controls.chosen = Some(Chosen::Failed);
     }
-    ui.add_space(8.0);
+}
+
+/// *Collapse checks*, or *Expand checks* when every step's are folded.
+fn fold_control(ui: &mut Ui, controls: &mut Controls) {
     let (icon, chosen) = if controls.all_folded {
         (Icon::ChevronDown, Chosen::Expand)
     } else {

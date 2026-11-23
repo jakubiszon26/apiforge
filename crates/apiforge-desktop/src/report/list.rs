@@ -172,7 +172,9 @@ pub(super) struct Arranged {
 }
 
 impl Arranged {
-    /// Arranges `rows` again when the run, its rows or the graphs changed.
+    /// Arranges `rows` again when the run, its rows or what the graphs say
+    /// changed: the single-project window edits its graphs in place, so
+    /// their contents are read, not their address.
     pub fn update(&mut self, run: &RunResult, rows: &[StepRow<'_>], graphs: Option<RunGraphs<'_>>) {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         run.id.hash(&mut hasher);
@@ -183,12 +185,7 @@ impl Arranged {
             row.step.request.is_some().hash(&mut hasher);
         }
         if let Some(graphs) = graphs {
-            (graphs.main as *const Graph as usize).hash(&mut hasher);
-            graphs.main.nodes.len().hash(&mut hasher);
-            graphs
-                .cleanup
-                .map(|cleanup| cleanup as *const Graph as usize)
-                .hash(&mut hasher);
+            graphs.hash(rows, &mut hasher);
         }
         let key = hasher.finish();
         if self.key == Some(key) {
@@ -197,6 +194,59 @@ impl Arranged {
         self.key = Some(key);
         self.lines = arrange(rows, graphs);
         self.entries = entries(rows, &self.lines, graphs);
+    }
+}
+
+/// Writes what it is given into a hasher.
+struct Hashing<'a, H>(&'a mut H);
+
+impl<H: Hasher> std::io::Write for Hashing<'_, H> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.write(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl RunGraphs<'_> {
+    /// Hashes what the list reads of the graphs: Main, Cleanup and the
+    /// definitions of the components the rows ran in.
+    fn hash(&self, rows: &[StepRow<'_>], hasher: &mut impl Hasher) {
+        let mut write = |graph: &Graph| {
+            // A graph always serialises; a failure only weakens the key.
+            let _ = serde_json::to_writer(Hashing(&mut *hasher), graph);
+        };
+        write(self.main);
+        if let Some(cleanup) = self.cleanup {
+            write(cleanup);
+        }
+        let mut levels: Vec<(Phase, &[&str])> = Vec::new();
+        for row in rows.iter().filter(|row| !row.calls.is_empty()) {
+            let level = (row.step.phase, row.calls.as_slice());
+            if !levels.contains(&level) {
+                levels.push(level);
+            }
+        }
+        for (phase, calls) in levels {
+            if let Some(graph) = self.graph(phase, calls) {
+                write(graph);
+            }
+        }
+        for row in rows
+            .iter()
+            .filter(|row| row.step.kind == NodeKind::Component)
+        {
+            let component = self
+                .graph(row.step.phase, &row.calls)
+                .and_then(|graph| graph.nodes.iter().find(|node| node.id == row.step.node_id))
+                .and_then(|call| component_definition(self.project, call));
+            if let Some(component) = component {
+                (&component.name, component.revision).hash(hasher);
+            }
+        }
     }
 }
 
@@ -305,13 +355,20 @@ fn one_line(value: &Value) -> String {
     crate::labels::truncate(&text, 120)
 }
 
-/// The path of a request's URL, without its scheme and host.
+/// The path of a request's URL, without its scheme and host. `://` is a
+/// scheme's only after a scheme at the start: a letter, then letters,
+/// digits, `+`, `-` or `.`; elsewhere it is part of the path or the query.
 pub(super) fn url_path(url: &str) -> &str {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    if url.contains("://") {
-        rest.find('/').map_or("/", |at| &rest[at..])
-    } else {
-        rest
+    let scheme = url.split_once("://").filter(|(scheme, _)| {
+        let mut chars = scheme.chars();
+        chars
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic())
+            && chars.all(|char| char.is_ascii_alphanumeric() || matches!(char, '+' | '-' | '.'))
+    });
+    match scheme {
+        Some((_, rest)) => rest.find('/').map_or("/", |at| &rest[at..]),
+        None => url,
     }
 }
 
