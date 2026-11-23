@@ -3,6 +3,8 @@
 The question: what does a first-time tester need on v0.1.0 and on v0.2.0
 to finish T1 and T2 in the window, and where do they turn the wrong way.
 The sheet, the start state and the pass check are in [task.md](task.md).
+What is worse, better and the same, with a class for each regression, is
+in [classes.md](classes.md).
 
 Run on 2026-11-21, Linux, the `kwin` MCP server at 1280 × 800, isolated
 home, live against `apiforge-demo-api`. Sixteen counted runs, none void.
