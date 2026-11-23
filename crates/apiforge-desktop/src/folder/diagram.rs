@@ -1141,6 +1141,8 @@ impl FolderApp {
         for action in actions {
             match action {
                 inspector::Action::Reveal(handle) => self.reveal_in_code(document_id, &handle),
+                // Selecting is navigation, which a read-only board allows too.
+                inspector::Action::Select(step) => self.select_step(document_id, step),
                 // A view kept on this computer, which changes no document
                 // (LAY-30).
                 inspector::Action::ExpandChecksHere(chosen) => {
