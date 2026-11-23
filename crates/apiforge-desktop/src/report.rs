@@ -511,9 +511,10 @@ pub struct ReportPanel {
     arranged: list::Arranged,
 }
 
-/// The step list's width before it is dragged, and its least width
-/// (REP-07); the details keep at least [`DETAILS_LEAST_WIDTH`].
-const LIST_WIDTH: f32 = 300.0;
+/// The step list's width before it is dragged (the owner's default of
+/// 2026-11-23, about M1a's) and its least width (REP-07); the details keep
+/// at least [`DETAILS_LEAST_WIDTH`].
+const LIST_WIDTH: f32 = 440.0;
 const LIST_LEAST_WIDTH: f32 = 240.0;
 const DETAILS_LEAST_WIDTH: f32 = 400.0;
 /// The width of the list's edge.
