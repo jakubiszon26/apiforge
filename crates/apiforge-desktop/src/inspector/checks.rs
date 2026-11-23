@@ -382,7 +382,9 @@ fn summary(rows: &[Row], run: bool) -> (String, Tone) {
 
 /// A check's card. A click, or Return while it has the focus, selects the
 /// check (DIAG-15); a check of Cleanup stands on the other board, so its
-/// card only reads.
+/// card only reads. Selecting is no edit: where the Inspector is drawn
+/// disabled, on a read-only board or a locked document, the card still
+/// senses its click and its focus, and stays as faded as the rest.
 fn row(ui: &mut Ui, row: &Row, actions: &mut Vec<super::Action>) {
     let border = if row.tone == Tone::Failed {
         theme::DANGER.gamma_multiply(0.5)
@@ -399,6 +401,8 @@ fn row(ui: &mut Ui, row: &Row, actions: &mut Vec<super::Action>) {
         let ui = &mut frame.content_ui;
         ui.set_width(ui.available_width());
         ui.spacing_mut().item_spacing.y = 1.0;
+        // The card takes the click, not a selection of its text.
+        ui.style_mut().interaction.selectable_labels = false;
         ui.label(
             RichText::new(&row.title)
                 .family(theme::bold_family())
@@ -437,7 +441,7 @@ fn row(ui: &mut Ui, row: &Row, actions: &mut Vec<super::Action>) {
         frame.paint(ui);
         return;
     }
-    let response = ui
+    let response = enabled(ui, rect, id.with("sensing"))
         .interact(rect, id, egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
@@ -451,6 +455,21 @@ fn row(ui: &mut Ui, row: &Row, actions: &mut Vec<super::Action>) {
     if response.clicked() {
         actions.push(super::Action::Select(row.id.clone()));
     }
+}
+
+/// A `Ui` over `rect` of `ui`'s layer and clip that senses input where `ui`
+/// is disabled, for what is no edit there: selecting a check.
+fn enabled(ui: &Ui, rect: egui::Rect, id: egui::Id) -> Ui {
+    let mut builder = egui::UiBuilder::new()
+        .layer_id(ui.layer_id())
+        .max_rect(rect)
+        .accessibility_parent(ui.unique_id());
+    if ui.is_sizing_pass() {
+        builder = builder.sizing_pass();
+    }
+    let mut sensing = Ui::new(ui.ctx().clone(), id, builder);
+    sensing.set_clip_rect(ui.clip_rect());
+    sensing
 }
 
 /// The list of the selected step.
@@ -526,6 +545,8 @@ const MENU_GAP: f32 = 8.0;
 /// The most rows the menu draws in one frame, and of one branch.
 const MENU_ROWS: usize = 400;
 const MENU_BRANCH: usize = 100;
+/// The deepest level the menu opens; a field there has no fold mark.
+const MENU_DEPTH: usize = 10;
 
 /// A check chosen in the menu: the output, the field's path and the check.
 type Chosen = (String, String, FieldCheck);
@@ -576,6 +597,7 @@ fn add_check(ui: &mut Ui, context: &Context<'_>, words: bool, actions: &mut Vec<
         chosen: None,
         escape: false,
         budget: MENU_ROWS,
+        truncated: false,
     };
     // As wide as the Inspector leaves it, within the window.
     let room = ui.ctx().content_rect().right() - button.rect.left() - 40.0;
@@ -699,6 +721,8 @@ struct Fields<'a, 'b> {
     /// Escape closed the menu.
     escape: bool,
     budget: usize,
+    /// A row was left out for the budget.
+    truncated: bool,
 }
 
 impl Fields<'_, '_> {
@@ -737,7 +761,7 @@ impl Fields<'_, '_> {
                         );
                     }
                 }
-                if self.budget == 0 {
+                if self.truncated {
                     widgets::hint(
                         ui,
                         "Field display limit reached. Collapse a branch to inspect other fields.",
@@ -768,6 +792,7 @@ impl Fields<'_, '_> {
         supported: bool,
     ) {
         if self.budget == 0 {
+            self.truncated = true;
             return;
         }
         self.budget -= 1;
@@ -824,7 +849,9 @@ impl Fields<'_, '_> {
                 supported,
             );
         }
-        if children > 0 {
+        // Fields deeper than the menu opens are read in Output data.
+        let folds = children > 0 && depth < MENU_DEPTH;
+        if folds {
             let x = rect.left();
             let mark = egui::Rect::from_center_size(
                 egui::pos2(x + MENU_FOLD / 2.0, rect.center().y),
@@ -868,7 +895,7 @@ impl Fields<'_, '_> {
             self.chosen = Some((port.name.clone(), text.clone(), check));
         }
 
-        if !open || children == 0 || depth >= 10 {
+        if !open || !folds {
             return;
         }
         let reserved = |key: &str| ["__proto__", "constructor", "prototype"].contains(&key);
