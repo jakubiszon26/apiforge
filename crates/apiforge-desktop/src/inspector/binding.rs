@@ -10,7 +10,7 @@ use apiforge_core::{
     model::ValueType,
     operator::{Operator, OperatorGroup},
     path,
-    run::RunResult,
+    run::{RunMode, RunResult},
 };
 use eframe::egui::{self, Id, RichText, Stroke, Ui};
 use serde_json::Value;
@@ -1341,6 +1341,10 @@ struct TypedPath {
     note: String,
 }
 
+/// Why a path through a key [`path::JsonPath::resolve`] never reads is
+/// refused.
+const RESERVED_KEY: &str = "Not a path: __proto__, constructor and prototype are never read";
+
 impl TypedPath {
     fn of(
         search: &str,
@@ -1351,34 +1355,47 @@ impl TypedPath {
         if text.is_empty() {
             return None;
         }
-        let parsed = path::JsonPath::parse(text);
-        let path = match &parsed {
+        let path = match path::JsonPath::parse(text) {
+            Ok(parsed) if parsed.has_reserved_key() => Err(RESERVED_KEY),
             Ok(parsed) => {
                 let canonical = parsed.to_string();
                 if visible.iter().any(|field| field.path == canonical) {
                     return None;
                 }
-                Ok(canonical)
+                Ok(parsed)
             }
-            Err(error) => Err(not_a_path(*error)),
+            Err(error) => Err(not_a_path(error)),
         };
-        let note = match (&parsed, &source.value) {
-            (Err(_), _) => String::new(),
-            (Ok(_), None) => "A typed path · checked against the response on the next run".into(),
-            (Ok(parsed), Some(value)) => format!(
-                "A typed path · {} the {}",
-                if parsed.resolve(value).is_some() {
-                    "in"
+        let note = match &path {
+            Err(_) => String::new(),
+            Ok(parsed) => {
+                let place = match &source.value {
+                    None => "checked against the response on the next run".to_owned(),
+                    Some(value) => format!(
+                        "{} the {}",
+                        if parsed.resolve(value).is_some() {
+                            "in"
+                        } else {
+                            "not in"
+                        },
+                        match source.run {
+                            None => "sample",
+                            Some(RunMode::Simulation) => "last simulated response",
+                            Some(RunMode::Live) => "last response from the API",
+                        }
+                    ),
+                };
+                let canonical = parsed.to_string();
+                // What was typed, when the path written is spelled otherwise.
+                let typed = if canonical == text {
+                    String::new()
                 } else {
-                    "not in"
-                },
-                if source.observed {
-                    "last response"
-                } else {
-                    "sample"
-                }
-            ),
+                    format!(" · typed {text}")
+                };
+                format!("A typed path · {place}{typed}")
+            }
         };
+        let path = path.map(|parsed| parsed.to_string());
         Some(Self {
             text: text.to_owned(),
             path,
@@ -1390,6 +1407,15 @@ impl TypedPath {
         match &self.path {
             Ok(_) => &self.note,
             Err(reason) => reason,
+        }
+    }
+
+    /// The text the row names: the path it writes, or what was typed when
+    /// it is not a path.
+    fn shown(&self) -> &str {
+        match &self.path {
+            Ok(path) => path,
+            Err(_) => &self.text,
         }
     }
 }
@@ -1445,7 +1471,7 @@ fn typed_path_row(ui: &mut Ui, typed: &TypedPath, takes_return: bool) -> bool {
             egui::Sense::hover()
         },
     );
-    let label = format!("Use \"{}\" — {}", typed.text, typed.line());
+    let label = format!("Use \"{}\" — {}", typed.shown(), typed.line());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &label));
     ui.painter().rect_filled(
         rect,
@@ -1478,7 +1504,7 @@ fn typed_path_row(ui: &mut Ui, typed: &TypedPath, takes_return: bool) -> bool {
     painter.text(
         egui::pos2(end, rect.top() + 6.0),
         egui::Align2::LEFT_TOP,
-        &typed.text,
+        typed.shown(),
         egui::FontId::monospace(12.0),
         if enabled { theme::LINK } else { theme::MUTED },
     );
@@ -1518,14 +1544,17 @@ pub(crate) fn searchable_field_list(
     if focus_search {
         field.request_focus();
     }
-    // A single-line field gives up the focus on Return.
+    // A single-line field gives up the focus on Return. Only a plain Return
+    // takes a row.
     let returned = (field.has_focus() || field.lost_focus())
-        && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        && ui.input(|input| input.key_pressed(egui::Key::Enter) && input.modifiers.is_none());
     let visible = filter_response_fields(fields, search);
     let visible_count = visible.len();
     let typed = TypedPath::of(search, &visible, source);
-    // Return takes the first row once something is typed.
-    let takes_return = !search.trim().is_empty();
+    // Return takes the first row once something is typed, unless what is
+    // typed is not a path: then it takes nothing, even a listed field.
+    let takes_return =
+        !search.trim().is_empty() && typed.as_ref().is_none_or(|typed| typed.path.is_ok());
     egui::ScrollArea::vertical()
         .max_height(max_height)
         .show_rows(ui, 46.0, visible_count, |ui, range| {
@@ -1591,18 +1620,23 @@ pub(crate) fn searchable_field_list(
     if visible.is_empty() {
         widgets::hint(
             ui,
-            match (&source.value, source.observed) {
+            match (&source.value, source.run) {
                 (None, _) => "Run the request or add a sample response to list its fields.",
-                (Some(_), false) => "No field of the sample matches.",
-                (Some(_), true) => "No field of the last response matches.",
+                (Some(_), None) => "No field of the sample matches.",
+                (Some(_), Some(RunMode::Simulation)) => {
+                    "No field of the last simulated response matches."
+                }
+                (Some(_), Some(RunMode::Live)) => "No field of the last response matches.",
             },
         );
     }
-    if returned && takes_return && chosen.is_none() {
-        chosen = visible
-            .first()
-            .map(|field| field.path.clone())
-            .or_else(|| typed.and_then(|typed| typed.path.ok()));
+    if returned && chosen.is_none() {
+        if takes_return {
+            chosen = visible
+                .first()
+                .map(|field| field.path.clone())
+                .or_else(|| typed.and_then(|typed| typed.path.ok()));
+        }
         if chosen.is_none() {
             // Nothing to take: the search keeps the focus.
             field.request_focus();
@@ -1631,7 +1665,16 @@ fn field_picker(
                 .size(16.0)
                 .family(theme::bold_family()),
         );
-        widgets::hint(ui, &source.origin);
+        // DIAG-16: only this line says a step has nothing to show yet; the
+        // Inspector and the variable's dialog keep the origin's words.
+        widgets::hint(
+            ui,
+            if source.value.is_none() && source.run.is_none() {
+                "No sample yet"
+            } else {
+                &source.origin
+            },
+        );
         let (picked, visible_len) = searchable_field_list(
             ui,
             &mut search,
@@ -1796,17 +1839,24 @@ mod tests {
         let sample = response::Source {
             value: Some(value),
             origin: "Sample data".into(),
-            observed: false,
+            run: None,
         };
         let typed = TypedPath::of(" data.[0] ", &listed, &sample).unwrap();
         assert_eq!(typed.text, "data.[0]");
         assert_eq!(typed.path, Ok("data[0]".into()));
-        assert_eq!(typed.line(), "A typed path · not in the sample");
+        assert_eq!(typed.shown(), "data[0]");
+        assert_eq!(
+            typed.line(),
+            "A typed path · not in the sample · typed data.[0]"
+        );
         // `items.[0]` is the listed `items[0]`.
         assert!(TypedPath::of("items.[0]", &listed, &sample).is_none());
         // Listed but not shown by the search: offered, and found.
         let typed = TypedPath::of("items.[0]", &[], &sample).unwrap();
-        assert_eq!(typed.line(), "A typed path · in the sample");
+        assert_eq!(
+            typed.line(),
+            "A typed path · in the sample · typed items.[0]"
+        );
         let typed = TypedPath::of("a..b", &listed, &sample).unwrap();
         assert_eq!(
             typed.line(),
@@ -1821,9 +1871,14 @@ mod tests {
         let sample = response::Source {
             value: Some(value),
             origin: "Sample data".into(),
-            observed: false,
+            run: None,
         };
-        for text in ["__proto__", "constructor", "items[0].prototype", "[\"__proto__\"].a"] {
+        for text in [
+            "__proto__",
+            "constructor",
+            "items[0].prototype",
+            "[\"__proto__\"].a",
+        ] {
             let typed = TypedPath::of(text, &[], &sample).unwrap();
             assert_eq!(
                 typed.path,

@@ -15,8 +15,9 @@ use serde_json::Value;
 pub struct Source {
     pub value: Option<Value>,
     pub origin: String,
-    /// The value is the last run's, not the saved sample.
-    pub observed: bool,
+    /// The mode of the last run the value comes from; `None` when it is
+    /// the saved sample.
+    pub run: Option<RunMode>,
 }
 
 /// The value an output would have according to saved samples.
@@ -91,23 +92,13 @@ pub fn source(node: &Node, port: &str, project: &Project, run: Option<&RunResult
                     RunMode::Simulation => "simulation",
                 }
             ),
-            observed: true,
+            run: Some(mode),
         },
-        None => {
-            let value = sample_output(node, port, project);
-            Source {
-                // A step with neither a sample nor a run has no data to
-                // describe (DIAG-16).
-                origin: if value.is_some() {
-                    "Sample data"
-                } else {
-                    "No sample yet"
-                }
-                .into(),
-                value,
-                observed: false,
-            }
-        }
+        None => Source {
+            value: sample_output(node, port, project),
+            origin: "Sample data".into(),
+            run: None,
+        },
     }
 }
 
