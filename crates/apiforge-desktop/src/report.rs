@@ -75,6 +75,10 @@ pub struct Context<'a> {
     /// What the run executed, where a check's card reads what the check
     /// required (DIAG-03); without it the card reads as before.
     pub graphs: Option<RunGraphs<'a>>,
+    /// The document's checks as it stands, which mark the fields of a
+    /// step's outputs they read in the colour of their outcome in this run
+    /// (DIAG-12); `None` marks nothing.
+    pub checks: Option<&'a crate::inspector::CheckIndex>,
 }
 
 /// The graphs a run executed. A step's result carries only the values a
@@ -1050,6 +1054,8 @@ impl ReportPanel {
             self.tab = DetailTab::Outputs;
         }
 
+        // The outcomes that colour the marks, once per frame (DIAG-12).
+        let outcomes = context.checks.map(|_| crate::inspector::Outcomes::of(run));
         let height = ui.available_height().max(80.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
@@ -1080,6 +1086,10 @@ impl ReportPanel {
                                 requirement,
                                 !context.document_locked,
                                 context.component,
+                                context.checks.map(|index| crate::inspector::Marks {
+                                    index,
+                                    run: outcomes.as_ref(),
+                                }),
                                 actions,
                             );
                         });
@@ -1132,6 +1142,7 @@ impl ReportPanel {
         requirement: Option<Requirement>,
         editable: bool,
         component: bool,
+        marks: Option<crate::inspector::Marks<'_>>,
         actions: &mut Vec<Action>,
     ) {
         let Some(selected) = selected else {
@@ -1313,6 +1324,7 @@ impl ReportPanel {
                                     fields: false,
                                     offers: false,
                                     checked: &none,
+                                    marks: None,
                                 },
                             );
                         }
@@ -1365,6 +1377,7 @@ impl ReportPanel {
                                 fields,
                                 offers: fields && editable,
                                 checked: &is_checked,
+                                marks,
                             },
                         );
                         actions.extend(chosen.map(|chosen| match chosen {
@@ -1381,6 +1394,11 @@ impl ReportPanel {
                                 port: port.clone(),
                                 path,
                             },
+                            // A check of the field, chosen in the menu of
+                            // *Check*, is selected (DIAG-12).
+                            crate::inspector::TreeAction::Select { check } => {
+                                Action::SelectNode(check)
+                            }
                         }));
                     }
                 }
@@ -2027,6 +2045,7 @@ mod tests {
             running: false,
             stale: false,
             checked: &[],
+            checks: None,
             files_busy: false,
             component: false,
             document_locked: false,
@@ -2140,6 +2159,7 @@ mod tests {
                     running: false,
                     stale: false,
                     checked: &[],
+                    checks: None,
                     files_busy: false,
                     component: false,
                     document_locked: false,
@@ -2159,6 +2179,7 @@ mod tests {
                     running: false,
                     stale: true,
                     checked: &[],
+                    checks: None,
                     files_busy: false,
                     component: false,
                     document_locked: false,
@@ -2217,6 +2238,7 @@ mod tests {
                         running: false,
                         stale: false,
                         checked: &checked,
+                        checks: None,
                         files_busy: false,
                         component: false,
                         document_locked: locked,
@@ -2269,6 +2291,7 @@ mod tests {
             running: false,
             stale: false,
             checked: &[],
+            checks: None,
             files_busy: false,
             component: false,
             document_locked: false,
@@ -2331,6 +2354,7 @@ mod tests {
                 running: false,
                 stale: false,
                 checked: &[],
+                checks: None,
                 files_busy: false,
                 component: false,
                 document_locked: false,
@@ -2396,6 +2420,7 @@ mod tests {
                 running: false,
                 stale: false,
                 checked: &[],
+                checks: None,
                 files_busy: false,
                 component: false,
                 document_locked: false,

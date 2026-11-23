@@ -344,6 +344,14 @@ pub struct FolderApp {
     /// The steps the Cleanup board's cards read, kept while the model is the
     /// same: building them copies the Main graph (UX-16).
     cleanup_reference: Option<(Arc<Document>, Arc<Graph>)>,
+    /// Which fields the checks of the model read, kept while the model and
+    /// the project are the same: built once per edit, never per frame or
+    /// row (DIAG-12).
+    check_index: Option<(
+        Arc<Document>,
+        Arc<Project>,
+        Arc<crate::inspector::CheckIndex>,
+    )>,
     /// The values worth a variable of the model the board shows, kept while
     /// the model is the same (LAY-25).
     shared_values: Option<(Arc<Document>, Arc<Vec<apiforge_core::edit::SharedValue>>)>,
@@ -585,6 +593,7 @@ impl FolderApp {
             canvases: HashMap::new(),
             checks_here: checks_here::ChecksHere::default(),
             cleanup_reference: None,
+            check_index: None,
             shared_values: None,
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
@@ -2025,6 +2034,48 @@ impl FolderApp {
 
     // ----- Helpers ---------------------------------------------------------------
 
+    /// The index of the checks of `model` (DIAG-12): the one kept while the
+    /// model and the project are the same, else a new one.
+    fn check_index(&mut self, model: &Arc<Document>) -> Arc<crate::inspector::CheckIndex> {
+        let project = self.context_project();
+        if let Some((document, context, index)) = &self.check_index
+            && Arc::ptr_eq(document, model)
+            && Arc::ptr_eq(context, &project)
+        {
+            return index.clone();
+        }
+        let (main, cleanup) = match &**model {
+            Document::Scenario(scenario) => (&scenario.graph, Some(&scenario.cleanup)),
+            Document::Component(component) => (&component.graph, None),
+        };
+        let index = Arc::new(crate::inspector::CheckIndex::build(main, cleanup, &project));
+        self.check_index = Some((model.clone(), project, index.clone()));
+        index
+    }
+
+    /// Selects the step `node` of `document_id` on the board that holds it,
+    /// from a results row or a field's menu (DIAG-12): a check folded into
+    /// its subject is found there, the subject selected with its checks open
+    /// (LAY-11); any other step is selected as a click on its card does.
+    fn select_on_board(
+        &mut self,
+        document_id: &str,
+        model: &Document,
+        node: String,
+        cleanup: bool,
+    ) {
+        if let Some(tab) = self.workbench.tab_mut(document_id) {
+            tab.cleanup = cleanup;
+        }
+        let subject = self.canvases.get(document_id).and_then(|canvas| {
+            canvas.folded_into(graph_of(model, cleanup), later_of(model, cleanup), &node)
+        });
+        match subject {
+            Some(subject) => self.show_checks(document_id, subject),
+            None => self.select_step(document_id, node),
+        }
+    }
+
     /// Configuration and published components; views are drawn only while a
     /// project is open.
     fn context_project(&self) -> Arc<Project> {
@@ -2143,6 +2194,12 @@ fn with_graphs(model: &Document, main: Graph, cleanup: Option<Graph>) -> Documen
         Document::Component(component) => component.graph = main,
     }
     next
+}
+
+/// Whether `node` is a step of the scenario's Cleanup graph.
+fn cleanup_holds(model: &Document, node: &str) -> bool {
+    matches!(model, Document::Scenario(scenario)
+        if scenario.cleanup.nodes.iter().any(|candidate| candidate.id == node))
 }
 
 fn later_of(model: &Document, cleanup: bool) -> Option<&Graph> {

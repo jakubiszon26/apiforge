@@ -263,6 +263,7 @@ fn inspector_offers_add_check(node: Node) -> bool {
                 step: None,
                 expand_here: None,
                 read_only: None,
+                checks: None,
             };
             inspector.show(ui, &context);
         });
