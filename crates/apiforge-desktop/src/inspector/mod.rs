@@ -59,6 +59,9 @@ pub enum Action {
 }
 
 pub struct Context<'a> {
+    /// The document the step is in: what the panel keeps per field of a
+    /// step, such as a branch of *Output data* opened, is kept per document.
+    pub document: Id,
     pub node: &'a Node,
     /// Nodes that bindings may reference.
     pub graph: &'a Graph,
@@ -1348,7 +1351,9 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
     // Where the data comes from: a mark and a sentence (DIAG-10).
     ui.horizontal(|ui| {
         if context.step.is_some() {
-            widgets::pill(ui, "Last run", theme::SUCCESS);
+            // Neutral: the mark says where the data is from, not whether the
+            // step passed.
+            widgets::pill(ui, "Last run", theme::MUTED);
             widgets::hint(ui, "Editing the step does not update it.");
         } else {
             widgets::pill(ui, "Sample", theme::WARNING);
@@ -1370,6 +1375,7 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
         // The output's heading is the first row of its tree.
         if let Some(action) = fields::json_tree(
             ui,
+            context.document,
             &node.id,
             &port.name,
             port.display_name(),

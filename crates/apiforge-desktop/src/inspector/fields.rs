@@ -469,20 +469,34 @@ fn check_sentence(subject: &str, check: &FieldCheck) -> String {
 /// its type, and ✓ (*Add a check*) and {} (*Assign to variable*). The first
 /// row is the output itself, named `heading`. Field names can be dragged
 /// onto arguments as a reference to `node`'s `port`. `read_only` says why
-/// the actions are disabled, on their hover (DIAG-09).
+/// the actions are disabled, on their hover (DIAG-09). What is folded or
+/// opened is kept per field of `document`.
 pub fn json_tree(
     ui: &mut Ui,
+    document: Id,
     node: &str,
     port: &str,
     heading: &str,
     value: &Value,
     read_only: Option<&str>,
 ) -> Option<TreeAction> {
-    let tree = Tree {
+    let mut tree = Tree {
+        document,
         node,
         port,
         read_only,
+        step: TREE_INDENT,
     };
+    // 14 px a level wherever the panel has room; where the deepest row shown
+    // would leave its name and value less than they need before ✓ and {},
+    // every level steps in by the same smaller amount.
+    let mut walked = JSON_ROWS_PER_FRAME;
+    let deepest = deepest(ui.ctx(), &tree, value, &JsonPath::root(), 0, &mut walked);
+    if deepest > 0 {
+        let spare =
+            ui.available_width() - TREE_ACTIONS - TREE_GAP - TREE_TEXT_MIN - TREE_GAP - TREE_FOLD;
+        tree.step = TREE_INDENT.min(spare.max(0.0) / deepest as f32);
+    }
     let mut action = None;
     let mut budget = JSON_ROWS_PER_FRAME;
     let spacing = ui.spacing().item_spacing.y;
@@ -510,9 +524,22 @@ pub fn json_tree(
 
 /// What every row of one tree shares.
 struct Tree<'a> {
+    document: Id,
     node: &'a str,
     port: &'a str,
     read_only: Option<&'a str>,
+    /// How far a child's row starts right of its parent's.
+    step: f32,
+}
+
+impl Tree<'_> {
+    /// Where the field at `path` keeps whether it is open, per field of the
+    /// step's output in its document, not per frame of the panel: a branch
+    /// opened stays open while another step is selected.
+    fn branch(&self, path: &str) -> Id {
+        self.document
+            .with(("json-branch", self.node, self.port, path))
+    }
 }
 
 const JSON_ROWS_PER_FRAME: usize = 400;
@@ -522,8 +549,17 @@ const JSON_PAGE_SIZE: usize = 100;
 const TREE_ROW: f32 = 26.0;
 /// The space between two rows.
 const TREE_ROW_GAP: f32 = 2.0;
-/// How far a child's row starts right of its parent's, at every level.
+/// How far a child's row starts right of its parent's, at every level the
+/// panel has room for.
 const TREE_INDENT: f32 = 14.0;
+/// What a row's name and value keep at least before ✓ and {}: the indent
+/// gives way before they do.
+const TREE_TEXT_MIN: f32 = 64.0;
+/// The most of a value a row lays out on its one line: more than the widest
+/// panel shows.
+const TREE_CUT_CHARS: usize = 200;
+/// The most of a value a row lays out opened, or shows in its hover.
+const TREE_WHOLE_CHARS: usize = 4000;
 /// The width of the fold mark.
 const TREE_FOLD: f32 = 14.0;
 /// The space between a row's parts.
@@ -540,14 +576,73 @@ fn page_range(total: usize, page: usize) -> std::ops::Range<usize> {
     start..(start + JSON_PAGE_SIZE).min(total)
 }
 
-/// A value as its row writes it: a scalar as the language writes it, an
-/// object or a list as its type and size.
-fn tree_preview(value: &Value) -> String {
+/// A value as its row writes it: a scalar as the language writes it, at
+/// most `limit` characters and an ellipsis, an object or a list as its type
+/// and size. A huge text is cut before it is written, not after.
+fn tree_preview(value: &Value, limit: usize) -> String {
     match value {
         Value::Array(items) => format!("array · {}", items.len()),
         Value::Object(fields) => format!("object · {}", fields.len()),
-        scalar => json_stringify(scalar),
+        Value::String(text) if text.len() > limit => {
+            let head: String = text.chars().take(limit).collect();
+            crate::labels::truncate(&json_stringify(&Value::String(head)), limit)
+        }
+        scalar => crate::labels::truncate(&json_stringify(scalar), limit),
     }
+}
+
+/// The deepest level among the rows `value` shows from `depth`: its open
+/// branches on their shown page, to ten levels and within `budget` rows.
+fn deepest(
+    ctx: &egui::Context,
+    tree: &Tree<'_>,
+    value: &Value,
+    path: &JsonPath,
+    depth: usize,
+    budget: &mut usize,
+) -> usize {
+    if *budget == 0 {
+        return depth;
+    }
+    *budget -= 1;
+    let count = match value {
+        Value::Array(items) => items.len(),
+        Value::Object(fields) => fields.len(),
+        _ => 0,
+    };
+    if count == 0 || depth >= 10 {
+        return depth;
+    }
+    let id = tree.branch(&path.to_string());
+    let (open, page) = ctx.data(|data| {
+        (
+            data.get_temp::<bool>(id).unwrap_or(depth == 0),
+            data.get_temp::<usize>(id.with("page")).unwrap_or(0),
+        )
+    });
+    if !open {
+        return depth;
+    }
+    let range = page_range(count, page);
+    let mut found = depth;
+    match value {
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate().take(range.end).skip(range.start) {
+                let mut child = path.clone();
+                child.push_index(index);
+                found = found.max(deepest(ctx, tree, item, &child, depth + 1, budget));
+            }
+        }
+        Value::Object(fields) => {
+            for (key, item) in fields.iter().take(range.end).skip(range.start) {
+                let mut child = path.clone();
+                child.push_key(key.clone());
+                found = found.max(deepest(ctx, tree, item, &child, depth + 1, budget));
+            }
+        }
+        _ => {}
+    }
+    found
 }
 
 /// A value's colour by its type.
@@ -597,9 +692,7 @@ fn tree_row(
         Value::Object(fields) => fields.len(),
         _ => 0,
     };
-    // Kept per field of the step's output, not per frame of the panel: a
-    // branch opened stays open while another step is selected.
-    let state_id = Id::new(("json-branch", tree.node, tree.port, &text));
+    let state_id = tree.branch(&text);
     let mut open = ui
         .ctx()
         .data(|data| data.get_temp::<bool>(state_id))
@@ -610,13 +703,14 @@ fn tree_row(
         .data(|data| data.get_temp::<bool>(whole_id))
         .unwrap_or(false);
 
-    // Where the row's parts go: the name keeps what it needs up to most of
-    // the room, the value takes the rest up to ✓ and {}.
+    // Where the row's parts go: ✓ and {} at the panel's right edge, always;
+    // the name keeps what it needs up to most of the room left of them, the
+    // value takes the rest. Both are cut where they do not fit.
     let width = ui.available_width();
     let left = ui.cursor().min.x;
-    let fold_x = left + depth as f32 * TREE_INDENT;
+    let actions_x = left + (width - TREE_ACTIONS).max(0.0);
+    let fold_x = left + depth as f32 * tree.step;
     let name_x = fold_x + TREE_FOLD + TREE_GAP;
-    let actions_x = (left + width - TREE_ACTIONS).max(name_x);
     let room = (actions_x - TREE_GAP - name_x).max(0.0);
     let name_text = if depth == 0 {
         RichText::new(name)
@@ -631,16 +725,18 @@ fn tree_row(
     let name_galley = egui::WidgetText::from(name_text).into_galley(
         ui,
         Some(egui::TextWrapMode::Truncate),
-        (room * 0.6).max(24.0),
+        (room * 0.6).max(room.min(24.0)),
         egui::FontSelection::Default,
     );
     let value_x = name_x + name_galley.size().x + TREE_GAP;
-    let value_room = (actions_x - TREE_GAP - value_x).max(24.0);
-    let value_text = RichText::new(tree_preview(value))
-        .monospace()
-        .size(theme::FONT_LABEL)
-        .color(tree_colour(value));
-    let cut_galley = egui::WidgetText::from(value_text.clone()).into_galley(
+    let value_room = (actions_x - TREE_GAP - value_x).max(0.0);
+    let value_text = |limit: usize| {
+        RichText::new(tree_preview(value, limit))
+            .monospace()
+            .size(theme::FONT_LABEL)
+            .color(tree_colour(value))
+    };
+    let cut_galley = egui::WidgetText::from(value_text(TREE_CUT_CHARS)).into_galley(
         ui,
         Some(egui::TextWrapMode::Truncate),
         value_room,
@@ -652,7 +748,7 @@ fn tree_row(
     let cut = cut_galley.elided;
     let whole = whole && cut;
     let value_galley = if whole {
-        egui::WidgetText::from(value_text).into_galley(
+        egui::WidgetText::from(value_text(TREE_WHOLE_CHARS)).into_galley(
             ui,
             Some(egui::TextWrapMode::Wrap),
             value_room,
@@ -668,7 +764,7 @@ fn tree_row(
     // A thin guide line through the row for each level it is nested in,
     // under the fold mark of that level's row.
     for level in 0..depth {
-        let x = left + level as f32 * TREE_INDENT + TREE_FOLD / 2.0;
+        let x = left + level as f32 * tree.step + TREE_FOLD / 2.0;
         ui.painter().line_segment(
             [
                 egui::pos2(x, row.top() - TREE_ROW_GAP),
@@ -743,14 +839,27 @@ fn tree_row(
         value_galley.size(),
     );
     let shown_value = put_at(row_ui, value_rect, |ui| {
-        ui.add(egui::Label::new(value_galley).sense(if cut {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        }))
+        ui.add(
+            egui::Label::new(value_galley)
+                .sense(if cut {
+                    egui::Sense::click()
+                } else {
+                    egui::Sense::hover()
+                })
+                .show_tooltip_when_elided(false),
+        )
     });
+    // Pointing at a cut value shows it whole, up to as much as it opens to,
+    // written only while the hover is shown.
     if cut
         && shown_value
+            .on_hover_ui(|ui| {
+                ui.label(
+                    RichText::new(tree_preview(value, TREE_WHOLE_CHARS))
+                        .monospace()
+                        .size(theme::FONT_LABEL),
+                );
+            })
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
     {
@@ -803,7 +912,7 @@ fn tree_row(
         return;
     }
     // What stands among the children starts where their names do.
-    let inset = (depth + 1) as f32 * TREE_INDENT + TREE_FOLD + TREE_GAP;
+    let inset = (depth + 1) as f32 * tree.step + TREE_FOLD + TREE_GAP;
     if depth >= 10 {
         ui.horizontal(|ui| {
             ui.add_space(inset);
@@ -927,9 +1036,11 @@ mod tree_tests {
         let mut visited = 0;
         let mut limited = 0;
         let tree = Tree {
+            document: Id::new("document"),
             node: "n",
             port: "body",
             read_only: None,
+            step: TREE_INDENT,
         };
         let mut output = context.run_ui(Default::default(), |ui| {
             let mut budget = JSON_ROWS_PER_FRAME;
@@ -966,6 +1077,56 @@ mod tree_tests {
             "root and nested summary, without visiting the closed subtree"
         );
         assert_eq!(limited, 0);
+    }
+
+    #[test]
+    fn a_huge_text_is_cut_before_it_is_written() {
+        let huge = serde_json::json!("A".repeat(1_000_000));
+        for limit in [TREE_CUT_CHARS, TREE_WHOLE_CHARS] {
+            let shown = tree_preview(&huge, limit);
+            assert_eq!(shown.chars().count(), limit + 1, "{limit} and an ellipsis");
+            assert!(shown.starts_with("\"AAA") && shown.ends_with('…'));
+        }
+        let short = serde_json::json!("o-1042");
+        assert_eq!(tree_preview(&short, TREE_CUT_CHARS), "\"o-1042\"");
+    }
+
+    #[test]
+    fn two_documents_whose_steps_share_an_id_keep_their_folding_apart() {
+        let context = egui::Context::default();
+        let value = serde_json::json!({"customer": {"name": "Anna", "email": "a@b.test"}});
+        let tree = |document: &str| Tree {
+            document: Id::new(document),
+            node: "node-1",
+            port: "body",
+            read_only: None,
+            step: TREE_INDENT,
+        };
+        context.data_mut(|data| data.insert_temp(tree("first").branch("customer"), true));
+        let mut visited = Vec::new();
+        let mut output = context.run_ui(Default::default(), |ui| {
+            for document in ["first", "second"] {
+                let mut budget = JSON_ROWS_PER_FRAME;
+                tree_row(
+                    ui,
+                    &tree(document),
+                    &value,
+                    &JsonPath::root(),
+                    "Response",
+                    0,
+                    true,
+                    &mut None,
+                    &mut budget,
+                );
+                visited.push(JSON_ROWS_PER_FRAME - budget);
+            }
+        });
+        output.textures_delta.clear();
+        assert_eq!(
+            visited,
+            [4, 2],
+            "customer is open in the first document only"
+        );
     }
 }
 
