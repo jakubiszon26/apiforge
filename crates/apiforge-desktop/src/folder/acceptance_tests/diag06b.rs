@@ -656,3 +656,87 @@ fn diag06b_criterion_4_the_code_editor_keeps_its_keys() {
         );
     }
 }
+
+// Design review -------------------------------------------------------------
+
+/// Renders the window as it stands, the pointer and its hover kept, as
+/// `<name>.png` in the capture directory.
+fn held(harness: &mut FolderHarness, name: &str) {
+    let image = harness
+        .render()
+        .unwrap_or_else(|error| panic!("cannot render {name}: {error}"));
+    let directory = crate::testing::capture_dir();
+    fs::create_dir_all(&directory).unwrap();
+    image.save(directory.join(format!("{name}.png"))).unwrap();
+}
+
+/// `booking-day` at `size`, laid out by *Tidy up*.
+fn tidied(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    let (project, mut harness, id) = booking_day();
+    harness.set_size(size);
+    settle(&mut harness);
+    choose(&mut harness, "Tidy up");
+    settle(&mut harness);
+    harness.step();
+    (project, harness, id)
+}
+
+/// The four views of DIAG-06b at 960 × 540 and 1600 × 1000: a wire
+/// carried over a step that reads its source's step, and after its release, the notice
+/// after a delete, the `+` on a line, and a step's menu.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_diag06b() {
+    for (size, suffix) in [(MINIMUM, "960"), (WIDE, "1600")] {
+        let (_project, mut harness, id) = shop_with(PAY);
+        harness.set_size(size);
+        settle(&mut harness);
+        show(&mut harness, &id, &["begin", "pay"]);
+        let target = id_of(&graph(&harness, &id), "pay");
+        let from = centre(&harness, "Output __order of begin");
+        let (socket, _) = board(&harness, &id).debug_order_sockets(&target);
+        let to = screen(&harness, &id, socket.expect("an order socket"));
+        press(&mut harness, from);
+        move_to(&mut harness, from, to);
+        harness.step();
+        held(&mut harness, &format!("diag06b-refused-{suffix}"));
+        release(&mut harness, to);
+        settle(&mut harness);
+        crate::testing::capture(
+            &mut harness,
+            &format!("diag06b-refused-after-{suffix}"),
+            None,
+        );
+        drop(harness);
+
+        let (_project, mut harness, id) = tidied(size);
+        show(&mut harness, &id, &["equipment", "holidays"]);
+        delete(&mut harness, &id, &["policy"]);
+        crate::testing::capture(&mut harness, &format!("diag06b-notice-{suffix}"), None);
+        drop(harness);
+
+        let (_project, mut harness, id) = tidied(size);
+        show(&mut harness, &id, &["first", "hold"]);
+        let line = chain_line(&harness, &id, "first", "hold");
+        let at = super::lay14::point_on(&harness, &id, &line);
+        harness.hover_at(at);
+        harness.step();
+        harness.step();
+        held(&mut harness, &format!("diag06b-plus-{suffix}"));
+        drop(harness);
+
+        let (_project, mut harness, id) = tidied(size);
+        show(&mut harness, &id, &["hold"]);
+        let card = board(&harness, &id)
+            .debug_card_rect(&id_of(&graph(&harness, &id), "hold"))
+            .expect("`hold` is drawn");
+        click_at(
+            &mut harness,
+            card.center(),
+            egui::PointerButton::Secondary,
+            1,
+        );
+        harness.step();
+        crate::testing::capture(&mut harness, &format!("diag06b-menu-{suffix}"), None);
+    }
+}
