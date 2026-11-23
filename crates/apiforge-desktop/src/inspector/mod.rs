@@ -10,7 +10,9 @@ mod fields;
 mod response;
 pub mod source_change;
 
-pub use fields::{Opening, Results, TreeAction, forget_field_text, results_tree, type_combo};
+pub use fields::{
+    Opening, Results, TreeAction, forget_field_text, forget_results_tree, results_tree, type_combo,
+};
 pub use response::sample_output;
 
 use crate::icons::Icon;

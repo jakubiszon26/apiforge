@@ -321,7 +321,8 @@ pub fn resolve_selected<'a, 'b>(
 }
 
 /// What *Expand all* and *Collapse all* last chose (REP-08). It holds while
-/// another step is selected, so every step opens the same way.
+/// another step is selected, so every step opens the same way, until the
+/// next run.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Folding {
     /// Neither: a value opens to its leaves, a large one to its second level.
@@ -338,37 +339,47 @@ const OPEN_NODES: usize = 2000;
 
 /// How a value's rows open before one is folded by hand (REP-08): to its
 /// leaves, or to its second level when it has more than [`OPEN_NODES`]
-/// nodes; *Expand all* opens any value to its leaves and *Collapse all*
-/// folds every row.
+/// nodes or more open rows than are drawn at once, or to its first where
+/// even the second level's rows are not drawn at once (review round,
+/// 2026-11-23); *Expand all* opens any value to its leaves and *Collapse
+/// all* folds every row.
 pub(crate) fn opening(folding: Folding, value: &Value) -> Opening {
     match folding {
         Folding::ExpandAll => Opening::Leaves,
         Folding::CollapseAll => Opening::Closed,
-        Folding::Default if nodes(value, OPEN_NODES + 1) > OPEN_NODES => Opening::Levels(2),
-        Folding::Default => Opening::Leaves,
+        Folding::Default => by_default(value).0,
     }
 }
 
-/// How many nodes `value` has, the value itself included, counted no
-/// further than `limit`.
-fn nodes(value: &Value, limit: usize) -> usize {
-    fn walk(value: &Value, count: &mut usize, limit: usize) {
-        *count += 1;
-        let children: Box<dyn Iterator<Item = &Value>> = match value {
-            Value::Array(items) => Box::new(items.iter()),
-            Value::Object(fields) => Box::new(fields.values()),
-            _ => return,
-        };
-        for child in children {
-            if *count >= limit {
-                return;
-            }
-            walk(child, count, limit);
+/// How a value opens with neither *Expand all* nor *Collapse all*, and
+/// whether it has more than [`OPEN_NODES`] nodes.
+fn by_default(value: &Value) -> (Opening, bool) {
+    let large = more_nodes_than(value, OPEN_NODES);
+    let opening = if !large && Opening::Leaves.drawn_whole(value) {
+        Opening::Leaves
+    } else if Opening::Levels(2).drawn_whole(value) {
+        Opening::Levels(2)
+    } else {
+        Opening::Levels(1)
+    };
+    (opening, large)
+}
+
+/// Whether `value` has more than `limit` nodes, the value itself included.
+fn more_nodes_than(value: &Value, limit: usize) -> bool {
+    fn walk(value: &Value, left: &mut usize) -> bool {
+        if *left == 0 {
+            return true;
+        }
+        *left -= 1;
+        match value {
+            Value::Array(items) => items.iter().any(|item| walk(item, left)),
+            Value::Object(fields) => fields.values().any(|item| walk(item, left)),
+            _ => false,
         }
     }
-    let mut count = 0;
-    walk(value, &mut count, limit);
-    count
+    let mut left = limit;
+    walk(value, &mut left)
 }
 
 /// The most of a value's JSON text Run results lay out (REP-08); *Copy*
@@ -456,9 +467,15 @@ pub struct ReportPanel {
     tab: DetailTab,
     /// *Expand all* or *Collapse all*, holding from step to step (REP-08).
     folding: Folding,
-    /// Counts the choices of *Expand all* and *Collapse all*: the rows
-    /// folded or opened by hand before the last one are forgotten.
+    /// Counts the choices of *Expand all* and *Collapse all*, and the runs:
+    /// the rows folded or opened by hand before the last one are forgotten.
     epoch: u64,
+    /// The trees drawn since the last change of `epoch`, whose rows' state
+    /// is freed at the next.
+    trees: std::collections::HashSet<egui::Id>,
+    /// How each value of the run opens by default, and whether it is large,
+    /// per step, tab and port: counted once, not every frame.
+    openings: std::collections::HashMap<egui::Id, (Opening, bool)>,
     /// The value is shown as JSON text instead of a tree (REP-08); the
     /// folder window keeps it with the project's view.
     json: bool,
@@ -487,6 +504,8 @@ impl Default for ReportPanel {
             tab: DetailTab::Outputs,
             folding: Folding::Default,
             epoch: 0,
+            trees: Default::default(),
+            openings: Default::default(),
             json: false,
             json_text: None,
             checked: Vec::new(),
@@ -564,7 +583,13 @@ impl ReportPanel {
 
     pub fn show(&mut self, ui: &mut Ui, context: &Context<'_>) -> Vec<Action> {
         let mut actions = Vec::new();
-        self.sync_selection(context.run, context.selected_node_id);
+        if self.sync_selection(context.run, context.selected_node_id) {
+            // *Expand all* and *Collapse all* hold until the next run, whose
+            // values open as by default (review round, 2026-11-23).
+            self.folding = Folding::Default;
+            self.openings.clear();
+            self.forget_trees(ui.ctx());
+        }
         if self.checked != context.checked {
             self.checked = context.checked.to_vec();
         }
@@ -847,7 +872,9 @@ impl ReportPanel {
         actions
     }
 
-    fn sync_selection(&mut self, run: Option<&RunResult>, selected_node_id: Option<&str>) {
+    /// Follows the run and the board's selection; returns whether the run
+    /// changed.
+    fn sync_selection(&mut self, run: Option<&RunResult>, selected_node_id: Option<&str>) -> bool {
         let run_id = run.map(|run| run.id.as_str());
         let run_changed = self.last_run_id.as_deref() != run_id;
         let node_changed = self.last_selected_node_id.as_deref() != selected_node_id;
@@ -870,7 +897,7 @@ impl ReportPanel {
                     Some(row.key.as_str()) == self.selected_key.as_deref() && row.root_id == node_id
                 })
             {
-                return;
+                return run_changed;
             }
             if let Some(item) = rows
                 .iter()
@@ -878,6 +905,16 @@ impl ReportPanel {
             {
                 self.selected_key = Some(item.key.clone());
             }
+        }
+        run_changed
+    }
+
+    /// Forgets the rows folded or opened by hand, and frees what their trees
+    /// kept in egui's memory: at a new run, *Expand all* or *Collapse all*.
+    fn forget_trees(&mut self, ctx: &egui::Context) {
+        self.epoch += 1;
+        for tree in self.trees.drain() {
+            crate::inspector::forget_results_tree(ctx, tree);
         }
     }
 
@@ -1223,9 +1260,24 @@ impl ReportPanel {
             self.tab as u8,
             self.epoch,
         ));
+        self.trees.insert(document);
         let folding = self.folding;
         let checked = &self.checked;
+        let openings = &mut self.openings;
         let tab = self.tab;
+        // How a port's value opens, counted once per run, step and tab.
+        let mut opens = |port: &str, value: &Value| match folding {
+            Folding::Default => *openings
+                .entry(egui::Id::new((
+                    "report-opening",
+                    run_id,
+                    selected.key.as_str(),
+                    tab as u8,
+                    port,
+                )))
+                .or_insert_with(|| by_default(value)),
+            folding => (opening(folding, value), false),
+        };
 
         ui.push_id(
             ("report-detail", run_id, &selected.key, tab as u8),
@@ -1248,8 +1300,8 @@ impl ReportPanel {
                             trees.push(("body", body));
                         }
                         for (port, value) in trees {
-                            let opening = opening(folding, value);
-                            large_line(ui, opening, port);
+                            let (opening, large) = opens(port, value);
+                            large_line(ui, opening, large, port);
                             crate::inspector::results_tree(
                                 ui,
                                 document,
@@ -1300,8 +1352,8 @@ impl ReportPanel {
                                     && checked.path == path
                             })
                         };
-                        let opening = opening(folding, value);
-                        large_line(ui, opening, port);
+                        let (opening, large) = opens(port, value);
+                        large_line(ui, opening, large, port);
                         let chosen = crate::inspector::results_tree(
                             ui,
                             document,
@@ -1358,7 +1410,7 @@ impl ReportPanel {
                 .clicked()
             {
                 self.folding = Folding::CollapseAll;
-                self.epoch += 1;
+                self.forget_trees(ui.ctx());
             }
             if ui
                 .add(
@@ -1369,7 +1421,7 @@ impl ReportPanel {
                 .clicked()
             {
                 self.folding = Folding::ExpandAll;
-                self.epoch += 1;
+                self.forget_trees(ui.ctx());
             }
         });
         ui.add_space(8.0);
@@ -1460,14 +1512,20 @@ fn bar_width(ui: &Ui) -> f32 {
         + gap
 }
 
-/// The line over a value opened to its second level only (REP-08).
-fn large_line(ui: &mut Ui, opening: Opening, port: &str) {
-    if let Opening::Levels(_) = opening {
-        widgets::hint(
-            ui,
-            format!("{port} has more than {OPEN_NODES} values · opened to its second level"),
-        );
-    }
+/// The line over a value opened to its second or first level only
+/// (REP-08): `large`, it has more than [`OPEN_NODES`] nodes; otherwise more
+/// open rows than are drawn at once.
+fn large_line(ui: &mut Ui, opening: Opening, large: bool, port: &str) {
+    let Opening::Levels(levels) = opening else {
+        return;
+    };
+    let level = if levels >= 2 { "second" } else { "first" };
+    let why = if large {
+        format!("has more than {OPEN_NODES} values")
+    } else {
+        "has more values than are shown at once".to_owned()
+    };
+    widgets::hint(ui, format!("{port} {why} · opened to its {level} level"));
 }
 
 /// A value as indented JSON text that can be selected (REP-08), at most

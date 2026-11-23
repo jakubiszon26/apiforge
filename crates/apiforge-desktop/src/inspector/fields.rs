@@ -518,6 +518,54 @@ impl Opening {
             Self::Closed => false,
         }
     }
+
+    /// Whether every row `value` shows opened this way, on the first page
+    /// of each branch, is drawn in one frame (review round, 2026-11-23).
+    pub fn drawn_whole(self, value: &Value) -> bool {
+        fn count(value: &Value, opening: Opening, depth: usize, left: &mut usize) -> bool {
+            if *left == 0 {
+                return false;
+            }
+            *left -= 1;
+            if depth >= 10 || !opening.open(depth) {
+                return true;
+            }
+            match value {
+                Value::Array(items) => items
+                    .iter()
+                    .take(JSON_PAGE_SIZE)
+                    .all(|item| count(item, opening, depth + 1, left)),
+                Value::Object(fields) => fields
+                    .values()
+                    .take(JSON_PAGE_SIZE)
+                    .all(|item| count(item, opening, depth + 1, left)),
+                _ => true,
+            }
+        }
+        // The 400th row drawn already reads *Field display limit reached*.
+        let mut left = JSON_ROWS_PER_FRAME - 1;
+        count(value, self, 0, &mut left)
+    }
+}
+
+/// Where a Run results tree lists what it kept in egui's memory: its rows'
+/// folding, pages and values opened whole.
+fn kept_id(document: Id) -> Id {
+    document.with("kept")
+}
+
+/// Frees what the Run results tree `document` kept in egui's memory, once
+/// its run or its choice of *Expand all* or *Collapse all* is over.
+pub fn forget_results_tree(ctx: &egui::Context, document: Id) {
+    ctx.data_mut(|data| {
+        for id in data
+            .remove_temp::<Vec<Id>>(kept_id(document))
+            .unwrap_or_default()
+        {
+            data.remove::<bool>(id);
+            data.remove::<usize>(id);
+        }
+    });
 }
 
 /// What Run results' rows do that the Inspector's do not (REP-08 on
@@ -568,8 +616,8 @@ fn draw_tree(ui: &mut Ui, mut tree: Tree<'_>, heading: &str, value: &Value) -> O
     let mut walked = JSON_ROWS_PER_FRAME;
     let deepest = deepest(ui.ctx(), &tree, value, &JsonPath::root(), 0, &mut walked);
     if deepest > 0 {
-        let spare =
-            ui.available_width() - TREE_ACTIONS - TREE_GAP - TREE_TEXT_MIN - TREE_GAP - TREE_FOLD;
+        let end = End::widest(ui, &tree);
+        let spare = ui.available_width() - end - TREE_GAP - TREE_TEXT_MIN - TREE_GAP - TREE_FOLD;
         tree.step = TREE_INDENT.min(spare.max(0.0) / deepest as f32);
     }
     let mut action = None;
@@ -616,6 +664,20 @@ impl Tree<'_> {
     fn branch(&self, path: &str) -> Id {
         self.document
             .with(("json-branch", self.node, self.port, path))
+    }
+
+    /// Keeps `value` at `id`; Run results also list `id`, so that it is
+    /// freed with its run ([`forget_results_tree`]).
+    fn keep<T: Clone + Send + Sync + 'static>(&self, ctx: &egui::Context, id: Id, value: T) {
+        ctx.data_mut(|data| {
+            data.insert_temp(id, value);
+            if self.results.is_some() {
+                let kept = data.get_temp_mut_or_default::<Vec<Id>>(kept_id(self.document));
+                if !kept.contains(&id) {
+                    kept.push(id);
+                }
+            }
+        });
     }
 
     /// Whether a row `depth` levels under the first opens before it is
@@ -833,33 +895,60 @@ enum End {
 const CHECK_ADDED: &str = "Check added";
 const CUSTOM_KEY: &str = "custom key";
 
+/// The width `text` takes at `size`.
+fn text_width(ui: &Ui, text: &str, size: f32) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::proportional(size),
+            theme::TEXT,
+        )
+        .size()
+        .x
+}
+
 impl End {
+    /// The widest end a row of `tree` takes where its words have no room:
+    /// what its indent leaves room for.
+    fn widest(ui: &Ui, tree: &Tree<'_>) -> f32 {
+        let Some(results) = tree.results else {
+            return TREE_ACTIONS;
+        };
+        if !results.fields {
+            return 0.0;
+        }
+        let added = Self::added(ui);
+        if results.offers {
+            added.max(TREE_ACTIONS).max(Self::custom(ui))
+        } else {
+            added
+        }
+    }
+
+    fn added(ui: &Ui) -> f32 {
+        14.0 + 4.0 + text_width(ui, CHECK_ADDED, theme::FONT_LABEL)
+    }
+
+    fn custom(ui: &Ui) -> f32 {
+        text_width(ui, CUSTOM_KEY, 11.0)
+    }
+
     /// The end of the row of the field at `path`, which leaves `room` from
     /// its name to the panel's edge.
     fn of(ui: &Ui, tree: &Tree<'_>, path: &str, supported: bool, room: f32) -> Self {
         let Some(results) = tree.results else {
             return Self::Column;
         };
-        let text = |text: &str, size: f32| {
-            ui.painter()
-                .layout_no_wrap(
-                    text.to_owned(),
-                    egui::FontId::proportional(size),
-                    theme::TEXT,
-                )
-                .size()
-                .x
-        };
         // A compact action button's natural width.
-        let word = |label: &str| 20.0 + 14.0 + 6.0 + text(label, theme::FONT_LABEL);
+        let word = |label: &str| 20.0 + 14.0 + 6.0 + text_width(ui, label, theme::FONT_LABEL);
         if !results.fields {
             Self::Nothing
         } else if supported && (results.checked)(path) {
-            Self::Added(14.0 + 4.0 + text(CHECK_ADDED, theme::FONT_LABEL))
+            Self::Added(Self::added(ui))
         } else if !results.offers {
             Self::Nothing
         } else if !supported {
-            Self::Custom(text(CUSTOM_KEY, 11.0))
+            Self::Custom(Self::custom(ui))
         } else {
             let (check, variable) = (word("Check"), word("To variable"));
             if room - TREE_TEXT_MIN - TREE_GAP >= check + TREE_WORD_GAP + variable {
@@ -1109,13 +1198,14 @@ fn tree_row(
         );
         if toggle.on_hover_text(label).clicked() {
             open = !open;
-            row_ui
-                .ctx()
-                .data_mut(|data| data.insert_temp(state_id, open));
+            tree.keep(row_ui.ctx(), state_id, open);
         }
     }
 
     let shown = if text.is_empty() { tree.port } else { &text };
+    // A path is shown whole up to 200 characters, in the drag's label and
+    // the hovers.
+    let shown = &crate::labels::truncate(shown, 200);
     let kind = type_name(Some(value));
     let name_rect = egui::Rect::from_min_size(
         egui::pos2(name_x, middle - TREE_TEXT_LIFT - name_galley.size().y / 2.0),
@@ -1176,9 +1266,7 @@ fn tree_row(
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
     {
-        row_ui
-            .ctx()
-            .data_mut(|data| data.insert_temp(whole_id, !whole));
+        tree.keep(row_ui.ctx(), whole_id, !whole);
     }
 
     if tree.results.is_some() {
@@ -1206,10 +1294,8 @@ fn tree_row(
         return;
     }
     let page_key = state_id.with("page");
-    let mut page = ui
-        .ctx()
-        .data(|data| data.get_temp::<usize>(page_key))
-        .unwrap_or(0);
+    let kept_page = ui.ctx().data(|data| data.get_temp::<usize>(page_key));
+    let mut page = kept_page.unwrap_or(0);
     let range = page_range(child_count, page);
     // A newer response may be shorter than the previous page selection.
     page = range.start / JSON_PAGE_SIZE;
@@ -1239,7 +1325,9 @@ fn tree_row(
                 page += 1;
             }
         });
-        ui.ctx().data_mut(|data| data.insert_temp(page_key, page));
+        if page != kept_page.unwrap_or(0) {
+            tree.keep(ui.ctx(), page_key, page);
+        }
     }
     let reserved = |key: &str| ["__proto__", "constructor", "prototype"].contains(&key);
     match value {

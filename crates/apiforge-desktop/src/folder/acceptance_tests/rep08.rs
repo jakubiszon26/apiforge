@@ -459,9 +459,7 @@ fn rep08_criterion_5_the_opening_rule() {
 fn rep08_a_value_opens_only_as_far_as_its_rows_are_drawn() {
     let items: Vec<String> = (0..150)
         .map(|index| {
-            format!(
-                "{{ id: {index}, name: \"n{index}\", price: 1.5, stock: 3, active: true }}"
-            )
+            format!("{{ id: {index}, name: \"n{index}\", price: 1.5, stock: 3, active: true }}")
         })
         .collect();
     let source = format!(
@@ -509,7 +507,10 @@ fn rep08_a_new_run_opens_its_values_as_by_default() {
     let (_project, mut harness, _id) = labels_after_a_run(WIDE);
     select_step(&mut harness, WEIGHT_31);
     choose(&mut harness, COLLAPSE_ALL);
-    assert!(row_named(&harness, "code").is_none(), "Collapse all folds it");
+    assert!(
+        row_named(&harness, "code").is_none(),
+        "Collapse all folds it"
+    );
     choose(&mut harness, "Run simulation");
     let report = finish_run(&mut harness);
     assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
