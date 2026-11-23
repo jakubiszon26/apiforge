@@ -448,14 +448,26 @@ fn results_on(harness: &mut FolderHarness, step: &str) {
     if harness.query_by_label("Maximise run results").is_some() {
         choose(harness, "Maximise run results");
     }
-    let label = harness
+    // The step's name may stand on more than one node: the first button
+    // is its row.
+    let row = |harness: &FolderHarness| {
+        harness
+            .query_all_by_label_contains(&format!("{step} · "))
+            .find(|node| node.accesskit_node().role() == egui::accesskit::Role::Button)
+            .map(|node| node.rect().center())
+            .unwrap_or_else(|| panic!("Run results list the step {step}"))
+    };
+    harness
         .query_all_by_label_contains(&format!("{step} · "))
         .find(|node| node.accesskit_node().role() == egui::accesskit::Role::Button)
-        .and_then(|node| node.accesskit_node().label())
-        .unwrap_or_else(|| panic!("Run results list the step {step}"));
-    harness.get_by_label(&label).scroll_to_me();
+        .unwrap()
+        .scroll_to_me();
     settle(harness);
-    harness.get_by_label(&label).click();
+    let at = row(harness);
+    harness.hover_at(at);
+    harness.drag_at(at);
+    harness.drop_at(at);
+    harness.remove_cursor();
     settle(harness);
 }
 
@@ -813,12 +825,19 @@ fn diag12_criterion_7_one_index_for_a_large_response() {
         text.push_str(&format!("f{field}: {field}, "));
     }
     text.push_str("last: 0 }\n  }\n");
-    for check in 0..200 {
+    // A graph holds at most 200 steps: 150 checks in Main, 50 in Cleanup.
+    for check in 0..150 {
         text.push_str(&format!(
             "  c{check} = assert big.body.f{check} == {check}\n"
         ));
     }
-    text.push_str("}\n");
+    text.push_str("  cleanup {\n");
+    for check in 150..200 {
+        text.push_str(&format!(
+            "    c{check} = assert big.body.f{check} == {check}\n"
+        ));
+    }
+    text.push_str("  }\n}\n");
     let (_project, mut harness, id) = opened(WIDE, &text);
     output_data(&mut harness, &id, "big");
     let builds = CheckIndex::builds();
@@ -832,4 +851,34 @@ fn diag12_criterion_7_one_index_for_a_large_response() {
         harness.step();
     }
     assert_eq!(CheckIndex::builds(), builds, "no frame builds the index");
+}
+
+/// Design review of DIAG-12 against the board: the Inspector's *Output
+/// data* of `cart` with `owner` folded, its ✓ menu on `total`, and Run
+/// results of `cart` with the menu of *2 checks*, at 1600 × 1000 and
+/// 960 × 540.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_diag12_marks() {
+    for (size, suffix) in [(WIDE, "1600"), (MINIMUM, "960")] {
+        let (_project, mut harness, id) = opened(size, &source(CHECKS, ""));
+        output_data(&mut harness, &id, "cart");
+        crate::testing::capture(&mut harness, &format!("diag12-inspector-{suffix}"), None);
+        check_on(&harness, "total").click();
+        settle(&mut harness);
+        crate::testing::capture(
+            &mut harness,
+            &format!("diag12-inspector-menu-{suffix}"),
+            None,
+        );
+        harness.key_press(egui::Key::Escape);
+        settle(&mut harness);
+
+        run(&mut harness);
+        results_on(&mut harness, "cart");
+        crate::testing::capture(&mut harness, &format!("diag12-results-{suffix}"), None);
+        results_check(&harness, "total").click();
+        settle(&mut harness);
+        crate::testing::capture(&mut harness, &format!("diag12-results-menu-{suffix}"), None);
+    }
 }

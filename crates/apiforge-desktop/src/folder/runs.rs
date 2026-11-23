@@ -619,6 +619,14 @@ impl FolderApp {
             self.runs.panel.restore();
         }
         let Some(id) = active else { return };
+        if !self.runs.reports.contains_key(id) {
+            return;
+        }
+        // The marks are the document's as it stands (DIAG-12).
+        let checks = self
+            .snapshot(id)
+            .and_then(|snapshot| snapshot.model)
+            .map(|model| self.check_index(&model));
         let Some(report) = self.runs.reports.get(id) else {
             return;
         };
@@ -678,6 +686,7 @@ impl FolderApp {
                 document_locked: stale
                     || snapshot.as_ref().is_none_or(|snapshot| !snapshot.editable),
                 graphs: Some(graphs),
+                checks: checks.as_deref(),
             },
         );
         let json = self.runs.panel.json_view();
@@ -704,25 +713,16 @@ impl FolderApp {
         let Some(model) = snapshot.model else { return };
         match action {
             Action::SelectNode(node) => {
-                let cleanup = result
-                    .steps
-                    .iter()
-                    .find(|step| step.node_id == node)
-                    .is_some_and(|step| step.phase == Phase::Cleanup);
-                if let Some(tab) = self.workbench.tab_mut(id) {
-                    tab.cleanup = cleanup;
-                }
+                // The run says where its step ran; a check added since the
+                // run, chosen in a field's menu (DIAG-12), is where the
+                // document holds it.
+                let cleanup = match result.steps.iter().find(|step| step.node_id == node) {
+                    Some(step) => step.phase == Phase::Cleanup,
+                    None => cleanup_holds(&model, &node),
+                };
                 // A check folded into its subject is found there: the row
                 // selects the subject and opens its checks (LAY-11).
-                let subject = self.canvases.get(id).and_then(|canvas| {
-                    canvas.folded_into(graph_of(&model, cleanup), later_of(&model, cleanup), &node)
-                });
-                match subject {
-                    Some(subject) => self.show_checks(id, subject),
-                    None => {
-                        self.selections.insert(id.into(), vec![node]);
-                    }
-                }
+                self.select_step(id, &model, node, cleanup);
             }
             Action::ExportReport => {
                 if let Ok(text) = serde_json::to_string_pretty(result) {

@@ -2121,6 +2121,7 @@ impl App {
                     cleanup: Some(&scenario.cleanup),
                     project: self.editor.project(),
                 }),
+                checks: None,
             };
             self.report.show(ui, &context)
         };
@@ -2266,6 +2267,9 @@ impl App {
                 // The workspace window shows every check card.
                 expand_here: None,
                 read_only: None,
+                // It keeps its behaviour: fields are marked in the folder
+                // window (DIAG-12).
+                checks: None,
             };
             self.inspector.show(ui, &context)
         };
@@ -2304,7 +2308,9 @@ impl App {
                     )));
                 }
                 inspector::Action::Error(message) => self.canvas.set_error(message),
-                inspector::Action::ExpandChecksHere(_) => {}
+                // The legacy workspace window marks no field (DIAG-12), so
+                // its menus list no check to select.
+                inspector::Action::ExpandChecksHere(_) | inspector::Action::SelectCheck(_) => {}
                 inspector::Action::ReadDirectly => {
                     match edit::read_directly(self.editor.graph(), None, &node.id) {
                         Ok(read) => self.apply_graph(read.main),
