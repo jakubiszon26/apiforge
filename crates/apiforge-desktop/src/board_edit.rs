@@ -738,6 +738,12 @@ impl Board<'_> {
         })
     }
 
+    /// *Move earlier* or *Move later* (DIAG-06b): the step `id` one step
+    /// earlier or later in its braces, or the refusal the board shows.
+    pub fn move_by_one(&self, id: &str, later: bool) -> Result<(Graph, Vec<String>), String> {
+        edit::move_by_one(self.graph, self.project, id, later).map_err(|error| error.to_string())
+    }
+
     /// *Move out of the branch* (DIAG-06d): the check, value, variable or
     /// export `id` is written after the `if` whose braces hold it.
     pub fn move_out_of_branch(&self, id: &str) -> Result<(Graph, Vec<String>), String> {

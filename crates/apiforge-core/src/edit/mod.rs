@@ -48,7 +48,7 @@ pub use nodes::{
     AddedNode, AssignedVariable, FieldCheck, OutputRef, add_check, add_node,
     assign_response_variable, field_assertion, field_check,
 };
-pub use place::{Place, add_step_after, place};
+pub use place::{Place, add_step_after, move_by_one, place};
 pub use proxies::{
     add_proxy, move_proxies, proxy_binding, proxy_source, prune_proxies, remove_proxies,
 };
