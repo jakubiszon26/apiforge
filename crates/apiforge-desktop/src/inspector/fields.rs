@@ -438,6 +438,43 @@ pub fn check_menu(button: &egui::Response, subject: &str, value: &Value) -> Opti
         }
         widgets::name_menu(ui, "Add a check menu");
         ui.set_min_width(200.0);
+        if crate::mock::mark_mode() == 1
+            && let Some(mark) = crate::mock::menu_mark(button.id)
+            && !mark.checks.is_empty()
+        {
+            widgets::caption(
+                ui,
+                if mark.checks.len() == 1 {
+                    "CHECK OF THIS FIELD"
+                } else {
+                    "CHECKS OF THIS FIELD"
+                },
+            );
+            for sentence in mark.checks {
+                let results = crate::mock::RESULTS.load(std::sync::atomic::Ordering::Relaxed);
+                let mut job = egui::text::LayoutJob::default();
+                job.append(
+                    sentence,
+                    0.0,
+                    egui::TextFormat::simple(
+                        egui::FontId::monospace(theme::FONT_LABEL),
+                        theme::LINK,
+                    ),
+                );
+                if results {
+                    job.append(
+                        if mark.failed { "Failed" } else { "Passed" },
+                        12.0,
+                        egui::TextFormat::simple(
+                            egui::FontId::proportional(theme::FONT_META),
+                            mark.colour(),
+                        ),
+                    );
+                }
+                let _ = ui.button(job);
+            }
+            ui.separator();
+        }
         widgets::caption(ui, "ADD A CHECK");
         for check in FieldCheck::offered(value) {
             if ui.button(check_sentence(subject, &check)).clicked() {
@@ -450,7 +487,7 @@ pub fn check_menu(button: &egui::Response, subject: &str, value: &Value) -> Opti
 }
 
 /// A check of `subject` as the menu reads it: *total is a number*.
-fn check_sentence(subject: &str, check: &FieldCheck) -> String {
+pub(super) fn check_sentence(subject: &str, check: &FieldCheck) -> String {
     let subject = crate::labels::truncate(subject, 48);
     match check {
         FieldCheck::Equals(value) => format!(
@@ -727,6 +764,12 @@ fn page_range(total: usize, page: usize) -> std::ops::Range<usize> {
 /// A value as its row writes it: a scalar as the language writes it, at
 /// most `limit` characters and an ellipsis, an object or a list as its type
 /// and size. A huge text is cut before it is written, not after.
+pub(super) fn mock_preview(value: &Value) -> String {
+    tree_preview(value, 40)
+}
+pub(super) fn mock_colour(value: &Value) -> egui::Color32 {
+    tree_colour(value)
+}
 fn tree_preview(value: &Value, limit: usize) -> String {
     match value {
         Value::Array(items) => format!("array · {}", items.len()),
@@ -852,6 +895,24 @@ fn inspector_actions(
             widgets::icon_button(Icon::Check, "Add a check").compact(),
         )
     }));
+    if let Some(mark) = crate::mock::mark(text) {
+        let centre = button(actions_x).center();
+        match crate::mock::mark_mode() {
+            1 => {
+                crate::mock::remember(check.id, text);
+                row_ui.painter().rect_filled(
+                    button(actions_x).shrink(1.0),
+                    4.0,
+                    row_ui.visuals().panel_fill,
+                );
+                crate::mock::badge(row_ui.painter(), centre, &mark);
+            }
+            2 => {
+                crate::mock::chip(row_ui, actions_x - TREE_GAP, None, middle, &mark);
+            }
+            _ => crate::mock::gutter(row_ui, row_ui.max_rect(), &mark),
+        }
+    }
     if let Some(check) = check_menu(&check, shown, value) {
         *action = Some(TreeAction::Check {
             path: text.to_owned(),
@@ -1026,11 +1087,48 @@ impl End {
             }
         };
         let mut chosen = None;
+        let mark = crate::mock::mark(path);
+        let mode = crate::mock::mark_mode();
+        let mut x = x;
+        let mut check_width = check_width;
+        if let Some(mark) = &mark {
+            match mode {
+                2 => {
+                    x += crate::mock::chip(ui, 0.0, Some(x), middle, mark) + TREE_GAP;
+                }
+                3 => crate::mock::gutter(ui, ui.max_rect(), mark),
+                _ => {}
+            }
+        }
+        let words_text = mark.as_ref().map(crate::mock::Mark::words);
+        if mode == 1 && words && let Some(text) = &words_text {
+            check_width = 20.0 + 18.0 + 6.0 + text_width(ui, text, theme::FONT_LABEL);
+        }
         // *Check* opens the menu Add a check (DIAG-08).
         let check_hover = format!("Check {shown}");
         let check = put_at(ui, at(x, check_width), |ui| {
             ui.add(button(Icon::Check, "Check").hover(&check_hover))
         });
+        if mode == 1 && let Some(mark) = &mark {
+            crate::mock::remember(check.id, path);
+            let rect = at(x, check_width);
+            ui.painter()
+                .rect_filled(rect.shrink(1.0), 4.0, ui.visuals().panel_fill);
+            if words {
+                ui.painter()
+                    .rect_filled(rect.shrink2(egui::vec2(0.0, 2.0)), 6.0, mark.colour().gamma_multiply(0.10));
+                crate::mock::badge(ui.painter(), egui::pos2(rect.left() + 15.0, middle), mark);
+                ui.painter().text(
+                    egui::pos2(rect.left() + 30.0, middle),
+                    egui::Align2::LEFT_CENTER,
+                    words_text.as_deref().unwrap_or_default(),
+                    egui::FontId::proportional(theme::FONT_LABEL),
+                    mark.colour(),
+                );
+            } else {
+                crate::mock::badge(ui.painter(), rect.center(), mark);
+            }
+        }
         if let Some(check) = check_menu(&check, shown, value) {
             chosen = Some(TreeAction::Check {
                 path: path.to_owned(),
@@ -1079,6 +1177,9 @@ fn tree_row(
         .ctx()
         .data(|data| data.get_temp::<bool>(state_id))
         .unwrap_or_else(|| tree.opens(depth));
+    *crate::mock::PORT.lock().unwrap() = tree.port.to_owned();
+    crate::mock::RESULTS.store(tree.results.is_some(), std::sync::atomic::Ordering::Relaxed);
+    crate::mock::OPEN.store(open, std::sync::atomic::Ordering::Relaxed);
     let whole_id = state_id.with("whole");
     let whole = ui
         .ctx()

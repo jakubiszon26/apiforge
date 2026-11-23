@@ -1351,6 +1351,50 @@ pub(crate) fn searchable_field_list(
     }
     let visible = filter_response_fields(fields, search);
     let visible_count = visible.len();
+    let mock = crate::mock::typed_path();
+    let typed = search.trim().to_owned();
+    if mock == 1 && !typed.is_empty() && fields.iter().all(|field| field.path != typed) {
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 46.0), egui::Sense::click());
+        ui.painter().rect_filled(rect, 4.0, theme::ACCENT_SOFT);
+        let label = format!("Use \"{typed}\"");
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        let painter = ui.painter().with_clip_rect(rect.shrink(4.0));
+        let end = painter
+            .text(
+                rect.left_top() + egui::vec2(8.0, 5.0),
+                egui::Align2::LEFT_TOP,
+                "Use ",
+                egui::FontId::proportional(13.0),
+                theme::TEXT,
+            )
+            .right();
+        painter.text(
+            egui::pos2(end, rect.top() + 5.0),
+            egui::Align2::LEFT_TOP,
+            &typed,
+            egui::FontId::monospace(12.0),
+            theme::LINK,
+        );
+        painter.text(
+            rect.left_top() + egui::vec2(8.0, 25.0),
+            egui::Align2::LEFT_TOP,
+            if has_source_value {
+                "A typed path · not in the sample"
+            } else {
+                "A typed path · checked against the response on the next run"
+            },
+            egui::FontId::proportional(12.0),
+            theme::MUTED,
+        );
+        painter.text(
+            rect.right_center() - egui::vec2(10.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            "Return ↵",
+            egui::FontId::proportional(11.0),
+            theme::MUTED,
+        );
+    }
     egui::ScrollArea::vertical()
         .max_height(max_height)
         .show_rows(ui, 46.0, visible_count, |ui, range| {
@@ -1403,11 +1447,37 @@ pub(crate) fn searchable_field_list(
     if visible.is_empty() {
         widgets::hint(
             ui,
-            if !has_source_value {
-                "Run the request or add a sample response. You can also type a path."
-            } else {
-                "No matching field. Change the search or type a path."
+            match (mock, has_source_value) {
+                (0, false) => "Run the request or add a sample response. You can also type a path.",
+                (0, true) => "No matching field. Change the search or type a path.",
+                (1, false) => "Run the request or add a sample response to list its fields.",
+                (1, true) => "No field of the sample matches.",
+                (2, false) => "Run the request or add a sample response to list its fields, or type the path below.",
+                (2, true) => "No matching field. Change the search, or type the path below.",
+                (_, false) => "Run the request or add a sample response to list its fields.",
+                (_, true) => "No matching field. Change the search.",
             },
+        );
+    }
+    if mock == 2 {
+        ui.add_space(6.0);
+        widgets::field_label(ui, "Path");
+        ui.horizontal(|ui| {
+            let mut path = String::from("id");
+            let button = 96.0;
+            ui.add(
+                crate::widgets::text_edit(&mut path)
+                    .hint_text("e.g. data.items[0].name")
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(ui.available_width() - button - 8.0),
+            );
+            let _ = ui.add(widgets::action(Icon::Check, "Use path").compact());
+        });
+    }
+    if mock == 3 && visible.is_empty() {
+        widgets::hint(
+            ui,
+            "To type a path, close this and open Edit path manually under the field.",
         );
     }
     (chosen, visible_count)
@@ -1421,6 +1491,12 @@ fn field_picker(
     port: &str,
 ) -> Option<String> {
     let mut search: String = ctx.data_mut(|data| data.get_temp(id))?;
+    if crate::mock::PREFILL.load(std::sync::atomic::Ordering::Relaxed)
+        && crate::mock::typed_path() != 2
+        && search.is_empty()
+    {
+        search = "id".to_owned();
+    }
     let mut chosen = None;
     let mut close = false;
     let fields = response::fields(source.value.as_ref());

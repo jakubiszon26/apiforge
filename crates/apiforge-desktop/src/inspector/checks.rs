@@ -432,8 +432,16 @@ pub(super) fn show(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<super::
         &context.node.id,
         context.run,
     );
+    let mode = crate::mock::add_check();
+    if mode == 1 {
+        mock_add_check(ui, context);
+        ui.add_space(4.0);
+    }
     if rows.is_empty() {
         widgets::hint(ui, "No check reads this step yet.");
+        if mode == 2 {
+            mock_response(ui, context);
+        }
         return;
     }
     // Three rows, one of them shared, fit the Inspector of the smallest window.
@@ -452,6 +460,112 @@ pub(super) fn show(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<super::
     }
     for line in &rows {
         row(ui, line);
+    }
+    if mode == 2 {
+        mock_response(ui, context);
+    }
+}
+
+/// Mock (DIAG-15, A): *Add check* opens the step's fields; a field opens
+/// DIAG-08's sentences.
+fn mock_add_check(ui: &mut Ui, context: &Context<'_>) {
+    use crate::icons::Icon;
+    let button = ui.add(widgets::action(Icon::Plus, "Add check").compact());
+    egui::Popup::menu(&button).show(|ui| {
+        widgets::name_menu(ui, "Add check menu");
+        ui.set_min_width(250.0);
+        widgets::caption(ui, "ADD A CHECK OF");
+        for port in apiforge_core::graph::output_ports(context.node, context.project) {
+            if !["status", "body"].contains(&port.name.as_str()) {
+                continue;
+            }
+            let Some(value) = super::response::source(
+                context.node,
+                &port.name,
+                context.project,
+                context.run,
+            )
+            .value
+            else {
+                continue;
+            };
+            for field in super::response::fields(Some(&value)).fields {
+                let Some(found) = apiforge_core::path::resolve(&value, &field.path) else {
+                    continue;
+                };
+                let found = found.into_owned();
+                let (name, subject) = if field.path.is_empty() {
+                    (port.display_name().to_owned(), port.name.clone())
+                } else {
+                    let own = field
+                        .path
+                        .rsplit_once('.')
+                        .map_or(field.path.as_str(), |(_, own)| own);
+                    let own = match own.find('[') {
+                        Some(at) if at > 0 => &own[at..],
+                        _ => own,
+                    };
+                    (own.to_owned(), field.path.clone())
+                };
+                let mut job = egui::text::LayoutJob::default();
+                job.append(
+                    &name,
+                    field.depth as f32 * 14.0,
+                    if field.path.is_empty() {
+                        egui::TextFormat::simple(
+                            egui::FontId::proportional(theme::FONT_BODY),
+                            theme::TEXT,
+                        )
+                    } else {
+                        egui::TextFormat::simple(
+                            egui::FontId::monospace(theme::FONT_LABEL),
+                            theme::LINK,
+                        )
+                    },
+                );
+                job.append(
+                    &super::fields::mock_preview(&found),
+                    10.0,
+                    egui::TextFormat::simple(
+                        egui::FontId::monospace(theme::FONT_LABEL),
+                        super::fields::mock_colour(&found),
+                    ),
+                );
+                egui::containers::menu::SubMenuButton::new(job).ui(ui, |ui| {
+                    ui.set_min_width(200.0);
+                    widgets::caption(ui, "ADD A CHECK");
+                    for check in apiforge_core::edit::FieldCheck::offered(&found) {
+                        let _ = ui.button(super::fields::check_sentence(&subject, &check));
+                    }
+                });
+            }
+        }
+    });
+}
+
+/// Mock (DIAG-15, B): the response stands in the tab, with its ✓.
+fn mock_response(ui: &mut Ui, context: &Context<'_>) {
+    ui.add_space(8.0);
+    widgets::caption(ui, "ADD A CHECK FROM THE RESPONSE");
+    ui.add_space(2.0);
+    for port in apiforge_core::graph::output_ports(context.node, context.project) {
+        if !["status", "body"].contains(&port.name.as_str()) {
+            continue;
+        }
+        let Some(value) =
+            super::response::source(context.node, &port.name, context.project, context.run).value
+        else {
+            continue;
+        };
+        let _ = super::fields::json_tree(
+            ui,
+            context.document.with("mock-checks"),
+            &context.node.id,
+            &port.name,
+            port.display_name(),
+            &value,
+            context.read_only,
+        );
     }
 }
 
