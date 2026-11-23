@@ -201,7 +201,8 @@ fn lay21_criterion_2_lines_name_their_source() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
     show(&mut harness, "cart_created", 0.6);
     assert!(
-        lines(&harness, "cart_created").contains(&"cart.status is equal to 201".to_owned()),
+        // The check's title since DIAG-02, its subject on the line under it.
+        lines(&harness, "cart_created").contains(&"status == 201".to_owned()),
         "{:?}",
         lines(&harness, "cart_created")
     );

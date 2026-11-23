@@ -20,7 +20,9 @@ mod variables;
 pub use collapse::collapsible;
 #[cfg(test)]
 pub(crate) use edge::{DrawnEdge, Side};
-pub use layout::{Card, CardDensity, Chip, parse_inline};
+pub use layout::{Card, CardDensity, Chip, check_text, own_step, parse_inline};
+#[cfg(test)]
+pub use layout::{CheckText, Part, PartRole, fit_title};
 /// The halo of a related step, which a test compares with the selection's.
 #[cfg(test)]
 pub(crate) use paint::RELATED;
@@ -2291,15 +2293,21 @@ impl Canvas {
                 card.origin + vec2(56.0, 8.0),
                 card.origin + vec2(layout::WIDTH - 48.0, 60.0),
             ));
-            // A satellite's one line may be cut short: its tooltip has it whole.
+            // A satellite's one line may be cut short: its tooltip has it
+            // whole; so has a check's title, over its rows too (DIAG-02).
             let line = card.compact.as_ref().and_then(|compact| {
                 let row = compact
                     .rows
                     .iter()
                     .find(|row| row.role == layout::CompactRole::Line)?;
-                let area = camera.rect(Rect::from_min_size(
-                    card.origin + vec2(0.0, row.top),
-                    vec2(layout::WIDTH, row.height),
+                let top = if compact.title.is_some() {
+                    0.0
+                } else {
+                    row.top
+                };
+                let area = camera.rect(Rect::from_min_max(
+                    card.origin + vec2(0.0, top),
+                    card.origin + vec2(layout::WIDTH, row.top + row.height),
                 ));
                 Some((area, compact.hover.clone()?))
             });
@@ -2314,8 +2322,14 @@ impl Canvas {
                 });
             }
             let a11y_label = format!("{} ({})", card.name, card.caption);
+            // A check card carries the predicate it shows as its value
+            // (DIAG-02); its name stays its own.
+            let shown = card.check_text().map(str::to_owned);
             response.widget_info(move || {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label)
+                let mut info =
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &a11y_label);
+                info.current_text_value = shown.clone();
+                info
             });
             if response.clicked() {
                 clicked_card = true;
@@ -2421,6 +2435,12 @@ impl Canvas {
                     .get(card.id.as_str())
                     .copied()
                     .filter(|_| !matches!(card.kind, NodeKind::Value | NodeKind::If)),
+                subject: card
+                    .compact
+                    .as_ref()
+                    .and_then(|compact| compact.title.as_ref())
+                    .and_then(|title| title.subject.as_ref())
+                    .and_then(|(id, _)| numbers.get(id.as_str()).copied()),
             };
             let reveal = Reveal::of(
                 card,

@@ -57,6 +57,12 @@ pub fn bold_family() -> egui::FontFamily {
     egui::FontFamily::Name("api-forge-bold".into())
 }
 
+/// The bold face of the monospace font, for a check card's title (DIAG-02).
+/// Its characters are as wide as the regular face's.
+pub fn bold_mono_family() -> egui::FontFamily {
+    egui::FontFamily::Name("api-forge-mono-bold".into())
+}
+
 pub fn apply(ctx: &egui::Context) {
     // Ship the same fonts on Linux and Windows; system fallback must not turn
     // arrows and UI symbols into missing-glyph boxes or change card geometry.
@@ -82,6 +88,10 @@ pub fn apply(ctx: &egui::Context) {
         .or_default()
         .insert(0, "api-forge-mono".into());
     fonts.font_data.insert(
+        "api-forge-mono-bold".into(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/AdwaitaMono-Bold.ttf")).into(),
+    );
+    fonts.font_data.insert(
         "api-forge-symbols".into(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/DejaVuSans.ttf")).into(),
     );
@@ -98,6 +108,10 @@ pub fn apply(ctx: &egui::Context) {
     fonts.families.insert(
         bold_family(),
         vec!["api-forge-bold".into(), "api-forge-symbols".into()],
+    );
+    fonts.families.insert(
+        bold_mono_family(),
+        vec!["api-forge-mono-bold".into(), "api-forge-symbols".into()],
     );
     ctx.set_fonts(fonts);
     ctx.set_theme(egui::Theme::Light);
