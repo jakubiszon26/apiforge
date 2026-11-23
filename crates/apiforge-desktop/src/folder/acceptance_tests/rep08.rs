@@ -420,10 +420,104 @@ fn rep08_criterion_5_the_opening_rule() {
     assert_eq!(opening(Folding::Default, &over), Opening::Levels(2));
     assert_eq!(opening(Folding::ExpandAll, &over), Opening::Leaves);
     assert_eq!(opening(Folding::CollapseAll, &over), Opening::Closed);
+    // A value opens to its leaves only where Run results draw all its open
+    // rows at once (review round, 2026-11-23): 100 objects of 5 fields under
+    // the root (601 rows) open to their second level, which draws 102.
+    let wide = json!({
+        "items": (0..150)
+            .map(|id| json!({ "id": id, "name": "n", "price": 1.5, "stock": 3, "active": true }))
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(opening(Folding::Default, &wide), Opening::Levels(2));
+    // Where the second level would not be drawn whole either, four lists of
+    // 100 numbers under the root (405 rows), the value opens to its first.
+    let lists = json!({
+        "a": (0..100).collect::<Vec<_>>(),
+        "b": (0..100).collect::<Vec<_>>(),
+        "c": (0..100).collect::<Vec<_>>(),
+        "d": (0..100).collect::<Vec<_>>(),
+    });
+    assert_eq!(opening(Folding::Default, &lists), Opening::Levels(1));
+    // Three lists of 100 objects (904 rows open) draw 304 at their second.
+    let objects = json!({
+        "a": vec![json!({ "x": 1, "y": 2 }); 100],
+        "b": vec![json!({ "x": 1, "y": 2 }); 100],
+        "c": vec![json!({ "x": 1, "y": 2 }); 100],
+    });
+    assert_eq!(opening(Folding::Default, &objects), Opening::Levels(2));
     // What each opens: a row at `depth` is open, or folded.
     assert!(Opening::Leaves.open(0) && Opening::Leaves.open(9));
     assert!(Opening::Levels(2).open(1) && !Opening::Levels(2).open(2));
     assert!(!Opening::Closed.open(0));
+}
+
+/// Review round (2026-11-23): a value whose open rows are more than Run
+/// results draw at once, a body of 150 objects of 5 fields, opens only as
+/// far as its rows are drawn and a line says so; no row is hidden behind
+/// the field display limit.
+#[test]
+fn rep08_a_value_opens_only_as_far_as_its_rows_are_drawn() {
+    let items: Vec<String> = (0..150)
+        .map(|index| {
+            format!(
+                "{{ id: {index}, name: \"n{index}\", price: 1.5, stock: 3, active: true }}"
+            )
+        })
+        .collect();
+    let source = format!(
+        "scenario \"Wide\" {{\n  begin = start\n  order = GET \"/wide\" {{\n    sample 200 {{ items: [{}] }}\n  }}\n}}\n",
+        items.join(", ")
+    );
+    let project = crate::testing::shop_project();
+    fs::write(project.path().join(SCENARIO), source).unwrap();
+    let mut harness = crate::testing::folder_harness_in(project.path(), WIDE, Mode::Diagram);
+    app(&mut harness).review_open(SCENARIO, None);
+    settle(&mut harness);
+    run(&mut harness);
+    select_step(&mut harness, "order");
+    assert!(
+        harness
+            .query_all_by_label_contains("Field display limit reached")
+            .next()
+            .is_none(),
+        "no row is hidden behind the field display limit"
+    );
+    assert!(
+        harness
+            .query_all_by_label_contains("opened to its second level")
+            .next()
+            .is_some(),
+        "a line says the value opened to its second level"
+    );
+    assert!(row_named(&harness, "items").is_some(), "the first level");
+    for item in ["[0]", "[99]"] {
+        assert!(
+            row_named(&harness, item).is_some(),
+            "the second level, {item} the last of its page included"
+        );
+    }
+    assert!(
+        row_named(&harness, "price").is_none(),
+        "the third level stays folded"
+    );
+}
+
+/// Review round (2026-11-23): *Expand all* and *Collapse all* hold from step
+/// to step, not from run to run: a new run opens its values as by default.
+#[test]
+fn rep08_a_new_run_opens_its_values_as_by_default() {
+    let (_project, mut harness, _id) = labels_after_a_run(WIDE);
+    select_step(&mut harness, WEIGHT_31);
+    choose(&mut harness, COLLAPSE_ALL);
+    assert!(row_named(&harness, "code").is_none(), "Collapse all folds it");
+    choose(&mut harness, "Run simulation");
+    let report = finish_run(&mut harness);
+    assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
+    settle(&mut harness);
+    select_step(&mut harness, WEIGHT_31);
+    for (field, shown) in ERROR {
+        value(&harness, field, shown);
+    }
 }
 
 /// Criterion 7: a row of the tree is DIAG-10's row: one line at most 26 px
