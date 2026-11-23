@@ -44,7 +44,12 @@ fn card_text(harness: &FolderHarness, node: &Node) -> String {
 /// `labels` on its board at 1600 × 1000 with every check card shown, as
 /// the bar's *Checks* shows them.
 fn labels_with_checks() -> (tempfile::TempDir, FolderHarness, String) {
-    let (project, mut harness, id) = labels_board(WIDE);
+    labels_with_checks_at(WIDE)
+}
+
+/// As [`labels_with_checks`], at `size`.
+fn labels_with_checks_at(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    let (project, mut harness, id) = labels_board(size);
     harness.get_by_label(CHECKS).click();
     settle(&mut harness);
     harness.step();
@@ -461,6 +466,36 @@ fn diag02_criterion_7_check_cards_keep_distinct_accessible_names() {
             harness.query_all_by_label(name).count(),
             1,
             "{name} names one card"
+        );
+    }
+}
+
+/// The captures of the pull request: `labels` with every check card shown,
+/// at 100 % on `weight_31_code`, at 960 × 540 and 1600 × 1000; the
+/// whole window and the step with its checks.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_diag02_check_cards() {
+    for (size, name) in [(crate::testing::MINIMUM, "960"), (WIDE, "1600")] {
+        let (_project, mut harness, id) = labels_with_checks_at(size);
+        show(&mut harness, &id, "weight_31_code", 1.0);
+        crate::testing::capture(&mut harness, &format!("diag02-labels-{name}"), None);
+        let graph = graph(&harness, &id);
+        let region = [
+            "weight_31",
+            "weight_31_code",
+            "weight_31_field",
+            "weight_31_text",
+        ]
+        .into_iter()
+        .filter_map(|handle| board(&harness, &id).debug_card_rect(&node(&graph, handle).id))
+        .reduce(egui::Rect::union)
+        .expect("the step and its checks are drawn")
+        .expand2(egui::vec2(36.0, 16.0));
+        crate::testing::capture(
+            &mut harness,
+            &format!("diag02-weight31-{name}"),
+            Some(region),
         );
     }
 }

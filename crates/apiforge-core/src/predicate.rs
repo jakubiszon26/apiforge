@@ -28,20 +28,6 @@ impl Predicate {
         Self::Type,
     ];
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Equals => "is equal to",
-            Self::NotEquals => "is not equal to",
-            Self::Greater => "is greater than",
-            Self::Less => "is less than",
-            Self::Approximately => "is approximately",
-            Self::Exists => "exists",
-            Self::NotEmpty => "is not empty",
-            Self::Contains => "contains",
-            Self::Type => "has type",
-        }
-    }
-
     /// Whether the predicate needs an expected value.
     pub fn takes_expected(self) -> bool {
         !matches!(self, Self::Exists | Self::NotEmpty)

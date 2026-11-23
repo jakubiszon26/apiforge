@@ -3,7 +3,10 @@
 use super::{
     Camera,
     collapse::Aggregate,
-    layout::{CHIP_HEIGHT, COMPACT_HEADER, Card, CardDetail, Chip, CompactRole, RowValue, WIDTH},
+    layout::{
+        CHIP_HEIGHT, COMPACT_HEADER, Card, CardDetail, Chip, CompactRole, Part, PartRole, RowValue,
+        TITLE_LEFT, TITLE_RIGHT, TITLE_ROW, TITLE_TEXT, WIDTH,
+    },
     routing::Routed,
 };
 use crate::{
@@ -642,6 +645,9 @@ pub struct CardRun<'a> {
     /// The steps the card's step, or a check folded into it, kept from
     /// running (LAY-19).
     pub cost: Option<Cost>,
+    /// The number of the step a check hangs under, for the line under its
+    /// title (DIAG-02).
+    pub subject: Option<usize>,
 }
 
 impl CardRun<'_> {
@@ -759,6 +765,70 @@ impl Drawn {
         #[cfg(not(test))]
         let _ = kind;
         label(painter, rect, text, font, color, align);
+    }
+
+    /// Draws a row of a check's title in `rect`, each part in its colour,
+    /// and notes it (DIAG-02).
+    fn parts(
+        &mut self,
+        painter: &Painter,
+        rect: Rect,
+        parts: &[Part],
+        kind: TextKind,
+        font: FontId,
+    ) {
+        if rect.width() < 2.0 || rect.height() < 2.0 {
+            return;
+        }
+        let mut job = egui::text::LayoutJob::default();
+        for part in parts {
+            job.append(
+                &part.text,
+                0.0,
+                egui::TextFormat {
+                    font_id: font.clone(),
+                    color: part_color(part.role),
+                    ..Default::default()
+                },
+            );
+        }
+        job.wrap.max_width = rect.width();
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        let galley = painter.layout_job(job);
+        let at = pos2(rect.left(), rect.center().y - galley.size().y / 2.0);
+        #[cfg(test)]
+        self.texts.push(DrawnText {
+            kind,
+            size: font.size,
+            color: theme::TEXT,
+            text: parts.iter().map(|part| part.text.as_str()).collect(),
+            rect: Rect::from_min_size(at, galley.size())
+                .intersect(rect)
+                .intersect(painter.clip_rect()),
+        });
+        #[cfg(not(test))]
+        let _ = kind;
+        painter
+            .with_clip_rect(rect.intersect(painter.clip_rect()))
+            .galley(at, galley, theme::TEXT);
+    }
+}
+
+/// The height of a row of monospace text per point of its size:
+/// AdwaitaMono's ascent, descent and gap, 1250 of 1000 units.
+const TITLE_LINE_HEIGHT: f32 = 1.25;
+
+/// The colour of a piece of a check's title (DIAG-02): what it reads in the
+/// text's colour, a value written in it in the colour of its type, as
+/// *Output data* writes values (DIAG-10), and a missing operand in red.
+fn part_color(role: PartRole) -> Color32 {
+    match role {
+        PartRole::Operand | PartRole::Sign | PartRole::Data => theme::TEXT,
+        PartRole::Text => theme::VALUE_STRING,
+        PartRole::Number => theme::VALUE_NUMBER,
+        PartRole::Literal => theme::VALUE_LITERAL,
+        PartRole::Missing => theme::DANGER,
     }
 }
 
@@ -1970,7 +2040,10 @@ pub fn compact_card(
         )),
         _ => name,
     };
-    if let Some(name) = name {
+    // A check is titled by its predicate, or by its `@label` with the
+    // predicate under it (DIAG-02).
+    let title = compact.title.as_ref().filter(|_| legible);
+    if let Some(name) = name.filter(|_| title.is_none_or(|title| title.label.is_some())) {
         drawn.label(
             &clipped,
             name,
@@ -1980,6 +2053,45 @@ pub fn compact_card(
             theme::TEXT,
             egui::Align::Min,
         );
+    }
+    if let Some(title) = title {
+        let font = FontId::monospace(min_on_screen(TITLE_TEXT, z, LINE_MIN));
+        let kind = TextKind::Line;
+        // Where the rows are lower than the smallest text, below 75 %, the
+        // title is one row cut with `…`, whole on hover; a label keeps the
+        // header and its predicate is on hover only.
+        if font.size * TITLE_LINE_HEIGHT <= TITLE_ROW * z + 0.01 {
+            for (index, row) in title.rows.iter().enumerate() {
+                let (top, bottom) = title.row(index);
+                drawn.parts(
+                    &clipped,
+                    cell(TITLE_LEFT, top, WIDTH - TITLE_RIGHT, bottom),
+                    row,
+                    kind,
+                    font.clone(),
+                );
+            }
+        } else if title.label.is_none() {
+            let mut joined: Vec<Part> = Vec::new();
+            for row in &title.rows {
+                if !joined.is_empty() {
+                    joined.push(Part {
+                        text: " ".into(),
+                        role: PartRole::Sign,
+                    });
+                }
+                joined.extend(row.iter().cloned());
+            }
+            drawn.parts(
+                &clipped,
+                cell(TITLE_LEFT, 6.0, WIDTH - TITLE_RIGHT, COMPACT_HEADER),
+                &joined,
+                kind,
+                font,
+            );
+        }
+        #[cfg(test)]
+        drawn.lines.push(title.shown.clone());
     }
     if let Some(line) = overview {
         line.draw(&clipped, &mut drawn);
@@ -2035,6 +2147,36 @@ pub fn compact_card(
                 theme::MUTED,
                 egui::Align::Min,
             ),
+            // Under a check's title its handle and the step it hangs
+            // under, with that step's number (DIAG-02).
+            CompactRole::Line if compact.title.is_some() => {
+                let title = compact.title.as_ref().expect("a check's title");
+                // At Full right under the title; below, the line's whole
+                // row. Under a label the predicate takes the line.
+                area = match title.small_line().filter(|_| full) {
+                    Some((top, bottom)) => cell(TITLE_LEFT, top, WIDTH - TITLE_RIGHT, bottom),
+                    None => cell(
+                        TITLE_LEFT,
+                        row.top,
+                        WIDTH - TITLE_RIGHT,
+                        row.top + row.height,
+                    ),
+                };
+                let line = match (&title.subject, run.subject) {
+                    _ if title.label.is_some() => continue,
+                    (Some((_, name)), Some(number)) => {
+                        format!("{} · of {number} {name}", title.handle)
+                    }
+                    (Some((_, name)), None) => format!("{} · of {name}", title.handle),
+                    (None, _) => title.handle.clone(),
+                };
+                (
+                    Cow::Owned(line),
+                    FontId::proportional(min_on_screen(theme::FONT_META, z, LINE_MIN)),
+                    theme::MUTED,
+                    egui::Align::Min,
+                )
+            }
             CompactRole::Line => (
                 Cow::Borrowed(text.as_str()),
                 FontId::proportional(small),
@@ -2570,6 +2712,31 @@ mod tests {
 
     /// The compact card and its trays (LAY-16) keep every label inside its cell
     /// at every zoom, and below the legible row height show only the title.
+    /// A check's title is wrapped by counting characters (DIAG-02): a full
+    /// row of the monospace font fits the title's width, and a row is as
+    /// high as the title's row.
+    #[test]
+    fn a_title_row_fits_its_cell() {
+        use super::super::layout::{TITLE_ROW, title_per_row};
+        let context = egui::Context::default();
+        theme::apply(&context);
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            let galley = ui.painter().layout_no_wrap(
+                "m".repeat(title_per_row()),
+                FontId::monospace(TITLE_TEXT),
+                theme::TEXT,
+            );
+            assert!(
+                galley.size().x <= WIDTH - TITLE_LEFT - TITLE_RIGHT,
+                "{} characters take {} px",
+                title_per_row(),
+                galley.size().x
+            );
+            assert!(galley.size().y <= TITLE_ROW + 0.5, "{:?}", galley.size());
+        });
+        output.textures_delta.clear();
+    }
+
     #[test]
     fn every_compact_card_label_stays_in_its_cell_from_25_to_160_percent() {
         let context = egui::Context::default();

@@ -372,9 +372,75 @@ pub struct Compact {
     pub height: f32,
     /// What the card's one line stands for in full, for its tooltip.
     pub hover: Option<String>,
+    /// A check's title: its predicate (DIAG-02).
+    pub title: Option<CheckTitle>,
+}
+
+/// The title of a check card (DIAG-02, decision 2 = A): its predicate in
+/// the signs of the code, in up to three rows, with its handle and the step
+/// it hangs under on a small line under it. A check with an `@label` is
+/// titled by the label, as a card by its name, and its predicate is the one
+/// row under it. The card is as tall as before whatever the title takes, so
+/// that no board moves: the rows share the header and the line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CheckTitle {
+    pub rows: Vec<Vec<Part>>,
+    /// What the rows say, cut where they had to be.
+    pub shown: String,
+    pub label: Option<String>,
+    pub handle: String,
+    /// The step the check hangs under, by node id, and its name.
+    pub subject: Option<(String, String)>,
+}
+
+impl CheckTitle {
+    /// The top and the bottom of the predicate's row `index`, from the
+    /// card's origin: one row beside the icon, where a card's name is; two
+    /// or three from the top of the header; under a label, the line's.
+    pub fn row(&self, index: usize) -> (f32, f32) {
+        let first = match (&self.label, self.rows.len()) {
+            (Some(_), _) => COMPACT_HEADER + 1.0,
+            (None, 0 | 1) => 14.0,
+            (None, 2) => 6.0,
+            (None, _) => 5.0,
+        };
+        let top = first + index as f32 * TITLE_ROW;
+        (top, top + TITLE_ROW)
+    }
+
+    /// The small line under the title: right under its last row, ending
+    /// where the result's row starts at the latest. `None` under a label,
+    /// whose predicate takes the line.
+    pub fn small_line(&self) -> Option<(f32, f32)> {
+        if self.label.is_some() {
+            return None;
+        }
+        let (_, bottom) = self.row(self.rows.len().max(1) - 1);
+        let end = COMPACT_HEADER + COMPACT_ROW;
+        let top = (bottom + 1.0).min(end - SMALL_LINE);
+        Some((top, top + SMALL_LINE))
+    }
 }
 
 pub const COMPACT_HEADER: f32 = 40.0;
+/// A check's title (DIAG-02): the size of its monospace text at 100 %, the
+/// advance of one of its characters per point (AdwaitaMono's 600 of 1000
+/// units), its left edge after the icon and its margin on the right, the
+/// height of a row (AdwaitaMono's 1250 units at 12 points) and how many
+/// rows it may take.
+pub const TITLE_TEXT: f32 = 12.0;
+pub const MONO_ADVANCE: f32 = 0.6;
+pub const TITLE_LEFT: f32 = 42.0;
+pub const TITLE_RIGHT: f32 = CARD_PADDING;
+pub const TITLE_ROW: f32 = 15.0;
+pub const TITLE_ROWS: usize = 3;
+/// The height of the small line under a check's title.
+const SMALL_LINE: f32 = 14.0;
+
+/// How many characters of a check's title fit in a row.
+pub fn title_per_row() -> usize {
+    ((WIDTH - TITLE_LEFT - TITLE_RIGHT) / (TITLE_TEXT * MONO_ADVANCE)).floor() as usize
+}
 /// The title line of a card (LAY-45), where the sockets of its order sit on
 /// its sides: within the header row of a compact card and of a full one
 /// alike, so that the line between two neighbours of a row, *Start* and a
@@ -450,7 +516,7 @@ impl Card {
                 project,
                 request: Some(node),
             };
-            card.subtitle = Some(satellite_line(&card, node, scope, reference_graph).0);
+            card.subtitle = Some(satellite_line(node, scope, reference_graph).0);
         }
         if density == CardDensity::Compact && compacts(node.kind) {
             card.compact = Some(compact(&card, node, reference_graph, project));
@@ -529,7 +595,9 @@ impl Card {
             )),
             NodeKind::Condition => Some(condition_subtitle(node)),
             NodeKind::Value => value_subtitle(node),
-            NodeKind::Assert | NodeKind::If => Some(predicate(node).label().to_owned()),
+            NodeKind::Assert | NodeKind::If => {
+                Some(apiforge_script::predicate_symbol(predicate(node)).to_owned())
+            }
             _ => None,
         };
         let controls = match node.kind {
@@ -729,6 +797,16 @@ impl Card {
         ports
     }
 
+    /// What the card shows as a check's predicate (DIAG-02): its title,
+    /// cut where it had to be, or the subtitle of a full check card.
+    pub fn check_text(&self) -> Option<&str> {
+        match &self.compact {
+            Some(compact) => compact.title.as_ref().map(|title| title.shown.as_str()),
+            None if self.kind == NodeKind::Assert => self.subtitle.as_deref(),
+            None => None,
+        }
+    }
+
     /// The height of the card's title line from its origin, where the
     /// sockets of its order sit on its sides (LAY-45).
     pub fn title_line(&self) -> f32 {
@@ -917,6 +995,7 @@ fn compact(card: &Card, node: &Node, reference_graph: &Graph, project: &Project)
     };
     let mut rows: Vec<Pending> = Vec::new();
     let mut hover = None;
+    let mut title = None;
     match node.kind {
         NodeKind::Request | NodeKind::Component => {
             if let Some(subtitle) = &card.subtitle {
@@ -970,7 +1049,33 @@ fn compact(card: &Card, node: &Node, reference_graph: &Graph, project: &Project)
             // every value, with the sockets of the inputs a wire feeds and of
             // the outputs a step reads. An input with a literal value, or
             // none, takes a wire through the tray.
-            let (text, full, missing) = satellite_line(card, node, scope, reference_graph);
+            let (mut text, full, missing) = satellite_line(node, scope, reference_graph);
+            // A check is titled by its predicate, and its line is its handle
+            // and the step it hangs under (DIAG-02, decision 2 = A).
+            if node.kind == NodeKind::Assert {
+                let own = own_step(node, reference_graph);
+                let rows = if node.label.is_some() { 1 } else { TITLE_ROWS };
+                let fitted = fit_title(
+                    &check_text(node, scope, reference_graph, own),
+                    title_per_row(),
+                    rows,
+                );
+                text = node.handle.clone();
+                title = Some(CheckTitle {
+                    rows: fitted.rows,
+                    shown: fitted.shown,
+                    label: node.label.clone(),
+                    handle: node.handle.clone(),
+                    subject: own.map(|id| {
+                        let name = reference_graph
+                            .nodes
+                            .iter()
+                            .find(|step| step.id == id)
+                            .map_or(id, |step| step.display_name());
+                        (id.to_owned(), name.to_owned())
+                    }),
+                });
+            }
             let mut line = Pending::new(CompactRole::Line, COMPACT_ROW, &text);
             line.inputs = (0..card.inputs.len())
                 .filter(|index| wired(*index))
@@ -1038,6 +1143,7 @@ fn compact(card: &Card, node: &Node, reference_graph: &Graph, project: &Project)
         rows,
         height: top + COMPACT_END,
         hover,
+        title,
     }
 }
 
@@ -1068,18 +1174,7 @@ impl Pending {
 
 /// The one line of a satellite card, the same at every zoom; what it stands
 /// for in full, for the tooltip; and whether it names a missing input.
-fn satellite_line(
-    card: &Card,
-    node: &Node,
-    scope: Scope<'_>,
-    graph: &Graph,
-) -> (String, String, bool) {
-    let label = |name: &str| {
-        card.inputs
-            .iter()
-            .find(|row| row.name == name)
-            .map_or_else(|| name.to_owned(), |row| row.label.clone())
-    };
+fn satellite_line(node: &Node, scope: Scope<'_>, graph: &Graph) -> (String, String, bool) {
     match node.kind {
         NodeKind::Value => {
             let text = node.inputs.get(VALUE_INPUT).map_or_else(
@@ -1089,76 +1184,285 @@ fn satellite_line(
             (text.clone(), text, false)
         }
         NodeKind::Condition => {
-            let predicates = condition_predicates(node);
-            let sentences: Vec<(String, bool)> = predicates
-                .iter()
-                .enumerate()
-                .map(|(index, predicate)| {
-                    let (actual, expected) = condition_inputs(index + 1);
-                    sentence(node, *predicate, &actual, &expected, &label, scope, graph)
-                })
-                .collect();
-            let missing = sentences.iter().any(|(_, missing)| *missing);
-            let joined = sentences
-                .iter()
-                .map(|(sentence, _)| sentence.as_str())
-                .collect::<Vec<_>>()
-                .join(match node.config.match_mode {
-                    Some(apiforge_core::model::Match::Any) => " or ",
-                    _ => " and ",
-                });
-            match sentences.as_slice() {
-                [(single, _)] => (single.clone(), joined, missing),
-                _ => (condition_subtitle(node), joined, missing),
+            let written = check_text(node, scope, graph, None);
+            let joined = written.text();
+            match condition_predicates(node).as_slice() {
+                [_] => (joined.clone(), joined, written.missing),
+                _ => (condition_subtitle(node), joined, written.missing),
             }
         }
         _ => {
-            let (text, missing) = sentence(
-                node,
-                predicate(node),
-                "actual",
-                "expected",
-                &label,
-                scope,
-                graph,
-            );
-            (text.clone(), text, missing)
+            let own = own_step(node, graph);
+            let written = check_text(node, scope, graph, own);
+            let text = written.text();
+            (text.clone(), text, written.missing)
         }
     }
 }
 
-/// A comparison in words, as the subject reads it: `cart.status is equal to
-/// 201`. A missing operand is named by its input, and the line says so.
-fn sentence(
-    node: &Node,
-    predicate: Predicate,
-    actual: &str,
-    expected: &str,
-    label: &dyn Fn(&str) -> String,
-    scope: Scope<'_>,
-    graph: &Graph,
-) -> (String, bool) {
-    let mut missing = false;
-    let mut operand = |name: &str| {
-        node.inputs.get(name).map_or_else(
-            || {
-                missing = true;
-                label(name)
-            },
-            |binding| source_text(binding, scope, graph, 0),
-        )
-    };
-    let mut text = format!("{} {}", operand(actual), predicate.label());
-    if predicate.takes_expected() {
-        text.push(' ');
-        text.push_str(&operand(expected));
+/// What a piece of a check's text is, for its colour (DIAG-02).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PartRole {
+    /// An operand read from somewhere: a path, a parameter, a calculation.
+    Operand,
+    /// The predicate's sign, `within`, `and`, with the spaces around them.
+    Sign,
+    /// A value written in the check, by its JSON type.
+    Text,
+    Number,
+    /// `true`, `false` or `null`.
+    Literal,
+    /// An object or a list written in the check.
+    Data,
+    /// An operand the check does not have yet, named by its input.
+    Missing,
+}
+
+/// One piece of a check's text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Part {
+    pub text: String,
+    pub role: PartRole,
+}
+
+/// A check's predicate as the code writes it (DIAG-02, decision 3 = A):
+/// `status == 422`, `nonempty items`, `total ~= 172.5 within 0.01`. The
+/// card's title, the folded line of LAY-30 and the Inspector's *Checks* tab
+/// write it with [`check_text`]; so may Run results (REP-07).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CheckText {
+    pub parts: Vec<Part>,
+    /// An operand is missing: the text names its input instead.
+    pub missing: bool,
+}
+
+impl CheckText {
+    pub fn text(&self) -> String {
+        self.parts.iter().map(|part| part.text.as_str()).collect()
     }
-    if predicate == Predicate::Approximately
-        && let Some(tolerance) = node.config.tolerance
+
+    fn push(&mut self, text: impl Into<String>, role: PartRole) {
+        self.parts.push(Part {
+            text: text.into(),
+            role,
+        });
+    }
+}
+
+/// The step whose name a comparison check leaves out (DIAG-02): the one
+/// step it reads, the step it hangs under. `None` for a check that stands
+/// alone or reads two steps, which keeps the names, and for any other
+/// node.
+pub fn own_step<'a>(check: &'a Node, graph: &'a Graph) -> Option<&'a str> {
+    if check.kind != NodeKind::Assert {
+        return None;
+    }
+    match apiforge_core::graph::check_subjects(graph, check)
+        .subjects
+        .as_slice()
     {
-        text.push_str(&format!(" within {tolerance}"));
+        [single] => Some(single.step),
+        _ => None,
     }
-    (text, missing)
+}
+
+/// The predicate of `check` in the signs of the code (DIAG-02): a
+/// comparison, an `if`'s condition, or the comparisons of a *Data
+/// condition* joined by `and` or `or`. A reference to the step `own` leaves
+/// its name out (`weight_31.status` → `status`), and, when the check reads
+/// no other step, the leading `body.` too (`error.code`); only a comparison
+/// check does this. A missing operand is named by its input.
+pub fn check_text(check: &Node, scope: Scope<'_>, graph: &Graph, own: Option<&str>) -> CheckText {
+    let own = own
+        .filter(|_| check.kind == NodeKind::Assert)
+        .map(|id| Own {
+            id,
+            body: apiforge_core::graph::check_subjects(graph, check)
+                .subjects
+                .iter()
+                .all(|subject| subject.step == id),
+        });
+    let ports = apiforge_core::graph::input_ports(check, scope.project);
+    let mut text = CheckText::default();
+    let operand = |text: &mut CheckText, name: &str| match check.inputs.get(name) {
+        None => {
+            text.missing = true;
+            let label = ports
+                .iter()
+                .find(|port| port.name == name)
+                .map_or(name, |port| port.display_name());
+            text.push(label, PartRole::Missing);
+        }
+        Some(Binding::Literal { value }) => text.push(
+            apiforge_core::js::json_stringify(value),
+            match value {
+                serde_json::Value::String(_) => PartRole::Text,
+                serde_json::Value::Number(_) => PartRole::Number,
+                serde_json::Value::Bool(_) | serde_json::Value::Null => PartRole::Literal,
+                _ => PartRole::Data,
+            },
+        ),
+        Some(binding) => text.push(
+            source_text_of(binding, scope, graph, 0, own),
+            PartRole::Operand,
+        ),
+    };
+    let comparisons: Vec<(Predicate, String, String)> = if check.kind == NodeKind::Condition {
+        condition_predicates(check)
+            .into_iter()
+            .enumerate()
+            .map(|(index, predicate)| {
+                let (actual, expected) = condition_inputs(index + 1);
+                (predicate, actual, expected)
+            })
+            .collect()
+    } else {
+        vec![(predicate(check), "actual".into(), "expected".into())]
+    };
+    let join = match check.config.match_mode {
+        Some(apiforge_core::model::Match::Any) => " or ",
+        _ => " and ",
+    };
+    for (index, (predicate, actual, expected)) in comparisons.iter().enumerate() {
+        if index > 0 {
+            text.push(join, PartRole::Sign);
+        }
+        let sign = apiforge_script::predicate_symbol(*predicate);
+        if !predicate.takes_expected() {
+            text.push(format!("{sign} "), PartRole::Sign);
+            operand(&mut text, actual);
+            continue;
+        }
+        operand(&mut text, actual);
+        text.push(format!(" {sign} "), PartRole::Sign);
+        operand(&mut text, expected);
+        if *predicate == Predicate::Approximately {
+            text.push(" within ", PartRole::Sign);
+            text.push(
+                apiforge_core::js::number_to_string(check.config.tolerance.unwrap_or(0.0)),
+                PartRole::Number,
+            );
+        }
+    }
+    text
+}
+
+/// A check's title as a card writes it (DIAG-02): what it shows, cut where
+/// it had to be, and that text in rows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Title {
+    pub shown: String,
+    pub rows: Vec<Vec<Part>>,
+}
+
+/// `text` in rows of at most `per_row` characters, wrapped at spaces, in
+/// at most `max_rows` rows (DIAG-02, criterion 4). A text too long is cut
+/// inside its first operand's path, its first and last names kept
+/// (`error…message.text`); one still too long is cut at its end, so the
+/// start of the expected value always shows.
+pub fn fit_title(text: &CheckText, per_row: usize, max_rows: usize) -> Title {
+    let per_row = per_row.max(2);
+    let max_rows = max_rows.max(1);
+    let fits = |parts: &[Part]| wrap(&characters(parts), per_row).len() <= max_rows;
+    let mut parts = text.parts.clone();
+    if !fits(&parts) {
+        let path = parts
+            .iter()
+            .position(|part| part.role == PartRole::Operand)
+            .filter(|&index| !parts[index].text.contains(' '));
+        if let Some(index) = path {
+            let segments: Vec<String> = parts[index].text.split('.').map(str::to_owned).collect();
+            // From one name left out to all but the first and the last.
+            for kept in (1..segments.len().saturating_sub(1)).rev() {
+                parts[index].text = format!(
+                    "{}…{}",
+                    segments[0],
+                    segments[segments.len() - kept..].join(".")
+                );
+                if fits(&parts) {
+                    break;
+                }
+            }
+        }
+    }
+    let characters = characters(&parts);
+    let mut rows = wrap(&characters, per_row);
+    let mut shown: String = characters.iter().map(|(c, _)| c).collect();
+    let cut = rows.len() > max_rows;
+    if cut {
+        rows.truncate(max_rows);
+        let last = rows.last_mut().expect("at least one row");
+        last.end = last.end.min(last.start + per_row - 1);
+        while last.end > last.start && characters[last.end - 1].0 == ' ' {
+            last.end -= 1;
+        }
+        shown = characters[..last.end].iter().map(|(c, _)| c).collect();
+        shown.push('…');
+    }
+    let mut rows: Vec<Vec<Part>> = rows
+        .iter()
+        .map(|range| group(&characters[range.clone()]))
+        .collect();
+    if cut && let Some(row) = rows.last_mut() {
+        let role = row.last().map_or(PartRole::Operand, |part| part.role);
+        row.push(Part {
+            text: "…".into(),
+            role,
+        });
+    }
+    Title { shown, rows }
+}
+
+/// Each character of `parts` with its role.
+fn characters(parts: &[Part]) -> Vec<(char, PartRole)> {
+    parts
+        .iter()
+        .flat_map(|part| part.text.chars().map(move |c| (c, part.role)))
+        .collect()
+}
+
+/// Consecutive characters of one role as one part.
+fn group(characters: &[(char, PartRole)]) -> Vec<Part> {
+    let mut parts: Vec<Part> = Vec::new();
+    for (c, role) in characters {
+        match parts.last_mut() {
+            Some(part) if part.role == *role => part.text.push(*c),
+            _ => parts.push(Part {
+                text: c.to_string(),
+                role: *role,
+            }),
+        }
+    }
+    parts
+}
+
+/// The rows of `characters` at `per_row` characters each: broken at the
+/// last space that fits, the space dropped, or inside a word longer than
+/// a row.
+fn wrap(characters: &[(char, PartRole)], per_row: usize) -> Vec<std::ops::Range<usize>> {
+    let mut rows = Vec::new();
+    let mut start = 0;
+    while start < characters.len() {
+        if characters.len() - start <= per_row {
+            rows.push(start..characters.len());
+            break;
+        }
+        let limit = start + per_row;
+        match (start + 1..=limit)
+            .rev()
+            .find(|&index| characters[index].0 == ' ')
+        {
+            Some(space) => {
+                rows.push(start..space);
+                start = space + 1;
+            }
+            None => {
+                rows.push(start..limit);
+                start = limit;
+            }
+        }
+    }
+    rows
 }
 
 /// A binding as a line of a card reads it: references as in scenario code
@@ -1169,16 +1473,12 @@ fn source_text(binding: &Binding, scope: Scope<'_>, graph: &Graph, outer: u8) ->
     source_text_of(binding, scope, graph, outer, None)
 }
 
-/// A check's operand as the line of its subject `own` writes it (LAY-30):
-/// as [`source_text`], a reference to `own` without its name
-/// (`second.status` → `status`).
-pub(super) fn own_source_text(
-    binding: &Binding,
-    scope: Scope<'_>,
-    graph: &Graph,
-    own: &str,
-) -> String {
-    source_text_of(binding, scope, graph, 0, Some(own))
+/// The step a check's text leaves the name of out (LAY-30, DIAG-02), and
+/// whether it leaves the leading `body.` out too.
+#[derive(Clone, Copy, Debug)]
+struct Own<'a> {
+    id: &'a str,
+    body: bool,
 }
 
 fn source_text_of(
@@ -1186,7 +1486,7 @@ fn source_text_of(
     scope: Scope<'_>,
     graph: &Graph,
     outer: u8,
-    own: Option<&str>,
+    own: Option<Own<'_>>,
 ) -> String {
     use apiforge_core::operator::Operator as O;
     match binding {
@@ -1197,20 +1497,22 @@ fn source_text_of(
             let text = apiforge_core::template_text::print_reference(binding, scope)
                 .unwrap_or_else(|| labels::binding(binding, graph));
             match (binding, own) {
-                (Binding::Reference { node_id, .. }, Some(own)) if node_id == own => {
+                (Binding::Reference { node_id, .. }, Some(own)) if node_id == own.id => {
                     let handle = scope
                         .nodes
                         .iter()
                         .find(|node| &node.id == node_id)
                         .map_or("", |node| node.handle.as_str());
-                    match text.strip_prefix(handle) {
-                        Some(rest) if !handle.is_empty() && rest.starts_with('.') => {
-                            rest[1..].to_owned()
-                        }
-                        Some(rest) if !handle.is_empty() && rest.starts_with('[') => {
-                            rest.to_owned()
-                        }
-                        _ => text,
+                    let rest = match text.strip_prefix(handle) {
+                        Some(rest) if !handle.is_empty() && rest.starts_with('.') => &rest[1..],
+                        Some(rest) if !handle.is_empty() && rest.starts_with('[') => rest,
+                        _ => return text,
+                    };
+                    // Under its one step a check's path starts at the
+                    // response's fields (DIAG-02).
+                    match rest.strip_prefix("body.") {
+                        Some(field) if own.body && !field.is_empty() => field.to_owned(),
+                        _ => rest.to_owned(),
                     }
                 }
                 _ => text,
@@ -1488,7 +1790,7 @@ fn overview_line(
                 project,
                 request: Some(node),
             };
-            Some(satellite_line(card, node, scope, reference_graph).0)
+            Some(satellite_line(node, scope, reference_graph).0)
         }
         _ => None,
     }
@@ -1497,7 +1799,7 @@ fn overview_line(
 /// The predicate of a single check, or how many checks must hold.
 fn condition_subtitle(node: &Node) -> String {
     match condition_predicates(node).as_slice() {
-        [single] => single.label().to_owned(),
+        [single] => apiforge_script::predicate_symbol(*single).to_owned(),
         checks => match node.config.match_mode {
             Some(apiforge_core::model::Match::Any) => format!("any of {} checks", checks.len()),
             _ => format!("all {} checks", checks.len()),
@@ -1660,8 +1962,8 @@ mod tests {
         );
         node.config.predicate = Some(Predicate::NotEmpty);
         let card = Card::build(&node, graph, &project, CardDensity::Full);
-        // The subtitle names the subject before the predicate (LAY-09).
-        assert_eq!(card.subtitle.as_deref(), Some("null is not empty"));
+        // The subtitle writes the predicate as the code does (DIAG-02).
+        assert_eq!(card.subtitle.as_deref(), Some("nonempty null"));
         assert!(card.inputs.iter().any(|row| row.name == "actual"));
         assert!(!card.inputs.iter().any(|row| row.name == "expected"));
         node.config.predicate = Some(Predicate::Equals);

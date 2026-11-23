@@ -12851,7 +12851,8 @@ mod lay08 {
         settle(harness);
     }
 
-    /// Criterion 2: the checks of `cart` in words, each with its predicate,
+    /// Criterion 2: the checks of `cart`, each with its predicate (in the
+    /// signs of the code since DIAG-02),
     /// sources, status and moment; the check that reads `cart` and `receipt`
     /// under both, waiting for the later one.
     #[test]
@@ -12863,13 +12864,13 @@ mod lay08 {
             &harness,
             &[
                 "cart_created — Waiting for cart",
-                "cart.status equals 201",
+                "status == 201",
                 "Sources: cart.status",
                 "cart_total — Waiting for cart",
-                "cart.body.total is approximately expected_total",
+                "total ~= expected_total within 0.01",
                 "Sources: cart.body.total, expected_total",
                 "receipt_total — Waiting for receipt · Shared",
-                "receipt.body.total is approximately cart.body.total",
+                "receipt.body.total ~= cart.body.total within 0.01",
                 "Sources: receipt.body.total, cart.body.total",
                 "Shared with: receipt",
             ],
@@ -12881,7 +12882,7 @@ mod lay08 {
             &harness,
             &[
                 "receipt_total — Waiting for receipt",
-                "receipt.body.total is approximately cart.body.total",
+                "receipt.body.total ~= cart.body.total within 0.01",
                 "Sources: receipt.body.total, cart.body.total",
                 "Shared with: cart",
                 "Not run yet",
@@ -13007,7 +13008,7 @@ mod lay08 {
         let right = harness.get_by_label("Check cart_total").rect().right();
         for line in [
             "cart_total — Waiting for cart",
-            "cart.body.total is approximately expected_total",
+            "total ~= expected_total within 0.01",
             "Sources: cart.body.total, expected_total",
         ] {
             let rect = harness.get_by_label(line).rect();
@@ -13131,7 +13132,7 @@ mod lay20 {
                 "1 check",
                 "Check promo_priced",
                 "promo_priced — Waiting for promoted",
-                "promoted.product.promotion.price is greater than 0",
+                "promotion.price > 0",
                 "Sources: promoted.product.promotion.price",
                 "Not run yet",
             ],
@@ -13150,7 +13151,7 @@ mod lay20 {
             &[
                 "3 checks · 1 shared · 1 in Cleanup",
                 "cart_id_kept — Cleanup",
-                "cart.body.id equals \"c-1\"",
+                "id == \"c-1\"",
                 "Sources: cart.body.id",
             ],
         );
@@ -13210,7 +13211,7 @@ mod lay20 {
                 "1 check",
                 "Check gone",
                 "gone — Waiting for removed",
-                "removed.status equals 204",
+                "status == 204",
             ],
         );
         assert!(

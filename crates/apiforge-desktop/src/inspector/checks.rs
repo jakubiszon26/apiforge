@@ -10,12 +10,13 @@
 
 use super::Context;
 use crate::report::Requirement;
-use crate::{labels, theme, widgets};
+use crate::{theme, widgets};
 use apiforge_core::{
-    format::{Binding, Graph, Node, OptionalJson},
-    graph::{check_subjects_in, condition_inputs, condition_predicates, predicate, sequence},
-    model::{Match, NodeKind, Predicate},
+    format::{Binding, Graph, Node, OptionalJson, Project},
+    graph::{check_subjects_in, sequence},
+    model::NodeKind,
     run::{RunResult, RunStatus, StepResult, StepStatus},
+    template_text::Scope,
 };
 use eframe::egui::{self, Color32, RichText, Ui};
 use indexmap::IndexSet;
@@ -68,9 +69,12 @@ struct Row {
 }
 
 /// Names a step by its handle, wherever the check found it: a Cleanup check
-/// may read a step of the main graph.
+/// may read a step of the main graph. `nodes` are every node a check may
+/// read, the graph its predicate is written against.
 struct Names<'a> {
     graphs: Vec<&'a Graph>,
+    nodes: &'a Graph,
+    project: &'a Project,
 }
 
 impl Names<'_> {
@@ -95,57 +99,17 @@ impl Names<'_> {
         text
     }
 
-    /// An operand in words. What is not a plain value keeps the board's
-    /// short description; the sources line still names what it reads.
-    fn operand(&self, binding: &Binding) -> String {
-        match binding {
-            Binding::Reference {
-                node_id,
-                port,
-                path,
-            } => self.reference(node_id, port, path),
-            Binding::Literal { value } => labels::truncate(&value.to_string(), 80),
-            other => labels::binding(other, self.graphs[0]),
-        }
-    }
-
-    /// `cart.status equals 201`.
-    fn comparison(
-        &self,
-        node: &Node,
-        predicate: Predicate,
-        actual: &str,
-        expected: &str,
-    ) -> Option<String> {
-        let actual = self.operand(node.inputs.get(actual)?);
-        let words = predicate_words(predicate);
-        Some(match node.inputs.get(expected) {
-            Some(expected) if predicate.takes_expected() => {
-                format!("{actual} {words} {}", self.operand(expected))
-            }
-            _ => format!("{actual} {words}"),
-        })
-    }
-
-    /// What the check holds: one comparison, or those of a Data condition.
+    /// What the check holds, as its card writes it (DIAG-02): the signs of
+    /// the code, the step's name and leading `body.` left out under the one
+    /// step it reads.
     fn sentence(&self, node: &Node) -> String {
-        if node.kind != NodeKind::Condition {
-            return self
-                .comparison(node, predicate(node), "actual", "expected")
-                .unwrap_or_else(|| predicate_words(predicate(node)).to_owned());
-        }
-        let parts: Vec<String> = condition_predicates(node)
-            .into_iter()
-            .enumerate()
-            .filter_map(|(index, predicate)| {
-                let (actual, expected) = condition_inputs(index + 1);
-                self.comparison(node, predicate, &actual, &expected)
-            })
-            .collect();
-        parts.join(match node.config.match_mode.unwrap_or(Match::All) {
-            Match::All => " and ",
-            Match::Any => " or ",
-        })
+        let scope = Scope {
+            nodes: &self.nodes.nodes,
+            project: self.project,
+            request: Some(node),
+        };
+        let own = crate::canvas::own_step(node, self.nodes);
+        crate::canvas::check_text(node, scope, self.nodes, own).text()
     }
 
     /// Everything the check reads, once each, in the order it reads it.
@@ -157,20 +121,6 @@ impl Names<'_> {
             .map(|source| self.reference(source.node_id, source.port, source.path))
             .collect();
         sources.into_iter().collect()
-    }
-}
-
-fn predicate_words(predicate: Predicate) -> &'static str {
-    match predicate {
-        Predicate::Equals => "equals",
-        Predicate::NotEquals => "does not equal",
-        Predicate::Greater => "is greater than",
-        Predicate::Less => "is less than",
-        Predicate::Exists => "exists",
-        Predicate::NotEmpty => "is not empty",
-        Predicate::Contains => "contains",
-        Predicate::Type => "has type",
-        Predicate::Approximately => "is approximately",
     }
 }
 
@@ -307,12 +257,39 @@ fn rows(
     board: &Graph,
     graph: &Graph,
     cleanup: Option<&Graph>,
+    project: &Project,
     subject: &str,
     run: Option<&RunResult>,
 ) -> Vec<Row> {
     let mut graphs = vec![board, graph];
     graphs.extend(cleanup);
-    let names = Names { graphs };
+    // A Cleanup check listed here is written against Main's steps and its
+    // own graph's (LAY-20).
+    let merged;
+    let nodes = match cleanup.filter(|graph| graph.nodes.iter().any(is_check)) {
+        Some(cleanup) => {
+            let mut nodes = graph.nodes.clone();
+            nodes.extend(
+                cleanup
+                    .nodes
+                    .iter()
+                    .filter(|node| !graph.nodes.iter().any(|known| known.id == node.id))
+                    .cloned(),
+            );
+            merged = Graph {
+                nodes,
+                edges: Vec::new(),
+                proxies: Vec::new(),
+            };
+            &merged
+        }
+        None => graph,
+    };
+    let names = Names {
+        graphs,
+        nodes,
+        project,
+    };
     let position: HashMap<&str, usize> = sequence(board)
         .iter()
         .enumerate()
@@ -449,6 +426,7 @@ pub(super) fn show(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<super::
         context.board,
         context.graph,
         context.cleanup,
+        context.project,
         &context.node.id,
         context.run,
     );
@@ -547,6 +525,10 @@ mod tests {
         run::{Phase, RunMode},
     };
 
+    fn project() -> Project {
+        apiforge_core::demos::empty_project()
+    }
+
     fn request(id: &str) -> Node {
         let mut node = create_node(NodeKind::Request, Position { x: 0.0, y: 0.0 }, None);
         node.id = id.into();
@@ -602,7 +584,9 @@ mod tests {
     }
 
     fn title(board: &Graph, subject: &str, run: Option<&RunResult>) -> String {
-        rows(board, board, None, subject, run)[0].title.clone()
+        rows(board, board, None, &project(), subject, run)[0]
+            .title
+            .clone()
     }
 
     /// The moment follows a run under way: a shared check still waits for its
@@ -721,7 +705,7 @@ mod tests {
             proxies: Vec::new(),
         };
 
-        let listed = rows(&board, &board, Some(&cleanup), "first", None);
+        let listed = rows(&board, &board, Some(&cleanup), &project(), "first", None);
         let titles: Vec<&str> = listed.iter().map(|row| row.title.as_str()).collect();
         assert_eq!(
             titles,
@@ -740,14 +724,21 @@ mod tests {
 
         // Nothing is listed under a step of the Cleanup graph itself: that
         // board lists its own checks.
-        assert!(rows(&board, &board, Some(&cleanup), "removed", None).is_empty());
+        assert!(rows(&board, &board, Some(&cleanup), &project(), "removed", None).is_empty());
         // The result takes the moment's place once the check has one.
         let done = run(&cleanup, &["kept"], RunStatus::Passed);
         assert_eq!(
-            rows(&board, &board, Some(&cleanup), "first", Some(&done))
-                .last()
-                .unwrap()
-                .title,
+            rows(
+                &board,
+                &board,
+                Some(&cleanup),
+                &project(),
+                "first",
+                Some(&done)
+            )
+            .last()
+            .unwrap()
+            .title,
             "kept — Passed"
         );
     }
