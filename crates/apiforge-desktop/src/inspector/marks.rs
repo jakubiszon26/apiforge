@@ -3,19 +3,22 @@
 //! Run results in the colour of the checks' outcome.
 //!
 //! What is marked is decided once per edit of the document, by
-//! [`CheckIndex::build`]; a row looks its field up and walks no graph.
+//! [`CheckIndex::build_with_board`]; a row looks its field up and walks no graph.
 
 use crate::icons::Icon;
 use crate::theme;
 use apiforge_core::{
-    format::{Graph, Node, Project},
+    edit::FieldCheck,
+    format::{Binding, Graph, Node, Project},
     graph::sequence,
-    model::NodeKind,
+    js::json_stringify,
+    model::{NodeKind, Predicate},
     path::JsonPath,
     run::{RunResult, StepStatus},
     template_text::Scope,
 };
 use eframe::egui::{self, Color32, Ui};
+use serde_json::Value;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,6 +36,69 @@ pub struct IndexedCheck {
     pub id: String,
     /// What it holds, as DIAG-02 writes it under the step it reads.
     pub text: String,
+    /// What it asks of one field, when the menu *Add a check* could have
+    /// written it.
+    pub asks: Option<Asks>,
+}
+
+/// What a check asks of one field (DIAG-19): an assertion whose `actual`
+/// is the field and whose `expected`, if its predicate takes one, is
+/// written in it. The menu *Add a check* offers no check the field already
+/// has, by this and not by the text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Asks {
+    node: String,
+    port: String,
+    path: String,
+    predicate: Predicate,
+    expected: Option<Value>,
+}
+
+impl Asks {
+    fn of(check: &Node) -> Option<Self> {
+        if check.kind != NodeKind::Assert {
+            return None;
+        }
+        let Some(Binding::Reference {
+            node_id,
+            port,
+            path,
+        }) = check.inputs.get("actual")
+        else {
+            return None;
+        };
+        let predicate = apiforge_core::graph::predicate(check);
+        let expected = if predicate.takes_expected() {
+            match check.inputs.get("expected") {
+                Some(Binding::Literal { value }) => Some(value.clone()),
+                _ => return None,
+            }
+        } else {
+            None
+        };
+        Some(Self {
+            node: node_id.clone(),
+            port: port.clone(),
+            path: JsonPath::parse(path).ok()?.to_string(),
+            predicate,
+            expected,
+        })
+    }
+
+    /// Whether `check` of the field at `path` of `port` of `node` asks what
+    /// this does; values compared as the language writes them.
+    pub fn same(&self, node: &str, port: &str, path: &str, check: &FieldCheck) -> bool {
+        let same_value = |a: &Value, b: &Value| a == b || json_stringify(a) == json_stringify(b);
+        self.node == node
+            && self.port == port
+            && JsonPath::parse(path).is_ok_and(|path| path.to_string() == self.path)
+            && self.predicate == check.predicate()
+            && match (&self.expected, check.expected()) {
+                (Some(a), Some(b)) => same_value(a, &b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
 }
 
 /// The checks of one output of one step, by the path of the field.
@@ -50,8 +116,9 @@ pub struct PortMarks {
 pub struct CheckIndex {
     checks: Vec<IndexedCheck>,
     ports: HashMap<(String, String), PortMarks>,
-    /// The document's steps and the project, which the menu *Add a check*
-    /// writes the checks it offers against (DIAG-19).
+    /// The document's steps, Main's and Cleanup's, and the project, which
+    /// the menu *Add a check* writes the checks it offers against
+    /// (DIAG-19).
     board: Option<(Graph, Arc<Project>)>,
 }
 
@@ -60,33 +127,43 @@ fn is_check(node: &Node) -> bool {
 }
 
 impl CheckIndex {
+    /// [`Self::build_with_board`] without the board.
+    #[cfg(test)]
+    pub fn build(main: &Graph, cleanup: Option<&Graph>, project: &Project) -> Self {
+        Self::build_on(main, cleanup, project, None)
+    }
+
     /// The index of a document's checks: those of `main`, then those of the
     /// scenario's `cleanup`, which read Main's steps too (LAY-20). Only the
     /// field a check names is marked, never the fields under it; a check of
-    /// a component's inner step is the component's, not its caller's.
-    pub fn build(main: &Graph, cleanup: Option<&Graph>, project: &Project) -> Self {
+    /// a component's inner step is the component's, not its caller's. It
+    /// keeps the document's steps and `project` for the menu *Add a check*,
+    /// which writes the checks it offers as their cards will read them
+    /// (DIAG-19).
+    pub fn build_with_board(main: &Graph, cleanup: Option<&Graph>, project: &Arc<Project>) -> Self {
+        let steps = steps(main, cleanup);
+        let mut index = Self::build_on(main, cleanup, project, Some(&steps));
+        index.board = Some((steps, project.clone()));
+        index
+    }
+
+    /// The index, Cleanup's checks written against `steps` when given.
+    fn build_on(
+        main: &Graph,
+        cleanup: Option<&Graph>,
+        project: &Project,
+        steps: Option<&Graph>,
+    ) -> Self {
         BUILDS.with(|builds| builds.set(builds.get() + 1));
         let mut index = Self::default();
         index.add(main, main, project);
         if let Some(cleanup) = cleanup.filter(|graph| graph.nodes.iter().any(is_check)) {
             // A Cleanup check is written against Main's steps and its own.
-            let mut both = main.clone();
-            both.nodes.extend(cleanup.nodes.iter().cloned());
-            index.add(cleanup, &both, project);
+            match steps {
+                Some(steps) => index.add(cleanup, steps, project),
+                None => index.add(cleanup, &self::steps(main, Some(cleanup)), project),
+            }
         }
-        index
-    }
-
-    /// [`Self::build`], keeping the document's steps and `project` for the
-    /// menu *Add a check*, which writes the checks it offers as their cards
-    /// will read them (DIAG-19).
-    pub fn build_with_board(main: &Graph, cleanup: Option<&Graph>, project: &Arc<Project>) -> Self {
-        let mut index = Self::build(main, cleanup, project);
-        let mut both = main.clone();
-        if let Some(cleanup) = cleanup {
-            both.nodes.extend(cleanup.nodes.iter().cloned());
-        }
-        index.board = Some((both, project.clone()));
         index
     }
 
@@ -123,6 +200,7 @@ impl CheckIndex {
             self.checks.push(IndexedCheck {
                 id: check.id.clone(),
                 text: crate::canvas::check_text(check, scope, lookup, own).capped(80),
+                asks: Asks::of(check),
             });
             for binding in check.inputs.values() {
                 for reference in binding.references() {
@@ -165,6 +243,22 @@ impl CheckIndex {
             .and_then(|marks| marks.on.get(path))
             .map(|checks| checks.iter().map(|&check| &self.checks[check]).collect())
             .unwrap_or_default()
+    }
+}
+
+/// The steps of Main and of Cleanup in one graph, without their edges: a
+/// check's text is written from the steps it reads ([`crate::canvas::own_step`],
+/// [`crate::canvas::check_text`] and `check_subjects` read nodes, never
+/// edges), and a Cleanup check reads Main's steps and its own.
+fn steps(main: &Graph, cleanup: Option<&Graph>) -> Graph {
+    Graph {
+        nodes: main
+            .nodes
+            .iter()
+            .chain(cleanup.into_iter().flat_map(|graph| &graph.nodes))
+            .cloned()
+            .collect(),
+        ..Graph::default()
     }
 }
 
@@ -293,6 +387,7 @@ impl<'a> TreeMarks<'a> {
                 .map(|check| Listed {
                     id: check.id.clone(),
                     text: check.text.clone(),
+                    asks: check.asks.clone(),
                     outcome: results.then(|| {
                         let status = status(check);
                         (
@@ -339,6 +434,8 @@ fn outcome(status: Option<StepStatus>) -> &'static str {
 pub struct Listed {
     pub id: String,
     pub text: String,
+    /// What it asks of the field, which no offer repeats (DIAG-19).
+    pub asks: Option<Asks>,
     /// In Run results, the check's outcome in a word and its colour.
     pub outcome: Option<(&'static str, Color32)>,
 }

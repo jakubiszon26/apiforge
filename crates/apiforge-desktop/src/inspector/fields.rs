@@ -488,7 +488,7 @@ pub fn check_menu(button: &egui::Response, field: Field<'_>, value: &Value) -> O
 /// [`check_menu`] on a field that `listed` checks already read: the menu
 /// lists them first, as DIAG-02 writes them and in Run results with their
 /// outcome, and a click selects one; *Add a check* follows as `adding`
-/// says (DIAG-12).
+/// says (DIAG-12), without the checks the field already has (DIAG-19).
 pub fn check_menu_with(
     button: &egui::Response,
     field: Field<'_>,
@@ -497,6 +497,17 @@ pub fn check_menu_with(
     adding: Adding,
 ) -> Option<MenuChoice> {
     let mut chosen = None;
+    let offers: Vec<FieldCheck> = FieldCheck::offered(value)
+        .into_iter()
+        .filter(|check| {
+            !listed.iter().any(|listed| {
+                listed
+                    .asks
+                    .as_ref()
+                    .is_some_and(|asks| asks.same(field.node, field.port, field.path, check))
+            })
+        })
+        .collect();
     egui::Popup::menu(button).show(|ui| {
         // Escape closes the menu and leaves the selection under it.
         if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -539,13 +550,13 @@ pub fn check_menu_with(
                     ui.close();
                 }
             }
-            if adding == Adding::Hidden {
+            if adding == Adding::Hidden || offers.is_empty() {
                 return;
             }
             ui.separator();
         }
         widgets::caption(ui, "ADD A CHECK");
-        for check in FieldCheck::offered(value) {
+        for check in offers {
             let item = egui::Button::new(offer_text(field, &check));
             if ui.add_enabled(adding == Adding::Offered, item).clicked() {
                 chosen = Some(MenuChoice::Add(check));
@@ -567,12 +578,16 @@ fn menu_action(choice: MenuChoice, path: &str) -> TreeAction {
     }
 }
 
+/// How many characters an offer of the menu *Add a check* takes, as many
+/// as the field's checks listed above it.
+const OFFER_CHARACTERS: usize = 60;
+
 /// `check` of `field` as the menu offers it: the check it writes, as
 /// DIAG-02's [`crate::canvas::check_text`] writes it under the step it
-/// reads, so that what is chosen is what its card reads (DIAG-19). A path
-/// is cut at 48 characters and a value at 40, the sign kept between them.
+/// reads, so that what is chosen is what its card reads (DIAG-19). A value
+/// is cut at 40 characters, and a text still too long in the middle of its
+/// path, as a card's title is cut ([`crate::canvas::fit_title`]).
 fn offer_text(field: Field<'_>, check: &FieldCheck) -> String {
-    let truncate = crate::labels::truncate;
     let written = field.board.and_then(|(graph, project)| {
         let step = graph.nodes.iter().find(|node| node.id == field.node)?;
         let written = apiforge_core::edit::field_check(step, field.port, field.path, check);
@@ -582,24 +597,48 @@ fn offer_text(field: Field<'_>, check: &FieldCheck) -> String {
             request: Some(&written),
         };
         let own = crate::canvas::own_step(&written, graph);
-        let mut text = crate::canvas::check_text(&written, scope, graph, own);
-        if let Some(path) = text.actual.and_then(|index| text.parts.get_mut(index)) {
-            path.text = truncate(&path.text, 48);
-        }
-        Some(text.capped(40))
+        Some(crate::canvas::check_text(&written, scope, graph, own))
     });
-    // Without a board, the same signs with the row's name as the subject.
-    written.unwrap_or_else(|| {
-        let subject = truncate(field.shown, 48);
-        let sign = apiforge_script::predicate_symbol(check.predicate());
-        match check.expected() {
-            Some(expected) => format!(
-                "{subject} {sign} {}",
-                truncate(&json_stringify(&expected), 40)
-            ),
-            None => format!("{sign} {subject}"),
+    let text = written
+        .unwrap_or_else(|| unboarded_text(field, check))
+        .values_cut(40);
+    crate::canvas::fit_title(&text, OFFER_CHARACTERS, 1).shown
+}
+
+/// `check` of `field` where the step is on no board the window knows: the
+/// same signs, the field named as [`apiforge_core::edit::field_check`]
+/// names it, by its path in the output or else the output.
+fn unboarded_text(field: Field<'_>, check: &FieldCheck) -> crate::canvas::CheckText {
+    use crate::canvas::{Part, PartRole};
+    let part = |text: String, role| Part { text, role };
+    let subject = if field.path.is_empty() {
+        field.port
+    } else {
+        field.path
+    };
+    let operand = part(subject.to_owned(), PartRole::Operand);
+    let sign = apiforge_script::predicate_symbol(check.predicate());
+    let (parts, actual) = match check.expected() {
+        Some(expected) => {
+            let role = match expected {
+                Value::String(_) => PartRole::Text,
+                Value::Number(_) => PartRole::Number,
+                Value::Bool(_) | Value::Null => PartRole::Literal,
+                _ => PartRole::Data,
+            };
+            let sign = part(format!(" {sign} "), PartRole::Sign);
+            (
+                vec![operand, sign, part(json_stringify(&expected), role)],
+                0,
+            )
         }
-    })
+        None => (vec![part(format!("{sign} "), PartRole::Sign), operand], 1),
+    };
+    crate::canvas::CheckText {
+        parts,
+        actual: Some(actual),
+        missing: false,
+    }
 }
 
 /// A JSON value as a tree of fields, one row a field (DIAG-10): its fold
