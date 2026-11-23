@@ -245,8 +245,13 @@ fn rep08_criterion_1_a_value_opens_to_its_leaves() {
         let (_project, mut harness, _id) = labels_after_a_run(size);
         select_step(&mut harness, WEIGHT_31);
         assert!(row_named(&harness, "error").is_some(), "error is shown");
+        let window = harness.ctx.content_rect();
         for (field, shown) in ERROR {
-            value(&harness, field, shown);
+            let row = name(&harness, field).union(value(&harness, field, shown));
+            assert!(
+                window.contains_rect(row),
+                "{field} is in view at {size:?} without scrolling: {row:?}"
+            );
         }
     }
 }

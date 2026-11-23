@@ -394,10 +394,11 @@ fn diag08_criterion_5_one_vocabulary() {
     run(&mut harness);
     choose(&mut harness, "Maximise run results");
     select(&mut harness, "cart");
-    for summary in ["object (1)", "array (1)"] {
+    // Run results' rows are the Inspector's since REP-08 (#455, criterion 7).
+    for summary in ["object · 1", "array · 1"] {
         assert!(has_label(&harness, summary), "Run results say {summary}");
     }
-    for old in ["Object (1)", "List (1)"] {
+    for old in ["Object (1)", "List (1)", "object (1)", "array (1)"] {
         assert!(!has_label(&harness, old), "Run results do not say {old}");
     }
     select(&mut harness, "Check total");
