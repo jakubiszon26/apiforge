@@ -411,11 +411,7 @@ fn diag08_criterion_5_one_vocabulary() {
 /// Chooses the first row of a step named `name` in the step list of Run
 /// results: its label, or its handle where it has none.
 fn select(harness: &mut FolderHarness, name: &str) {
-    let row = format!("{name} · ");
-    let label = harness
-        .query_all_by_label_contains(&row)
-        .filter_map(|found| found.accesskit_node().label())
-        .find(|label| label.starts_with(&row))
+    let label = step_row_label(harness, name)
         .unwrap_or_else(|| panic!("{name} has a row in the step list"));
     harness
         .query_all_by_label(&label)

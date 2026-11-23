@@ -69,11 +69,7 @@ fn simulate(harness: &mut FolderHarness) -> RunResult {
 
 /// Chooses `handle`'s row in the step list.
 fn select(harness: &mut FolderHarness, handle: &str) {
-    let row = format!("{handle} · ");
-    let label = harness
-        .query_all_by_label_contains(&row)
-        .filter_map(|found| found.accesskit_node().label())
-        .find(|label| label.starts_with(&row))
+    let label = step_row_label(harness, handle)
         .unwrap_or_else(|| panic!("{handle} has a row in the step list"));
     harness.get_by_label(&label).scroll_to_me();
     settle(harness);
