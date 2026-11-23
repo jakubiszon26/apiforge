@@ -42,8 +42,13 @@ const OLD: [&str; 4] = [
 
 /// `SOURCE` as the demo shop's scenario, on its board at `size`.
 fn opened(size: egui::Vec2) -> (tempfile::TempDir, FolderHarness, String) {
+    opened_text(size, SOURCE)
+}
+
+/// `text` as the demo shop's scenario, on its board at `size`.
+fn opened_text(size: egui::Vec2, text: &str) -> (tempfile::TempDir, FolderHarness, String) {
     let project = crate::testing::shop_project();
-    fs::write(project.path().join(SCENARIO), SOURCE).unwrap();
+    fs::write(project.path().join(SCENARIO), text).unwrap();
     let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
     app(&mut harness).review_open(SCENARIO, None);
     settle(&mut harness);
@@ -317,4 +322,86 @@ fn diag19_criterion_5_subjects_as_the_card_writes_them() {
         harness.key_press(egui::Key::Escape);
         settle(&mut harness);
     }
+}
+
+/// The items under *Add a check* in the open menu, below the field's own
+/// checks (DIAG-12), top to bottom.
+fn under_add_a_check(harness: &FolderHarness) -> Vec<String> {
+    let menu = harness.get_by_label(MENU).rect();
+    let caption = harness
+        .query_all_by_label("ADD A CHECK")
+        .find(|caption| menu.contains_rect(caption.rect().shrink(1.0)))
+        .expect("the menu has Add a check")
+        .rect();
+    let mut items: Vec<(f32, String)> = harness
+        .query_all_by_role(egui::accesskit::Role::Button)
+        .filter(|item| menu.contains_rect(item.rect().shrink(1.0)))
+        .filter(|item| item.rect().top() >= caption.bottom())
+        .filter_map(|item| Some((item.rect().top(), item.accesskit_node().label()?)))
+        .collect();
+    items.sort_by(|a, b| a.0.total_cmp(&b.0));
+    items.into_iter().map(|(_, label)| label).collect()
+}
+
+/// Review round (2026-11-23): an offer identical to a check the field
+/// already has is not offered again. On DIAG-12's scenario `total` has
+/// `total == 172.5` and `total is "number"`: the menu lists each once,
+/// under *Checks of this field*, and offers only `exists total` and
+/// `nonempty total`. A listed check, clicked, selects that check.
+#[test]
+fn diag19_review_no_offer_repeats_a_check_of_the_field() {
+    use super::diag12::{CHECKS, assert_selected, source};
+    let (_project, mut harness, id) = opened_text(WIDE, &source(CHECKS, ""));
+    inspector_on(&mut harness, &id, "Output data");
+    open_menu(&mut harness, "total");
+    let items = offered(&harness);
+    for item in OFFERED {
+        assert_eq!(
+            items.iter().filter(|found| *found == item).count(),
+            1,
+            "the menu has {item} once: {items:?}"
+        );
+    }
+    assert_eq!(
+        under_add_a_check(&harness),
+        ["exists total", "nonempty total"],
+        "Add a check offers only what total has not"
+    );
+    let before = graph(&harness, &id);
+    pick(&mut harness, "total == 172.5");
+    assert_eq!(
+        graph(&harness, &id).nodes.len(),
+        before.nodes.len(),
+        "choosing a listed check adds nothing"
+    );
+    assert_selected(&harness, &id, "total_value", "cart");
+}
+
+/// Review round (2026-11-23): the offer is hidden by what the check asks,
+/// not by its text. A value too long for the menu is cut there at 40
+/// characters and in the field's list at 80, yet `note == "…"` is not
+/// offered again; a check of the same field for another value hides
+/// nothing.
+#[test]
+fn diag19_review_an_identical_check_is_found_by_what_it_asks() {
+    let note = "a note long enough to be cut in the menu, twice over";
+    let text = format!(
+        "scenario \"A cart\" {{\n  begin = start\n  cart = POST \"/carts\" {{\n    sample 201 {{ total: 172.5, note: \"{note}\" }}\n  }}\n  note_value = assert cart.body.note == \"{note}\"\n  total_other = assert cart.body.total == 99\n}}\n"
+    );
+    let (_project, mut harness, id) = opened_text(WIDE, &text);
+    inspector_on(&mut harness, &id, "Output data");
+    open_menu(&mut harness, "note");
+    assert_eq!(
+        under_add_a_check(&harness),
+        ["note is \"string\"", "exists note", "nonempty note"],
+        "note == \"…\" is not offered again"
+    );
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    open_menu(&mut harness, "total");
+    assert_eq!(
+        under_add_a_check(&harness),
+        OFFERED,
+        "a check for another value hides no offer"
+    );
 }

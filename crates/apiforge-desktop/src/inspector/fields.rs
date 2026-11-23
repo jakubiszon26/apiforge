@@ -1705,6 +1705,42 @@ mod tests {
 mod tree_tests {
     use super::*;
 
+    /// A field of `cart`'s `port` at `path`, on no board (DIAG-19).
+    fn unboarded<'a>(port: &'a str, path: &'a str, shown: &'a str) -> Field<'a> {
+        Field {
+            node: "cart",
+            port,
+            path,
+            board: None,
+            shown,
+        }
+    }
+
+    #[test]
+    fn an_offer_off_the_board_names_the_field_as_its_check_does() {
+        let status = unboarded("status", "", "HTTP status");
+        assert_eq!(
+            offer_text(status, &FieldCheck::Equals(serde_json::json!(200))),
+            "status == 200"
+        );
+        let total = unboarded("body", "total", "total");
+        assert_eq!(offer_text(total, &FieldCheck::Exists), "exists total");
+        assert_eq!(
+            offer_text(total, &FieldCheck::Type("number".into())),
+            "total is \"number\""
+        );
+    }
+
+    #[test]
+    fn a_long_path_is_cut_in_its_middle_as_a_card_cuts_it() {
+        let path = "customer.addresses.primary.street.lines.first.text.value";
+        let field = unboarded("body", path, "value");
+        assert_eq!(
+            offer_text(field, &FieldCheck::Exists),
+            "exists customer…primary.street.lines.first.text.value"
+        );
+    }
+
     #[test]
     fn pagination_covers_the_tail_and_clamps_after_the_source_shrinks() {
         assert_eq!(page_range(250, 0), 0..100);
