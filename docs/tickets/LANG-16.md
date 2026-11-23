@@ -7,10 +7,13 @@
   (#129), LANG-04 (#132), LANG-19 (#472), LANG-18 (#471), LANG-03 (#131)
 - Risk: `format` (new forms in `.afs`), `default` (what a check on a missing
   field reports), `visible UI` (a loop on the board)
-- State: **Analysis, waiting for the owner.** Nothing below is decided. The
-  eight [decisions](#decisions-for-the-owner) and the five
-  [consequences](#to-confirm-at-approval) are the owner's; no ticket of the
-  second half is `ready:*` before them.
+- State: **Decided on 2026-11-23.** The owner chose D4 = B, a loop is one
+  card that opens, and delegated the other seven
+  [decisions](#decisions) and the five [consequences](#confirmed) to an
+  independent reviewer (Fable 5.2, not the author of the analysis). The
+  shape, the order and the exit criteria below are as decided. LANG-08 owes
+  its design-review captures before it is approved; no ticket of the second
+  half is `ready:*` yet.
 - Measured with `apiforge 0.2.0` built from `main` at `e8e0858e`, simulated.
 
 ## Goal
@@ -69,7 +72,7 @@ addition that writes it.
 | 5 | Create five products, check the list, remove them | five copies; cleanup by five names | `for`, `collect` |
 | 6 | The same, failing at the third: remove what was made | works for a number written out (RUN-01, M5) | `collect` holds what exists |
 | 7 | Pages by number: no page above the limit, the total adds up | one request per page, written out | `for` over `range`, `collect` |
-| 8 | Pages by cursor: follow `next` until there is none | not possible | **a round that reads the round before: not proposed, see D1** |
+| 8 | Pages by cursor: follow `next` until there is none | not possible | **a round that reads the round before: left out by D1** |
 | 9 | Every item has a price above 0 and a currency | by index | `every` |
 | 10 | The order contains an item with `sku: "A"`, `qty: 2` | all fields written, F3 | `matches` in `some` |
 | 11 | Take the element of `included` whose `type` is `items` | `included[0]`, when the API can be asked to order it | `first … where` |
@@ -106,11 +109,13 @@ the ticket that makes it writable ([exit criterion 1](#exit-criteria-of-the-seco
 
 ## The proposed shape
 
-Illustrations of the recommended options; every spelling is a decision below.
+Illustrations of what was [decided](#decisions). The exact spelling of each
+form is set by the analysis of its ticket.
 
 **A block** is one statement, `handle = head { statements }`, with one way in
 and one way out, as `if` is. Its steps run in the order written; blocks nest;
-handles stay unique in the file.
+handles stay unique in the file. On the board a loop is **one card that
+opens** (D4 = B): its steps are seen inside it, as a component's are.
 
 ```text
 emptied = for item in cart.body.items {
@@ -128,9 +133,15 @@ emptied = for item in cart.body.items {
 - `item` and the names written inside are readable inside the braces only.
   What leaves is said: `collect ids = made.body.id` gives `emptied.ids`, a
   list with one value per round that produced it; `emptied.count` is the
-  number of rounds.
+  number of rounds. These are the card's outputs, as exports are a
+  component call's.
+- The steps inside read values from outside as a branch's do
+  (`cart.body.id` above); nothing is declared. The card shows each as an
+  input.
 - A run reports each round under the loop, named by the row's first text
-  value or its number, as a component call's steps are reported today.
+  value or its number, as a component call's steps are reported today. The
+  closed card and the run's summary name the rounds that failed (*3 of 16
+  cases failed: Weight 31 kg, …*).
 
 **Waiting** is said on the request that is repeated:
 
@@ -144,17 +155,21 @@ order = GET "/orders/{{placed.body.id}}" {
 
 After it `order` is the last answer; the step fails when the time passes and
 says how many attempts it made. A simulation waits for nothing and answers
-attempt *n* with the *n*-th sample, the last one repeating.
+attempt *n* with the *n*-th sample, the last one repeating. A `retry` is a
+field of its request: the request stays one card, with no card of its own.
 
-**A table** is a spelling of a list of rows; an empty cell is a value that
-does not exist:
+**A table** is a value: a list of rows, written as rows. It is a statement
+of its own, so it is a card on the board and its cases are read without
+opening the loop. A cell is a literal; an empty cell is a value that does
+not exist. A loop reads it by its name, as it reads any list:
 
 ```text
-refused = for case in table {
+cases = table {
   | name            | weight | postcode | status | error                                      |
   | "Weight 31 kg"  | 31     | "00-950" | 422    | { code: "out_of_range", field: "weight" }  |
   | "No postcode"   | 2      |          | 422    | { code: "postcode_required" }              |
-} {
+}
+refused = for case in cases {
   sent = POST "/parcels/{{param.parcel_id}}/labels" {
     body { weight: case.weight, postcode: case.postcode, service: "standard" }
     sample case.status { error: case.error }
@@ -174,9 +189,15 @@ A check that reads a missing field of an answer that came **fails** and says
 the field is missing; only `exists` answers "no" without failing.
 
 **Checks**: `assert` without a handle where nothing reads the result;
-`x matches { … }` compares the fields written and ignores the rest;
+`x matches { … }` compares the fields written and ignores the rest, and
+when it fails names every field that differs;
 `every item in list { … }` and `some item in list { … }` are predicates with
 the loop's `name in list`.
+
+**Shared headers** are written once, `headers { … }` in the scenario's
+head; a request's own entry wins. How a request leaves one out is LANG-18's
+to spell: `Name: none` is not confirmed, because a value is read by its bare
+handle and `none` can be one today.
 
 ## The picture on the board
 
@@ -191,6 +212,13 @@ card is a component call with a label. LANG-08's own analysis owes the
 design-review captures at 960 × 540 and 1600 × 1000, and with them the loop
 in Run results and in *Steps* (REQ-01), before it is approved.
 
+The owner chose **B** on this board (2026-11-23). What LANG-08's captures
+have to show because of it: the card closed, with its inputs, `count` and
+its collected lists, and with the rounds that failed after a run; the card
+open, and the way back; a loop inside a loop; the table's card beside it. A
+component opens as another document (`inspector/mod.rs:471`); a loop's
+steps are in the same file, so the view of a part of a document is new.
+
 - **A · a frame.** The steps that repeat stay on the board, in the chain,
   inside a frame that carries the loop's variable; the same picture LAY-13
   decided for a branch (a band per pair of braces). Editing inside is the
@@ -199,71 +227,91 @@ in Run results and in *Steps* (REQ-01), before it is approved.
   board is shorter; what repeats is not visible without opening, and a step
   is added to a loop in another place than to a branch.
 
-## Decisions for the owner
+## Decisions
 
-Recommended first. D1–D4 belong to LANG-16 and decide LANG-08, LANG-07 and
-LANG-17. D5–D8 are the direction of the later analyses, asked now because
-the forms above lean on them; each comes back with its analysis and its
-exact spelling.
+D4 is the owner's (quiz, 2026-11-23). The others were decided the same day
+by an independent reviewer on the owner's delegation; the ruling is on
+[#413](https://github.com/jakubiszon26/apiforge/issues/413#issuecomment-7103075273).
+*Rec.* is the option the analysis recommended. D5–D8 are directions: each
+comes back with its ticket's analysis for the exact spelling only.
 
-| # | Question | Options |
-| --- | --- | --- |
-| D1 | What repeats | **A** `for` as a block, and `retry until` on one request: cursor paging stays a written limit · **B** one block for both (`repeat until … { }`), as the plan sketched: waiting costs three lines more and a rule for which round a name means · **C** A, and a block that reads its last round, now |
-| D2 | What a loop gives back | **A** names stay inside the braces; `collect name = expr` gives a list · **B** a name read after the loop is its last round: no new word, a list cannot be got · **C** nothing in the first version, `count` only |
-| D3 | A table of cases | **A** `for` over rows, with the `table { \| … \| }` spelling, in the `.afs` · **B** `for` over a list written as JSON, no new spelling · **C** a form of its own, apart from the loop · **D** a request based on another (`as valid_label with { weight: 31 }`), no table |
-| D4 | A loop on the board | **A** a frame around the steps that repeat · **B** one card that opens |
-| D5 | A check that reads a missing field | **A** it fails, and `??` says what stands in: changes what F1 reports, from three errors to three failures · **B** it stays an error; `??` is the only way |
-| D6 | A check without a name | **A** allowed where nothing reads it; names already written stay; shown by its predicate · **B** every check keeps a name |
-| D7 | One check for several fields | **A** `matches { … }`, a partial object, the same predicate for a list element and a table row · **B** `assert all { a, b, c }`, a list of any predicates · **C** both |
-| D8 | Headers shared by a scenario | **A** `headers { … }` in the scenario's head; a request's own entry wins, `Name: none` leaves one out · **B** in the project's environment, for every scenario · **C** a block `with headers { … } { steps }` |
+| # | Question | Decided | Rec. | Reason |
+| --- | --- | --- | --- | --- |
+| D1 | What repeats | **A** `for` as a block, and `retry until` on one request; cursor paging stays out | A | Six of the seven scenarios that go round until something holds repeat one request. As a block a wait would be a card hiding one request; as a field it stays that request's card |
+| D2 | What a loop gives back | **A** names stay inside; `collect name = expr` gives a list; `count` | A | What a component call does: the runner copies the inner graph's exports onto the calling step and nothing else leaves (`engine.rs:1058-1072`). With one card, a name read after the loop would be a wire from a step that is not seen |
+| D3 | A table of cases | **A, as a variant**: the `table { \| … \| }` spelling in the `.afs`, as a value of its own read by `for case in cases`; not inside the loop's head. Cells are literals | A, inside the head | A value statement is a card already, so the cases stay readable while the loop is closed; the head keeps one pair of braces. A list written as JSON needs nothing more: `for` takes any list |
+| D4 | A loop on the board | **B** one card that opens — **the owner** | A | — |
+| D5 | A check that reads a missing field | **A** it fails and names the field; `??` says what stands in | A | F1. Only `exists` and `nonempty` read a missing value as "no" today (`predicate.rs:53-73`); an *error* sends a tester to look for a defect in the test. A value whose step never ran stays *blocked* (ADR 0015); a missing value in a URL or a body stays an error |
+| D6 | A check without a name | **A** allowed where nothing reads it, built after `matches` | A, before `matches` | The predicate is already a check's title on its card and in Run results (REQ decisions 1–3), and no AB-01 driver chose a check's name. Every position, folded check and MCP result finds a statement by its handle, so it is the riskiest change of the half: tables and `matches` remove most invented names first, and it is the ticket to drop if the half runs long |
+| D7 | One check for several fields | **A** `matches { … }` | A | `condition all { … }` is a list of predicates already; a partial object is what F3 lacks. A failed `matches` names every field that differs |
+| D8 | Headers shared by a scenario | **A** `headers { … }` in the scenario's head; a request's own entry wins. The spelling of leaving one out is LANG-18's, and not `none` unless it is shown to be an error today | A, with `Name: none` | The file holds all a run uses; a header in the project would change every scenario unseen (`format.rs:338`). `limit = 10` is read as `limit`, so a bare `none` can be a reference in a valid file |
 
-## To confirm at approval
+Not chosen: D1 B and C; D2 B and C; D3 B as the only spelling, C and D;
+D4 A; D5 B; D6 B; D7 B and C; D8 B and C.
 
-1. **The language version stays 2.** Every addition is one an older build
-   refuses at its line; the new words are read as words only where their form
-   stands, so no handle becomes invalid (F7). If the owner prefers reserved
-   words, the half raises the language to 3 with a fix that renames, in one
-   release.
-2. `sample` may read the loop's row, and a request under `retry` may carry
-   several samples (F5, F6). Elsewhere both stay errors.
-3. A table lives in the `.afs`. Rows from a file beside it are RUN-02 (#130),
-   after the sprint.
-4. Every loop and every `retry` has a ceiling that ends it as a failure. Its
-   numbers are set by LANG-08 and LANG-07 with their measurements.
-5. LANG-07 is analysed beside LANG-08, not inside it (follows from D1 = A).
+## Confirmed
+
+1. **The language version stays 2**, and no word is reserved. Every new form
+   is an error today at the place it stands (`x = for a in …`,
+   `collect a = …`, `a matches {`, `x = table {`, `retry until` among a
+   request's fields), so no valid file changes its meaning (F7). The
+   acceptance tests of each ticket keep a file that uses its new words as
+   handles.
+2. **`sample` may read the loop's row, and a request under `retry` may carry
+   several samples** (F5, F6). A sample reads the row and literals, never
+   another step; elsewhere both stay errors.
+3. **A table lives in the `.afs`.** Rows from a file beside it are RUN-02
+   (#130), after the sprint.
+4. **Every loop and every `retry` has a ceiling that ends it as a failure**,
+   as a timeout is at most 60 s and component calls nest to 16
+   (`request.rs:116`). The numbers are set by LANG-08 and LANG-07 with their
+   measurements.
+5. **LANG-07 is analysed beside LANG-08**, not inside it. With D4 = B a
+   `retry` has no card of its own and shares no board work with the loop.
 
 ## The proposed order
 
 | Order | Ticket | Delivers | Size, provisional |
 | --- | --- | --- | --- |
 | 1 | LANG-01 #127 with LANG-09 #353 | a check on a missing field fails; `??` | M · 20 · `default`, `format` |
-| 2 | LANG-08 #352, in two: **a** the `for` block, rounds in the run, the frame · **b** `collect` | scenarios 1, 16, 20; then 5–7 | a: M upper end · 30 · `format`, `visible UI` · b: S · 10 · `format` |
-| 2 | LANG-07 #212, beside 08a | `retry until`; scenarios 3, 4, 19 | M · 20 · `format`, `visible UI` |
-| 3 | LANG-17 #470, after 08a | the table spelling, the sample from a row; `labels` rewritten | M · 20 · `format` |
-| 4 | LANG-19 #472 in two: **a** a check without a name · **b** with LANG-04 #132 and LANG-02 #129: `matches`, `every`, `some`, `first … where` | scenarios 9–12 | a: M · 20 · `format`, `visible UI` · b: M · 20 · `format`; LANG-02's functions (unique, sorted) S after |
-| 5 | LANG-18 #471 | shared headers; scenario 17; unblocks REQ-09's header half | M · 20 · `format`, `visible UI` |
-| 6 | LANG-03 #131 | text functions; scenario 18 | S · 10 |
+| 2 | LANG-08 #352, in two: **a** the `for` block, rounds in the run and the failed rounds named, the card that opens · **b** `collect` | scenarios 1, 16, 20; then 5–7 | a: above M as one ticket; its analysis splits it, text and run first, the board second · `format`, `visible UI` · b: S · 10 · `format`, `visible UI` (outputs on the card) |
+| 2 | LANG-07 #212, beside 08a | `retry until`; scenarios 3, 4, 19 | M · 20 · `format`, `visible UI` (attempts in Run results, a mark on the request's card) |
+| 3 | LANG-17 #470, after 08a | the table as a value and its card, the sample from a row; `labels` rewritten | M · 20 · `format`, `visible UI` |
+| 4 | LANG-19b #472 with LANG-04 #132 and LANG-02 #129: `matches`, `every`, `some`, `first … where` | scenarios 9–12 | M · 20 · `format`; LANG-02's functions (unique, sorted) S after |
+| 5 | LANG-19a #472 a check without a name | the invented names that tables and `matches` leave | M · 20 · `format`, `visible UI`; the ticket to drop if the half runs long |
+| 6 | LANG-18 #471 | shared headers; scenario 17; unblocks REQ-09's header half | M · 20 · `format`, `visible UI` |
+| 7 | LANG-03 #131 | text functions; scenario 18 | S · 10 |
 
-The milestone's order stands, with three changes: LANG-07 leaves LANG-08's
-analysis (D1); LANG-08 and LANG-19 are each two tickets, because the run's
-rounds and the hidden identity of an unnamed check are the two places with
-real regression potential and neither should wait for its smaller half;
-LANG-17 follows the loop instead of sharing its ticket. About 190 owner
-minutes. Rows 1, 2 and 4a touch different files (`predicate.rs` and the
-parser's operators; the engine and `canvas/`; the handle's identity) and can
-be analysed side by side; REQ's tickets in `canvas/` are not open together
-with LANG-08a.
+The milestone's order stands, with four changes. LANG-07 leaves LANG-08's
+analysis (D1). LANG-08 and LANG-19 are each two tickets, and `matches` comes
+before the unnamed check (D6): it carries corpus scenarios and no risk to a
+statement's identity. LANG-17 follows the loop instead of sharing its
+ticket. LANG-08a is larger than the analysis sized it, because D4 = B needs
+a view of a part of a document, which the window does not have; if it is
+split, a build that reads a loop also draws its card, so no merged build
+opens a file it cannot show. The sizes are provisional and LANG-08a's is
+open; the 190 owner minutes of the analysis no longer hold. Rows 1, 2 and 4
+touch different files (`predicate.rs` and the parser's operators; the
+engine and `canvas/`; the predicates) and can be analysed side by side;
+REQ's tickets in `canvas/` are not open together with LANG-08a.
+
+Analyses that can start now: LANG-01 with LANG-09, LANG-08, LANG-07. None
+is `ready:*` by this ticket. After its analysis LANG-03 could take
+`ready:opus` directly; LANG-01 with LANG-09, LANG-08b, LANG-19b and LANG-07
+could once their spellings are approved; LANG-08a, LANG-17, LANG-19a and
+LANG-18 wait for their captures.
 
 ## Exit criteria of the second half
 
 - [ ] Each of the twenty scenarios of the corpus is a fixture under
       `fixtures/scenarios/lang/`, passes `check`, prints unchanged and gives
       the same simulated report through the command line and the MCP server;
-      scenario 8, and any other the owner's decisions leave out, is named in
+      scenario 8, and any other the decisions leave out, is named in
       the reference under *What cannot be expressed*.
 - [ ] `labels` is written with every case once: a seventeenth case is one
-      added row; its run reports 16 cases by name and the same 33 verdicts
-      as on `e8e0858e`.
+      added row; its run reports 16 cases by name and checks the same 33
+      expectations as on `e8e0858e`: breaking any one of them fails its
+      case and names the field.
 - [ ] Every `.afs` of the repository as of 0.2.1 passes `check` unedited and
       its simulated run has the same verdict per step, except the errors D5
       turns into failures, which are listed in the pull request that does it.
@@ -274,7 +322,12 @@ with LANG-08a.
 - [ ] A simulated `retry` takes no time; a live one ends within its limit and
       reports its attempts.
 - [ ] No gesture on the board writes a file that does not pass `check`, with
-      a loop on it.
+      a loop on it, closed or open. A step can be added to, moved inside and
+      removed from an open loop, and every step of a file with a loop can be
+      reached from the board.
+- [ ] After a run a closed loop's card says how many rounds failed and
+      names them; the table of `labels` is read on the board without opening
+      the loop.
 - [ ] The reference describes each new form with an example its test parses
       and runs; ADR 0005 and ADR 0015 are amended by the tickets that change
       them.
@@ -301,13 +354,16 @@ functions, imports.
 
 ## Proposals beyond the request
 
+P1, P2 and P4 are offers of scope, open for the owner; none holds a ticket
+of the half back.
+
 | # | Proposal | Solves | Size, risk | Trade-offs | Where |
 | --- | --- | --- | --- | --- | --- |
 | P1 | **A field, header or query entry whose value does not exist is not sent** (HTTP-01 #128 and HTTP-02 #133 as one rule) | the row "no postcode field" and "no token" of a table; one component for variants of a request | M · 20 · `default` | today such a step errors, which catches a typing mistake in a name; the rule would hide it unless only `??`-free optional inputs and empty cells count | with LANG-17, this sprint |
 | P2 | **`apiforge fix` offers the table**: requests that differ only in literal values become rows | the 16 edits of `labels`, and every scenario written by copying before the table existed | M · 20 · `format` | a fix that rewrites many statements must show a difference a person can read; not automatic | after LANG-17; REQ-09's third hint |
-| P3 | **A run names the case that failed first**: the summary of a failed loop says *3 of 16 cases failed: Weight 31 kg, …* in the window, the command line and MCP | finding the row is the reason a table is worth having | S · 10 · `visible UI` | none found | inside LANG-08a's report work |
-| P4 | **A loop that reads its last round** (`repeat`, cursor paging, scenario 8) | the one corpus scenario left out | M upper end · `format` | a second kind of loop and a rule for "the round before" | later; candidate issue if D1 = A |
-| P5 | **The frame for a branch too** (LAY-13) built with the loop's | one picture for every pair of braces, one implementation | S on top of LANG-08a | LAY-13 was moved after 0.2.0 by the owner; this pulls it back | the owner's call at LANG-08's mock-up |
+| P3 | **A run names the case that failed first**: the summary of a failed loop says *3 of 16 cases failed: Weight 31 kg, …* in the window, the command line and MCP | finding the row is the reason a table is worth having | S · 10 · `visible UI` | none found | **part of LANG-08a** since D4 = B: a closed card has to say what failed inside |
+| P4 | **A loop that reads its last round** (`repeat`, cursor paging, scenario 8) | the one corpus scenario left out | M upper end · `format` | a second kind of loop and a rule for "the round before" | later; a candidate issue, since D1 = A |
+| P5 | **The frame for a branch too** (LAY-13) built with the loop's | one picture for every pair of braces, one implementation | S on top of LANG-08a | LAY-13 was moved after 0.2.0 by the owner; this pulls it back | **lapsed** with D4 = B: no frame is built; LAY-13 stays where the owner put it |
 
 ## Technical appendix
 
@@ -315,8 +371,17 @@ functions, imports.
   `children` with a round index added to `StepResult` (`run.rs`), which the
   report, `run --json` and MCP `Step` carry; `fixtures/runs` grows, existing
   files unchanged.
-- The body's braces are read back from edges as a branch's are
-  (`core/branches.rs`, `plan.rs`): a third kind beside *then* and *else*.
+- With D4 = B the body is a graph inside the loop's node, run as a
+  component's is (`engine.rs:1033-1074`), not a third kind of braces read
+  back from edges. A component's graph starts from its parameters alone
+  (`Context.outputs` is empty there), so what the body reads from outside
+  reaches a round as the loop node's inputs, which is also what the card
+  draws. `collect` is the body's export, gathered per round. LANG-08
+  decides how the model holds the inner graph.
+- The table: `|` is a symbol of the lexer already, and `||` is one token
+  (`lexer.rs:108-116`); two empty cells written without a space meet it.
+  LANG-17 reads `||` inside a table as two bars and the formatter prints the
+  space.
 - `??` and `retry`: the lexer has `?` as the empty slot; `??` is a new
   two-character token (`lexer.rs:108-116`).
 - An unnamed check: a handle derived from its step and predicate, kept by

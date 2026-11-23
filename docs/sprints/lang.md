@@ -241,8 +241,11 @@ adds only `apiforge fix`.
 
 Exit criteria of the second half, its proposed order and the decisions it
 waits for are in [LANG-16](../tickets/LANG-16.md#exit-criteria-of-the-second-half)
-(analysis of 2026-11-23, **not yet approved**; the table above stands until
-the owner decides).
+(analysis of 2026-11-23, **decided that day**: D4 by the owner, the rest by
+an independent reviewer on his delegation). Its order replaces the table
+above where they differ: LANG-07 has its own analysis beside LANG-08,
+LANG-17 follows the loop, and `matches` comes before the check without a
+name.
 
 ## The older tickets, placed
 
