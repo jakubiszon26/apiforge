@@ -23,6 +23,8 @@ use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 
+mod detail;
+
 /// Requests from the report panel to the application.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
@@ -1053,6 +1055,15 @@ impl ReportPanel {
         {
             self.tab = DetailTab::Outputs;
         }
+        // What the details say of a check: its predicate, what it compared
+        // and the step it runs after (REP-07b).
+        let check = selected
+            .as_ref()
+            .zip(context.graphs)
+            .and_then(|(selected, graphs)| {
+                let index = rows.iter().position(|row| row.key == selected.key)?;
+                detail::of(&rows, index, graphs)
+            });
 
         // The outcomes that colour the marks, once per frame (DIAG-12).
         let outcomes = context.checks.map(|_| crate::inspector::Outcomes::of(run));
@@ -1082,6 +1093,7 @@ impl ReportPanel {
                                 ui,
                                 &run.id,
                                 selected.as_ref(),
+                                check.as_ref(),
                                 ends,
                                 requirement,
                                 !context.document_locked,
@@ -1138,6 +1150,7 @@ impl ReportPanel {
         ui: &mut Ui,
         run_id: &str,
         selected: Option<&StepRow<'_>>,
+        check: Option<&detail::CheckDetail<'_>>,
         ends: &CauseEnds,
         requirement: Option<Requirement>,
         editable: bool,
@@ -1163,11 +1176,36 @@ impl ReportPanel {
         let checkable = selected.depth == 0 && step.kind != NodeKind::Export;
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(
-                    RichText::new(step.display_name())
-                        .size(14.0)
-                        .family(theme::bold_family()),
-                );
+                match check {
+                    // A check is titled by its predicate, its handle and
+                    // its step under it (REP-07b).
+                    Some(check) => {
+                        let title = ui.add(
+                            egui::Label::new(
+                                RichText::new(&check.predicate)
+                                    .monospace()
+                                    .size(13.5)
+                                    .strong(),
+                            )
+                            .wrap(),
+                        );
+                        widgets::named(title, check.predicate.as_str());
+                        let line = check.line(step);
+                        let said = ui.label(
+                            RichText::new(&line)
+                                .size(theme::FONT_LABEL)
+                                .color(theme::MUTED),
+                        );
+                        widgets::named(said, line);
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new(step.display_name())
+                                .size(14.0)
+                                .family(theme::bold_family()),
+                        );
+                    }
+                }
                 if selected.depth > 0 {
                     widgets::hint(ui, format!("Step inside component · {}", step.node_id));
                 }
@@ -1210,7 +1248,71 @@ impl ReportPanel {
                 Some(requirement) => requirement.text(&step.expected),
                 None => expected_text(Predicate::Equals, &step.expected, 0.0),
             };
-            comparison_box(ui, &expected, &step.actual);
+            comparison_box(
+                ui,
+                check.and_then(|check| check.checked.as_deref()),
+                &expected,
+                &step.actual,
+            );
+        }
+        // The response of the step a check runs after, the field it read
+        // marked by DIAG-12's mark (REP-07b).
+        if let Some((head, _)) = check.and_then(|check| check.head.as_ref())
+            && !head.step.outputs.is_empty()
+        {
+            ui.add_space(6.0);
+            let heading = format!(
+                "Response of {} · the checked field is marked",
+                head.step.display_name()
+            );
+            let said = ui.label(
+                RichText::new(&heading)
+                    .size(theme::FONT_LABEL)
+                    .color(theme::MUTED),
+            );
+            widgets::named(said, heading);
+            let document =
+                egui::Id::new(("report-response", run_id, selected.key.as_str(), self.epoch));
+            self.trees.insert(document);
+            let none = |_: &str| false;
+            ui.push_id(("report-response", run_id, &selected.key), |ui| {
+                for (port, value) in &head.step.outputs {
+                    let (opening, large) = match self.folding {
+                        Folding::Default => *self
+                            .openings
+                            .entry(egui::Id::new((
+                                "report-opening",
+                                run_id,
+                                head.key.as_str(),
+                                "response",
+                                port,
+                            )))
+                            .or_insert_with(|| by_default(value)),
+                        folding => (opening(folding, value), false),
+                    };
+                    large_line(ui, opening, large, port);
+                    // A check chosen in a mark's menu is selected (DIAG-12).
+                    if let Some(crate::inspector::TreeAction::Select { check }) =
+                        crate::inspector::results_tree(
+                            ui,
+                            document,
+                            &head.step.node_id,
+                            port,
+                            value,
+                            crate::inspector::Results {
+                                opening,
+                                fields: true,
+                                offers: false,
+                                checked: &none,
+                                marks,
+                            },
+                        )
+                    {
+                        actions.push(Action::SelectNode(check));
+                    }
+                }
+            });
+            ui.add_space(6.0);
         }
 
         let outputs = format!("Outputs  {}", step.outputs.len());
@@ -1676,25 +1778,36 @@ fn group_label(ui: &mut Ui, group: not_run::Group, count: usize) {
     );
 }
 
-fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
+/// The EXPECTED and ACTUAL sides of a check, under what it compared when
+/// that is known (REP-07b).
+fn comparison_box(ui: &mut Ui, checked: Option<&str>, expected: &str, actual: &OptionalJson) {
     egui::Frame::new()
         .fill(theme::FIELD)
         .stroke(Stroke::new(1.0, theme::BORDER))
         .corner_radius(6)
         .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
+            if let Some(checked) = checked {
+                widgets::subcaption(ui, "CHECKED");
+                let value = ui.add(egui::Label::new(RichText::new(checked).monospace()).wrap());
+                widgets::named(value, checked);
+                ui.add_space(4.0);
+            }
             ui.horizontal(|ui| {
                 let col_width = ((ui.available_width() - 28.0) * 0.5).max(80.0);
                 ui.allocate_ui(egui::vec2(col_width, 36.0), |ui| {
                     ui.vertical(|ui| {
                         widgets::subcaption(ui, "EXPECTED");
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(labels::truncate(expected, 120)).monospace(),
+                        let value = ui
+                            .add(
+                                egui::Label::new(
+                                    RichText::new(labels::truncate(expected, 120)).monospace(),
+                                )
+                                .truncate(),
                             )
-                            .truncate(),
-                        )
-                        .on_hover_text(expected);
+                            .on_hover_text(expected);
+                        // Named by its text, which the label may cut (REP-07b).
+                        widgets::named(value, expected);
                     });
                 });
                 ui.label(RichText::new("→").color(theme::MUTED));
@@ -1705,13 +1818,15 @@ fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
                             OptionalJson::Present(value) => compact_json(value),
                             OptionalJson::Missing => "(missing value)".into(),
                         };
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(labels::truncate(&text, 120)).monospace(),
+                        let value = ui
+                            .add(
+                                egui::Label::new(
+                                    RichText::new(labels::truncate(&text, 120)).monospace(),
+                                )
+                                .truncate(),
                             )
-                            .truncate(),
-                        )
-                        .on_hover_text(text);
+                            .on_hover_text(&text);
+                        widgets::named(value, text);
                     });
                 });
             });
