@@ -33,6 +33,28 @@ const DEEP: &str = r#"scenario "Deep" {
 }
 "#;
 
+/// A response nested ten levels deep under long names, its last value a
+/// text longer than a narrow Inspector.
+const DEEP_LONG: &str = r#"scenario "Deep" {
+  begin = start
+  order = GET "/deep" {
+    sample 200 { level_01: { level_02: { level_03: { level_04: { level_05: { level_06: { level_07: { level_08: { level_09: { level_10: "a text far longer than what a narrow Inspector holds on one line" } } } } } } } } } }
+  }
+}
+"#;
+
+/// How many characters of one value the panel may lay out at most, whole,
+/// cut or in its hover: a few thousand, never the whole of a huge value.
+const LAID_OUT: usize = 5000;
+
+/// A response whose `token` is a text of `length` characters.
+fn huge(length: usize) -> String {
+    format!(
+        "scenario \"Huge\" {{\n  begin = start\n  order = GET \"/huge\" {{\n    sample 200 {{ id: \"o-1\", token: \"{}\" }}\n  }}\n}}\n",
+        "A".repeat(length)
+    )
+}
+
 /// `note` as the language writes it.
 const NOTE: &str =
     "\"Leave the parcel with the neighbour at number 14 if nobody answers the door.\"";
@@ -364,6 +386,159 @@ fn diag10_criterion_2_nesting_and_names() {
     harness.key_press(egui::Key::Escape);
     harness.drop_at(from);
     settle(&mut harness);
+}
+
+/// Criterion 2 in the narrowest Inspector: with ten levels of long names
+/// open, ✓ and {} of every row stay inside the panel, and the name and the
+/// value give way before them — they are cut, or the indent narrows — while
+/// each level still starts right of its parent.
+#[test]
+fn diag10_criterion_2_deep_rows_keep_their_actions_in_a_narrow_inspector() {
+    let (_project, mut harness, id) = opened(MINIMUM, DEEP_LONG);
+    output_data(&mut harness, &id, "order");
+    // The Inspector as narrow as it goes: a width below its least is
+    // clamped to it.
+    let inspector = egui::Id::new("folder-inspector");
+    let mut state = egui::containers::panel::PanelState::load(&harness.ctx, inspector)
+        .expect("the Inspector is open");
+    state.outer_rect.min.x = state.outer_rect.max.x - 100.0;
+    harness
+        .ctx
+        .data_mut(|data| data.insert_persisted(inspector, state));
+    settle(&mut harness);
+    let panel = panel(&harness);
+    assert!(
+        panel.width() <= 320.0,
+        "the Inspector is at its narrowest: {panel:?}"
+    );
+    let levels: Vec<String> = std::iter::once("Response".to_owned())
+        .chain((1..=10).map(|level| format!("level_{level:02}")))
+        .collect();
+    for level in &levels[1..10] {
+        // The window is short: each level is scrolled into view first.
+        let edge = edge(&harness);
+        harness
+            .query_all_by_label(level)
+            .find(|node| node.rect().left() > edge)
+            .unwrap_or_else(|| panic!("the Inspector shows a row named {level}"))
+            .scroll_to_me();
+        settle(&mut harness);
+        fold(&mut harness, level, "Expand field");
+    }
+    for pair in levels.windows(2) {
+        assert!(
+            name(&harness, &pair[1]).left() > name(&harness, &pair[0]).left(),
+            "{} starts right of {}",
+            pair[1],
+            pair[0]
+        );
+    }
+    for level in &levels {
+        let row = name(&harness, level);
+        let (check, variable) = actions(&harness, level);
+        for (button, rect) in [(CHECK, check), (VARIABLE, variable)] {
+            assert!(
+                rect.left() >= panel.left() && rect.right() <= panel.right(),
+                "{button} on {level} is inside the panel: {rect:?} in {panel:?}"
+            );
+        }
+        assert!(
+            row.left() >= panel.left() && row.right() <= check.left(),
+            "{level}'s name stands inside the panel, left of ✓: {row:?}, {check:?}"
+        );
+    }
+    let leaf = harness
+        .query_all_by_label_contains("a text far longer")
+        .map(|node| node.rect())
+        .find(|rect| rect.left() > panel.left())
+        .expect("level_10's value is shown");
+    let (check, _) = actions(&harness, "level_10");
+    assert!(
+        leaf.right() <= check.left(),
+        "level_10's value is cut before ✓: {leaf:?}, {check:?}"
+    );
+}
+
+/// The longest text the Inspector lays out, painted or named for AccessKit.
+fn longest_text(harness: &FolderHarness) -> usize {
+    fn walk(shape: &egui::Shape, longest: &mut usize) {
+        match shape {
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, longest);
+                }
+            }
+            egui::Shape::Text(shape) => {
+                *longest = (*longest).max(shape.galley.job.text.chars().count());
+            }
+            _ => {}
+        }
+    }
+    let mut longest = 0;
+    for clipped in &harness.output().shapes {
+        walk(&clipped.shape, &mut longest);
+    }
+    for node in harness.query_all_by_label_contains("AAAA") {
+        let node = node.accesskit_node();
+        for text in [node.label(), node.value()].into_iter().flatten() {
+            longest = longest.max(text.chars().count());
+        }
+    }
+    longest
+}
+
+/// Criteria 4 and 9 on a huge value: a text of 100 000 characters is cut on
+/// its row, opened on a click and shown on a hover, and each lays out at
+/// most a few thousand characters, so the panel does not stall.
+#[test]
+fn diag10_criterion_9_a_huge_value_lays_out_a_bounded_text() {
+    let (_project, mut harness, id) = opened(WIDE, &huge(100_000));
+    output_data(&mut harness, &id, "order");
+    let edge = edge(&harness);
+    let token = |harness: &FolderHarness| {
+        harness
+            .query_all_by_label_contains("\"AAAA")
+            .map(|node| node.rect())
+            .find(|rect| rect.left() > edge)
+            .expect("token's value is shown")
+    };
+    let cut = token(&harness);
+    assert!(
+        cut.height() <= 26.0,
+        "the huge value is cut to one line: {cut:?}"
+    );
+    let longest = longest_text(&harness);
+    assert!(
+        longest <= LAID_OUT,
+        "the cut value lays out at most {LAID_OUT} characters, not {longest}"
+    );
+
+    let hovered = crate::testing::hover_until(
+        &mut harness,
+        |harness| Some(token(harness)),
+        |harness| harness.query_all_by_label_contains("\"AAAA").count() > 1,
+    );
+    assert!(hovered, "pointing at the huge value shows more of it");
+    let longest = longest_text(&harness);
+    assert!(
+        longest <= LAID_OUT,
+        "the hover lays out at most {LAID_OUT} characters, not {longest}"
+    );
+    harness.remove_cursor();
+    settle(&mut harness);
+
+    let at = token(&harness).center();
+    click_at(&mut harness, at);
+    let open = token(&harness);
+    assert!(
+        open.height() > 26.0,
+        "a click opens the huge value over several lines: {open:?}"
+    );
+    let longest = longest_text(&harness);
+    assert!(
+        longest <= LAID_OUT,
+        "the open value lays out at most {LAID_OUT} characters, not {longest}"
+    );
 }
 
 /// Criterion 3: the value of `total` is drawn in the number colour, `id`
