@@ -52,10 +52,19 @@ pub struct ActionMenu {
     /// Opened on a check, value, variable or export in a branch: the menu
     /// offers *Move out of the branch* for it (DIAG-06d).
     pub out_of_branch: Option<String>,
+    /// Opened by the `+` on a line of a chain: a step it adds goes on that
+    /// line, after its source by its port (DIAG-06b).
+    pub on_line: bool,
+    /// Opened on a step of the folder window's board: the menu offers *Move
+    /// earlier* and *Move later* for it (DIAG-06b).
+    pub moves: Option<String>,
 }
 
 /// The entry that writes a check of a branch after its `if` (DIAG-06d).
 pub const MOVE_OUT: &str = "Move out of the branch";
+/// The entries that move a step by one in its braces (DIAG-06b).
+pub const MOVE_EARLIER: &str = "Move earlier";
+pub const MOVE_LATER: &str = "Move later";
 
 /// Whether `id` is a check, value, variable or export that stands in the
 /// braces of an `if`.
@@ -99,6 +108,8 @@ impl ActionMenu {
             open_groups: library::default_open_groups(),
             bar: false,
             out_of_branch: None,
+            on_line: false,
+            moves: None,
         }
     }
 
@@ -284,6 +295,39 @@ impl ActionMenu {
                         }
                         // First, above the steps the menu adds, where the
                         // menu of a card low on the board still shows it.
+                        if let Some(id) = &self.moves {
+                            let handle = graph
+                                .nodes
+                                .iter()
+                                .find(|node| &node.id == id)
+                                .map_or("", |node| node.handle.as_str());
+                            for (later, icon, label, keys) in [
+                                (false, Icon::ChevronUp, MOVE_EARLIER, "Alt+↑"),
+                                (true, Icon::ChevronDown, MOVE_LATER, "Alt+↓"),
+                            ] {
+                                let refused =
+                                    apiforge_core::edit::move_by_one(graph, project, id, later)
+                                        .err()
+                                        .map(|error| error.to_string());
+                                let entry = ui
+                                    .add_enabled(
+                                        refused.is_none(),
+                                        crate::widgets::action(icon, label).quiet(),
+                                    )
+                                    .on_hover_text(format!(
+                                        "Run `{handle}` one step {} in its braces, with its checks. {keys}",
+                                        if later { "later" } else { "earlier" }
+                                    ))
+                                    .on_disabled_hover_text(refused.unwrap_or_default());
+                                if entry.clicked() {
+                                    outcome = Outcome::Add(Command::MoveStep {
+                                        id: id.clone(),
+                                        later,
+                                    });
+                                }
+                            }
+                            ui.separator();
+                        }
                         if let Some(id) = &self.out_of_branch {
                             let entry = ui
                                 .add(crate::widgets::action(Icon::ArrowLeft, MOVE_OUT).quiet())
@@ -337,11 +381,26 @@ impl ActionMenu {
                                                 y: node.position.y + 20.0,
                                             },
                                         );
+                                        let step = apiforge_core::chain::is_step(
+                                            action.block.kind(),
+                                        ) && action.block.kind() != NodeKind::Start;
                                         outcome = Outcome::Add(if self.bar {
                                             Command::AddStep {
                                                 block: action.block,
                                                 component: action.component.clone(),
                                                 position,
+                                            }
+                                        } else if let Some(after) =
+                                            self.source.clone().filter(|_| self.on_line && step)
+                                        {
+                                            // On the line it was opened on
+                                            // (DIAG-06b), as a step dropped
+                                            // there lands (DIAG-06c).
+                                            Command::AddOnLine {
+                                                block: action.block,
+                                                component: action.component.clone(),
+                                                position,
+                                                after,
                                             }
                                         } else {
                                             Command::AddNode {

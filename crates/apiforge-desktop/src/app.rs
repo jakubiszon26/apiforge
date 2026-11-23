@@ -2485,6 +2485,9 @@ impl App {
             }
             // The legacy window has no moves across braces (DIAG-06d).
             Command::MoveOutOfBranch(_) => {}
+            // Nor moves by one, nor the notice after a delete (DIAG-06b).
+            Command::MoveStep { .. } => {}
+            Command::Undo => self.editor.undo(),
             // The legacy window keeps adding last (DIAG-06a, criterion 9).
             Command::AddStep {
                 block,

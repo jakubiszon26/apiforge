@@ -593,6 +593,19 @@ impl FolderApp {
                 self.apply_move(document_id, model, cleanup, placed);
                 None
             }
+            // One step earlier or later in its braces (DIAG-06b).
+            Command::MoveStep { id, later } => {
+                let placed = board
+                    .move_by_one(&id, later)
+                    .map(|(graph, moved)| (board.make_room(graph), moved));
+                self.apply_move(document_id, model, cleanup, placed);
+                None
+            }
+            // *Undo* on the notice after a delete (DIAG-06b).
+            Command::Undo => {
+                self.step_model_history(document_id, true);
+                None
+            }
             // After the selection, in its braces (DIAG-06a).
             Command::AddStep {
                 block,
@@ -671,10 +684,30 @@ impl FolderApp {
                         .into_iter()
                         .filter(|id| !ids.contains(id) && !deletion.gone.contains(id))
                         .collect();
-                    Some(Ok(Edit {
-                        graph: board.delete_checked(&deletion, &ids, &wires),
-                        selection: Some(kept),
-                    }))
+                    // What now follows what, said once the delete is
+                    // applied (DIAG-06b).
+                    let joined = joined_after_delete(graph, &ids, &deletion.gone);
+                    let current = self.shared_model(document_id);
+                    self.apply_edit(
+                        document_id,
+                        model,
+                        cleanup,
+                        Ok(Edit {
+                            graph: board.delete_checked(&deletion, &ids, &wires),
+                            selection: Some(kept),
+                        }),
+                    );
+                    let applied = current
+                        .as_ref()
+                        .zip(self.shared_model(document_id).as_ref())
+                        .is_some_and(|(current, now)| !Arc::ptr_eq(current, now));
+                    if applied
+                        && let Some(text) = joined
+                        && let Some(canvas) = self.canvases.get_mut(document_id)
+                    {
+                        canvas.set_notice(text);
+                    }
+                    None
                 }
             }
             Command::AddProxy { source, position } => Some(board.add_proxy(source, position)),
@@ -1441,4 +1474,39 @@ impl Header<'_> {
                 });
             });
     }
+}
+
+/// The board's notice after a delete (DIAG-06b): when the statements `ids`
+/// hold one step and it stood between two steps of its braces, which now
+/// follow one another, the sentence that says so. `None` for the first or
+/// the last step of its braces, for a check, value, variable or export, and
+/// for several steps at once.
+fn joined_after_delete(graph: &Graph, ids: &[String], gone: &[String]) -> Option<String> {
+    use apiforge_core::chain::{braces, is_step};
+    let mut deleted = graph
+        .nodes
+        .iter()
+        .filter(|node| ids.contains(&node.id) && is_step(node.kind));
+    let step = deleted.next()?;
+    if deleted.next().is_some() {
+        return None;
+    }
+    let written = braces(graph);
+    let own = written.get(step.id.as_str()).copied();
+    let siblings: Vec<&apiforge_core::format::Node> = graph
+        .nodes
+        .iter()
+        .filter(|node| {
+            is_step(node.kind)
+                && written.get(node.id.as_str()).copied() == own
+                && (node.id == step.id || !gone.contains(&node.id))
+        })
+        .collect();
+    let index = siblings.iter().position(|node| node.id == step.id)?;
+    let before = siblings.get(index.checked_sub(1)?)?;
+    let after = siblings.get(index + 1)?;
+    Some(format!(
+        "`{}` deleted. `{}` now follows `{}`.",
+        step.handle, after.handle, before.handle
+    ))
 }
