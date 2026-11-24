@@ -39,6 +39,28 @@ pub static INSPECTOR: AtomicU8 = AtomicU8::new(0);
 /// The handle of the step shown as selected; empty for none.
 pub static SELECTED: Mutex<String> = Mutex::new(String::new());
 
+/// REQ-17: 0 a scenario in Steps, 1 a request with no file (option A).
+pub static SCRATCH: AtomicU8 = AtomicU8::new(0);
+/// REQ-17: the pills say the request was really sent.
+pub static LIVE: AtomicBool = AtomicBool::new(false);
+/// REQ-17: the *Keep* menu is open.
+pub static KEEP: AtomicBool = AtomicBool::new(false);
+/// REQ-18: 0 nothing, 1 the dialog (A), 2 one action and no dialog (B).
+pub static COMPONENT: AtomicU8 = AtomicU8::new(0);
+
+fn scratch() -> bool {
+    SCRATCH.load(Relaxed) == 1
+}
+
+/// The label of a tab: a request with no file has no file name.
+pub fn tab(label: &str) -> String {
+    if on() && scratch() {
+        "Request 1".to_owned()
+    } else {
+        label.to_owned()
+    }
+}
+
 pub fn on() -> bool {
     ON.load(Relaxed)
 }
@@ -853,7 +875,7 @@ fn code(ui: &mut Ui, value: &serde_json::Value, height: f32) {
         });
 }
 
-fn small_button(ui: &mut Ui, words: &str, primary: bool) {
+fn small_button(ui: &mut Ui, words: &str, primary: bool) -> egui::Rect {
     egui::Frame::new()
         .fill(if primary {
             theme::SIMULATION
@@ -869,7 +891,9 @@ fn small_button(ui: &mut Ui, words: &str, primary: bool) {
                     .size(theme::FONT_LABEL)
                     .color(if primary { theme::WHITE } else { theme::TEXT }),
             );
-        });
+        })
+        .response
+        .rect
 }
 
 fn request_pane(ui: &mut Ui, row: &Row<'_>, view: &View<'_>, graph: &Graph, height: f32) {
@@ -887,7 +911,7 @@ fn request_pane(ui: &mut Ui, row: &Row<'_>, view: &View<'_>, graph: &Graph, heig
                         .strong()
                         .color(theme::LINK),
                 );
-                let address = url(row.node, s);
+                let address = url(row.node, s).trim_matches('"').to_owned();
                 let room = ((ui.available_width() - 8.0) / 7.3) as usize;
                 let shown = if address.chars().count() > room {
                     format!("…{}", path(&address))
@@ -897,9 +921,25 @@ fn request_pane(ui: &mut Ui, row: &Row<'_>, view: &View<'_>, graph: &Graph, heig
                 ui.label(mono(cut(&shown, room)));
             });
         });
+    if COMPONENT.load(Relaxed) == 2 {
+        banner(
+            ui,
+            "Saved as the component Create cart, revision 1. Inputs: productId, quantity.",
+            "Edit inputs · Undo",
+            theme::SUCCESS,
+        );
+    }
     ui.horizontal(|ui| {
-        small_button(ui, "▶ Run to here", true);
-        small_button(ui, "Send alone", false);
+        if scratch() {
+            small_button(ui, "▶ Send", true);
+            let keep = small_button(ui, "Keep ▾", false);
+            if KEEP.load(Relaxed) {
+                keep_menu(ui.ctx(), keep.left_bottom() + egui::vec2(0.0, 3.0));
+            }
+        } else {
+            small_button(ui, "▶ Run to here", true);
+            small_button(ui, "Send alone", false);
+        }
     });
     let headers = sent(row.node, s)
         .keys()
@@ -1033,7 +1073,10 @@ fn response_pane(ui: &mut Ui, row: &Row<'_>, view: &View<'_>, graph: &Graph, hei
     ui.horizontal(|ui| {
         ui.label(RichText::new("Response").strong());
         ui.add_space(6.0);
+        let live = LIVE.load(Relaxed);
         match alone {
+            _ if scratch() => widgets::pill(ui, "LIVE · sent 14:02", theme::DANGER),
+            1 if live => widgets::pill(ui, "SENT ALONE · live", theme::WARNING),
             1 => widgets::pill(ui, "SENT ALONE · simulation", theme::WARNING),
             _ => widgets::pill(ui, "SIMULATION · sample", theme::SIMULATION),
         };
@@ -1049,6 +1092,12 @@ fn response_pane(ui: &mut Ui, row: &Row<'_>, view: &View<'_>, graph: &Graph, hei
         }
     });
     match alone {
+        1 if LIVE.load(Relaxed) => banner(
+            ui,
+            "Sent alone. Nothing after it runs, Cleanup included: what it created stays.",
+            "",
+            theme::WARNING,
+        ),
         1 => banner(
             ui,
             "Sent alone with the values of the last run. Not part of a run: the run's verdict is unchanged.",
@@ -1185,6 +1234,15 @@ pub fn steps(ui: &mut Ui, view: &View<'_>) {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.set_height(theme::CONTROL_HEIGHT);
+                if scratch() {
+                    ui.label(RichText::new("Request 1").strong());
+                    ui.label(
+                        RichText::new("not saved · not a test of the project")
+                            .size(theme::FONT_LABEL)
+                            .color(theme::MUTED),
+                    );
+                    return;
+                }
                 ui.label(RichText::new(view.file).strong());
                 if tabs_for_cleanup {
                     let mut chosen = 0;
@@ -1233,7 +1291,9 @@ pub fn steps(ui: &mut Ui, view: &View<'_>) {
                 .iter()
                 .map(|row| (row, view.cleanup.unwrap_or(view.main))),
         )
-        .find(|(row, _)| selected(row));
+        .find(|(row, _)| {
+            selected(row) || (scratch() && row.node.kind == NodeKind::Request)
+        });
     let area = ui.available_rect_before_wrap();
     let Some((picked, picked_graph)) = picked else {
         // Nothing selected: the wide cards.
@@ -1296,7 +1356,9 @@ pub fn steps(ui: &mut Ui, view: &View<'_>) {
         return;
     };
     let fold = FOLD.load(Relaxed);
-    let list = if fold == 1 {
+    let list = if scratch() {
+        0.0
+    } else if fold == 1 {
         54.0
     } else {
         (area.width() * 0.24).clamp(190.0, 300.0)
@@ -1305,6 +1367,7 @@ pub fn steps(ui: &mut Ui, view: &View<'_>) {
     let height = area.height();
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
+        if !scratch() {
         ui.allocate_ui_with_layout(
             egui::vec2(list, height),
             egui::Layout::top_down(egui::Align::Min),
@@ -1340,6 +1403,7 @@ pub fn steps(ui: &mut Ui, view: &View<'_>) {
                     });
             },
         );
+        }
         let pane = |ui: &mut Ui, width: f32, height: f32, request: bool| {
             ui.allocate_ui_with_layout(
                 egui::vec2(width, height),
@@ -1397,4 +1461,158 @@ pub fn steps(ui: &mut Ui, view: &View<'_>) {
             egui::pos2(area.left() + list - 30.0, area.top() + 60.0),
         );
     }
+    if COMPONENT.load(Relaxed) == 1 {
+        component_dialog(ui.ctx());
+    }
+}
+
+fn keep_menu(ctx: &egui::Context, at: egui::Pos2) {
+    egui::Area::new(egui::Id::new("req17-keep"))
+        .fixed_pos(at)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme::WHITE)
+                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .corner_radius(6)
+                .inner_margin(egui::Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.set_width(200.0);
+                    for entry in [
+                        "Add to a scenario…",
+                        "Save as a new scenario…",
+                        "Save as component…",
+                        "Copy as cURL",
+                    ] {
+                        ui.label(entry);
+                    }
+                });
+        });
+}
+
+fn fake_field(ui: &mut Ui, words: &str, width: f32, monospace: bool) {
+    egui::Frame::new()
+        .fill(theme::FIELD)
+        .corner_radius(4)
+        .inner_margin(egui::Margin::symmetric(6, 3))
+        .show(ui, |ui| {
+            ui.set_width(width - 12.0);
+            let text = RichText::new(words).size(theme::FONT_LABEL);
+            ui.label(if monospace { text.monospace() } else { text });
+        });
+}
+
+/// REQ-18, option A: UX-30's dialog opened from one request, its literal
+/// values listed as inputs.
+fn component_dialog(ctx: &egui::Context) {
+    let screen = ctx.content_rect();
+    egui::Area::new(egui::Id::new("req18-dim"))
+        .fixed_pos(screen.min)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            ui.painter()
+                .rect_filled(screen, 0.0, Color32::from_black_alpha(90));
+        });
+    let width = (screen.width() - 120.0).min(680.0);
+    egui::Area::new(egui::Id::new("req18-dialog"))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .order(egui::Order::Tooltip)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme::WHITE)
+                .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                .corner_radius(10)
+                .inner_margin(egui::Margin::symmetric(20, 14))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    caption(ui, "COMPONENTS/ · FROM 1 REQUEST");
+                    ui.label(RichText::new("Save as component").size(18.0).strong());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Name").size(theme::FONT_LABEL));
+                        fake_field(ui, "Create cart", width * 0.34, false);
+                        ui.add_space(10.0);
+                        ui.label(mono("components/").color(theme::MUTED));
+                        fake_field(ui, "create-cart.afs", width * 0.26, true);
+                    });
+                    ui.horizontal(|ui| {
+                        let _ = ui.radio(true, "Publish revision 1");
+                        let _ = ui.radio(false, "Only create the file");
+                    });
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Inputs").strong());
+                        ui.label(
+                            RichText::new(
+                                "the values of this request · ticked: those you changed between sends",
+                            )
+                            .size(theme::FONT_LABEL)
+                            .color(theme::MUTED),
+                        );
+                    });
+                    for (on, name, kind, origin, note) in [
+                        (true, "productId", "Number", "body.productId = 123", "changed in 3 sends"),
+                        (true, "quantity", "Number", "body.quantity = 2", "changed in 2 sends"),
+                        (false, "client", "Text", "header X-Client = \"tester-7\"", ""),
+                        (false, "host", "Text", "URL https://shop.example.test", ""),
+                    ] {
+                        egui::Frame::new()
+                            .fill(theme::PANEL)
+                            .stroke(egui::Stroke::new(1.0, theme::BORDER))
+                            .corner_radius(6)
+                            .inner_margin(egui::Margin::symmetric(8, 3))
+                            .show(ui, |ui| {
+                                ui.set_width(width - 18.0);
+                                ui.horizontal(|ui| {
+                                    let mut ticked = on;
+                                    ui.checkbox(&mut ticked, "");
+                                    fake_field(ui, name, 110.0, true);
+                                    fake_field(ui, &format!("{kind} ▾"), 84.0, false);
+                                    ui.label(mono(origin).color(theme::MUTED));
+                                    if !note.is_empty() && ui.available_width() > 130.0 {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| widgets::pill(ui, note, theme::SIMULATION),
+                                        );
+                                    }
+                                });
+                            });
+                    }
+                    ui.label(
+                        RichText::new(
+                            "A ticked value becomes the input's default. Content-Type stays in the request.",
+                        )
+                        .size(theme::FONT_META)
+                        .color(theme::MUTED),
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Outputs").strong());
+                        let (mut body, mut status) = (true, false);
+                        ui.checkbox(&mut body, "Response (body)");
+                        ui.checkbox(&mut status, "HTTP status");
+                    });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("Publishes revision 1. This request stays open.")
+                                .size(theme::FONT_LABEL)
+                                .color(theme::MUTED),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            egui::Frame::new()
+                                .fill(theme::ACCENT)
+                                .corner_radius(6)
+                                .inner_margin(egui::Margin::symmetric(12, 6))
+                                .show(ui, |ui| {
+                                    ui.label(
+                                        RichText::new("Save and publish")
+                                            .strong()
+                                            .color(theme::WHITE),
+                                    );
+                                });
+                            ui.label("Cancel");
+                        });
+                    });
+                });
+        });
 }

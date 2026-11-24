@@ -358,7 +358,7 @@ impl FolderApp {
                     ))
                 });
                 let room = TAB_LABEL_WIDTH - dot.as_ref().map_or(0.0, |dot| dot.size().x);
-                let mut job = egui::text::LayoutJob::single_section(label.clone(), format);
+                let mut job = egui::text::LayoutJob::single_section(crate::mock::tab(label), format);
                 job.wrap = egui::text::TextWrapping::truncate_at_width(room);
                 TabText {
                     name: layout(job),
