@@ -12,7 +12,8 @@ mod response;
 pub mod source_change;
 
 pub use fields::{
-    Opening, Results, TreeAction, forget_field_text, forget_results_tree, results_tree, type_combo,
+    Opening, Results, Shown, TreeAction, forget_field_text, forget_results_tree, results_tree,
+    type_combo,
 };
 pub use marks::{CheckIndex, Marks, Outcomes};
 #[cfg(test)]

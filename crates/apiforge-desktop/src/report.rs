@@ -1633,21 +1633,15 @@ impl ReportPanel {
         if let Some(check) = check
             && let Some(source) = check.source
             && !source.step.outputs.is_empty()
-            && let Some(heading) = check.heading(&step.node_id, marks_here.map(|marks| marks.index))
         {
-            ui.add_space(6.0);
-            let said = ui.label(
-                RichText::new(&heading)
-                    .size(theme::FONT_LABEL)
-                    .color(theme::MUTED),
-            );
-            widgets::named(said, heading);
             let document =
                 egui::Id::new(("report-response", run_id, selected.key.as_str(), self.epoch));
             self.trees.insert(document);
-            let none = |_: &str| false;
-            ui.push_id(("report-response", run_id, &selected.key), |ui| {
-                for (port, value) in &source.step.outputs {
+            let ports: Vec<_> = source
+                .step
+                .outputs
+                .iter()
+                .map(|(port, value)| {
                     let (opening, large) = match self.folding {
                         Folding::Default => *self
                             .openings
@@ -1661,6 +1655,43 @@ impl ReportPanel {
                             .or_insert_with(|| by_default(value)),
                         folding => (opening(folding, value), false),
                     };
+                    (port, value, opening, large)
+                })
+                .collect();
+            // The response opens to the field it compared, unless every row
+            // was folded by *Collapse all*.
+            let mut marked = false;
+            for (port, value, path) in
+                check.marked(&step.node_id, marks_here.map(|marks| marks.index))
+            {
+                let opening = ports
+                    .iter()
+                    .find(|(name, ..)| *name == port)
+                    .map_or(Opening::Closed, |(_, _, opening, _)| *opening);
+                let shown = crate::inspector::Shown {
+                    document,
+                    node: &source.step.node_id,
+                    port,
+                    value,
+                    opening,
+                };
+                if self.folding != Folding::CollapseAll {
+                    shown.open_to(ui.ctx(), &path);
+                }
+                marked |= shown.shows(ui.ctx(), &path);
+            }
+            ui.add_space(6.0);
+            if let Some(heading) = check.heading(marked) {
+                let said = ui.label(
+                    RichText::new(&heading)
+                        .size(theme::FONT_LABEL)
+                        .color(theme::MUTED),
+                );
+                widgets::named(said, heading);
+            }
+            let none = |_: &str| false;
+            ui.push_id(("report-response", run_id, &selected.key), |ui| {
+                for (port, value, opening, large) in ports {
                     large_line(ui, opening, large, port);
                     // A check chosen in a mark's menu is selected (DIAG-12).
                     if let Some(crate::inspector::TreeAction::Select { check }) =

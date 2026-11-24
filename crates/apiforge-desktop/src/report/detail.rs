@@ -7,6 +7,7 @@ use super::{Line, StepRow, list};
 use crate::inspector::CheckIndex;
 use apiforge_core::{
     model::NodeKind,
+    path::JsonPath,
     run::{Phase, StepResult},
 };
 use serde_json::Value;
@@ -54,25 +55,34 @@ impl CheckDetail<'_> {
         line
     }
 
+    /// The fields of the response that hold what it compared, where the
+    /// response has them and `index` still marks them for the check `check`:
+    /// the output and the path in it.
+    pub fn marked<'b>(
+        &'b self,
+        check: &'b str,
+        index: Option<&'b CheckIndex>,
+    ) -> impl Iterator<Item = (&'b str, &'b Value, JsonPath)> {
+        let source = self.source;
+        self.reads.iter().filter_map(move |read| {
+            let step = source?.step;
+            let value = step.outputs.get(&read.port)?;
+            let path = JsonPath::parse(&read.path).ok()?;
+            path.resolve(value)?;
+            (read.node == step.node_id && index?.marks(check, &read.node, &read.port, &read.path))
+                .then_some((read.port.as_str(), value, path))
+        })
+    }
+
     /// `Response of Weight 31 kg · the checked field is marked`, the last
-    /// part only where the response has the field and `index` still marks
-    /// it for the check `check`.
-    pub fn heading(&self, check: &str, index: Option<&CheckIndex>) -> Option<String> {
+    /// part only while the mark's row is shown.
+    pub fn heading(&self, marked: bool) -> Option<String> {
         let source = self.source?;
         let what = match source.step.kind {
             NodeKind::Request => "Response",
             _ => "Outputs",
         };
         let mut heading = format!("{what} of {}", source.step.display_name());
-        let marked = self.reads.iter().any(|read| {
-            read.node == source.step.node_id
-                && source
-                    .step
-                    .outputs
-                    .get(&read.port)
-                    .is_some_and(|value| apiforge_core::path::resolve(value, &read.path).is_some())
-                && index.is_some_and(|index| index.marks(check, &read.node, &read.port, &read.path))
-        });
         if marked {
             heading.push_str(" · the checked field is marked");
         }

@@ -346,6 +346,7 @@ fn job(ui: &Ui, side: &Side, tone: Color32, width: f32) -> LayoutJob {
         font_id: egui::FontId::new(font.size, theme::bold_mono_family()),
         color: theme::TEXT,
         background: tint(tone),
+        expand_bg: 0.0,
         underline: Stroke::new(1.5, underline(tone)),
         ..Default::default()
     };
@@ -362,9 +363,10 @@ fn job(ui: &Ui, side: &Side, tone: Color32, width: f32) -> LayoutJob {
     job
 }
 
-/// The colour behind what differs.
+/// The colour behind what differs. A wrapped row's is drawn over the line
+/// under the row above, so it lets that line through.
 fn tint(tone: Color32) -> Color32 {
-    theme::FIELD.lerp_to_gamma(tone, 0.25)
+    tone.gamma_multiply(0.25)
 }
 
 /// The line under what differs: darker than its tone, so that it stands out
@@ -760,8 +762,9 @@ mod tests {
             (a.max(b) + 0.05) / (a.min(b) + 0.05)
         };
         for tone in [theme::SUCCESS, theme::DANGER] {
-            assert!(contrast(theme::TEXT, tint(tone)) >= 4.5);
-            assert!(contrast(underline(tone), tint(tone)) >= 3.0);
+            let tint = theme::FIELD.blend(tint(tone));
+            assert!(contrast(theme::TEXT, tint) >= 4.5);
+            assert!(contrast(underline(tone), tint) >= 3.0);
         }
         assert!(contrast(theme::MUTED, theme::FIELD) >= 4.5);
     }
