@@ -25,6 +25,7 @@ use std::borrow::Cow;
 
 mod detail;
 mod list;
+pub mod mockbox;
 pub use list::Line;
 #[cfg(test)]
 pub use list::arrange;
@@ -1598,7 +1599,17 @@ impl ReportPanel {
             Some(not_run) => Some(Cow::Owned(not_run.sentence())),
             None => step.message.as_deref().map(Cow::Borrowed),
         };
-        if let Some(message) = message {
+        let folded = mockbox::fold()
+            && check.is_some()
+            && (!step.expected.is_missing() || !step.actual.is_missing());
+        if folded {
+            let color = status_color(step.status);
+            mockbox::MESSAGE.with(|slot| {
+                *slot.borrow_mut() = message.as_ref().map(|m| (m.to_string(), color));
+            });
+        }
+        mockbox::BOX.with(|rect| rect.set(None));
+        if let Some(message) = message.filter(|_| !folded) {
             let color = status_color(step.status);
             egui::Frame::new()
                 .fill(color.gamma_multiply(0.08))
@@ -1647,7 +1658,7 @@ impl ReportPanel {
                     .size(theme::FONT_LABEL)
                     .color(theme::MUTED),
             );
-            widgets::named(said, heading);
+            let said = widgets::named(said, heading);
             let document =
                 egui::Id::new(("report-response", run_id, selected.key.as_str(), self.epoch));
             self.trees.insert(document);
@@ -1690,6 +1701,25 @@ impl ReportPanel {
                 }
             });
             ui.add_space(6.0);
+            // Mock of REP-07c: once per selected row, the pane opens on the
+            // box and the response's first lines under it.
+            let opened = egui::Id::new(("rep07c-opened", run_id, selected.key.as_str()));
+            if mockbox::fold()
+                && !ui.data(|data| data.get_temp::<bool>(opened).unwrap_or(false))
+                && let Some(frame) = mockbox::BOX.with(std::cell::Cell::get)
+            {
+                ui.data_mut(|data| data.insert_temp(opened, true));
+                let lines = mockbox::LINES.load(std::sync::atomic::Ordering::Relaxed) as f32;
+                let view = egui::Rect::from_min_max(
+                    frame.min,
+                    egui::pos2(frame.max.x, said.rect.bottom() + lines),
+                );
+                if view.height() <= ui.clip_rect().height() {
+                    ui.scroll_to_rect(view, Some(egui::Align::TOP));
+                } else {
+                    ui.scroll_to_rect(frame, Some(egui::Align::TOP));
+                }
+            }
         }
 
         let outputs = format!("Outputs  {}", step.outputs.len());
@@ -2311,6 +2341,13 @@ fn group_label(ui: &mut Ui, group: not_run::Group, count: usize) {
 /// The EXPECTED and ACTUAL sides of a check, under what it compared when
 /// that is known (REP-07b).
 fn comparison_box(ui: &mut Ui, checked: Option<&str>, expected: &str, actual: &OptionalJson) {
+    if mockbox::variant() != 0 {
+        return mockbox::draw(ui, checked, expected, actual);
+    }
+    today_box(ui, checked, expected, actual);
+}
+
+fn today_box(ui: &mut Ui, checked: Option<&str>, expected: &str, actual: &OptionalJson) {
     egui::Frame::new()
         .fill(theme::FIELD)
         .stroke(Stroke::new(1.0, theme::BORDER))
