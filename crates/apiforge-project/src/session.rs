@@ -1031,12 +1031,12 @@ impl ProjectSession {
         let previous = document.model.as_ref().ok_or(Error::ModelLocked)?;
         let semantic = apiforge_script::semantic(previous, &self.context)
             != apiforge_script::semantic(&model, &self.context);
-        let (model, text) = if semantic {
+        let (model, written) = if semantic {
             // The edit changes the text of what it changes and nothing else
             // (LAY-34). Only printing the whole file drops comments that
             // belong to no statement, so only then is the person asked first
             // (owner, 2026-11-17).
-            let written = match moved {
+            let in_place = match moved {
                 Some(moved) => apiforge_script::edit_in_place_moving(
                     &self.context,
                     document.text(),
@@ -1048,7 +1048,7 @@ impl ProjectSession {
                     apiforge_script::edit_in_place(&self.context, document.text(), previous, &model)
                 }
             };
-            let text = match written {
+            let text = match in_place {
                 Some(text) => text,
                 // A move is written line by line or not at all (DIAG-06a).
                 None if moved.is_some() => return Err(Error::MoveNotWritten),
@@ -1062,31 +1062,35 @@ impl ProjectSession {
             // model's identities and positions: a board edit may store blocks
             // or inputs in an order the source cannot state, and the
             // checkpoint sealed from the model must describe the source
-            // (KTLO-26).
+            // (KTLO-26). What the reading reports is what the text's analysis
+            // would (#578): nothing analyses it again after the edit.
             let target = self.target(&document.entry);
-            let read_back = analysis::derive(
+            match analysis::derive_counted(
                 &target,
                 &text,
                 &self.context,
                 Some(&model),
                 None,
                 self.placer.as_ref(),
-            )
-            .1;
-            (read_back.map_or(model, |(model, _)| model), Some(text))
+            ) {
+                (diagnostics, omitted, Some((read_back, _))) => {
+                    (read_back, Some((text, diagnostics, omitted)))
+                }
+                (_, _, None) => (model, Some((text, Vec::new(), 0))),
+            }
         } else {
             (model, None)
         };
         let document_id = document.entry.document_id.clone();
         let document = &mut self.documents[index];
         document.model = Some(Arc::new(model));
-        match text {
-            Some(text) => {
+        match written {
+            Some((text, diagnostics, omitted)) => {
                 document.model_source = Some(text.clone());
                 document.set_text(text);
                 document.source_version += 1;
-                document.diagnostics.clear();
-                document.omitted_diagnostics = 0;
+                document.diagnostics = diagnostics;
+                document.omitted_diagnostics = omitted;
                 let version = document.source_version;
                 self.emit(
                     origin,
