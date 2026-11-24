@@ -53,11 +53,17 @@ impl FolderApp {
     pub(super) fn save_active(&mut self) {
         match self.workbench.active().map(str::to_owned) {
             Some(id) => {
-                if let Err(error) = self.save_document(&id) {
-                    self.notify(error, true);
+                if self.after_title(diagram::AfterTitle::Save(id.clone())) {
+                    self.save_or_notify(&id);
                 }
             }
             None => self.save_configuration(),
+        }
+    }
+
+    pub(super) fn save_or_notify(&mut self, id: &str) {
+        if let Err(error) = self.save_document(id) {
+            self.notify(error, true);
         }
     }
 
@@ -143,6 +149,9 @@ impl FolderApp {
     }
 
     pub(super) fn save_all(&mut self) {
+        if !self.after_title(diagram::AfterTitle::SaveAll) {
+            return;
+        }
         self.save_all_then(|_, _| {});
     }
 
@@ -304,6 +313,29 @@ impl FolderApp {
         if self.persistence.close_ready {
             return true;
         }
+        // A title typed in the board's header is work to protect (WS-05a):
+        // the closing begins once it is written, and stops when it cannot be.
+        if !self.persistence.closing && !self.persistence.discard {
+            let typed = self
+                .title_edit
+                .as_ref()
+                .and_then(diagram::TitleEdit::written);
+            match self.commit_title() {
+                diagram::TitleCommit::Done => {}
+                diagram::TitleCommit::Wait => return false,
+                diagram::TitleCommit::Refused => {
+                    if matches!(self.prompt, Some(Prompt::CommentLoss { .. })) {
+                        self.prompt = None;
+                    }
+                    self.persistence.departure = false;
+                    self.close_error = Some(format!(
+                        "The title “{}” was not written.",
+                        typed.unwrap_or_default()
+                    ));
+                    return false;
+                }
+            }
+        }
         self.persistence.closing = true;
         self.watcher.stop();
         self.watcher.drain_stopped();
@@ -409,6 +441,7 @@ impl FolderApp {
         self.storage.is_busy()
             || self.watcher.is_busy()
             || self.persistence.closing
+            || self.title_typed(None)
             || self.runs.exporting
             || self.runs.handle.is_some()
             || self
