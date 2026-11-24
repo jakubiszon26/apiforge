@@ -199,6 +199,7 @@ impl FolderApp {
             self.show_checks_here(document_id);
         }
         let mode = self.workbench.mode;
+        let storage_band = self.storage_band;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
         // An edit that is not the delete, made anywhere, ends its notice
         // (DIAG-06b).
@@ -251,6 +252,7 @@ impl FolderApp {
                     scenario: Some(scenario_of(&model)),
                     shared: &shared,
                     moves: true,
+                    storage_band,
                 };
                 let fit = header.fit(ui, canvas.header_room(ui, &input));
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));

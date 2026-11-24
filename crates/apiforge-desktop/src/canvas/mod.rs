@@ -400,6 +400,10 @@ pub struct Input<'a> {
     /// branch*. The folder window's boards; the legacy window has no such
     /// move.
     pub moves: bool,
+    /// How much of the board's top the storage band takes while it shows: a
+    /// slow storage job's, gone with the job. The camera is the one the
+    /// board has without it. 0 where no such band shows.
+    pub storage_band: f32,
 }
 
 /// Where a run of the board's document has got to while it is on (LAY-07):
@@ -594,6 +598,8 @@ pub struct Canvas {
     last_size: Vec2,
     last_focus: Option<Rect>,
     last_viewport: Rect,
+    /// [`Input::storage_band`] of the last frame placed.
+    storage_band: f32,
     drag: Option<Drag>,
     menu: Option<ActionMenu>,
     /// The choice at an input where a far value was dropped (LAY-25).
@@ -828,6 +834,7 @@ impl Default for Canvas {
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
+            storage_band: 0.0,
             router: routing::Router::default(),
             revealed_router: routing::Router::default(),
             wire_mode: WireMode::All,
@@ -1565,11 +1572,12 @@ impl Canvas {
 
     /// The camera as `(pan x, pan y, zoom)` once the user has moved it, so a
     /// document's view can be kept between sessions. A fitted camera is not
-    /// worth keeping: it is fitted again.
+    /// worth keeping: it is fitted again. It is the camera without the
+    /// storage band.
     pub fn camera(&self) -> Option<(f32, f32, f32)> {
         self.camera_moved_by_user.then_some((
             self.camera.pan.x,
-            self.camera.pan.y,
+            self.camera.pan.y + self.storage_band,
             self.camera.zoom,
         ))
     }
@@ -1579,7 +1587,7 @@ impl Canvas {
         self.context = context.to_owned();
         self.camera = Camera {
             zoom: zoom.clamp(MIN_ZOOM, MAX_ZOOM),
-            pan: vec2(x, y),
+            pan: vec2(x, y - self.storage_band),
         };
         self.fit_pending = false;
         self.camera_moved_by_user = true;
@@ -1879,6 +1887,7 @@ impl Canvas {
         let board_changed = self.place_camera(
             viewport,
             overlays.focus,
+            input.storage_band,
             rearranged,
             shapes(&cards, &chips, &extents),
         );
@@ -3418,14 +3427,20 @@ impl Canvas {
     /// leaves the board where it is on screen and its zoom as it is: the
     /// panel covers the edge it opens from (UX-18). The board's own header
     /// settling, with nothing else changed, fits a fitted camera again and
-    /// keeps the middle of a moved one.
+    /// keeps the middle of a moved one. The storage band coming or going is
+    /// none of these: what is on screen stays where it is, and the camera is
+    /// the one the board has without the band.
     fn place_camera(
         &mut self,
         viewport: Rect,
         focus: Rect,
+        storage_band: f32,
         rearranged: bool,
         shapes: Shapes<'_>,
     ) -> bool {
+        // The camera pans from the board's corner, which the band moves.
+        let last_band = std::mem::replace(&mut self.storage_band, storage_band);
+        self.camera.pan.y += last_band - storage_band;
         if self.fit_pending || (self.last_size == Vec2::ZERO && !self.camera_moved_by_user) {
             self.fit(viewport, focus, shapes);
             return false;
@@ -3433,31 +3448,35 @@ impl Canvas {
         let Some(previous) = self.last_focus else {
             return false;
         };
-        let moved = (viewport.min - self.last_viewport.min).length() > 0.5;
-        let resized = (viewport.size() - self.last_viewport.size()).length() > 0.5;
+        // All that follows compares the board without the band.
+        let viewport = without_band(viewport, storage_band);
+        let focus = without_band(focus, storage_band);
+        let last_viewport = without_band(self.last_viewport, last_band);
+        let previous = without_band(previous, last_band);
+        let moved = (viewport.min - last_viewport.min).length() > 0.5;
+        let resized = (viewport.size() - last_viewport.size()).length() > 0.5;
         let refocused = (focus.size() - previous.size()).length() > 1.0;
         if !(moved || resized || refocused) {
             return false;
         }
-        let kept_middle =
-            (focus.center() - viewport.min) - (previous.center() - self.last_viewport.min);
+        let kept_middle = (focus.center() - viewport.min) - (previous.center() - last_viewport.min);
         let pan = self.camera.pan;
         if rearranged {
             if self.camera_moved_by_user {
                 self.camera.pan += kept_middle;
             } else {
-                self.fit(viewport, focus, shapes);
+                self.fit_whole(viewport, focus, shapes);
             }
         } else if moved || resized {
-            self.camera.pan += self.last_viewport.min - viewport.min;
+            self.camera.pan += last_viewport.min - viewport.min;
             self.fitted_for = None;
         } else if self.camera_moved_by_user {
             self.camera.pan += kept_middle;
         } else if self.fitted_for == Some(viewport.size()) {
-            self.fit(viewport, focus, shapes);
+            self.fit_whole(viewport, focus, shapes);
         }
         let fitted = !self.camera_moved_by_user && self.fitted_for == Some(viewport.size());
-        let moved_with = (viewport.min - self.last_viewport.min) + (self.camera.pan - pan);
+        let moved_with = (viewport.min - last_viewport.min) + (self.camera.pan - pan);
         self.previous_focus = (!fitted).then(|| previous.translate(moved_with));
         true
     }
@@ -3522,7 +3541,19 @@ impl Canvas {
         }
     }
 
+    /// Fits the board as it is drawn, as it will stand once the storage band
+    /// has gone.
     fn fit(&mut self, viewport: Rect, focus: Rect, shapes: Shapes<'_>) {
+        let band = self.storage_band;
+        self.fit_whole(
+            without_band(viewport, band),
+            without_band(focus, band),
+            shapes,
+        );
+    }
+
+    /// Fits `focus` of `viewport`, both given without the storage band.
+    fn fit_whole(&mut self, viewport: Rect, focus: Rect, shapes: Shapes<'_>) {
         self.fit_pending = false;
         self.camera_moved_by_user = false;
         self.fitted_for = Some(viewport.size());
@@ -3530,14 +3561,17 @@ impl Canvas {
         let Some(bounds) = shapes.bounds() else {
             self.camera = Camera {
                 zoom: 1.0,
-                pan: vec2(60.0, 60.0),
+                pan: vec2(60.0, 60.0 - self.storage_band),
             };
             return;
         };
         let zoom = fit_zoom(focus, bounds);
+        // The camera pans from the corner the band moves down.
         self.camera = Camera {
             zoom,
-            pan: local_focus_center - bounds.center().to_vec2() * zoom,
+            pan: local_focus_center
+                - bounds.center().to_vec2() * zoom
+                - vec2(0.0, self.storage_band),
         };
     }
 
@@ -5262,6 +5296,13 @@ impl Canvas {
     }
 }
 
+/// `rect` of the board as it stands without the storage band of `band`
+/// above it, which takes the board's top and nothing else.
+fn without_band(mut rect: Rect, band: f32) -> Rect {
+    rect.min.y -= band;
+    rect
+}
+
 /// The zoom that shows `bounds` whole in `focus`.
 fn fit_zoom(focus: Rect, bounds: Rect) -> f32 {
     (focus.width().max(60.0) / bounds.width().max(1.0))
@@ -6153,6 +6194,7 @@ mod tests {
                                 scenario: None,
                                 shared: &[],
                                 moves: false,
+                                storage_band: 0.0,
                             },
                         );
                     });
@@ -6211,6 +6253,7 @@ mod tests {
                                 scenario: None,
                                 shared: &[],
                                 moves: false,
+                                storage_band: 0.0,
                             };
                             let room = canvas.header_room(ui, &input);
                             input.header_leading =
@@ -6297,6 +6340,7 @@ mod tests {
                             scenario: None,
                             shared: &[],
                             moves: false,
+                            storage_band: 0.0,
                         };
                         let room = canvas.header_room(ui, &input);
                         input.header_leading = Some(vec2(200.0, theme::CONTROL_HEIGHT));
