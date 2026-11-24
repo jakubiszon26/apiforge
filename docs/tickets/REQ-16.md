@@ -48,9 +48,10 @@ Tests in `crates/apiforge-runner/tests/kept_values.rs` and
    published, with every secret the first run learned and every value
    read from the kept values.** The token came from a response of the
    first run and is in no environment: a test's API echoes it in the
-   response body, in a redirect's address and in an error text, and
-   sends it under a name that is not sensitive; each is `[REDACTED]`
-   in the single send's result. `req16_criterion_4_*`
+   response body under a name that is not sensitive, in a response
+   header and in the text of an error; each is `[REDACTED]` in the
+   single send's result (a redirect is not followed and its address
+   is in no result: `http.rs:69`). `req16_criterion_4_*`
 5. A live *Send alone* of a request that reads a login's token sends
    the real token; REQ-05's criterion 4 holds only when no kept values
    exist (a new window, a run made by an agent or the CLI).

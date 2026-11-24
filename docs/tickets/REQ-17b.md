@@ -1,7 +1,9 @@
 # REQ-17b: One request tried without making a test of it — New request, its tab, Send
 
-- Size: M · Owner review: 25 min · Risk: `visible UI`, `permission`
-  (a live send from a new place)
+- Size: M, at its upper edge: thirteen criteria, one seam (a snapshot
+  and an edit asked of the session or of the set) · Owner review:
+  25 min · Risk: `visible UI`, `permission` (a live send from a new
+  place)
 - State: **Decided** ([REQ-17](REQ-17.md): 1 A, 3 A, 5 A). Mock-up
   approved, its defects below as criteria. After REQ-17a, REQ-02a,
   REQ-05 and REQ-16. Issue [#603](https://github.com/jakubiszon26/apiforge/issues/603).
@@ -68,6 +70,11 @@ Tests in `folder/acceptance_tests/req17b.rs`.
     `req17b_criterion_11_*`
 12. A try uses no kept values of REQ-16: it reads no step.
     `req17b_criterion_12_*`
+13. *Code* and *Split* show and edit a try's text by the scenario's
+    own views. An edit in the panes that would lose a comment is asked
+    about by the question a scenario gets today, nothing new
+    (REQ-17a, criterion 3). In a project in an older language *Send*
+    is refused with the message a run gets. `req17b_criterion_13_*`
 
 ## Captures the owner judges on the pull request
 

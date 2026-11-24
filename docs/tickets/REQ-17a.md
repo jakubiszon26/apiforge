@@ -5,7 +5,8 @@
 - State: **Decided as a need** ([REQ-17](REQ-17.md): 1 A, 2 A).
   **Redesigned on 2026-11-24 after a second model's read**: the first
   design, a document inside the session's list, is dropped (below).
-  The new design waits for one more read before a label.
+  The new design was read again the same day and its findings are in
+  the criteria. Approved by the owner with the files of #605 (#603).
   Issue [#607](https://github.com/jakubiszon26/apiforge/issues/607).
 - Analysis model: Fable 5.2 · Implementation model: Opus
 
@@ -37,36 +38,50 @@ Nothing: no caller until REQ-17b.
 Tests in `crates/apiforge-project/tests/tries.rs`.
 
 1. `TrySet`, a type of `apiforge-project` owned by its caller and
-   never a field of `ProjectSession`: `create(name, text)`,
+   never a field of `ProjectSession`, made with the caller's `Placer`
+   as a session is: `create(name, text)`,
    `get(id)`, `list()`, `rename`, `discard`. It has no store
    and no path on disk: no function of it takes or returns a
    `ProjectStore`. `req17a_criterion_1_*`
 2. `edit_source`, `apply_model_edit`, `undo` and `redo` take
-   the project's context (`&Project`) as an argument and give, for
-   the same text, model and edit, **the same text and model as the
-   session gives for a scenario**: the part of `install_model` and
-   `install_step` that writes a model to text and reads it back is
-   one function both call, not a copy. A table-driven test runs the
-   same edits through both. `req17a_criterion_2_*`
-3. A try is analysed on every change, at once, with the context given;
+   what `ProjectSession::try_context()` gives (the context project
+   and whether the project is in an older language: the one new,
+   read-only function of the session) and give, for the same text,
+   model, placer and edit, **the same text, model and diagnostics as
+   the session gives for a scenario**. What `apply_edit` does to one
+   document — the kind check, `normalise`, `kept_chain`, the "nothing
+   changed" return, `install_model`, the history step — and
+   `install_step` are functions both call, not copies. A table-driven
+   test runs the same edits through both with the same placer.
+   `req17a_criterion_2_*`
+3. An edit that can only be written by printing the whole text, on a
+   text with comments that belong to no statement, is refused with
+   `CommentsWouldBeLost` exactly as the session refuses it, and
+   `accept_comment_loss(id)` lifts it for that version of the text:
+   the session's rule and state (`comments.rs`), no policy of a try's
+   own. `req17a_criterion_3_*`
+4. A try is analysed on every change, at once, with the context given;
    `refresh(&Project)` analyses all of them again when the context
    changed (a publication, a reload, a take-back).
-   `req17a_criterion_3_*`
-4. `run_project(id, &Project) -> Project` gives the project a runner
-   needs: the context with the try as its one scenario; refused with
-   the first error when the try does not check.
    `req17a_criterion_4_*`
-5. `into_source(id)` gives the text to register with
-   `create_document` (REQ-17d); nothing else leaves the set.
+5. `run_project(id, context) -> Result<Project>` gives the project a
+   runner needs: the context with the try as its one scenario; an
+   error with the first diagnostic when the try does not check, and
+   the session's language problem when the project is in an older
+   language, as `prepare_run` refuses a run.
    `req17a_criterion_5_*`
-6. `ProjectSession` has no new public function, field or event; with
+6. `into_source(id)` gives the text to register with
+   `create_document` (REQ-17d); nothing else leaves the set.
+   `req17a_criterion_6_*`
+7. `ProjectSession` has no new field or event and one new function,
+   `try_context()`; with
    a `TrySet` alive beside it, save, *Save all*, a background save
    finishing, `reload_project`, `release_writer` and
    `take_writer` leave the set equal and the folder without a byte
-   of it. One test each. `req17a_criterion_6_*`
-7. The session's suites pass with no test edited; `apiforge-cli` and
+   of it. One test each. `req17a_criterion_7_*`
+8. The session's suites pass with no test edited; `apiforge-cli` and
    `apiforge-mcp` do not name `TrySet` (a test reads their
-   sources). `req17a_criterion_7_*`
+   sources). `req17a_criterion_8_*`
 
 ## Not in scope
 
@@ -80,9 +95,12 @@ the project's components (a try declares no component).
   and `step_history`: context, `Target`, placer, text, previous
   model, new model → model and text), `document.rs` (`History`
   reused); `lib.rs`; the test file.
-- Checked in the code: `install_model` needs only the context, the
-  target, the placer and the document's text and model
-  (`session.rs:1020`); `analysis::derive` is a function of the
-  same. A try's `Target` is a scenario with an id of its own.
+- Checked in the code: `install_model` (`session.rs:1020`) needs the
+  context, the target, the placer, the document's text and model, and
+  the comment decision (`require_comment_decision`, `comments.rs:37`,
+  which reads the document's own `comments_accepted` and
+  `source_version`); `apply_edit` runs `normalise` and `kept_chain`
+  before it. A try's `Target` is a scenario with an id of its own and
+  `older` from `try_context()` (`session.rs:1390`).
 - Regression: the factoring — criterion 2's table and the session's
-  own suites (criterion 7); nothing else of the session changes.
+  own suites (criterion 8); nothing else of the session changes.

@@ -90,15 +90,16 @@ be copied: the address shortened to `…/shop/carts` with room left
 
 | Ticket | Issue | Size · review | Risk | After | Label |
 | --- | --- | --- | --- | --- | --- |
-| [REQ-17a](REQ-17a.md) tries held beside the session | [#607](https://github.com/jakubiszon26/apiforge/issues/607) | M · 10 | none visible; the session's edit code factored | — | none: redesigned after the second read, read once more first |
-| [REQ-17b](REQ-17b.md) the try in the window | [#603](https://github.com/jakubiszon26/apiforge/issues/603) | M · 25 | `visible UI`, `permission` | REQ-17a, REQ-02a, REQ-05, REQ-16 | none yet |
-| [REQ-17c](REQ-17c.md) listed in *Files*, kept across a restart | [#608](https://github.com/jakubiszon26/apiforge/issues/608) | M · 15 | `visible UI`, `permission` | REQ-17b | none yet |
-| [REQ-17d](REQ-17d.md) *Keep* | [#609](https://github.com/jakubiszon26/apiforge/issues/609) | M · 15 | `visible UI` | REQ-17b, REQ-01b, REQ-18 | none yet |
+| [REQ-17a](REQ-17a.md) tries held beside the session | [#607](https://github.com/jakubiszon26/apiforge/issues/607) | M · 10 | none visible; the session's edit code factored | — | `ready:opus` |
+| [REQ-17b](REQ-17b.md) the try in the window | [#603](https://github.com/jakubiszon26/apiforge/issues/603) | M · 25 | `visible UI`, `permission` | REQ-17a, REQ-02a, REQ-05, REQ-16 | `ready:opus` |
+| [REQ-17c](REQ-17c.md) listed in *Files*, kept across a restart | [#608](https://github.com/jakubiszon26/apiforge/issues/608) | M · 15 | `visible UI`, `permission` | REQ-17b | `ready:opus` |
+| [REQ-17d](REQ-17d.md) *Keep* | [#609](https://github.com/jakubiszon26/apiforge/issues/609) | M · 15 | `visible UI` | REQ-17b, REQ-01b, REQ-18 | `ready:opus` |
 
 No ticket has a `format` flag: nothing a project keeps changes.
 REQ-17c adds a file of the person's own, versioned in itself. The
-secret in that file is decided: A, not written (#608). A `ready:opus`
-label follows the owner's recorded approval of these files.
+secret in that file is decided: A, not written (#608). The files
+were approved by the owner on 2026-11-24 (#603), after two reads by a
+second model whose findings are in the criteria.
 
 **`prepare_run`, resolved from the code.** A run does not need a
 session document: the window hands the runner a `RunRequest` holding a
