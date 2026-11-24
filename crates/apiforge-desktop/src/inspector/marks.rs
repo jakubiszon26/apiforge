@@ -288,6 +288,9 @@ pub struct Marks<'a> {
     /// `None` in the Inspector, whose mark says that a check exists, not how
     /// it ended.
     pub run: Option<&'a Outcomes<'a>>,
+    /// The check whose details show the tree: the mark of a field it names
+    /// says its own result, not the field's (REP-07b).
+    pub chosen: Option<&'a str>,
 }
 
 /// The status of each step of a run, by node: looked up once per frame of
@@ -337,6 +340,7 @@ pub(super) struct TreeMarks<'a> {
     port: &'a PortMarks,
     /// The run's status of each check, when the tree is Run results'.
     outcomes: Option<&'a Outcomes<'a>>,
+    chosen: Option<&'a str>,
 }
 
 impl<'a> TreeMarks<'a> {
@@ -345,6 +349,7 @@ impl<'a> TreeMarks<'a> {
             index: marks.index,
             port: marks.index.port(node, port)?,
             outcomes: marks.run,
+            chosen: marks.chosen,
         })
     }
 
@@ -368,8 +373,17 @@ impl<'a> TreeMarks<'a> {
             .iter()
             .filter(|check| matches!(status(check), Some(StepStatus::Failed | StepStatus::Error)))
             .count();
+        let chosen = checks
+            .iter()
+            .find(|check| Some(check.id.as_str()) == self.chosen);
         let tone = if self.outcomes.is_none() {
             MarkTone::Plain
+        } else if let Some(chosen) = chosen {
+            match status(chosen) {
+                Some(StepStatus::Passed) => MarkTone::Passed,
+                Some(StepStatus::Failed | StepStatus::Error) => MarkTone::Failed,
+                _ => MarkTone::NotRun,
+            }
         } else if failed > 0 {
             MarkTone::Failed
         } else if checks
@@ -384,6 +398,11 @@ impl<'a> TreeMarks<'a> {
         let plural = if count == 1 { "check" } else { "checks" };
         let words = if inside {
             format!("{count} {plural} inside")
+        } else if chosen.is_some() {
+            match count - 1 {
+                0 => "This check".to_owned(),
+                others => format!("This check · {others} more"),
+            }
         } else if failed > 0 {
             format!("{failed} failed")
         } else {
@@ -456,7 +475,7 @@ pub(super) struct RowMark {
     /// Outlined: the checks are of fields inside the folded row.
     pub inside: bool,
     pub tone: MarkTone,
-    /// *2 checks*, *1 failed*, *1 check inside*.
+    /// *2 checks*, *1 failed*, *1 check inside*, *This check · 1 more*.
     pub words: String,
     /// What the hover and assistive technology say: the checks, one a
     /// line, or the words of an outlined mark.

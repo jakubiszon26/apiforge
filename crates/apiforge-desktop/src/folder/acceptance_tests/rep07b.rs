@@ -595,7 +595,11 @@ fn rep07b_the_mark_of_the_checked_field_is_the_checks_own() {
         (MarkTone::Failed, "1 failed".into()),
         "another field's mark is DIAG-12's"
     );
-    let message = details_rect(&harness, "message");
+    let message = harness
+        .query_all_by_label("message")
+        .map(|node| node.rect())
+        .find(|rect| rect.left() >= details(&harness))
+        .expect("the field's row");
     harness
         .query_all_by_label("Checks of this field")
         .find(|node| (node.rect().center().y - message.center().y).abs() < 6.0)

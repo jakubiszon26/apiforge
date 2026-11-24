@@ -167,6 +167,9 @@ pub(super) struct Entry {
     pub predicate: Option<String>,
     /// What a check of one comparison compared, with every name (REP-07b).
     pub checked: Option<String>,
+    /// The expected side's name, with every name, where a check of one
+    /// comparison reads two steps (REP-07b).
+    pub expected_from: Option<String>,
     /// The fields a check's comparisons are about (REP-07b).
     pub reads: Vec<Read>,
     /// The second line of a value, an `if`, a component call or an export.
@@ -333,11 +336,23 @@ fn entries(rows: &[StepRow<'_>], lines: &[Line], graphs: Option<RunGraphs<'_>>) 
                 let actuals = actuals(check);
                 if actuals.len() == 1 {
                     let whole = crate::canvas::check_text(check, scope, lookup, None);
+                    let operand =
+                        |part: &&crate::canvas::Part| part.role == crate::canvas::PartRole::Operand;
+                    let actual = whole.actual.unwrap_or(0);
                     entry.checked = whole
-                        .actual
-                        .and_then(|at| whole.parts.get(at))
-                        .filter(|part| part.role == crate::canvas::PartRole::Operand)
+                        .parts
+                        .get(actual)
+                        .filter(operand)
                         .map(|part| part.text.clone());
+                    let steps = apiforge_core::graph::check_subjects(lookup, check).subjects;
+                    if steps.len() > 1 {
+                        entry.expected_from = whole
+                            .parts
+                            .iter()
+                            .skip(actual + 1)
+                            .find(operand)
+                            .map(|part| part.text.clone());
+                    }
                 }
                 entry.reads = actuals
                     .into_iter()

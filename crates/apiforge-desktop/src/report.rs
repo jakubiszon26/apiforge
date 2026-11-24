@@ -1227,6 +1227,7 @@ impl ReportPanel {
                                 context.checks.map(|index| crate::inspector::Marks {
                                     index,
                                     run: outcomes.as_ref(),
+                                    chosen: None,
                                 }),
                                 actions,
                             );
@@ -1614,14 +1615,21 @@ impl ReportPanel {
         if !step.expected.is_missing()
             || !step.actual.is_missing()
             || requirement.is_some_and(Requirement::always_compared)
+            || comparison::missing(requirement, step)
         {
             let written = comparison::Kept::of(&mut self.comparison, run_id, selected, requirement);
-            written.show(ui);
+            written.show(ui, check.and_then(|check| check.expected_from.as_deref()));
         }
         // The response that holds what a check compared, marked by DIAG-12's
         // mark (REP-07b). A check of a component's inner step has no mark:
         // it is the component's, not its caller's.
-        let marks_here = marks.filter(|_| selected.depth == 0);
+        let marks_here =
+            marks
+                .filter(|_| selected.depth == 0)
+                .map(|marks| crate::inspector::Marks {
+                    chosen: Some(&step.node_id),
+                    ..marks
+                });
         if let Some(check) = check
             && let Some(source) = check.source
             && !source.step.outputs.is_empty()
@@ -1680,7 +1688,7 @@ impl ReportPanel {
 
         let outputs = format!("Outputs  {}", step.outputs.len());
         let inputs = format!("Inputs  {}", step.inputs.len());
-        let hint = checkable && self.tab == DetailTab::Outputs;
+        let hint = checkable && editable && self.tab == DetailTab::Outputs;
         // The controls above the value share the tabs' line where it has
         // room for them, and take a line of their own under it otherwise.
         let gap = ui.spacing().item_spacing.x;

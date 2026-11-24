@@ -18,6 +18,8 @@ pub(super) struct CheckDetail<'a> {
     /// What it compared, with every name, the hover of its title:
     /// `weight_31.body.error.field`.
     pub checked: Option<String>,
+    /// Where its expected value came from, for a check of two steps.
+    pub expected_from: Option<String>,
     /// The step it is listed under, and that step's number on the board.
     head: Option<(&'a StepResult, Option<usize>)>,
     /// The step whose response holds what it compared, or else the one it
@@ -115,6 +117,7 @@ pub(super) fn of<'a>(
     Some(CheckDetail {
         predicate,
         checked: entry.checked.clone(),
+        expected_from: entry.expected_from.clone(),
         head: head.map(|head| (rows[head].step, arranged.entries[head].number)),
         source: source.map(|source| &rows[source]),
         reads: entry.reads.clone(),

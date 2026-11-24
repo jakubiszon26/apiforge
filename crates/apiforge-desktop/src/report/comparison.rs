@@ -9,7 +9,7 @@ use super::{
 use crate::{labels, not_run, theme, widgets};
 use apiforge_core::{
     format::OptionalJson,
-    graph::VALUE_INPUT,
+    graph::{VALUE_INPUT, condition_inputs},
     js::strict_equals,
     model::{NodeKind, Predicate},
     run::{StepResult, StepStatus},
@@ -160,7 +160,9 @@ impl Comparison {
         // A Data condition that passes a value on reports that value, not
         // the one it compared.
         let compared = step.kind != NodeKind::Condition || !step.inputs.contains_key(VALUE_INPUT);
-        let values = match (&step.expected, &step.actual) {
+        let sides = sides(requirement, step);
+        let (step_expected, step_actual) = (&*sides.0, &*sides.1);
+        let values = match (step_expected, step_actual) {
             (OptionalJson::Present(expected), OptionalJson::Present(actual)) if compared => {
                 Some((expected, actual))
             }
@@ -178,18 +180,18 @@ impl Comparison {
             Some((expected, actual)) => {
                 Cow::Owned(OptionalJson::Present(aligned(expected, actual)))
             }
-            None => Cow::Borrowed(&step.expected),
+            None => Cow::Borrowed(step_expected),
         };
         let line = match requirement {
             Some(requirement) => requirement.text_with(&written, one_line),
             None => super::requirement_text(Predicate::Equals, &written, 0.0, one_line),
         };
         let whole = match requirement {
-            Some(requirement) => requirement.text(&step.expected),
-            None => expected_text(Predicate::Equals, &step.expected, 0.0),
+            Some(requirement) => requirement.text(step_expected),
+            None => expected_text(Predicate::Equals, step_expected, 0.0),
         };
         let mut expected = Side::new(&line, whole, false);
-        let (actual_line, whole, missing) = match &step.actual {
+        let (actual_line, whole, missing) = match step_actual {
             OptionalJson::Present(value) => (one_line(value), compact_json(value), false),
             OptionalJson::Missing => ("(missing value)".into(), "(missing value)".into(), true),
         };
@@ -211,8 +213,9 @@ impl Comparison {
         Self { expected, actual }
     }
 
-    /// The box, as wide as the details.
-    pub fn show(&self, ui: &mut Ui) {
+    /// The box, as wide as the details; `from` is where the expected value
+    /// came from.
+    pub fn show(&self, ui: &mut Ui, from: Option<&str>) {
         egui::Frame::new()
             .fill(theme::FIELD)
             .stroke(Stroke::new(1.0, theme::BORDER))
@@ -225,13 +228,54 @@ impl Comparison {
                     .map(|caption| text_width(ui, caption, theme::FONT_META))
                     .fold(0.0, f32::max)
                     + 16.0;
-                row(ui, "EXPECTED", column, &self.expected, theme::SUCCESS);
-                row(ui, "ACTUAL", column, &self.actual, theme::DANGER);
+                row(ui, "EXPECTED", column, &self.expected, from, theme::SUCCESS);
+                row(ui, "ACTUAL", column, &self.actual, None, theme::DANGER);
             });
     }
 }
 
-fn row(ui: &mut Ui, caption: &str, column: f32, side: &Side, tone: Color32) {
+/// Whether the run ended a comparison because one side had no value: the
+/// step keeps neither side, and its inputs hold the other.
+pub(super) fn missing(requirement: Option<Requirement>, step: &StepResult) -> bool {
+    let takes = matches!(
+        requirement,
+        Some(Requirement::One { predicate, .. }) if predicate.takes_expected()
+    );
+    let (actual, expected) = inputs(step);
+    takes
+        && step.status == StepStatus::Error
+        && step.expected.is_missing()
+        && step.actual.is_missing()
+        && step.inputs.contains_key(&actual) != step.inputs.contains_key(&expected)
+}
+
+/// The inputs of a check's one comparison.
+fn inputs(step: &StepResult) -> (String, String) {
+    match step.kind {
+        NodeKind::Condition => condition_inputs(1),
+        _ => ("actual".into(), "expected".into()),
+    }
+}
+
+/// The expected and the actual side of `step`.
+fn sides(
+    requirement: Option<Requirement>,
+    step: &StepResult,
+) -> (Cow<'_, OptionalJson>, Cow<'_, OptionalJson>) {
+    if !missing(requirement, step) {
+        return (Cow::Borrowed(&step.expected), Cow::Borrowed(&step.actual));
+    }
+    let (actual, expected) = inputs(step);
+    let side = |name: &str| {
+        Cow::Owned(match step.inputs.get(name) {
+            Some(value) => OptionalJson::Present(value.clone()),
+            None => OptionalJson::Missing,
+        })
+    };
+    (side(&expected), side(&actual))
+}
+
+fn row(ui: &mut Ui, caption: &str, column: f32, side: &Side, from: Option<&str>, tone: Color32) {
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.allocate_ui_with_layout(
@@ -243,11 +287,11 @@ fn row(ui: &mut Ui, caption: &str, column: f32, side: &Side, tone: Color32) {
                 widgets::subcaption(ui, caption);
             },
         );
-        ui.vertical(|ui| value(ui, side, tone));
+        ui.vertical(|ui| value(ui, side, from, tone));
     });
 }
 
-fn value(ui: &mut Ui, side: &Side, tone: Color32) {
+fn value(ui: &mut Ui, side: &Side, from: Option<&str>, tone: Color32) {
     let width = ui.available_width();
     let galley = ui.painter().layout_job(job(ui, side, tone, width));
     let last = galley.rows.last().map(|row| row.rect());
@@ -256,12 +300,17 @@ fn value(ui: &mut Ui, side: &Side, tone: Color32) {
     let response = widgets::named(response, side.whole.as_str()).on_hover_ui(|ui| {
         ui.label(labels::truncate(&side.whole, JSON_SHOWN_CHARS));
     });
-    let Some(kind) = side.kind else { return };
+    let note = match (side.kind, from) {
+        (None, None) => return,
+        (Some(kind), None) => kind.to_owned(),
+        (None, Some(from)) => format!("from {from}"),
+        (Some(kind), Some(from)) => format!("{kind} · from {from}"),
+    };
     // Beside the end of the value, or under it where that has no room.
-    let text = RichText::new(kind)
+    let text = RichText::new(&note)
         .size(theme::FONT_META)
         .color(theme::MUTED);
-    let size = egui::vec2(text_width(ui, kind, theme::FONT_META), 0.0);
+    let size = egui::vec2(text_width(ui, &note, theme::FONT_META), 0.0);
     match last {
         Some(last) if last.right() + 10.0 + size.x <= width => {
             let at = response.rect.min + egui::vec2(last.right() + 10.0, last.top());
@@ -557,6 +606,26 @@ mod tests {
             marks(&Comparison::of(one(Predicate::Equals), &unmet)),
             [None, None]
         );
+    }
+
+    #[test]
+    fn a_comparison_without_one_value_shows_the_other() {
+        let mut step = step(json!(1), json!(1));
+        step.status = StepStatus::Error;
+        step.expected = OptionalJson::Missing;
+        step.actual = OptionalJson::Missing;
+        let equals = one(Predicate::Equals);
+        assert!(!missing(equals, &step), "neither side is known");
+        step.inputs.insert("expected".into(), json!("a"));
+        assert!(missing(equals, &step));
+        assert!(!missing(one(Predicate::Exists), &step));
+        assert!(!missing(None, &step));
+        let comparison = Comparison::of(equals, &step);
+        assert_eq!(comparison.expected.shown, r#""a""#);
+        assert_eq!(comparison.actual.shown, "(missing value)");
+        assert_eq!(marks(&comparison), [None, None]);
+        step.inputs.insert("actual".into(), json!("b"));
+        assert!(!missing(equals, &step), "another error");
     }
 
     #[test]

@@ -1396,7 +1396,11 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
             port.display_name(),
             &value,
             context.read_only,
-            context.checks.map(|index| Marks { index, run: None }),
+            context.checks.map(|index| Marks {
+                index,
+                run: None,
+                chosen: None,
+            }),
         ) {
             actions.push(match action {
                 fields::TreeAction::Check { path, check } => Action::AssertField {
