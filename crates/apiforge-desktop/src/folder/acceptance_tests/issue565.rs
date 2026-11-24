@@ -101,7 +101,9 @@ fn issue565_a_refused_edit_says_why() {
     unchanged(&harness);
 }
 
-const LATER: &str = "This edit was not applied: `order` reads `pay.body.id`, which runs after it. Nothing was changed.";
+/// Typed in a field, whose earlier keys are written already: the sentence
+/// does not say that nothing was changed.
+const LATER: &str = "This edit was not applied: `order` reads `pay.body.id`, which runs after it.";
 const CLEANUP_START: &str =
     "This edit was not applied: the cleanup needs no Start block. Nothing was changed.";
 
@@ -154,6 +156,41 @@ fn issue565_a_value_of_a_later_step_is_refused_by_name() {
     assert_eq!(notice(&harness).as_deref(), Some(LATER));
     assert!(has_label(&harness, LATER), "the banner is drawn");
     assert!(!source_of(&harness, &id).contains("/me/{{pay"));
+}
+
+/// The same typed a key at a time: what was typed before the refusal is
+/// written, so the sentence claims nothing about it.
+#[test]
+fn issue565_a_refusal_of_typed_text_does_not_say_nothing_was_changed() {
+    let (_project, mut harness, id) = shop_with(WITH_CLEANUP);
+    type_url(&mut harness, &id, "order", "");
+    for key in "/me/{{pay.body.id}}".chars() {
+        harness
+            .get_by_label("URL or path")
+            .type_text(&key.to_string());
+        settle(&mut harness);
+    }
+    harness.step();
+    assert!(
+        source_of(&harness, &id).contains("order = GET \"/me/{\""),
+        "{}",
+        source_of(&harness, &id)
+    );
+    assert_eq!(notice(&harness).as_deref(), Some(LATER));
+
+    // A gesture of the board keeps the whole sentence, also while the field
+    // holds the keyboard.
+    assert!(harness.get_by_label("URL or path").is_focused());
+    let begin = id_of(&graph(&harness, &id), "begin");
+    app(&mut harness).active_board_command(Command::SetLiteral {
+        node: begin,
+        input: "x".to_owned(),
+        path: Vec::new(),
+        value: "1".into(),
+    });
+    assert_eq!(notice(&harness).as_deref(), Some(START));
+    start_on_cleanup(&mut harness);
+    assert_eq!(notice(&harness).as_deref(), Some(CLEANUP_START));
 }
 
 /// *Start* added on *Cleanup*, which has none.
