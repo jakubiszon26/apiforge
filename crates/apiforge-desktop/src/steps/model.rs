@@ -326,6 +326,15 @@ impl<'a> Section<'a> {
     fn block(&mut self, braces: Option<(&'a str, bool)>, depth: usize) {
         let written = self.blocks.get(&braces).cloned().unwrap_or_default();
         let place = |node: &Node| self.numbers.get(node.id.as_str()).copied().unwrap_or(0);
+        // In the written language the steps of a block run as they are
+        // written. Where they do not (`@after`, language 1), what is written
+        // before a check says nothing: it stands under the step it reads.
+        let steps: Vec<usize> = written
+            .iter()
+            .filter(|node| chain::is_step(node.kind))
+            .map(|node| place(node))
+            .collect();
+        let ordered = steps.is_sorted();
         // The checks after each step, by the step; `None` before any.
         let mut under: HashMap<Option<&str>, Vec<&'a Node>> = HashMap::new();
         let mut items: Vec<&'a Node> = Vec::new();
@@ -343,7 +352,16 @@ impl<'a> Section<'a> {
                 continue;
             }
             // Under a request, and else after the last row above it.
-            let after = match step {
+            let before = if ordered {
+                step
+            } else {
+                self.read_by(node).filter(|step| {
+                    self.blocks
+                        .get(&braces)
+                        .is_some_and(|block| block.iter().any(|node| node.id == step.id))
+                })
+            };
+            let after = match before {
                 Some(step) if step.kind == NodeKind::Request && self.single(node) => Some(step),
                 _ => last,
             };
@@ -389,6 +407,18 @@ impl<'a> Section<'a> {
     /// Whether `check` reads one step.
     fn single(&self, check: &Node) -> bool {
         check_subjects_in(self.graphs, check).subjects.len() == 1
+    }
+
+    /// The one step `check` reads.
+    fn read_by(&self, check: &Node) -> Option<&'a Node> {
+        let subjects = check_subjects_in(self.graphs, check).subjects;
+        let [subject] = subjects.as_slice() else {
+            return None;
+        };
+        self.graphs
+            .iter()
+            .flat_map(|graph| &graph.nodes)
+            .find(|node| node.id == subject.step)
     }
 
     fn row(&mut self, node: &Node, depth: usize, kind: Kind) {

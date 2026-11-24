@@ -14,12 +14,9 @@ use crate::steps::{
 pub(super) struct StepsView {
     list: List,
     rows: Option<(Arc<Document>, Arc<Project>, Arc<Model>)>,
-    /// The board's header row had no room for *Steps | Canvas*, which stands
-    /// at the right of the tabs above it.
-    above: bool,
 }
 
-/// The gap between the header, the summary and the switch.
+/// The gap between the header and the summary, the tabs and the switch.
 const GAP: f32 = 12.0;
 
 impl FolderApp {
@@ -29,8 +26,8 @@ impl FolderApp {
         self.steps_offered(active) && self.workbench.panels.steps
     }
 
-    /// Whether the header offers *Steps | Canvas*: a scenario's, in Diagram.
-    pub(super) fn steps_offered(&self, active: Option<&str>) -> bool {
+    /// Whether *Steps | Canvas* is offered: for a scenario, in Diagram.
+    fn steps_offered(&self, active: Option<&str>) -> bool {
         self.workbench.mode == Mode::Diagram
             && active
                 .and_then(|id| self.shared_model(id))
@@ -66,9 +63,7 @@ impl FolderApp {
         model: &Arc<Document>,
     ) {
         let rows = self.step_rows(model);
-        if self.steps_header(ui, header, &rows.summary()) {
-            self.choose_steps(false);
-        }
+        Self::steps_header(ui, header, &rows.summary());
         let selected = self
             .selections
             .get(document_id)
@@ -93,7 +88,8 @@ impl FolderApp {
                     self.touched();
                 }
                 // As a row of Run results selects it: a folded check on its
-                // step.
+                // step, which the board says although it was never drawn.
+                self.ensure_canvas(document_id);
                 self.select_on_board(document_id, model, id, cleanup);
             }
             Some(Action::Clear) => {
@@ -103,8 +99,8 @@ impl FolderApp {
         }
     }
 
-    /// The header of *Steps*; whether *Canvas* was chosen.
-    fn steps_header(&self, ui: &mut egui::Ui, header: &diagram::Header<'_>, summary: &str) -> bool {
+    /// The header of *Steps*: the board's own name and kind, and the summary.
+    fn steps_header(ui: &mut egui::Ui, header: &diagram::Header<'_>, summary: &str) {
         let (band, _) = ui.allocate_exact_size(
             egui::vec2(
                 ui.available_width(),
@@ -122,16 +118,11 @@ impl FolderApp {
             band.left_top() + egui::vec2(canvas_padding::LEFT, canvas_padding::Y),
             band.right_bottom() - egui::vec2(canvas_padding::RIGHT, canvas_padding::Y),
         );
-        let switch = list::switch_size(ui);
-        let at = egui::Rect::from_center_size(
-            egui::pos2(row.right() - switch.x / 2.0, row.center().y),
-            switch,
-        );
         let font = egui::FontId::proportional(theme::FONT_META);
         let galley = ui
             .painter()
             .layout_no_wrap(summary.to_owned(), font, theme::MUTED);
-        let alone = row.width() - switch.x - GAP;
+        let alone = row.width();
         let with_summary = alone - galley.size().x - GAP;
         let fit = header.fit(
             ui,
@@ -144,7 +135,7 @@ impl FolderApp {
         if fit.width <= with_summary {
             let place = egui::Rect::from_min_size(
                 egui::pos2(
-                    at.left() - GAP - galley.size().x,
+                    row.right() - galley.size().x,
                     row.center().y - galley.size().y / 2.0,
                 ),
                 galley.size(),
@@ -153,32 +144,18 @@ impl FolderApp {
             ui.interact(place, ui.id().with("steps-summary"), egui::Sense::hover())
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, summary));
         }
-        let mut place = ui.new_child(egui::UiBuilder::new().max_rect(at));
-        list::switch(&mut place, true) == Some(false)
     }
 
-    /// Whether the board's header row has no room for *Steps | Canvas*, as it
-    /// was drawn in this frame.
-    pub(super) fn set_switch_above(&mut self, above: bool) {
-        if self.steps.above != above {
-            self.steps.above = above;
-            self.ui_context.request_repaint();
-        }
-    }
-
-    /// Draws *Steps | Canvas* at the right of the tabs while the board's
-    /// header row under them has no room for it. Returns the width it takes
-    /// from the tabs.
+    /// Draws *Steps | Canvas* at the right of the tabs' row, in the same
+    /// place in both views and at every width (the owner, 2026-11-24).
+    /// Returns the width it takes from the tabs.
     pub(super) fn strip_switch(&mut self, ui: &mut egui::Ui) -> f32 {
-        let shown = self.steps.above
-            && !self.workbench.panels.steps
-            && self.steps_offered(self.workbench.active());
-        if !shown {
+        if !self.steps_offered(self.workbench.active()) {
             return 0.0;
         }
         let size = list::switch_size(ui);
         let strip = ui.available_rect_before_wrap();
-        // Over the tools of the board's header row, level with the tabs.
+        // Over the right end of the header row below, level with the tabs.
         let margin = (canvas_padding::RIGHT - theme::SPACE_SM).max(0.0);
         let at = egui::Rect::from_center_size(
             egui::pos2(
@@ -188,37 +165,11 @@ impl FolderApp {
             size,
         );
         let mut place = ui.new_child(egui::UiBuilder::new().max_rect(at));
-        let chosen = list::switch(&mut place, false);
-        self.steps_chosen(chosen);
-        size.x + margin + GAP
-    }
-
-    /// *Steps | Canvas* chosen on the board's header.
-    pub(super) fn steps_chosen(&mut self, steps: Option<bool>) {
-        if let Some(steps) = steps {
+        if let Some(steps) = list::switch(&mut place, self.workbench.panels.steps) {
             self.choose_steps(steps);
         }
+        size.x + margin + GAP
     }
-}
-
-/// The width the board's header takes with *Steps | Canvas* at its right,
-/// before the steps summary and the tools; `None` when the row has no room
-/// for it beside a header of `full`, of which nothing is given up for it.
-pub(super) fn beside(ui: &egui::Ui, full: f32, room: canvas::HeaderRoom) -> Option<f32> {
-    // A point to spare keeps rounding from pushing the summary out.
-    let width = room.with_summary - 1.0;
-    (full + GAP + list::switch_size(ui).x <= width).then_some(width)
-}
-
-/// Draws *Steps | Canvas* at the right of `row`, the board's header as wide
-/// as [`beside`] says. Returns what a click chose.
-pub(super) fn board_switch(ui: &egui::Ui, row: egui::Rect) -> Option<bool> {
-    egui::Area::new(ui.id().with("steps-canvas-switch"))
-        .fixed_pos(row.right_center())
-        .pivot(egui::Align2::RIGHT_CENTER)
-        .fade_in(false)
-        .show(ui.ctx(), |ui| list::switch(ui, false))
-        .inner
 }
 
 /// The paddings of the board's header row.

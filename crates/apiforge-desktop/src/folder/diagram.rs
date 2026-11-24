@@ -114,7 +114,6 @@ impl FolderApp {
             self.steps_area(ui, document_id, &header, &model);
             return;
         }
-        let offered = self.steps_offered(active);
         let project = self.context_project();
         let run = self.fresh_run(document_id);
         // Resolved with the report, once per run (LAY-19).
@@ -202,11 +201,7 @@ impl FolderApp {
         // also while it is folded to its rail (KTLO-17).
         let library = (!library_in_view)
             .then(|| library_context(&project, document_id, &model, cleanup, snapshot.editable));
-        if !self.canvases.contains_key(document_id) {
-            let canvas = self.new_canvas();
-            self.canvases.insert(document_id.to_owned(), canvas);
-            self.show_checks_here(document_id);
-        }
+        self.ensure_canvas(document_id);
         let mode = self.workbench.mode;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
         // An edit that is not the delete, made anywhere, ends its notice
@@ -221,8 +216,6 @@ impl FolderApp {
             self.notice_models.remove(document_id);
         }
         let mut chosen = cleanup;
-        let mut switched = None;
-        let mut above = false;
         let commands = ui
             .scope(|ui| {
                 if !snapshot.editable && !snapshot.paused {
@@ -263,28 +256,15 @@ impl FolderApp {
                     shared: &shared,
                     moves: true,
                 };
-                let room = canvas.header_room(ui, &input);
-                let fit = header.fit(ui, room);
-                let beside = offered
-                    .then(|| steps_view::beside(ui, header.full_width(ui), room))
-                    .flatten();
-                input.header_leading = Some(egui::vec2(
-                    beside.unwrap_or(fit.width),
-                    theme::CONTROL_HEIGHT,
-                ));
+                let fit = header.fit(ui, canvas.header_room(ui, &input));
+                input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
                 let row = canvas.leading_rect(ui, &input);
-                if beside.is_some() {
-                    switched = steps_view::board_switch(ui, row);
-                }
-                above = offered && beside.is_none();
                 // Drawn before the board, so the keyboard reaches the header
                 // first and then the board's toolbar on the same row.
                 header.show(ui.ctx(), ui.id(), row, &fit, &mut chosen);
                 canvas.show(ui, &input)
             })
             .inner;
-        self.steps_chosen(switched);
-        self.set_switch_above(above);
         if chosen != cleanup {
             if let Some(tab) = self.workbench.tab_mut(document_id) {
                 tab.cleanup = chosen;
@@ -302,6 +282,15 @@ impl FolderApp {
             .is_some_and(canvas::Canvas::has_back)
         {
             self.jump_views.remove(document_id);
+        }
+    }
+
+    /// The board of `document_id`, made when it has none yet.
+    pub(super) fn ensure_canvas(&mut self, document_id: &str) {
+        if !self.canvases.contains_key(document_id) {
+            let canvas = self.new_canvas();
+            self.canvases.insert(document_id.to_owned(), canvas);
+            self.show_checks_here(document_id);
         }
     }
 

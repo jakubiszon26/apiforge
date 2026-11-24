@@ -373,8 +373,8 @@ impl FolderApp {
         let scroll = egui::ScrollArea::horizontal()
             .id_salt("folder-tab-strip")
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded);
-        // *Steps | Canvas* stands at the right of the tabs when the board's
-        // header has no room for it (REQ-01a).
+        // *Steps | Canvas* stands at the right of the tabs, which give way to
+        // it (REQ-01a).
         let width = (ui.available_width() - self.strip_switch(ui)).max(0.0);
         let mut scroll = scroll.max_width(width);
         // The active tab must be reachable, so activating one scrolls it in.

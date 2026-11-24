@@ -246,7 +246,10 @@ struct Drawing<'a> {
     document: &'a str,
     results: Option<&'a Results<'a>>,
     selected: Option<&'a str>,
-    caption: f32,
+    /// The widths of the two captions that have a short form, measured once
+    /// a frame.
+    differs: f32,
+    sets: f32,
 }
 
 impl List {
@@ -268,7 +271,8 @@ impl List {
             document,
             results,
             selected,
-            caption: width_of(ui, DIFFERS, caption_font()),
+            differs: width_of(ui, DIFFERS, caption_font()),
+            sets: width_of(ui, SETS, caption_font()),
         };
         egui::ScrollArea::vertical()
             .id_salt(("steps-list", document))
@@ -349,7 +353,7 @@ impl Drawing<'_> {
             .max(0.0);
         let width = full - indent - BADGE - BADGE_GAP;
         let inside = width - 2.0 * PAD.x;
-        let columns = Columns::of(inside, self.caption);
+        let columns = Columns::of(inside, self.differs);
         let height = match &row.kind {
             Kind::Request(request) => 2.0 * PAD.y + HEAD_HEIGHT + columns.height(heights(request)),
             _ => LINE_HEIGHT,
@@ -376,19 +380,24 @@ impl Drawing<'_> {
             .zip(result)
             .map(|(results, step)| Outcome::of(step, results, row.checks(), row.phase));
         let response = ui.interact(card, id, Sense::click());
-        let name = name(row, outcome.as_ref());
         let active = self.selected.is_some_and(|id| row.holds(id));
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        response.widget_info(|| {
+            let name = name(row, outcome.as_ref());
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name)
+        });
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_selected(active);
-            if let Some(branch) = row.branch {
-                node.set_description(format!("in {branch}"));
+            if let Some(said) = description(row) {
+                node.set_description(said);
             }
         });
         if response.gained_focus() {
             ui.scroll_to_rect(card, None);
         }
-        if ui.is_rect_visible(line) {
+        // A row out of sight, and its checks, are named and described for
+        // assistive technology and the keyboard; nothing is laid out.
+        let visible = ui.is_rect_visible(line);
+        if visible {
             self.frame(ui, row, line, card, indent, &response, active);
         }
         let mut chosen = response
@@ -403,12 +412,14 @@ impl Drawing<'_> {
                 vec2(inner.width(), card.height()),
             ),
         };
-        self.head(ui, id, row, head, result, outcome.as_ref());
+        if visible {
+            self.head(ui, id, row, head, result, outcome.as_ref());
+        }
         if let Kind::Request(request) = &row.kind {
             let top = head.bottom();
             let contents = Rect::from_min_max(pos2(inner.left(), top), inner.max);
             chosen = self
-                .columns(ui, id, row, request, contents, columns)
+                .columns(ui, id, row, request, contents, columns, visible)
                 .or(chosen);
         }
         (line, chosen)
@@ -491,7 +502,7 @@ impl Drawing<'_> {
         outcome: Option<&Outcome>,
     ) {
         let mut right = rect.right();
-        if let Some(outcome) = outcome.filter(|_| ui.is_rect_visible(rect)) {
+        if let Some(outcome) = outcome {
             let pill = pill(
                 ui,
                 pos2(right, rect.center().y),
@@ -575,17 +586,12 @@ impl Drawing<'_> {
         let sentence = outcome
             .and_then(|outcome| outcome.reason.as_ref())
             .map(|(_, sentence)| sentence.as_str());
-        // Out of sight a text keeps its name; it is not measured.
-        let widths: Vec<f32> = if ui.is_rect_visible(rect) {
-            let gaps = 8.0 * pieces.len().saturating_sub(1) as f32;
-            let whole: Vec<f32> = pieces
-                .iter()
-                .map(|(text, font, _)| width_of(ui, text, font.clone()).ceil() + 1.0)
-                .collect();
-            shared(&whole, right - 6.0 - x - gaps)
-        } else {
-            vec![0.0; pieces.len()]
-        };
+        let gaps = 8.0 * pieces.len().saturating_sub(1) as f32;
+        let whole: Vec<f32> = pieces
+            .iter()
+            .map(|(text, font, _)| width_of(ui, text, font.clone()).ceil() + 1.0)
+            .collect();
+        let widths = shared(&whole, right - 6.0 - x - gaps);
         for (index, ((piece, font, colour), width)) in pieces.into_iter().zip(widths).enumerate() {
             let hover = (Some(piece) == reason).then_some(sentence).flatten();
             text(
@@ -601,7 +607,9 @@ impl Drawing<'_> {
         }
     }
 
-    /// READS, SENDS or SETS, and CHECKS; returns the check a click chose.
+    /// READS, SENDS or SETS, and CHECKS, of which alone the checks are there
+    /// out of sight; returns the check a click chose.
+    #[allow(clippy::too_many_arguments)]
     fn columns(
         &self,
         ui: &Ui,
@@ -610,6 +618,7 @@ impl Drawing<'_> {
         request: &Request,
         rect: Rect,
         columns: Columns,
+        visible: bool,
     ) -> Option<String> {
         let heights = heights(request);
         let mut at = rect.min;
@@ -622,8 +631,9 @@ impl Drawing<'_> {
             };
             let column = Rect::from_min_size(at, vec2(room, height));
             match index {
+                0 | 1 if !visible => {}
                 0 => reads(ui, id, request, column),
-                1 => middle(ui, id, request, column),
+                1 => self.middle(ui, id, request, column),
                 _ => chosen = self.checks(ui, id, row, request, column),
             }
             if columns.stacked {
@@ -635,6 +645,70 @@ impl Drawing<'_> {
         chosen
     }
 
+    /// SENDS, or SETS for a step a later step reads.
+    fn middle(&self, ui: &Ui, id: egui::Id, request: &Request, column: Rect) {
+        let fitting = |words: &'static str, width: f32, short: &'static str| {
+            if width <= column.width() {
+                words
+            } else {
+                short
+            }
+        };
+        let quiet;
+        let lines: Vec<(&str, bool)> = match &request.column {
+            Column::Sends(sends) => {
+                let words = match sends.common {
+                    Some(_) => fitting(DIFFERS, self.differs, DIFFERS_SHORT),
+                    None => SENDS,
+                };
+                let hover = sends.common.as_deref();
+                caption(ui, id.with("sends"), column, words, hover);
+                quiet = sends
+                    .lines
+                    .iter()
+                    .map(|line| (line.text.as_str(), line.quiet))
+                    .collect();
+                quiet
+            }
+            Column::Sets(lines) => {
+                caption(
+                    ui,
+                    id.with("sends"),
+                    column,
+                    fitting(SETS, self.sets, SETS_SHORT),
+                    None,
+                );
+                lines.iter().map(|line| (line.as_str(), false)).collect()
+            }
+        };
+        let (listed, more) = sends::cut(lines.len());
+        for (index, (line, quiet)) in lines[..listed].iter().enumerate() {
+            let colour = if *quiet { theme::MUTED } else { theme::TEXT };
+            let rect = line_rect(column, index);
+            text(
+                ui,
+                id.with(("send", index)),
+                rect,
+                line,
+                mono(),
+                colour,
+                None,
+            );
+        }
+        if more > 0 {
+            let rest: Vec<&str> = lines[listed..].iter().map(|(line, _)| *line).collect();
+            text(
+                ui,
+                id.with("more"),
+                line_rect(column, listed),
+                &format!("+ {more} more"),
+                mono(),
+                theme::MUTED,
+                Some(&rest.join("\n")),
+            );
+        }
+    }
+
     fn checks(
         &self,
         ui: &Ui,
@@ -643,9 +717,14 @@ impl Drawing<'_> {
         request: &Request,
         column: Rect,
     ) -> Option<String> {
-        caption(ui, id.with("checks"), column, CHECKS, None);
+        if ui.is_rect_visible(column) {
+            caption(ui, id.with("checks"), column, CHECKS, None);
+        }
         let top = column.top() + CAPTION_HEIGHT;
         if request.checks.is_empty() {
+            if !ui.is_rect_visible(column) {
+                return None;
+            }
             let rect =
                 Rect::from_min_size(pos2(column.left(), top), vec2(column.width(), TEXT_HEIGHT));
             text(
@@ -683,18 +762,20 @@ impl Drawing<'_> {
             .zip(result)
             .map(|(results, step)| Outcome::of(step, results, &[], row.phase));
         let actual = result.and_then(failed_value);
-        let mut name = check.text.clone();
-        if let Some(outcome) = &outcome {
-            name.push_str(" · ");
-            name.push_str(&outcome.said());
-        }
-        if let Some(actual) = &actual {
-            name.push_str(" · ");
-            name.push_str(actual);
-        }
-        name.push_str(&format!(" · {} of {}", check.handle, row.name));
         let response = ui.interact(rect, id, Sense::click());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        response.widget_info(|| {
+            let mut name = check.text.clone();
+            if let Some(outcome) = &outcome {
+                name.push_str(" · ");
+                name.push_str(&outcome.said());
+            }
+            if let Some(actual) = &actual {
+                name.push_str(" · ");
+                name.push_str(actual);
+            }
+            name.push_str(&format!(" · {} of {}", check.handle, row.name));
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name)
+        });
         let active = self.selected == Some(check.id.as_str());
         if response.gained_focus() {
             ui.scroll_to_rect(rect, None);
@@ -811,6 +892,25 @@ fn name(row: &Row, outcome: Option<&Outcome>) -> String {
     name
 }
 
+/// What a row says beside its name for assistive technology: its branch, and
+/// what the request reads, sends or sets.
+fn description(row: &Row) -> Option<String> {
+    let mut said: Vec<String> = row.branch.iter().map(|it| format!("in {it}")).collect();
+    if let Kind::Request(request) = &row.kind {
+        if !request.reads.is_empty() {
+            said.push(format!("reads {}", request.reads.join(", ")));
+        }
+        match &request.column {
+            Column::Sends(sends) => {
+                let lines: Vec<&str> = sends.lines.iter().map(|line| &*line.text).collect();
+                said.push(format!("sends {}", lines.join(", ")));
+            }
+            Column::Sets(lines) => said.push(format!("sets {}", lines.join(", "))),
+        }
+    }
+    (!said.is_empty()).then(|| said.join(" · "))
+}
+
 /// The heights of a request's three columns.
 fn heights(request: &Request) -> [f32; 3] {
     let lines = match &request.column {
@@ -906,70 +1006,6 @@ fn line_rect(column: Rect, index: usize) -> Rect {
         ),
         vec2(column.width(), TEXT_HEIGHT),
     )
-}
-
-/// SENDS, or SETS for a step a later step reads.
-fn middle(ui: &Ui, id: egui::Id, request: &Request, column: Rect) {
-    let fitting = |words: &'static str, short: &'static str| {
-        if width_of(ui, words, caption_font()) <= column.width() {
-            words
-        } else {
-            short
-        }
-    };
-    let quiet;
-    let lines: Vec<(&str, bool)> = match &request.column {
-        Column::Sends(sends) => {
-            let words = match sends.common {
-                Some(_) => fitting(DIFFERS, DIFFERS_SHORT),
-                None => SENDS,
-            };
-            let hover = sends.common.as_deref();
-            caption(ui, id.with("sends"), column, words, hover);
-            quiet = sends
-                .lines
-                .iter()
-                .map(|line| (line.text.as_str(), line.quiet))
-                .collect();
-            quiet
-        }
-        Column::Sets(lines) => {
-            caption(
-                ui,
-                id.with("sends"),
-                column,
-                fitting(SETS, SETS_SHORT),
-                None,
-            );
-            lines.iter().map(|line| (line.as_str(), false)).collect()
-        }
-    };
-    let (listed, more) = sends::cut(lines.len());
-    for (index, (line, quiet)) in lines[..listed].iter().enumerate() {
-        let colour = if *quiet { theme::MUTED } else { theme::TEXT };
-        let rect = line_rect(column, index);
-        text(
-            ui,
-            id.with(("send", index)),
-            rect,
-            line,
-            mono(),
-            colour,
-            None,
-        );
-    }
-    if more > 0 {
-        let rest: Vec<&str> = lines[listed..].iter().map(|(line, _)| *line).collect();
-        text(
-            ui,
-            id.with("more"),
-            line_rect(column, listed),
-            &format!("+ {more} more"),
-            mono(),
-            theme::MUTED,
-            Some(&rest.join("\n")),
-        );
-    }
 }
 
 /// The *Steps | Canvas* switch: the words side by side, the chosen one

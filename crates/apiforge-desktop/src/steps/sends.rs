@@ -98,7 +98,8 @@ pub fn sends(requests: &[&Node], texts: &Texts<'_>) -> Vec<Sends> {
             continue;
         }
         let common = common(group.iter().map(|&index| sent[index].as_slice()));
-        let full = full(requests[group[0]], &common);
+        let peers: Vec<&Node> = group.iter().map(|&index| requests[index]).collect();
+        let full = full(&peers, &common);
         for &index in &group {
             out[index] = Some(Sends {
                 common: Some(full.clone()),
@@ -189,13 +190,23 @@ fn differing(sent: &[Sent], common: &IndexMap<Place, Sent>) -> Vec<Line> {
     lines
 }
 
-/// The common request in full: its method and path, then its places.
-fn full(first: &Node, common: &IndexMap<Place, Sent>) -> String {
+/// The common request in full: its method and path, the group's pattern where
+/// the paths have no common text, then its places.
+fn full(peers: &[&Node], common: &IndexMap<Place, Sent>) -> String {
+    // The pattern the group is of has the most `{{…}}`: those that join it
+    // have literal segments in their place.
+    let pattern = || {
+        peers
+            .iter()
+            .map(|node| blanked(node))
+            .max_by_key(|url| url.matches(BLANK).count())
+            .unwrap_or_default()
+    };
     let path = match common.get(&Place::Path) {
         Some(path) => crate::report::url_path(&path.text).to_owned(),
-        None => crate::report::url_path(&blanked(first)).replace(BLANK, "{{…}}"),
+        None => crate::report::url_path(&pattern()).replace(BLANK, "{{…}}"),
     };
-    let mut text = format!("The common request\n{} {path}", method(first));
+    let mut text = format!("The common request\n{} {path}", method(peers[0]));
     for sent in common.values().filter(|sent| sent.place != Place::Path) {
         text.push('\n');
         text.push_str(&sent.line().text);
