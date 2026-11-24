@@ -83,9 +83,12 @@ on screen is asserted.
    Test: `diag06c_criterion_4_*`; the smoke list's flow 3 holds.
 5. After an add or a move, the steps of the braces that changed — from
    the first place that changed to the end of that chain, with the cards
-   hung under them and everything inside an `if` among them — stand where
-   a whole *Tidy up* of the board would put them, whether they were
-   placed by hand or not (question 5 = A). For a move that is both the
+   hung under them and everything inside an `if` among them — stand as
+   a whole *Tidy up* of the board arranges them, measured from the step
+   they follow, whether they were placed by hand or not (question 5 = A;
+   amended by DIAG-23,
+   [#612](https://github.com/jakubiszon26/apiforge/issues/612), the owner's
+   answer A of 2026-11-24). For a move that is both the
    place left and the place entered, so no gap stays; an `if` takes the
    room of all its cards. Every other card keeps its position, also when
    that leaves the rows uneven; the camera does not move. Test:
