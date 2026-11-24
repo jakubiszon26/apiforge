@@ -1285,6 +1285,7 @@ impl App {
             mode: self.mode,
             target_node_id,
             single_node_id,
+            partial: None,
             previous_run,
             secrets: self.secrets.clone(),
         };
