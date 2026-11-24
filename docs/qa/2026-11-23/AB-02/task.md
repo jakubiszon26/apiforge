@@ -2,8 +2,8 @@
 
 Ticket: issue #583 · runbook: [AB-01](../../../../tickets/AB-01.md)
 (*Round 1* and *Rounds 2 to 4*) · comparison: [AB-01 round 4](../AB-01/round-4/)
-(v0.1.0's recorded T6 run, not run again). Run on 2026-11-23 by an Opus
-coordinator; every run driven by a fresh Opus subagent.
+(v0.1.0's recorded T6 run, not run again). Run on 2026-11-23 and
+2026-11-24 by Opus coordinators; every run driven by a fresh Opus subagent.
 
 ## The variant
 
@@ -33,6 +33,12 @@ line: `check.sh T6 <cli> <project> <start>` with the build's own CLI.
 
 ## Where this departs from the runbook
 
-- **The working day ended** at about 23:35 the same evening, by the
-  coordinator's limit; the runs that did not fit were not started.
-  See [results](results.md).
+- **The runs span two days.** Run 1 was made on 2026-11-23; the working
+  day ended at about 23:35 and the runs that did not fit were not
+  started. Runs 2 and 3 and the shortest path were made on 2026-11-24 on
+  a fresh release build of the same commit `fe74ae73`, the start verified
+  again as above.
+- **The shortest path's list** was rebuilt from [results](results.md#the-shortest-path),
+  as run 1's log was lost in a restart of the machine.
+- **The void attempt** at run 2 is recorded under
+  [void runs](results.md#void-runs).
