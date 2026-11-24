@@ -120,7 +120,7 @@ one ticket that creates it:
 | [REQ-14](REQ-14.md) Move to Cleanup | #549 | M · 15 | REQ-01b, DIAG-22 | `ready:opus` |
 | [REQ-02b](REQ-02b.md) the body editor | #459 | M · 20 | REQ-02a | `ready:opus` |
 | [REQ-03](REQ-03.md) headers and Auth | #460 | M · 15 | REQ-02a | `ready:opus` |
-| [REQ-04b](REQ-04b.md) Run to here | #461 | S · 15 | REQ-02a, REQ-04a | `ready:opus` |
+| [REQ-04b](REQ-04b.md) Run to here | #461 | M · 20 | REQ-02a, REQ-04a | `ready:opus` |
 | [REQ-05](REQ-05.md) Send alone | #462 | M · 25 | REQ-04b | `ready:opus` |
 
 In parallel, on disjoint files: REQ-01a with REQ-04a (first); then

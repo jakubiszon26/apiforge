@@ -1,6 +1,6 @@
 # REQ-04b: Run to here — run the scenario up to the selected step
 
-- Size: S · Owner review: 15 min · Risk: `visible UI`
+- Size: M · Owner review: 20 min · Risk: `visible UI`
 - State: **Decided** (2026-11-19, 8 = B; [REQ-00](REQ-00.md)). Mock-up
   approved (the button of the [Body](REQ-00.md#mock-up) capture, the
   menu of board 6). After REQ-02a and REQ-04a.
@@ -28,10 +28,16 @@ Tests in `folder/acceptance_tests/req04b.rs`.
    `LIVE_PAUSED`; live without a journal it is refused; in *Simulation*
    nothing is sent; a document with errors gets the prompt of a run.
    `req04b_criterion_2_*`
-3. The steps after it read *Not run* — "the run stopped at *name*", in
-   *Steps*, on the board and in Run results; the summary says the run
-   was partial and names the step; the verdict is not *Passed*.
-   `req04b_criterion_3_*`
+3. The steps the partial report leaves out read *Not run* — "the run
+   stopped at *name*": one function of `not_run.rs` gives them from the
+   document's `sequence` and the report, and *Steps*, the board and the
+   list of Run results (`report/list.rs`, which today draws `run.steps`
+   only) call it. `req04b_criterion_3_*`
+7. The verdict of a partial run is never *PASSED*: `run_pill`, which
+   maps the status alone today, and the bar at the bottom read
+   `diagnostic` and say *PARTIAL* in the warning colour, *FAILED* when a
+   step or check failed; the summary line names the step it stopped at.
+   A full run's pill is unchanged. `req04b_criterion_7_*`
 4. Cleanup ran and its rows carry results. `req04b_criterion_4_*`
 5. A step in a branch not taken is *Not run* with `not_run.rs`'s reason.
    `req04b_criterion_5_*`
@@ -40,9 +46,10 @@ Tests in `folder/acceptance_tests/req04b.rs`.
 
 ## Captures the owner judges on the pull request
 
-The summary line of a partial run (today: "Diagnostic run · may use
-saved inputs · does not pass the full test"); the rows after the stop;
-the button at 960 × 540.
+The pill *PARTIAL* and the summary line of a partial run (today:
+*PASSED* and "Diagnostic run · may use saved inputs · does not pass the
+full test"); the rows after the stop in the three places; the button at
+960 × 540.
 
 ## Not in scope
 
@@ -52,8 +59,14 @@ Ctrl+Enter (P5, the owner's); *Send alone* (REQ-05).
 
 - Files: `folder/runs.rs` (the kind, the stop kept beside the report),
   `steps/request.rs` and `steps/list_edit.rs` (the button, the item),
-  `not_run.rs` (the words), `report.rs` (the summary line), the test
-  file. The engine and `NotRunCause` are not changed: the window words
+  `not_run.rs` (the rows left out, the words), `report.rs` (`run_pill`,
+  the summary line), `report/list.rs` (the rows; REP-07a's file, so
+  after it and REP-07b), `folder/chrome.rs` (the bar's verdict), the
+  test file. M, not S: four places show one fact and a verdict changes
+  its word. The engine and `NotRunCause` are not changed: the window words
   the steps a partial report leaves out.
 - Regression: the gates of a live run — criterion 2 names each; a full
-  run's report and freshness (`report_tests.rs`) unchanged.
+  run's report, pill and freshness (`report_tests.rs`, `rep07a.rs`)
+  unchanged; the workspace window's diagnostic runs keep their pill
+  unless they are partial in this sense (they are not: `partial` is
+  `None` there).

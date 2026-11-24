@@ -50,7 +50,11 @@ Tests in `crates/apiforge-desktop/src/folder/acceptance_tests/req01a.rs`
 and unit tests of `steps/model.rs` and `steps/sends.rs`.
 
 1. *Steps | Canvas* stands on the right of the board's header; the first
-   open is *Canvas*; the choice is kept per project on this computer.
+   open is *Canvas*; the choice is kept per project on this computer,
+   in the local view state (`.apiforge/local/workspace.json`, not
+   tracked, not the project's format) as a field of `PanelSizes` with a
+   default, written only when *Steps*: a build without it drops the
+   field and keeps the rest of the view (KTLO-05c's test extended).
    With a title of 60 characters (WS-05a) at 960 × 540 the title and the
    switch do not overlap. `req01a_criterion_1_*`
 2. On `labels` the rows and their numbers equal `sequence(graph)`, the
@@ -97,8 +101,11 @@ P2 and P3.
 
 - Files: new `steps/mod.rs`, `steps/model.rs`, `steps/sends.rs`,
   `steps/list.rs`, `folder/steps_view.rs`; `folder/diagram.rs` (the
-  switch, the call); `preferences.rs` (the choice); `testing.rs` (a
-  review view); the test file.
+  switch, the call); `apiforge-storage/src/project/workspace.rs` and
+  `folder/workbench.rs` (the choice, beside `results_json`; not
+  `preferences.rs`, which is the person's and not per project; not a new
+  `ViewMode` or a field of `WorkspaceState`, which an earlier build
+  rejects whole); `testing.rs` (a review view); the test file.
 - Reuse: `graph::sequence`, `graph::relations`, `canvas::check_text`
   (with `own = None` for criterion 3), `chain` for the branch a
   statement is written in — not `own_step`, which answers what a check

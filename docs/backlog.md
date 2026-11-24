@@ -608,7 +608,7 @@ criteria:
 | [#549](https://github.com/jakubiszon26/apiforge/issues/549) | REQ-14 A step is moved between Main and Cleanup, with its checks; [ticket](tickets/REQ-14.md) | M · 15 · `visible UI` | `ready:opus` · after REQ-01b and DIAG-22 (`canvas/menu.rs`) |
 | [#459](https://github.com/jakubiszon26/apiforge/issues/459) | REQ-02b The body editor; closes DIAG-04 [#365](https://github.com/jakubiszon26/apiforge/issues/365); [ticket](tickets/REQ-02b.md) | M · 20 · `visible UI` | `ready:opus` · after REQ-02a |
 | [#460](https://github.com/jakubiszon26/apiforge/issues/460) | REQ-03 Headers as a table; authorization from a list; [ticket](tickets/REQ-03.md) | M · 15 · `visible UI` | `ready:opus` · after REQ-02a |
-| [#461](https://github.com/jakubiszon26/apiforge/issues/461) | REQ-04b Run to here; [ticket](tickets/REQ-04b.md) | S · 15 · `visible UI` | `ready:opus` · after REQ-02a and REQ-04a |
+| [#461](https://github.com/jakubiszon26/apiforge/issues/461) | REQ-04b Run to here; [ticket](tickets/REQ-04b.md) | M · 20 · `visible UI` | `ready:opus` · after REQ-02a and REQ-04a |
 | [#462](https://github.com/jakubiszon26/apiforge/issues/462) | REQ-05 Send this request alone; [ticket](tickets/REQ-05.md) | M · 25 · `visible UI`, `default` | `ready:opus` · after REQ-04b |
 | [#601](https://github.com/jakubiszon26/apiforge/issues/601) | REQ-16 Send alone can send a secret the last run received | S–M · `default` | proposed 2026-11-24, `decision-needed` |
 | [#464](https://github.com/jakubiszon26/apiforge/issues/464) | REQ-07 A request in and out as cURL; a failed check copied as a report | S–M · 15 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REP-07 and REQ-02a |
