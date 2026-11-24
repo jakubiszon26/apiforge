@@ -52,6 +52,9 @@ pub struct ActionMenu {
     /// Opened on a check, value, variable or export in a branch: the menu
     /// offers *Move out of the branch* for it (DIAG-06d).
     pub out_of_branch: Option<String>,
+    /// Opened on a step of the folder window's board, from its card or its
+    /// foot: a step it adds goes directly after that step, unbound (DIAG-22).
+    pub after_step: bool,
     /// Opened by the `+` on a line of a chain: a step it adds goes on that
     /// line, after its source by its port (DIAG-06b).
     pub on_line: bool,
@@ -120,6 +123,18 @@ pub fn default_source(graph: &Graph, project: &Project, node_id: &str) -> Option
     Some((node.id.clone(), port))
 }
 
+/// Whether a step taken from the menu of a card of this kind goes directly
+/// after it (DIAG-22). The menus of Start and of an `if` start from a control
+/// port, and a check or a value is no step.
+pub fn steps_go_after(kind: NodeKind) -> bool {
+    apiforge_core::chain::is_step(kind) && !matches!(kind, NodeKind::Start | NodeKind::If)
+}
+
+/// Whether `block` adds a step of a chain, Start excluded.
+fn adds_step(block: Block) -> bool {
+    apiforge_core::chain::is_step(block.kind()) && block.kind() != NodeKind::Start
+}
+
 struct Action {
     block: Block,
     name: String,
@@ -138,6 +153,7 @@ impl ActionMenu {
             open_groups: library::default_open_groups(),
             bar: false,
             out_of_branch: None,
+            after_step: false,
             on_line: false,
             moves: None,
         }
@@ -186,10 +202,7 @@ impl ActionMenu {
             ]
         };
         // On a line, only a step: the line runs between steps (DIAG-06b).
-        let on_line = |block: &Block| {
-            !self.on_line
-                || (apiforge_core::chain::is_step(block.kind()) && block.kind() != NodeKind::Start)
-        };
+        let on_line = |block: &Block| !self.on_line || adds_step(*block);
         let mut actions: Vec<Action> = blocks
             .iter()
             .copied()
@@ -203,10 +216,12 @@ impl ActionMenu {
                 component: None,
             })
             .collect();
-        let data_source = self
-            .source
-            .as_ref()
-            .is_some_and(|(_, port)| !port.starts_with("__"));
+        // A component put after the step reads nothing of it (DIAG-22).
+        let data_source = !self.after_step
+            && self
+                .source
+                .as_ref()
+                .is_some_and(|(_, port)| !port.starts_with("__"));
         for component in library::offered_components(project, component) {
             // From a data output, offer only components declaring a compatible action.
             if data_source {
@@ -234,6 +249,18 @@ impl ActionMenu {
             });
         }
         actions
+    }
+
+    /// The output a block taken from the menu is added from: a step from a
+    /// step's own menu from its *Next* (DIAG-22), anything else from the
+    /// menu's source.
+    fn source_for(&self, block: Block) -> Option<(String, String)> {
+        let (node, port) = self.source.clone()?;
+        if self.after_step && adds_step(block) {
+            Some((node, ORDER_PORT.to_owned()))
+        } else {
+            Some((node, port))
+        }
     }
 
     /// Shows the popup. With `library`, the steps are followed by the block
@@ -451,7 +478,7 @@ impl ActionMenu {
                                                 block: action.block,
                                                 component: action.component.clone(),
                                                 position,
-                                                source: self.source.clone(),
+                                                source: self.source_for(action.block),
                                             }
                                         });
                                     }
