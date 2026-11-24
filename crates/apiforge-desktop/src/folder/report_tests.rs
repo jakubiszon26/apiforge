@@ -254,19 +254,27 @@ fn ktlo19_the_maximised_bar_and_step_list_fit_the_minimum_window() {
                 policy.rect()
             );
         }
+        // Every row of the list, by its accessible label: since REP-07 a
+        // check's row starts with its predicate and a nested row names the
+        // call that holds it, so the labels are taken from the list itself.
         let id = folder(&harness).workbench.active().unwrap().to_owned();
-        let rows: Vec<String> =
-            crate::report::flatten_steps(&folder(&harness).run_result(&id).unwrap().steps)
-                .iter()
-                .map(|row| {
-                    format!(
-                        "{} · {} · {} ms",
-                        row.step.display_name(),
-                        row.step.status.label(),
-                        row.step.duration_ms
-                    )
-                })
-                .collect();
+        let steps =
+            crate::report::flatten_steps(&folder(&harness).run_result(&id).unwrap().steps).len();
+        let edge = harness
+            .get_by_label(crate::report::RESIZE_LIST)
+            .rect()
+            .left();
+        let rows: Vec<String> = harness
+            .query_all_by_role(egui::accesskit::Role::Button)
+            .filter(|node| node.rect().right() <= edge + 1.0)
+            .filter_map(|node| {
+                egui_kittest::kittest::NodeT::accesskit_node(&node)
+                    .label()
+                    .map(|label| label.to_string())
+            })
+            .filter(|label| label.contains(" · "))
+            .collect();
+        assert_eq!(rows.len(), steps, "{mode}: a row a step: {rows:?}");
         for (index, name) in rows.iter().enumerate() {
             // Rows of one name are told apart by their order.
             let nth = rows[..index].iter().filter(|other| *other == name).count();
