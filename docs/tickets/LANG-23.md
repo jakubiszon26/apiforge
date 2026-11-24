@@ -33,7 +33,7 @@ what already covers it, and what to do, ranked by what a tester gains.
 - **Evidence.** *Start and ordering* says "a scenario or a component with a
   step has a `start`" (`reference.md:138-139`). *Diagnostics* says "A
   component needs no `start`: its body runs from its first step written"
-  (`reference.md:814-815`). The code agrees with the second: the rule runs
+  (`reference.md:825-826`). The code agrees with the second: the rule runs
   only for a scenario (`apiforge-script/src/lower.rs:128-134`), and the
   message speaks of a scenario (`fix.rs:23`).
 - **Why.** LANG-13 first asked a `start` of a component and withdrew it on
@@ -69,7 +69,7 @@ what already covers it, and what to do, ranked by what a tester gains.
   `param.productId` (`reference.md:104-115`); a request declares
   `argument cart` and reads `input.cart` (`reference.md:192-193, 224-225`).
   The diagnostics follow: *Unknown parameter* for a missing `input`,
-  *Unknown request argument* for `input.x` (`reference.md:776-781`).
+  *Unknown request argument* for `input.x` (`reference.md:787-792`).
 - **Why.** History. `input.name` is the reading of a request's `argument`
   leaf in [ADR 0004](../decisions/0004-document-format-v2.md) (named request
   arguments, 23 October 2026), and `param.name` the `parameter` leaf;
@@ -151,7 +151,7 @@ what already covers it, and what to do, ranked by what a tester gains.
 ## F6b. One export or two changes how a caller reads them
 
 - **Evidence.** "A component with exactly one export has a single output,
-  read directly" (`reference.md:622-624`); a block with a single output
+  read directly" (`reference.md:629-630`); a block with a single output
   port takes a path directly, otherwise the first segment names the port
   (`apiforge-core/src/template_text.rs:4-6`).
 - **Why.** History: the rule of single-output blocks, applied to a

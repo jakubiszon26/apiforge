@@ -1,6 +1,6 @@
 # LANG-25: A request's argument is read as `arg.name`
 
-- Size: M · Owner review: 15 min · Risk: format
+- Size: M, at its upper edge · Owner review: 20 min · Risk: format, default
 - State: Analysis. The shape is the owner's decision 2 on #589
   (2026-11-24, [LANG-23](LANG-23.md), F3 option A); the readings under *To
   confirm* are the planning model's. Not labelled: the analysis awaits the
@@ -24,8 +24,10 @@ read as `input.cart`, while `input productId` of a component is read as
 - Changed: `input.name` in a request still runs, with a warning whose fix
   writes `arg.name`; `apiforge fix --folder` rewrites a whole project.
 - Removed or hidden: nothing. Migrated: nothing automatically.
-- Default behaviour that changes: none in a run. The language version
-  stays 2.
+- Default behaviour that changes: none in a run; the language version
+  stays 2. `apiforge fix --folder` on a project in the current language
+  no longer only says "nothing to convert": it applies the fixes of this
+  ticket (criterion 3).
 
 ## Mock-up
 
@@ -39,10 +41,17 @@ Not applicable: no control changes; a card shows the text of its source.
 2. `input.name` in a request stays valid and runs; it carries the warning
    *A request's argument is read as `arg.name`* with a fix that rewrites
    that reference alone. Test: S `lang25_criterion_2_*`.
-3. `apiforge fix --folder` rewrites every such reference of every source
-   through LANG-20's plan and commit, as LANG-20 defines them; every other
-   byte stays; a second run changes nothing; published revisions are not
-   touched. Test: C `lang25_criterion_3_*`.
+3. `apiforge fix --folder` on a project **already in language 2** applies
+   this fix to every working source instead of stopping at "nothing to
+   convert". Today it cannot: `plan_fix` returns `Planned::Current` for
+   such a project (`apiforge-project/src/language.rs:205-207, 228-230`) and
+   the command prints that sentence (`apiforge-cli/src/fix.rs:53-59`). The
+   pass writes through the guarded commit LANG-20 defines (its read set
+   and refusal, not restated here), leaves the manifest and the published
+   revisions untouched, changes no other byte, and changes nothing when
+   run again; `--check` reports what it would write and writes nothing. A
+   language-1 project is converted first, as today, and the pass follows
+   in the same run. Test: C `lang25_criterion_3_*`.
 4. The printer writes `arg.name` (`print.rs:303`); an edit on the board
    rewrites only the statements it changes. Test: S round trip, D one
    request edited on the board.
@@ -70,6 +79,18 @@ Not applicable: no control changes; a card shows the text of its source.
 - **Criterion 2: a warning, not silence.** Without a diagnostic the fix
   has nothing to hang on; every existing project gets warnings until its
   one `apiforge fix`.
+
+- **Criterion 3: the command widens** from "convert a project to the
+  build's language" to "and apply the fixes the current language
+  offers". That is the owner's decision 2 read literally ("`apiforge fix`
+  rewrites it"), and a change of what a command does by default, so it is
+  his to confirm. The alternative keeps the command as it is and leaves
+  the rewrite to the fix on the warning (editor, `check_text`), one
+  reference at a time: smaller, no `default` flag, and a project keeps
+  its warnings until someone clicks through them.
+- **Size.** If the second read finds criterion 3 takes the ticket over
+  M, it is split: 25a the language (criteria 1, 2, 4 to 7), 25b the pass
+  of the command.
 
 ## Not in scope
 
