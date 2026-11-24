@@ -243,8 +243,8 @@ fn middle_cut(text: &str, fits: usize) -> Option<String> {
     Some(cut)
 }
 
-/// Gives the keyboard to what a click chose; whether `response` has it.
-fn keyboard(response: &Response) -> bool {
+/// Gives the keyboard to what a click chose; its id while it has it.
+fn keyboard(response: &Response) -> Option<egui::Id> {
     let key = egui::Id::new(POINTER_FOCUS);
     let clicked = response.clicked_by(egui::PointerButton::Primary);
     if clicked {
@@ -259,7 +259,7 @@ fn keyboard(response: &Response) -> bool {
             }
         });
     }
-    response.has_focus()
+    response.has_focus().then_some(response.id)
 }
 
 /// The row a click gave the keyboard to, which is marked as selected and
@@ -337,8 +337,9 @@ impl Columns {
 pub struct List {
     /// What was selected when each document was last shown.
     shown: HashMap<String, Option<String>>,
-    /// A row or a check of the list has the keyboard.
-    focused: bool,
+    /// The row or check that had the keyboard when the list was last drawn;
+    /// egui says whether it still has.
+    focused: Option<egui::Id>,
 }
 
 /// What the rows are drawn from.
@@ -353,10 +354,9 @@ struct Drawing<'a> {
 }
 
 impl List {
-    /// Whether a row or a check of the list had the keyboard when it was last
-    /// drawn.
-    pub fn has_keyboard(&self) -> bool {
-        self.focused
+    /// Whether a row or a check of the list has the keyboard.
+    pub fn has_keyboard(&self, ctx: &egui::Context) -> bool {
+        self.focused.is_some() && ctx.memory(|memory| memory.focused()) == self.focused
     }
 
     /// Draws `model` in the room left, and returns what was asked for.
@@ -375,7 +375,7 @@ impl List {
             .shown
             .insert(document.to_owned(), selected.map(str::to_owned));
         let reveal = selected.is_some() && before.flatten().as_deref() != selected;
-        self.focused = false;
+        self.focused = None;
         let drawing = Drawing {
             document,
             results,
@@ -426,7 +426,7 @@ impl List {
                     }
                     for row in rows {
                         let response = drawing.row(ui, row);
-                        self.focused |= response.2;
+                        self.focused = response.2.or(self.focused);
                         if let Some(id) = response.1 {
                             action = Some(Action::Select {
                                 id,
@@ -455,9 +455,9 @@ impl List {
 }
 
 impl Drawing<'_> {
-    /// Draws one row; returns its place, the step a click chose, and whether
-    /// it or a check of it has the keyboard.
-    fn row(&self, ui: &mut Ui, row: &Row) -> (Rect, Option<String>, bool) {
+    /// Draws one row; returns its place, the step a click chose, and which of
+    /// it and its checks has the keyboard.
+    fn row(&self, ui: &mut Ui, row: &Row) -> (Rect, Option<String>, Option<egui::Id>) {
         let full = ui.available_width() - 2.0 * MARGIN;
         let indent = (row.depth as f32 * INDENT)
             .min(full - BADGE - BADGE_GAP - LEAST_CARD)
@@ -532,7 +532,7 @@ impl Drawing<'_> {
             let contents = Rect::from_min_max(pos2(inner.left(), top), inner.max);
             let (check, on_check) = self.columns(ui, id, row, request, contents, columns, visible);
             chosen = check.or(chosen);
-            focused |= on_check;
+            focused = on_check.or(focused);
         }
         (line, chosen, focused)
     }
@@ -731,10 +731,10 @@ impl Drawing<'_> {
         rect: Rect,
         columns: Columns,
         visible: bool,
-    ) -> (Option<String>, bool) {
+    ) -> (Option<String>, Option<egui::Id>) {
         let heights = heights(request);
         let mut at = rect.min;
-        let mut chosen = (None, false);
+        let mut chosen = (None, None);
         for (index, (width, height)) in columns.widths.into_iter().zip(heights).enumerate() {
             let room = if index == 2 || columns.stacked {
                 width
@@ -828,14 +828,14 @@ impl Drawing<'_> {
         row: &Row,
         request: &Request,
         column: Rect,
-    ) -> (Option<String>, bool) {
+    ) -> (Option<String>, Option<egui::Id>) {
         if ui.is_rect_visible(column) {
             caption(ui, id.with("checks"), column, CHECKS, None);
         }
         let top = column.top() + CAPTION_HEIGHT;
         if request.checks.is_empty() {
             if !ui.is_rect_visible(column) {
-                return (None, false);
+                return (None, None);
             }
             let rect =
                 Rect::from_min_size(pos2(column.left(), top), vec2(column.width(), TEXT_HEIGHT));
@@ -848,17 +848,17 @@ impl Drawing<'_> {
                 theme::MUTED,
                 None,
             );
-            return (None, false);
+            return (None, None);
         }
         let mut chosen = None;
-        let mut focused = false;
+        let mut focused = None;
         for (index, check) in request.checks.iter().enumerate() {
             let rect = Rect::from_min_size(
                 pos2(column.left(), top + index as f32 * CHECK_HEIGHT),
                 vec2(column.width(), CHECK_HEIGHT),
             );
             let response = self.check(ui, id, row, check, rect);
-            focused |= keyboard(&response);
+            focused = keyboard(&response).or(focused);
             if response.clicked() {
                 chosen = Some(check.id.clone());
             }

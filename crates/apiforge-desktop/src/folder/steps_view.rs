@@ -69,24 +69,23 @@ impl FolderApp {
         Self::steps_header(ui, header, &rows.summary());
         // Back from the board, which marked the step it folds the check into:
         // the mark of the list is where it was.
-        if let Some((check, Some(step))) = self.steps.marks.get(document_id)
-            && self
+        if let Some((check, Some(step))) = self.steps.marks.get(document_id).cloned() {
+            // A check deleted meanwhile has no mark to come back to.
+            if !rows.holds(&check) {
+                self.forget_mark(document_id);
+            } else if self
                 .selections
                 .get(document_id)
-                .is_some_and(|ids| ids.iter().eq([step]))
-        {
-            let check = check.clone();
-            self.selections
-                .insert(document_id.to_owned(), vec![check.clone()]);
-            self.steps
-                .marks
-                .insert(document_id.to_owned(), (check, None));
+                .is_some_and(|ids| ids.iter().eq([&step]))
+            {
+                self.selections
+                    .insert(document_id.to_owned(), vec![check.clone()]);
+                self.steps
+                    .marks
+                    .insert(document_id.to_owned(), (check, None));
+            }
         }
-        let selected = self
-            .selections
-            .get(document_id)
-            .and_then(|ids| ids.first())
-            .cloned();
+        let selected = self.shown_selection(document_id, &rows);
         let mut state = std::mem::take(&mut self.steps.list);
         let run = self.fresh_report(document_id);
         let results = run
@@ -152,8 +151,18 @@ impl FolderApp {
     }
 
     /// Whether a row of the list has the keyboard, which no field then has.
-    pub(super) fn steps_keyboard(&self) -> bool {
-        self.steps_shown(self.workbench.active()) && self.steps.list.has_keyboard()
+    pub(super) fn steps_keyboard(&self, ctx: &egui::Context) -> bool {
+        self.steps_shown(self.workbench.active()) && self.steps.list.has_keyboard(ctx)
+    }
+
+    /// What the list shows as selected: the first step selected, if it has a
+    /// row.
+    fn shown_selection(&self, document_id: &str, rows: &Model) -> Option<String> {
+        self.selections
+            .get(document_id)
+            .and_then(|ids| ids.first())
+            .filter(|id| rows.holds(id))
+            .cloned()
     }
 
     /// The section a step is added to from outside the board: in *Steps* the
@@ -163,10 +172,50 @@ impl FolderApp {
             return self.cleanup(document_id);
         }
         let rows = self.step_rows(model);
-        self.selections
-            .get(document_id)
-            .and_then(|ids| ids.first())
-            .is_some_and(|id| rows.in_cleanup(id))
+        self.shown_selection(document_id, &rows)
+            .is_some_and(|id| rows.in_cleanup(&id))
+    }
+
+    /// A board command from the keyboard or the Library. In *Steps* it acts on
+    /// what the list shows as selected, in the section [`Self::add_section`]
+    /// gives, and on nothing while Run results cover the list.
+    pub(super) fn shown_command(
+        &mut self,
+        document_id: &str,
+        model: &Arc<Document>,
+        editable: bool,
+        command: Command,
+    ) {
+        let cleanup = self.add_section(document_id, model);
+        if !self.steps_shown(Some(document_id)) {
+            self.board_command(document_id, model, cleanup, editable, command);
+            return;
+        }
+        if self.report_maximised(Some(document_id)) {
+            return;
+        }
+        let rows = self.step_rows(model);
+        let shown: Vec<String> = self
+            .shown_selection(document_id, &rows)
+            .into_iter()
+            .collect();
+        // What it adds is selected on the board that holds it.
+        if !matches!(command, Command::Copy)
+            && let Some(tab) = self.workbench.tab_mut(document_id)
+        {
+            tab.cleanup = cleanup;
+        }
+        let before = self
+            .selections
+            .insert(document_id.to_owned(), shown.clone());
+        self.board_command(document_id, model, cleanup, editable, command);
+        if self.selections.get(document_id) == Some(&shown) {
+            // The command selected nothing: the board's selection stays.
+            match before {
+                Some(before) => self.selections.insert(document_id.to_owned(), before),
+                None => self.selections.remove(document_id),
+            };
+        }
     }
 
     /// The header of *Steps*: the board's own name and kind, and the summary.

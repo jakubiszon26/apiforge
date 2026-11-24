@@ -177,6 +177,11 @@ impl Model {
         self.check_names.get(id).map(String::as_str)
     }
 
+    /// Whether the list shows the step or check `id`.
+    pub fn holds(&self, id: &str) -> bool {
+        self.rows().any(|row| row.holds(id))
+    }
+
     /// Whether the list shows the step or check `id` in Cleanup.
     pub fn in_cleanup(&self, id: &str) -> bool {
         self.cleanup.iter().any(|row| row.holds(id))
