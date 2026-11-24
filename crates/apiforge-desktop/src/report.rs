@@ -504,6 +504,14 @@ pub struct ReportPanel {
     failed_only: bool,
     /// The row the keyboard moved to, which takes the focus when drawn.
     focus: Option<String>,
+    /// The person folded checks or switched *Failed* since the list was
+    /// drawn, which may have hidden the selected row (REP-07c).
+    hid: bool,
+    /// The selected row last brought into view, or chosen by the person in
+    /// the list (REP-07c).
+    in_view: Option<String>,
+    /// The run was still going when the list was last drawn.
+    going: bool,
     /// The node a row last asked the board to select: the board may answer
     /// with the step the check is folded into (LAY-11), which leaves the
     /// check's row chosen once.
@@ -513,6 +521,15 @@ pub struct ReportPanel {
     /// The two sides of the check shown, written once.
     comparison: Option<comparison::Kept>,
 }
+
+/// The height Run results open at, and in a compact workspace (the owner's
+/// decision of 2026-11-24, REP-07c).
+const DEFAULT_HEIGHT: f32 = 350.0;
+const DEFAULT_COMPACT_HEIGHT: f32 = 215.0;
+
+/// What the engine says of a failed comparison of values, which the box of
+/// the two sides and the status say better (REP-07c).
+const COMPARISON_FAILED: &str = "The comparison failed.";
 
 /// The step list's width before it is dragged (the owner's default of
 /// 2026-11-23, about M1a's) and its least width (REP-07); the details keep
@@ -529,8 +546,8 @@ impl Default for ReportPanel {
     fn default() -> Self {
         Self {
             open: false,
-            height: 320.0,
-            compact_height: 180.0,
+            height: DEFAULT_HEIGHT,
+            compact_height: DEFAULT_COMPACT_HEIGHT,
             maximised: false,
             drag: None,
             grab: None,
@@ -555,6 +572,9 @@ impl Default for ReportPanel {
             folded: Default::default(),
             failed_only: false,
             focus: None,
+            hid: false,
+            in_view: None,
+            going: false,
             asked: None,
             arranged: Default::default(),
             comparison: None,
@@ -944,6 +964,8 @@ impl ReportPanel {
             // Every step's checks are shown after a run (REP-07).
             self.folded.clear();
             self.focus = None;
+            self.hid = false;
+            self.in_view = None;
             self.asked = None;
         }
         // What a row asked for is answered by the next change of the
@@ -1158,12 +1180,35 @@ impl ReportPanel {
         }
         ui.add_space(4.0);
 
-        let selected = resolve_selected(
+        let view = self.view(&rows, ends);
+        let mut selected = resolve_selected(
             &rows,
             self.selected_key.as_deref(),
             context.selected_node_id,
-        )
-        .cloned();
+        );
+        // A row the list does not show is never the selection: the step it
+        // is listed under is, or else the nearest row shown (REP-07c).
+        if let Some(hidden) = selected
+            && let Some(target) = view.stands_for(&rows, &hidden.key)
+        {
+            let row = &rows[target];
+            selected = Some(row);
+            // While a run goes on, what *Failed* leaves out is not yet known.
+            if self.hid || run.status != RunStatus::Running {
+                self.selected_key = Some(row.key.clone());
+            }
+            if self.hid {
+                self.asked = Some(row.root_id.clone());
+                actions.push(Action::SelectNode(row.root_id.clone()));
+            }
+        }
+        self.hid = false;
+        let selected = selected.cloned();
+        // The rows of a run that just ended stand where they stay.
+        let going = run.status == RunStatus::Running;
+        if std::mem::replace(&mut self.going, going) && !going && self.selected_key.is_none() {
+            self.in_view = None;
+        }
         if self.tab == DetailTab::Request
             && selected
                 .as_ref()
@@ -1199,7 +1244,7 @@ impl ReportPanel {
                         controls_above_list(ui, &mut controls);
                         ui.add_space(4.0);
                     }
-                    self.step_list(ui, &rows, selected.as_ref(), ends, actions);
+                    self.step_list(ui, &rows, view, selected.as_ref(), ends, actions);
                 },
             );
             self.list_edge(ui, width, widest, height, actions);
@@ -1241,6 +1286,12 @@ impl ReportPanel {
             Some(Chosen::Collapse) => self.folded.extend(heads),
             Some(Chosen::Expand) => self.folded.clear(),
             None => {}
+        }
+        if controls.chosen.is_some() {
+            self.hid = true;
+        }
+        if matches!(controls.chosen, Some(Chosen::All | Chosen::Failed)) {
+            self.in_view = None;
         }
     }
 
@@ -1310,17 +1361,9 @@ impl ReportPanel {
             .on_hover_text("Drag to change the width of the step list");
     }
 
-    fn step_list(
-        &mut self,
-        ui: &mut Ui,
-        rows: &[StepRow<'_>],
-        selected: Option<&StepRow<'_>>,
-        ends: &CauseEnds,
-        actions: &mut Vec<Action>,
-    ) {
-        let arranged = std::mem::take(&mut self.arranged);
-        let lines = &arranged.lines;
-        let entries = &arranged.entries;
+    /// What the list shows of `rows`: the lines *Failed* and the folds leave.
+    fn view(&self, rows: &[StepRow<'_>], ends: &CauseEnds) -> View {
+        let lines = &self.arranged.lines;
         let bad: Vec<bool> = rows.iter().map(|row| list::bad(row, ends)).collect();
         // A step's checks, and how many of them did not pass.
         let mut checks = vec![(0usize, 0usize); rows.len()];
@@ -1364,53 +1407,51 @@ impl ReportPanel {
         } else {
             vec![true; rows.len()]
         };
-        let visible = |folded: &std::collections::HashSet<String>| -> Vec<Line> {
-            lines
-                .iter()
-                .copied()
-                .filter(|line| kept[line.row])
-                .filter(|line| {
-                    line.under
-                        .is_none_or(|head| !folded.contains(&rows[head].key))
-                })
-                .collect()
+        let mut view = View {
+            lines: lines.clone(),
+            checks,
+            kept,
+            shown: Vec::new(),
         };
-        let mut shown = visible(&self.folded);
+        view.fold(rows, &self.folded);
+        view
+    }
+
+    fn step_list(
+        &mut self,
+        ui: &mut Ui,
+        rows: &[StepRow<'_>],
+        mut view: View,
+        selected: Option<&StepRow<'_>>,
+        ends: &CauseEnds,
+        actions: &mut Vec<Action>,
+    ) {
+        let arranged = std::mem::take(&mut self.arranged);
+        let entries = &arranged.entries;
 
         // A focused row that a fold or *Failed* hides gives its focus to the
         // step it is listed under, or else to the nearest row shown (REP-07).
         if self.focus.is_none()
             && let Some(focused) = ui.memory(|memory| memory.focused())
-            && let Some(at) = lines
+            && let Some(hidden) = view
+                .lines
                 .iter()
-                .position(|line| list::row_id(&rows[line.row].key) == focused)
-            && !shown.contains(&lines[at])
+                .map(|line| &rows[line.row].key)
+                .find(|key| list::row_id(key) == focused)
+            && let Some(target) = view.stands_for(rows, hidden)
         {
-            let head = lines[at]
-                .under
-                .filter(|head| shown.iter().any(|line| line.row == *head));
-            let nearest = || {
-                (1..lines.len()).find_map(|distance| {
-                    [at.checked_sub(distance), Some(at + distance)]
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|index| lines.get(index))
-                        .find(|line| shown.contains(line))
-                        .map(|line| line.row)
-                })
-            };
-            if let Some(target) = head.or_else(nearest) {
-                self.focus = Some(rows[target].key.clone());
-            }
+            self.focus = Some(rows[target].key.clone());
         }
 
         // The keyboard: up and down move between the rows, left and right
         // fold and open a step's checks (REP-07).
         let focused = ui.memory(|memory| memory.focused());
-        if let Some(at) = shown
+        if let Some(at) = view
+            .shown
             .iter()
             .position(|line| Some(list::row_id(&rows[line.row].key)) == focused)
         {
+            let shown = &view.shown;
             let id = list::row_id(&rows[shown[at].row].key);
             ui.memory_mut(|memory| {
                 memory.set_focus_lock_filter(
@@ -1433,8 +1474,8 @@ impl ReportPanel {
                     target = at.checked_sub(1).map(|before| shown[before].row);
                 } else if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
                     match line.under {
-                        None if checks[line.row].0 > 0 => {
-                            self.folded.insert(key.clone());
+                        None if view.checks[line.row].0 > 0 => {
+                            self.hid |= self.folded.insert(key.clone());
                         }
                         Some(head) => target = Some(head),
                         None => {}
@@ -1448,11 +1489,12 @@ impl ReportPanel {
             if let Some(target) = target {
                 let row = &rows[target];
                 self.selected_key = Some(row.key.clone());
+                self.in_view = Some(row.key.clone());
                 self.focus = Some(row.key.clone());
                 self.asked = Some(row.root_id.clone());
                 actions.push(Action::SelectNode(row.root_id.clone()));
             }
-            shown = visible(&self.folded);
+            view.fold(rows, &self.folded);
         }
 
         egui::ScrollArea::vertical()
@@ -1464,7 +1506,7 @@ impl ReportPanel {
                     return;
                 }
                 let mut cleanup = false;
-                for (index, line) in shown.iter().enumerate() {
+                for (index, line) in view.shown.iter().enumerate() {
                     let row = &rows[line.row];
                     if row.step.phase == Phase::Cleanup && row.depth == 0 && !cleanup {
                         cleanup = true;
@@ -1478,12 +1520,12 @@ impl ReportPanel {
                             list::Shape::Lone
                         }
                         None => list::Shape::Head {
-                            checks: checks[line.row].0,
-                            failed: checks[line.row].1,
+                            checks: view.checks[line.row].0,
+                            failed: view.checks[line.row].1,
                             folded: self.folded.contains(&row.key),
                         },
                     };
-                    let view = list::RowView {
+                    let drawing = list::RowView {
                         row,
                         entry: &entries[line.row],
                         shape,
@@ -1493,7 +1535,21 @@ impl ReportPanel {
                         ran: row.step.cause.is_none(),
                         first: index == 0,
                     };
-                    let drawn = list::draw(ui, &view);
+                    let drawn = list::draw(ui, &drawing);
+                    // Selected by the application, it comes into view once;
+                    // the list then scrolls as the person leaves it
+                    // (REP-07c).
+                    if drawing.active && self.in_view.as_deref() != Some(row.key.as_str()) {
+                        self.in_view = Some(row.key.clone());
+                        let clip = ui.clip_rect();
+                        let rect = drawn.row.rect;
+                        if rect.top() < clip.top() || rect.bottom() > clip.bottom() {
+                            drawn.row.scroll_to_me_animation(
+                                Some(egui::Align::Center),
+                                egui::style::ScrollAnimation::none(),
+                            );
+                        }
+                    }
                     if self.focus.as_deref() == Some(row.key.as_str()) {
                         self.focus = None;
                         drawn.row.request_focus();
@@ -1504,10 +1560,12 @@ impl ReportPanel {
                     {
                         if !self.folded.remove(&row.key) {
                             self.folded.insert(row.key.clone());
+                            self.hid = true;
                         }
                     } else if drawn.row.clicked() {
                         drawn.row.request_focus();
                         self.selected_key = Some(row.key.clone());
+                        self.in_view = Some(row.key.clone());
                         self.asked = Some(row.root_id.clone());
                         actions.push(Action::SelectNode(row.root_id.clone()));
                     }
@@ -1593,7 +1651,16 @@ impl ReportPanel {
             Some(not_run) => Some(Cow::Owned(not_run.sentence())),
             None => step.message.as_deref().map(Cow::Borrowed),
         };
-        if let Some(message) = message {
+        // A step whose node is not found (its component's definition is
+        // gone) reads as before DIAG-03.
+        let boxed = !step.expected.is_missing()
+            || !step.actual.is_missing()
+            || requirement.is_some_and(Requirement::always_compared)
+            || comparison::missing(requirement, step);
+        let said = boxed && step.status == StepStatus::Failed;
+        if let Some(message) =
+            message.filter(|message| !(said && message.as_ref() == COMPARISON_FAILED))
+        {
             let color = status_color(step.status);
             egui::Frame::new()
                 .fill(color.gamma_multiply(0.08))
@@ -1610,13 +1677,7 @@ impl ReportPanel {
                 });
         }
 
-        // A step whose node is not found (its component's definition is
-        // gone) reads as before DIAG-03.
-        if !step.expected.is_missing()
-            || !step.actual.is_missing()
-            || requirement.is_some_and(Requirement::always_compared)
-            || comparison::missing(requirement, step)
-        {
+        if boxed {
             let written = comparison::Kept::of(&mut self.comparison, run_id, selected, requirement);
             written.show(ui, check.and_then(|check| check.expected_from.as_deref()));
         }
@@ -1630,10 +1691,12 @@ impl ReportPanel {
                     chosen: Some(&step.node_id),
                     ..marks
                 });
+        let mut response = false;
         if let Some(check) = check
             && let Some(source) = check.source
             && !source.step.outputs.is_empty()
         {
+            response = true;
             let document =
                 egui::Id::new(("report-response", run_id, selected.key.as_str(), self.epoch));
             self.trees.insert(document);
@@ -1717,16 +1780,45 @@ impl ReportPanel {
             ui.add_space(6.0);
         }
 
+        // A check's tab with nothing in it is not drawn (REP-07c).
+        let drawn = |empty: bool| !empty || !list::is_check(step.kind);
+        let (has_outputs, has_inputs) = (
+            drawn(step.outputs.is_empty()),
+            drawn(step.inputs.is_empty()),
+        );
+        let mut tab = match self.tab {
+            DetailTab::Outputs if !has_outputs && has_inputs => DetailTab::Inputs,
+            DetailTab::Inputs if !has_inputs && has_outputs => DetailTab::Outputs,
+            tab => tab,
+        };
+        let no_tabs = !has_outputs && !has_inputs && step.request.is_none();
+        if no_tabs {
+            // The response above keeps the controls of its tree.
+            if response {
+                let line = egui::vec2(ui.available_width(), theme::CONTROL_HEIGHT);
+                ui.allocate_ui_with_layout(
+                    line,
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| self.fold_buttons(ui),
+                );
+            }
+            return;
+        }
         let outputs = format!("Outputs  {}", step.outputs.len());
         let inputs = format!("Inputs  {}", step.inputs.len());
-        let hint = checkable && editable && self.tab == DetailTab::Outputs;
+        let hint = checkable && editable && has_outputs && tab == DetailTab::Outputs;
         // The controls above the value share the tabs' line where it has
         // room for them, and take a line of their own under it otherwise.
         let gap = ui.spacing().item_spacing.x;
-        let mut tabs =
-            widgets::tab_value_width(ui, &outputs) + widgets::tab_value_width(ui, &inputs) + gap;
-        if step.request.is_some() {
-            tabs += widgets::tab_value_width(ui, "HTTP request") + gap;
+        let mut tabs = -gap;
+        for (has, label) in [
+            (has_outputs, outputs.as_str()),
+            (has_inputs, inputs.as_str()),
+            (step.request.is_some(), "HTTP request"),
+        ] {
+            if has {
+                tabs += widgets::tab_value_width(ui, label) + gap;
+            }
         }
         let hint_width = if hint {
             text_width(ui, CHOOSE_A_FIELD, theme::FONT_LABEL) + gap
@@ -1736,10 +1828,20 @@ impl ReportPanel {
         let one_line = ui.available_width() >= tabs + hint_width + bar_width(ui) + 16.0;
         let mut copy = false;
         ui.horizontal(|ui| {
-            widgets::tab_value(ui, &mut self.tab, DetailTab::Outputs, &outputs);
-            widgets::tab_value(ui, &mut self.tab, DetailTab::Inputs, &inputs);
+            let mut chosen = tab;
+            if has_outputs {
+                widgets::tab_value(ui, &mut chosen, DetailTab::Outputs, &outputs);
+            }
+            if has_inputs {
+                widgets::tab_value(ui, &mut chosen, DetailTab::Inputs, &inputs);
+            }
             if step.request.is_some() {
-                widgets::tab_value(ui, &mut self.tab, DetailTab::Request, "HTTP request");
+                widgets::tab_value(ui, &mut chosen, DetailTab::Request, "HTTP request");
+            }
+            // A check's one tab leaves the choice the other steps keep.
+            if chosen != tab {
+                tab = chosen;
+                self.tab = chosen;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if one_line {
@@ -1770,8 +1872,8 @@ impl ReportPanel {
         }
         ui.separator();
 
-        let json_id = egui::Id::new(("report-json", run_id, &selected.key, self.tab as u8));
-        let json = (copy || self.json).then(|| self.json_text(json_id, step));
+        let json_id = egui::Id::new(("report-json", run_id, &selected.key, tab as u8));
+        let json = (copy || self.json).then(|| self.json_text(json_id, step, tab));
         if copy && let Some(text) = &json {
             ui.ctx().copy_text(text.as_str().to_owned());
         }
@@ -1782,14 +1884,13 @@ impl ReportPanel {
             "report-tree",
             run_id,
             selected.key.as_str(),
-            self.tab as u8,
+            tab as u8,
             self.epoch,
         ));
         self.trees.insert(document);
         let folding = self.folding;
         let checked = &self.checked;
         let openings = &mut self.openings;
-        let tab = self.tab;
         // How a port's value opens, counted once per run, step and tab.
         let mut opens = |port: &str, value: &Value| match folding {
             Folding::Default => *openings
@@ -1932,35 +2033,28 @@ impl ReportPanel {
                     .hover("Copy the value as JSON"),
             )
             .clicked();
-        ui.add_enabled_ui(!self.json, |ui| {
-            if ui
-                .add(
-                    widgets::action(Icon::ChevronRight, "Collapse all")
-                        .compact()
-                        .quiet(),
-                )
-                .clicked()
-            {
-                self.folding = Folding::CollapseAll;
-                self.forget_trees(ui.ctx());
-            }
-            if ui
-                .add(
-                    widgets::action(Icon::ChevronDown, "Expand all")
-                        .compact()
-                        .quiet(),
-                )
-                .clicked()
-            {
-                self.folding = Folding::ExpandAll;
-                self.forget_trees(ui.ctx());
-            }
-        });
+        ui.add_enabled_ui(!self.json, |ui| self.fold_buttons(ui));
         if switch {
             ui.add_space(8.0);
             self.view_switch(ui);
         }
         copy
+    }
+
+    /// *Expand all* and *Collapse all*, right to left (REP-08).
+    fn fold_buttons(&mut self, ui: &mut Ui) {
+        for (icon, label, folding) in [
+            (Icon::ChevronRight, "Collapse all", Folding::CollapseAll),
+            (Icon::ChevronDown, "Expand all", Folding::ExpandAll),
+        ] {
+            if ui
+                .add(widgets::action(icon, label).compact().quiet())
+                .clicked()
+            {
+                self.folding = folding;
+                self.forget_trees(ui.ctx());
+            }
+        }
     }
 
     /// *Tree | JSON*, right to left (REP-08).
@@ -1990,13 +2084,18 @@ impl ReportPanel {
     }
 
     /// The JSON text of the value the tab shows, written once per value.
-    fn json_text(&mut self, id: egui::Id, step: &StepResult) -> std::sync::Arc<String> {
+    fn json_text(
+        &mut self,
+        id: egui::Id,
+        step: &StepResult,
+        tab: DetailTab,
+    ) -> std::sync::Arc<String> {
         if let Some((kept, text)) = &self.json_text
             && *kept == id
         {
             return text.clone();
         }
-        let value = match self.tab {
+        let value = match tab {
             DetailTab::Outputs => serde_json::to_value(&step.outputs),
             DetailTab::Inputs => serde_json::to_value(&step.inputs),
             DetailTab::Request => Ok(step.request.as_ref().map_or(Value::Null, |request| {
@@ -2139,6 +2238,60 @@ pub(crate) fn mode_pill(mode: RunMode) -> (&'static str, Color32) {
     match mode {
         RunMode::Simulation => ("SIMULATION", theme::SIMULATION),
         RunMode::Live => ("LIVE API", theme::ACCENT),
+    }
+}
+
+/// What the list shows of its rows.
+struct View {
+    lines: Vec<Line>,
+    /// A step's checks, and how many of them did not pass, by row.
+    checks: Vec<(usize, usize)>,
+    /// The rows *Failed* keeps.
+    kept: Vec<bool>,
+    /// The lines shown, in order.
+    shown: Vec<Line>,
+}
+
+impl View {
+    /// Shows the kept lines whose step is not `folded`.
+    fn fold(&mut self, rows: &[StepRow<'_>], folded: &std::collections::HashSet<String>) {
+        self.shown = self
+            .lines
+            .iter()
+            .copied()
+            .filter(|line| self.kept[line.row])
+            .filter(|line| {
+                line.under
+                    .is_none_or(|head| !folded.contains(&rows[head].key))
+            })
+            .collect();
+    }
+
+    /// The row that stands for the row of `key` while the list does not show
+    /// it: the step it is listed under, or else the nearest row shown.
+    /// `None` when it is shown, or nothing is.
+    fn stands_for(&self, rows: &[StepRow<'_>], key: &str) -> Option<usize> {
+        let at = self
+            .lines
+            .iter()
+            .position(|line| rows[line.row].key == key)?;
+        if self.shown.contains(&self.lines[at]) {
+            return None;
+        }
+        let shown = |row: usize| self.shown.iter().any(|line| line.row == row);
+        self.lines[at]
+            .under
+            .filter(|head| shown(*head))
+            .or_else(|| {
+                (1..self.lines.len()).find_map(|distance| {
+                    [at.checked_sub(distance), Some(at + distance)]
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|index| self.lines.get(index))
+                        .find(|line| self.shown.contains(line))
+                        .map(|line| line.row)
+                })
+            })
     }
 }
 
