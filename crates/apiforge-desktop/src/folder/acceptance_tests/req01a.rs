@@ -293,10 +293,11 @@ fn painted(
 
 /// The place of the list: below the header, from the first row down.
 fn list_area(harness: &FolderHarness) -> egui::Rect {
+    // Under the tabs' row with the switch and the header of *Steps*.
     let switch = harness.get_by_label(STEPS).rect();
     let window = harness.ctx.content_rect();
     egui::Rect::from_min_max(
-        egui::pos2(rows(harness)[0].rect.left() - 100.0, switch.bottom() + 4.0),
+        egui::pos2(rows(harness)[0].rect.left() - 100.0, switch.bottom() + 52.0),
         window.max,
     )
 }
@@ -384,18 +385,33 @@ fn req01a_criterion_1_the_choice_is_kept_with_the_projects_view() {
     assert!(saved(&mut harness)["panels"].get("steps").is_none());
 }
 
-/// Criterion 1: the switch is at the right end of the header of *Steps*; on
-/// the board's it is at the right, on the row where the row gives nothing up
-/// for it and else right of the tabs above; a long title never meets it, at
-/// either size.
+/// Criterion 1, as the owner decided on 2026-11-24: the switch stands at the
+/// right of the file tabs' row, in the same place in *Steps* and in *Canvas*,
+/// with a step selected or not, at every width; a long title never meets it.
 #[test]
-fn req01a_criterion_1_the_switch_and_the_title_do_not_overlap() {
+fn req01a_criterion_1_the_switch_stands_at_the_right_of_the_tabs() {
     // A file name of sixty characters stands for the title of WS-05a.
     let name = "a-parcel-label-is-refused-without-a-token-and-over-30-kg.afs";
     assert_eq!(name.chars().count(), 60);
-    for size in [MINIMUM, WIDE] {
+    for size in [MINIMUM, egui::vec2(1280.0, 800.0), WIDE] {
         let (_project, mut harness, id) =
             opened(size, &format!("scenarios/{name}"), &labels_text());
+        let places = |harness: &FolderHarness| {
+            [STEPS, CANVAS].map(|words| harness.get_by_label(words).rect())
+        };
+        let tab = harness.get_by_label(&format!("Close {name}")).rect();
+        let canvas_places = places(&harness);
+        for place in canvas_places {
+            assert!(
+                (place.center().y - tab.center().y).abs() < 4.0,
+                "the tabs' row"
+            );
+        }
+        let window = harness.ctx.content_rect();
+        assert!(
+            window.right() - canvas_places[1].right() < 32.0,
+            "at the right"
+        );
         let title = |harness: &FolderHarness| {
             harness
                 .query_all_by_role_and_label(egui::accesskit::Role::Label, name)
@@ -403,41 +419,143 @@ fn req01a_criterion_1_the_switch_and_the_title_do_not_overlap() {
                 .max_by(|a, b| a.top().total_cmp(&b.top()))
                 .expect("the header names the file")
         };
-        for selected in [false, true] {
-            if selected {
-                let first = node(&graphs(&harness, &id).0, "no_token").id.clone();
-                app(&mut harness).selections.insert(id.clone(), vec![first]);
-                settle(&mut harness);
-            }
-            let tools = ["Main", "Cleanup", "Add step", "Tidy up", "Board view"];
-            let mut all = vec![STEPS, CANVAS];
-            all.extend(tools);
-            assert_within_window(&harness, &all);
-            assert_disjoint(&harness, &all);
-            let switch = harness.get_by_label(STEPS).rect();
-            assert!(!title(&harness).intersects(switch));
-            let main = harness.get_by_label("Main").rect();
-            let board = harness.get_by_label("Diagram board").rect();
-            if (switch.center().y - main.center().y).abs() < 4.0 {
-                assert!(switch.left() > harness.get_by_label("Cleanup").rect().right());
-            } else {
-                assert!(switch.bottom() <= board.top(), "never over the board");
-            }
-            assert!(switch.left() > board.center().x, "at the right");
-        }
+        let mut all = vec![STEPS, CANVAS];
+        all.extend(["Main", "Cleanup", "Add step", "Tidy up", "Board view"]);
+        assert_within_window(&harness, &all);
+        assert_disjoint(&harness, &all);
+        let board = harness.get_by_label("Diagram board").rect();
+        assert!(canvas_places[0].bottom() <= board.top());
+        assert!(
+            canvas_places
+                .iter()
+                .all(|place| !title(&harness).intersects(*place))
+        );
         steps(&mut harness);
-        assert_within_window(&harness, &[STEPS, CANVAS]);
-        assert_disjoint(&harness, &[STEPS, CANVAS]);
-        let switch = harness.get_by_label(STEPS).rect();
-        assert!(title(&harness).right() < switch.left());
+        assert_eq!(places(&harness), canvas_places, "the same place in Steps");
         assert!(
-            (title(&harness).center().y - switch.center().y).abs() < 4.0,
-            "one row"
+            canvas_places
+                .iter()
+                .all(|place| !title(&harness).intersects(*place))
         );
-        assert!(
-            harness.ctx.content_rect().right() - harness.get_by_label(CANVAS).rect().right() < 32.0,
-            "at the right end"
-        );
+        // A selected step opens the Inspector in Canvas.
+        let first = node(&graphs(&harness, &id).0, "no_token").id.clone();
+        app(&mut harness).selections.insert(id.clone(), vec![first]);
+        settle(&mut harness);
+        assert_eq!(places(&harness), canvas_places, "a step selected");
+        canvas(&mut harness);
+        assert!(harness.query_by_label("Resize inspector").is_some());
+        assert_eq!(places(&harness), canvas_places, "the Inspector open");
+        // The chosen one is selected for assistive technology.
+        for (words, chosen) in [(STEPS, false), (CANVAS, true)] {
+            let found = harness.get_by_role_and_label(egui::accesskit::Role::Button, words);
+            let node = found.accesskit_node();
+            assert_eq!(
+                node.toggled() == Some(egui::accesskit::Toggled::True),
+                chosen,
+                "{words}"
+            );
+        }
+        // The keyboard.
+        harness.get_by_label(STEPS).focus();
+        harness.step();
+        harness.key_press(egui::Key::Enter);
+        settle(&mut harness);
+        assert!(harness.query_by_label("Diagram board").is_none());
+    }
+}
+
+/// The part of each tab's name that is on screen, left to right.
+fn tab_names(harness: &FolderHarness) -> Vec<(String, egui::Rect)> {
+    let row = harness
+        .query_all_by_label_contains("Close ")
+        .map(|found| found.rect())
+        .next()
+        .expect("a tab")
+        .y_range();
+    let mut names = Vec::new();
+    for clipped in &harness.output().shapes {
+        if let egui::Shape::Text(text) = &clipped.shape {
+            let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+            let seen = rect.intersect(clipped.clip_rect);
+            if row.contains(rect.center().y)
+                && seen.is_positive()
+                && text.galley.text().ends_with(".afs")
+            {
+                names.push((text.galley.text().to_owned(), seen));
+            }
+        }
+    }
+    names.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+    names
+}
+
+/// Criterion 1, the owner's decision of 2026-11-24: with many files open the
+/// tabs give way and scroll, the switch stays whole in its place and the
+/// active tab stays in view; a component's tab and Split, which have no
+/// switch, give the tabs their room back.
+#[test]
+fn req01a_criterion_1_many_tabs_give_way_to_the_switch() {
+    for size in [MINIMUM, WIDE] {
+        let (_project, mut harness, _) = rooms(size);
+        let place = harness.get_by_label(STEPS).rect();
+        let session = app(&mut harness).session.as_mut().unwrap();
+        let mut opened = Vec::new();
+        for index in 0..16 {
+            let path = format!("scenarios/another-test-{index}.afs");
+            let text = format!("scenario \"T{index}\" {{\n  begin = start\n}}\n");
+            session
+                .create_document(DocumentKind::Scenario, &path, &text)
+                .unwrap();
+            opened.push(path);
+        }
+        for path in &opened {
+            app(&mut harness).review_open(path, None);
+            settle(&mut harness);
+        }
+        let last = "another-test-15.afs";
+        for _ in 0..2 {
+            let switch = harness.get_by_label(STEPS).rect();
+            assert_eq!(switch, place, "the switch stays in its place");
+            assert_within_window(&harness, &[STEPS, CANVAS]);
+            let names = tab_names(&harness);
+            for (name, seen) in &names {
+                assert!(seen.right() < switch.left(), "{name} at {seen:?}");
+            }
+            let (_, seen) = names
+                .iter()
+                .find(|(name, _)| name == last)
+                .expect("the active tab is in view");
+            assert!(seen.width() > 80.0, "whole: {seen:?}");
+            let close = harness.get_by_label(&format!("Close {last}")).rect();
+            assert!(close.right() < switch.left(), "its close control too");
+            steps(&mut harness);
+        }
+        // Split has no switch: the tabs reach the edge again.
+        choose(&mut harness, "Split");
+        assert!(harness.query_by_label(STEPS).is_none());
+        let close = harness.get_by_label(&format!("Close {last}")).rect();
+        assert!(close.right() > place.left(), "{close:?} in Split");
+        // Neither has a component in Diagram.
+        choose(&mut harness, "Diagram");
+        let component = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().kind == DocumentKind::Component)
+            .unwrap()
+            .entry()
+            .path
+            .as_str()
+            .to_owned();
+        app(&mut harness).review_open(&component, None);
+        settle(&mut harness);
+        assert!(harness.query_by_label(STEPS).is_none());
+        let close = harness
+            .get_by_label(&format!("Close {}", file_name(&component)))
+            .rect();
+        assert!(close.right() > place.left(), "{close:?} of a component");
     }
 }
 
@@ -586,7 +704,7 @@ fn req01a_criterion_4_sends_lists_what_differs() {
             ("No postcode field", "no postcode"),
             ("Unknown service", "service: param.unknown_service"),
         ] {
-            let row = row(&harness, &format!("POST {name}"));
+            let row = shown(&mut harness, &format!("POST {name}"));
             assert_eq!(column(&harness, &row, "SENDS"), [expected], "{name}");
             assert_eq!(
                 column(&harness, &row, "READS")[0],
@@ -613,7 +731,7 @@ fn req01a_criterion_4_sends_lists_what_differs() {
             assert!(!galley.elided && galley.rows.len() == 1);
         }
         // The hover.
-        let first = row(&harness, "POST No token");
+        let first = shown(&mut harness, "POST No token");
         let caption = texts(&harness, &first)
             .into_iter()
             .find(|(text, _)| text == DIFFERS)
@@ -656,6 +774,12 @@ const GROUPS: &str = "scenario \"Groups\" {
 }
 ";
 
+/// The row whose name contains `part`, scrolled into view.
+fn shown(harness: &mut FolderHarness, part: &str) -> Row {
+    scroll_to(harness, part);
+    row(harness, part)
+}
+
 /// The place of `text` in `row`.
 fn text_at(harness: &FolderHarness, row: &Row, text: &str) -> egui::Rect {
     texts(harness, row)
@@ -671,7 +795,7 @@ fn text_at(harness: &FolderHarness, row: &Row, text: &str) -> egui::Rect {
 fn req01a_criterion_4_more_than_four_lines_are_cut() {
     let (_project, mut harness, _) = opened(WIDE, "scenarios/two.afs", GROUPS);
     steps(&mut harness);
-    let one = row(&harness, "POST one");
+    let one = shown(&mut harness, "POST one");
     assert_eq!(
         column(&harness, &one, "SENDS"),
         ["a: 1", "b: 2", "c: 3", "+ 2 more"]
@@ -681,16 +805,14 @@ fn req01a_criterion_4_more_than_four_lines_are_cut() {
             .iter()
             .any(|(text, _)| text == "SENDS")
     );
-    assert_eq!(
-        column(&harness, &row(&harness, "POST two"), "SENDS"),
-        ["no body"]
-    );
+    let two = shown(&mut harness, "POST two");
+    assert_eq!(column(&harness, &two, "SENDS"), ["no body"]);
     // A tie has no common value: each lists its own.
     for (handle, expected) in [
         ("tie_a", vec!["kind: \"a\""]),
         ("tie_d", vec!["kind: \"b\"", "size: 2"]),
     ] {
-        let row = row(&harness, &format!("PUT {handle}"));
+        let row = shown(&mut harness, &format!("PUT {handle}"));
         assert_eq!(column(&harness, &row, "SENDS"), expected);
     }
     let more = texts(&harness, &one)
@@ -714,7 +836,7 @@ fn req01a_criterion_5_sets_replaces_sends() {
     for size in [MINIMUM, WIDE] {
         let (_project, mut harness, _) = rooms(size);
         steps(&mut harness);
-        let listed = row(&harness, "GET rooms");
+        let listed = shown(&mut harness, "GET rooms");
         assert_eq!(
             column(&harness, &listed, "SETS"),
             [
@@ -729,17 +851,19 @@ fn req01a_criterion_5_sets_replaces_sends() {
                 .all(|(text, _)| !text.starts_with("SENDS"))
         );
         // Cleanup is later too.
+        let first = shown(&mut harness, "POST first");
         assert_eq!(
-            column(&harness, &row(&harness, "POST first"), "SETS"),
+            column(&harness, &first, "SETS"),
             ["status → booked", "body.id → cancelled"]
         );
-        let call = texts(&harness, &row(&harness, "call token"));
+        let call = shown(&mut harness, "call token");
+        let call = texts(&harness, &call);
         assert!(
             call.iter()
                 .any(|(text, _)| text == "SETS token · read by 5"),
             "{call:?}"
         );
-        let second = row(&harness, "POST second");
+        let second = shown(&mut harness, "POST second");
         assert_eq!(
             column(&harness, &second, "SENDS"),
             [
@@ -776,6 +900,7 @@ fn req01a_criterion_6_cleanup_follows_main() {
         after[0].name,
         format!("Cleanup step {number} · DELETE cancelled")
     );
+    let after = [shown(&mut harness, "DELETE cancelled")];
     assert_eq!(
         column(&harness, &after[0], "READS"),
         ["first.body.id", "token"]
@@ -899,7 +1024,7 @@ fn req01a_criterion_7_a_branch_not_taken_is_not_run() {
             "{name}"
         );
     }
-    let second = row(&harness, "POST second");
+    let second = shown(&mut harness, "POST second");
     assert_eq!(
         checks_in(&harness, &second),
         ["status == 409 · Not run · Skipped · outside path · refused of second"]
@@ -1116,6 +1241,11 @@ fn req01a_criterion_9_texts_fit_their_columns() {
                     harness.get_by_label(&row).scroll_to_me();
                     settle(&mut harness);
                     assert_texts_fit(&harness, &context);
+                    let found = rows(&harness).into_iter().find(|found| found.name == row);
+                    assert!(
+                        !texts(&harness, &found.unwrap()).is_empty(),
+                        "{context}: the texts of {row} are inside its card"
+                    );
                 }
                 // The cards do not overlap and stay inside the window's width.
                 let all = rows(&harness);
@@ -1125,12 +1255,6 @@ fn req01a_criterion_9_texts_fit_their_columns() {
                 let window = harness.ctx.content_rect();
                 for row in all {
                     assert!(row.rect.right() <= window.right() - 10.0, "{context}");
-                    for (text, rect) in texts(&harness, &row) {
-                        assert!(
-                            row.rect.expand(0.5).contains_rect(rect),
-                            "{context}: {text}"
-                        );
-                    }
                 }
             }
         }
@@ -1191,11 +1315,92 @@ fn req01a_code_with_errors_keeps_the_last_list() {
     edit_source(&mut harness, &id, "scenario \"broken\" {");
     assert_eq!(rows(&harness).len(), 16);
     let notice = harness.get_by_label("Show code").rect();
-    assert!(notice.bottom() <= harness.get_by_label(STEPS).rect().top() + 1.0);
+    assert!(notice.top() >= harness.get_by_label(STEPS).rect().bottom());
+    assert!(notice.bottom() <= rows(&harness)[0].rect.top());
     let name = row(&harness, "POST Weight 31 kg").name;
     harness.get_by_label(&name).click();
     settle(&mut harness);
     assert_eq!(selected(&harness), [name]);
+}
+
+/// Review of the pull request: a project opened on *Steps* selects a check as
+/// one opened on its board does, on the step it is folded into, so that the
+/// board shown later marks it.
+#[test]
+fn req01a_criterion_8_a_check_selected_before_the_board_was_drawn() {
+    let (project, mut harness, _) = rooms(WIDE);
+    steps(&mut harness);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while folder(&harness).changed_at.is_some() {
+        assert!(Instant::now() < deadline, "the view state was not written");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    settle(&mut harness);
+    drop(harness);
+
+    let mut harness = crate::testing::first_open_harness(project.path(), WIDE, Some(Mode::Diagram));
+    app(&mut harness).review_open(ROOMS, None);
+    settle(&mut harness);
+    let id = folder(&harness).workbench.active().unwrap().to_owned();
+    let (main, _, _) = graphs(&harness, &id);
+    assert_eq!(rows(&harness).len(), 10, "opened on the list");
+    choose(&mut harness, "status == 409 · refused of second");
+    let second = node(&main, "second").id.clone();
+    assert_eq!(folder(&harness).selections[&id], [second.clone()]);
+    canvas(&mut harness);
+    assert!(folder(&harness).canvases[&id].debug_selected(&second));
+}
+
+/// Review of the pull request: a row out of sight is named and described for
+/// assistive technology, and its texts are not laid out.
+#[test]
+fn req01a_rows_out_of_sight_are_described_and_not_drawn() {
+    let (_project, mut harness, _) = labels(MINIMUM, &labels_text());
+    steps(&mut harness);
+    let all = rows(&harness);
+    assert_eq!(all.len(), 16);
+    let last = all.last().unwrap();
+    assert!(last.rect.top() > harness.ctx.content_rect().bottom());
+    assert!(
+        !checks_in(&harness, last).is_empty(),
+        "its checks are named"
+    );
+    assert!(texts(&harness, last).is_empty(), "its texts are not built");
+    let found = harness.get_by_label(&last.name);
+    let said = found.accesskit_node().description().unwrap();
+    assert!(
+        said.contains("reads param.parcel_id") && said.contains("sends service: null"),
+        "{said}"
+    );
+}
+
+/// What a frame of *Steps* costs at the most steps a scenario may have:
+/// `cargo test -p apiforge-desktop --release --locked req01a_frame_budget
+/// -- --ignored --nocapture`.
+#[test]
+#[ignore = "KTLO-31: timing, run in release as the development guide's budget step says"]
+fn req01a_frame_budget() {
+    let mut text = String::from("scenario \"Large\" {\n  begin = start\n");
+    for step in 0..66 {
+        text.push_str(&format!(
+            "  r{step} = POST \"/orders\" {{ body {{ n: {step}, kind: \"a\" }} }}\n  \
+             s{step} = assert r{step}.status == 200\n  t{step} = assert r{step}.body.n == {step}\n"
+        ));
+    }
+    text.push_str("}\n");
+    for size in [MINIMUM, WIDE] {
+        let (_project, mut harness, _) = opened(size, "scenarios/large.afs", &text);
+        steps(&mut harness);
+        assert_eq!(rows(&harness).len(), 66);
+        let start = Instant::now();
+        for _ in 0..100 {
+            harness.step();
+        }
+        let frame = start.elapsed() / 100;
+        eprintln!("{size:?}: {frame:?} a frame");
+        assert!(frame < Duration::from_millis(16), "{size:?}: {frame:?}");
+    }
 }
 
 /// Design review: the list at both sizes, before and after a run, its
@@ -1242,7 +1447,7 @@ fn review_req01a() {
         };
         let (_project, mut harness, _) = labels(size, &labels_text());
         steps(&mut harness);
-        let first = row(&harness, "POST No token");
+        let first = shown(&mut harness, "POST No token");
         let place = text_at(&harness, &first, DIFFERS);
         hovered(
             &mut harness,
@@ -1252,7 +1457,7 @@ fn review_req01a() {
         );
         let (_project, mut harness, _) = opened(size, "scenarios/two.afs", GROUPS);
         steps(&mut harness);
-        let one = row(&harness, "POST one");
+        let one = shown(&mut harness, "POST one");
         let place = text_at(&harness, &one, "+ 2 more");
         hovered(
             &mut harness,

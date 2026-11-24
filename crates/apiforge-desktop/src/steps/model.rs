@@ -623,6 +623,37 @@ mod tests {
         assert_eq!(model.summary(), "3 steps · 6 checks");
     }
 
+    /// Review of the pull request: where the steps do not run in the order
+    /// they are written (`@after`, language 1), a check stands under the step
+    /// it reads, never under the one that happens to be written before it.
+    #[test]
+    fn a_check_of_steps_written_out_of_order_stands_under_the_step_it_reads() {
+        let (project, mut scenario) = scenario(
+            "scenario \"S\" {
+  begin = start
+  first = GET \"/a\"
+  second = GET \"/b\"
+  one = assert first.status == 200
+  two = assert second.status == 201
+}",
+        );
+        let at = |scenario: &apiforge_core::format::Scenario, handle: &str| {
+            scenario
+                .graph
+                .nodes
+                .iter()
+                .position(|node| node.handle == handle)
+                .unwrap()
+        };
+        // The engine still runs `first` before `second`.
+        let (first, second) = (at(&scenario, "first"), at(&scenario, "second"));
+        scenario.graph.nodes.swap(first, second);
+        let model = Model::of(&scenario.graph, None, &project);
+        assert_eq!(titles(&model.main), ["GET first", "GET second"]);
+        assert_eq!(checks(&model.main[0]), ["status == 200"]);
+        assert_eq!(checks(&model.main[1]), ["status == 201"]);
+    }
+
     /// A check after a call, which is one line, has a row of its own.
     #[test]
     fn a_check_of_no_step_has_a_row_of_its_own() {

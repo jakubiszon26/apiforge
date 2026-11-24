@@ -489,6 +489,26 @@ mod tests {
         assert_eq!(sends["other_path"].common, None);
     }
 
+    /// Review of the pull request: where the paths differ, the common request
+    /// shows the pattern, whichever request is written first.
+    #[test]
+    fn the_common_request_shows_the_pattern_of_differing_paths() {
+        let sends = of("scenario \"S\" {
+  begin = start
+  param id = \"1\"
+  param other = \"2\"
+  literal = GET \"https://shop.test/orders/missing/items\"
+  a = GET \"https://shop.test/orders/{{param.id}}/items\"
+  b = GET \"https://shop.test/orders/{{param.other}}/items\"
+}");
+        for sends in sends.values() {
+            assert_eq!(
+                sends.common.as_deref(),
+                Some("The common request\nGET /orders/{{…}}/items")
+            );
+        }
+    }
+
     #[test]
     fn a_literal_segment_joins_only_exactly_at_a_blank() {
         assert!(joins("/a/x/b", "/a/\u{0}/b"));
