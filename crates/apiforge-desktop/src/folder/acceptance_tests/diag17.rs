@@ -51,7 +51,7 @@ fn added(harness: &mut FolderHarness, id: &str, command: Command) -> Result<Stri
         .map(|node| node.handle.clone())
         .ok_or_else(|| {
             [
-                "The edited model is not a valid definition for this document.",
+                "This edit was not applied: duplicate handle. Nothing was changed.",
                 "Duplicate handle",
             ]
             .into_iter()
@@ -164,7 +164,7 @@ fn diag17_a_click_in_the_library_on_cleanup_is_not_refused() {
     assert!(
         !has_label(
             &harness,
-            "The edited model is not a valid definition for this document."
+            "This edit was not applied: duplicate handle. Nothing was changed."
         ),
         "the add is refused"
     );

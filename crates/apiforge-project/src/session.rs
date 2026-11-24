@@ -1783,4 +1783,171 @@ mod tests {
         assert_eq!(session.document(&id).unwrap().omitted_diagnostics(), 3);
         assert_eq!(reported(&session, &id), fresh(&session, &id));
     }
+
+    /// The text and the model the session holds, with what it reports.
+    fn held(session: &ProjectSession, id: &str) -> (String, Document, (Vec<Diagnostic>, usize)) {
+        let document = session.document(id).unwrap();
+        (
+            document.text().to_owned(),
+            document.model().unwrap().clone(),
+            reported(session, id),
+        )
+    }
+
+    /// The sentence and the fields of the refusal of `edit` on a document
+    /// with `source`, which is left as it was.
+    fn refused(
+        kind: DocumentKind,
+        source: &str,
+        edit: impl FnOnce(&mut Document),
+    ) -> (String, String) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut session =
+            ProjectSession::create_with(directory.path(), "S", Arc::new(FixedPlacer)).unwrap();
+        let path = match kind {
+            DocumentKind::Scenario => "scenarios/s.afs",
+            DocumentKind::Component => "components/s.afs",
+        };
+        let id = session.create_document(kind, path, source).unwrap();
+        session.settle(&id).unwrap();
+        if kind == DocumentKind::Component {
+            // Its step is named beside a published revision of its own too.
+            session.publish(&id, Origin::SESSION).unwrap();
+            session.settle(&id).unwrap();
+        }
+        let before = held(&session, &id);
+        let mut model = before.1.clone();
+        edit(&mut model);
+        let error = session
+            .apply_model_edit(&id, model, Origin::SESSION)
+            .unwrap_err();
+        assert_eq!(held(&session, &id), before, "nothing changes");
+        (error.to_string(), format!("{error:?}"))
+    }
+
+    fn main(model: &mut Document) -> &mut apiforge_core::format::Graph {
+        match model {
+            Document::Scenario(scenario) => &mut scenario.graph,
+            Document::Component(component) => &mut component.graph,
+        }
+    }
+
+    const PAY: &str = "scenario \"S\" {\n  begin = start\n  order = GET \"/order\"\n  pay = POST \"/pay\"\n  cleanup {\n    undo = DELETE \"/pay\"\n  }\n}\n";
+
+    /// #565, criterion 1: the sentence, with the step its fault names.
+    #[test]
+    fn a_refused_model_edit_names_its_reason() {
+        let literal = || apiforge_core::format::Binding::literal("x".into());
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                main(model).nodes[2].handle = "order".into();
+            }),
+            (
+                "This edit was not applied: duplicate handle. Nothing was changed.".to_owned(),
+                "EditRefused { reason: \"Duplicate handle\", step: None }".to_owned()
+            ),
+            "no step"
+        );
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                main(model).nodes[2].inputs.clear();
+            }),
+            (
+                "This edit was not applied: a request needs a URL (step \"pay\"). Nothing was changed."
+                    .to_owned(),
+                "EditRefused { reason: \"A request needs a URL\", step: Some(\"pay\") }".to_owned()
+            ),
+            "a step"
+        );
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                main(model).nodes[0].inputs.insert("x".into(), literal());
+            })
+            .0,
+            "This edit was not applied: Start cannot have inputs (step \"begin\"). Nothing was changed.",
+            "a kept capital"
+        );
+        // A word written in capitals keeps them, and has no step of its own
+        // when the fault is not a step's.
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                let mut deep = serde_json::Value::Null;
+                for _ in 0..41 {
+                    deep = serde_json::Value::Array(vec![deep]);
+                }
+                let Document::Scenario(scenario) = model else {
+                    panic!("a scenario")
+                };
+                scenario.parameters.insert("deep".into(), deep);
+            })
+            .0,
+            "This edit was not applied: JSON exceeds maximum nesting depth. Nothing was changed."
+        );
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                let Document::Scenario(scenario) = model else {
+                    panic!("a scenario")
+                };
+                scenario.cleanup.nodes[0].inputs.clear();
+            })
+            .0,
+            "This edit was not applied: a request needs a URL (step \"undo\"). Nothing was changed.",
+            "a step of the cleanup"
+        );
+        assert_eq!(
+            refused(
+                DocumentKind::Component,
+                "component fetch \"Fetch\" {\n  first = GET \"/a\"\n  second = GET \"/b\"\n}\n",
+                |model| main(model).nodes[1].inputs.clear()
+            )
+            .0,
+            "This edit was not applied: a request needs a URL (step \"second\"). Nothing was changed.",
+            "a step of a component"
+        );
+    }
+
+    /// #565, criterion 2: a step of the history whose text no longer reads
+    /// as valid is refused with the first error of that text.
+    #[test]
+    fn a_refused_step_names_its_reason() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut session =
+            ProjectSession::create_with(directory.path(), "S", Arc::new(FixedPlacer)).unwrap();
+        session
+            .edit_configuration(
+                |manifest| {
+                    manifest.contracts = vec![apiforge_core::format::Contract {
+                        id: "order".into(),
+                        name: "Order".into(),
+                        sample: serde_json::json!({ "id": 1 }),
+                    }]
+                },
+                Origin::SESSION,
+            )
+            .unwrap();
+        let without = "scenario \"S\" {\n  begin = start\n  a = GET \"/a\"\n}\n";
+        let with = without.replace("\"/a\"", "\"/a\" {\n    contract \"Order\"\n  }");
+        let id = session
+            .create_document(DocumentKind::Scenario, "scenarios/s.afs", &with)
+            .unwrap();
+        session.settle(&id).unwrap();
+        session.edit_source(&id, without, Origin::SESSION).unwrap();
+        session.settle(&id).unwrap();
+        session
+            .edit_configuration(|manifest| manifest.contracts.clear(), Origin::SESSION)
+            .unwrap();
+        session.settle(&id).unwrap();
+        let before = held(&session, &id);
+
+        let error = session.undo(&id, Origin::SESSION).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "This edit was not applied: unknown or ambiguous contract. Nothing was changed."
+        );
+        assert_eq!(
+            format!("{error:?}"),
+            "EditRefused { reason: \"Unknown or ambiguous contract\", step: None }"
+        );
+        assert_eq!(held(&session, &id), before, "nothing changes");
+    }
 }
