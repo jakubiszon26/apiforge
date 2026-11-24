@@ -61,7 +61,7 @@ const SIGN_IN: &str = "component sign_in \"Sign in\" {
 }
 ";
 
-fn booking_day() -> (tempfile::TempDir, FolderHarness, String) {
+pub(super) fn booking_day() -> (tempfile::TempDir, FolderHarness, String) {
     rooms(SCENARIO, |_| {})
 }
 
@@ -90,7 +90,7 @@ fn screen(harness: &FolderHarness, id: &str, world: Pos2) -> Pos2 {
 }
 
 /// One Undo gives the file back byte for byte.
-fn undone(harness: &mut FolderHarness, id: &str, before: &str) {
+pub(super) fn undone(harness: &mut FolderHarness, id: &str, before: &str) {
     harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
     settle(harness);
     harness.step();
@@ -102,7 +102,7 @@ fn undone(harness: &mut FolderHarness, id: &str, before: &str) {
 }
 
 /// Redo gives the edit back.
-fn redone(harness: &mut FolderHarness, id: &str, after: &str) {
+pub(super) fn redone(harness: &mut FolderHarness, id: &str, after: &str) {
     harness.key_press_modifiers(
         egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
         egui::Key::Z,
@@ -112,11 +112,11 @@ fn redone(harness: &mut FolderHarness, id: &str, after: &str) {
     assert_eq!(source_of(harness, id), after, "Redo gives the edit back");
 }
 
-fn position(order: &[String], handle: &str) -> usize {
+pub(super) fn position(order: &[String], handle: &str) -> usize {
     super::diag06a::at(order, handle)
 }
 
-fn indent(text: &str, handle: &str) -> usize {
+pub(super) fn indent(text: &str, handle: &str) -> usize {
     let line = text
         .lines()
         .nth(line_of(text, &format!("{handle} = ")))
@@ -699,7 +699,7 @@ fn diag06b_criterion_3_a_short_line_keeps_its_sockets() {
 // Criterion 4 ----------------------------------------------------------------
 
 /// Opens the menu of the card `handle` with the secondary button.
-fn menu_of(harness: &mut FolderHarness, id: &str, handle: &str) {
+pub(super) fn menu_of(harness: &mut FolderHarness, id: &str, handle: &str) {
     show(harness, id, &[handle]);
     let card = board(harness, id)
         .debug_card_rect(&id_of(&graph(harness, id), handle))
