@@ -490,3 +490,108 @@ fn review_rep07b_check_details() {
         }
     }
 }
+
+/// Mock-up (branch `mock/rep-07b-box`): the comparison box today and in
+/// three options, each check of the board in a column of the details' width;
+/// and the long check in the whole window, in every option.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_rep07b_box_mock() {
+    use crate::report::mockbox::{self, Case};
+    use std::sync::atomic::Ordering;
+    const LONG_LINE: &str = "Check the_first_reason_given_names_the_weight_of_the_parcel · of step 2 Printing a label of a parcel heavier than the courier takes on this route is refused · POST /parcels/pc-001/labels/for/the/courier/of/this/route → 422";
+    let rows: [(&str, Vec<Case>); 3] = [
+        (
+            "short",
+            vec![Case {
+                predicate: r#"error.field == "weight""#,
+                line: "Check weight_31_field · of step 6 Weight 31 kg · POST /parcels/pc-001/labels → 422",
+                checked: "weight_31.body.error.field",
+                expected: r#""weight""#,
+                actual: Some(r#""mass""#),
+            }],
+        ),
+        (
+            "long",
+            vec![Case {
+                predicate: r#"error.reasons_the_courier_gave_for_refusing_the_parcel_at_the_counter.first_reason_given == "The parcel weighs more than 25 kg and the van has no lift.""#,
+                line: LONG_LINE,
+                checked: "refused_label_of_a_heavy_parcel.body.error.reasons_the_courier_gave_for_refusing_the_parcel_at_the_counter.first_reason_given",
+                expected: r#""The parcel weighs more than 25 kg and the van has no lift.""#,
+                actual: Some(r#""The parcel weighs more than 30 kg and the van has no lift.""#),
+            }],
+        ),
+        (
+            "kinds",
+            vec![
+                Case {
+                    predicate: r#"error.limit == { max: 30, unit: "kg", per: "parcel" }"#,
+                    line: "Check limit_is_told · of step 6 Weight 31 kg · POST /parcels/pc-001/labels → 422",
+                    checked: "weight_31.body.error.limit",
+                    expected: r#"{"max":30,"unit":"kg","per":"parcel"}"#,
+                    actual: Some(r#"{"max":25,"unit":"kg","per":"parcel"}"#),
+                },
+                Case {
+                    predicate: "parcel.weight == 31",
+                    line: "Check weight_is_kept · of step 3 Parcel · GET /parcels/pc-001 → 200",
+                    checked: "parcel.body.parcel.weight",
+                    expected: "31",
+                    actual: Some(r#""31""#),
+                },
+                Case {
+                    predicate: r#"error.code == "too_heavy""#,
+                    line: "Check code_is_given · of step 6 Weight 31 kg · POST /parcels/pc-001/labels → 422",
+                    checked: "weight_31.body.error.code",
+                    expected: r#""too_heavy""#,
+                    actual: None,
+                },
+            ],
+        ),
+    ];
+    for (variant, letter) in [(0, "today"), (1, "a"), (2, "b"), (3, "c")] {
+        mockbox::VARIANT.store(variant, Ordering::Relaxed);
+        for width in [447.0_f32, 400.0] {
+            for (name, cases) in &rows {
+                let mut harness = egui_kittest::Harness::builder()
+                    .with_size(egui::vec2(width + 24.0, 780.0))
+                    .build_ui_state(
+                        |ui, ready: &mut bool| {
+                            if !*ready {
+                                return;
+                            }
+                            egui::Frame::new()
+                                .fill(egui::Color32::WHITE)
+                                .inner_margin(12)
+                                .show(ui, |ui| {
+                                    ui.set_width(width);
+                                    for case in cases {
+                                        mockbox::cell(ui, case);
+                                        ui.add_space(12.0);
+                                    }
+                                });
+                        },
+                        false,
+                    );
+                crate::theme::apply(&harness.ctx);
+                harness.step();
+                *harness.state_mut() = true;
+                harness.run();
+                let name = format!("box-{name}-{width}-{letter}");
+                crate::testing::capture(&mut harness, &name, None);
+            }
+        }
+        for (size, suffix) in [(MINIMUM, "960"), (WIDE, "1600")] {
+            for (name, text, check) in [
+                ("details", failing(), FAILED_CHECK),
+                ("long", long(), LONG_CHECK),
+            ] {
+                let (_project, mut harness) = labels_with(size, &text);
+                ran(&mut harness);
+                choose_check(&mut harness, check);
+                let name = format!("window-{name}-{suffix}-{letter}");
+                crate::testing::capture(&mut harness, &name, None);
+            }
+        }
+    }
+    mockbox::VARIANT.store(0, Ordering::Relaxed);
+}

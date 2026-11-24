@@ -25,6 +25,7 @@ use std::borrow::Cow;
 
 mod detail;
 mod list;
+pub mod mockbox;
 pub use list::Line;
 #[cfg(test)]
 pub use list::arrange;
@@ -2311,6 +2312,13 @@ fn group_label(ui: &mut Ui, group: not_run::Group, count: usize) {
 /// The EXPECTED and ACTUAL sides of a check, under what it compared when
 /// that is known (REP-07b).
 fn comparison_box(ui: &mut Ui, checked: Option<&str>, expected: &str, actual: &OptionalJson) {
+    if mockbox::variant() != 0 {
+        return mockbox::draw(ui, checked, expected, actual);
+    }
+    today_box(ui, checked, expected, actual);
+}
+
+fn today_box(ui: &mut Ui, checked: Option<&str>, expected: &str, actual: &OptionalJson) {
     egui::Frame::new()
         .fill(theme::FIELD)
         .stroke(Stroke::new(1.0, theme::BORDER))
