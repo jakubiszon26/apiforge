@@ -8,6 +8,10 @@ mod collapse;
 mod edge;
 mod layout;
 mod menu;
+thread_local! {
+    /// Mock of REQ-20: 0 today, 1 a badge, 2 a line.
+    pub(crate) static MOCK_REQ20: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
 mod paint;
 mod readers;
 mod resting;
@@ -918,6 +922,14 @@ impl Canvas {
         let at = self.last_viewport.min + vec2(16.0, 48.0);
         let camera = self.screen_camera(self.last_viewport);
         self.menu = Some(ActionMenu::bar(at, camera.to_world(at)));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_set_camera(&mut self, (pan, zoom): (Vec2, f32)) {
+        self.camera.pan = pan;
+        self.camera.zoom = zoom;
+        self.camera_moved_by_user = true;
+        self.fit_pending = false;
     }
 
     #[cfg(test)]
@@ -2738,6 +2750,44 @@ impl Canvas {
             };
             for (switch, folds, hovered) in switches.drain(..) {
                 paint::checks_switch(&board_painter, switch, folds, hovered, camera.zoom);
+            }
+            // Mock of REQ-20: the mark of a field with unfinished text.
+            let mock = MOCK_REQ20.with(std::cell::Cell::get);
+            if mock != 0 && card.name == "buildings" {
+                let on_screen = camera.rect(card.rect());
+                let z = camera.zoom;
+                if mock == 1 {
+                    // V1: a badge on the top-right corner, as the number's
+                    // on the top-left.
+                    let half = (10.0 * z).max(7.5);
+                    let centre = on_screen.right_top();
+                    board_painter.circle_filled(centre, half, theme::WARNING);
+                    board_painter.circle_stroke(centre, half, Stroke::new(1.0, theme::WHITE));
+                    // A pencil: a slanted stroke with a tip.
+                    let a = centre + vec2(-0.42, 0.42) * half;
+                    let b = centre + vec2(0.36, -0.36) * half;
+                    board_painter.line_segment([a, b], Stroke::new((half * 0.28).max(1.6), theme::WHITE));
+                    board_painter.circle_filled(a + vec2(-0.1, 0.1) * half, (half * 0.1).max(0.8), theme::WHITE);
+                } else {
+                    // V2: a line under the card's foot.
+                    let height = (18.0 * z).max(5.0);
+                    let strip = Rect::from_min_max(
+                        on_screen.left_bottom(),
+                        on_screen.right_bottom() + vec2(0.0, height),
+                    );
+                    board_painter.rect_filled(strip, 0.0, Color32::from_rgb(250, 240, 220));
+                    board_painter.rect_stroke(strip, 0.0, Stroke::new(1.0, theme::WARNING), egui::StrokeKind::Inside);
+                    let size = 11.0 * z;
+                    if size >= 6.5 {
+                        board_painter.text(
+                            strip.left_center() + vec2(8.0 * z, 0.0),
+                            Align2::LEFT_CENTER,
+                            "Unfinished: address",
+                            egui::FontId::proportional(size),
+                            theme::WARNING,
+                        );
+                    }
+                }
             }
             // What a card drew is kept for tests only.
             #[cfg(not(test))]
@@ -5196,6 +5246,9 @@ impl Canvas {
                                     });
                                 },
                             );
+                            if MOCK_REQ20.with(std::cell::Cell::get) != 0 {
+                                return ui.id();
+                            }
                             ui.separator();
                             let undo =
                                 ui.add(widgets::action(Icon::Undo, "Undo").compact().quiet());

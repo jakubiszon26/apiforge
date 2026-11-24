@@ -202,7 +202,9 @@ impl FolderApp {
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
         // An edit that is not the delete, made anywhere, ends its notice
         // (DIAG-06b).
-        if !canvas.has_notice()
+        if crate::canvas::MOCK_REQ20.with(std::cell::Cell::get) != 0 {
+            // Mock of REQ-20: the notice stays for the capture.
+        } else if !canvas.has_notice()
             || !self
                 .notice_models
                 .get(document_id)
