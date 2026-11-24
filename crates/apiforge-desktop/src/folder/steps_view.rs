@@ -14,6 +14,9 @@ use crate::steps::{
 pub(super) struct StepsView {
     list: List,
     rows: Option<(Arc<Document>, Arc<Project>, Arc<Model>)>,
+    /// The check last clicked in the list of a document, and the step the
+    /// board marks for it once it folds the check into one.
+    marks: HashMap<String, (String, Option<String>)>,
 }
 
 /// The gap between the header and the summary, the tabs and the switch.
@@ -64,6 +67,21 @@ impl FolderApp {
     ) {
         let rows = self.step_rows(model);
         Self::steps_header(ui, header, &rows.summary());
+        // Back from the board, which marked the step it folds the check into:
+        // the mark of the list is where it was.
+        if let Some((check, Some(step))) = self.steps.marks.get(document_id)
+            && self
+                .selections
+                .get(document_id)
+                .is_some_and(|ids| ids.iter().eq([step]))
+        {
+            let check = check.clone();
+            self.selections
+                .insert(document_id.to_owned(), vec![check.clone()]);
+            self.steps
+                .marks
+                .insert(document_id.to_owned(), (check, None));
+        }
         let selected = self
             .selections
             .get(document_id)
@@ -73,7 +91,7 @@ impl FolderApp {
         let run = self.fresh_report(document_id);
         let results = run
             .as_ref()
-            .map(|(run, ends)| Results::new(&run.steps, ends));
+            .map(|(run, ends)| Results::new(&run.steps, ends, &rows));
         let action = state.show(
             ui,
             document_id,
@@ -87,16 +105,68 @@ impl FolderApp {
                 if self.cleanup(document_id) != cleanup {
                     self.touched();
                 }
-                // As a row of Run results selects it: a folded check on its
-                // step, which the board says although it was never drawn.
-                self.ensure_canvas(document_id);
-                self.select_on_board(document_id, model, id, cleanup);
+                // The row clicked is the row marked, also for a check the
+                // board folds into another step.
+                if let Some(tab) = self.workbench.tab_mut(document_id) {
+                    tab.cleanup = cleanup;
+                }
+                self.select_step(document_id, id.clone());
+                self.steps.marks.insert(document_id.to_owned(), (id, None));
             }
             Some(Action::Clear) => {
                 self.selections.remove(document_id);
             }
             None => {}
         }
+    }
+
+    /// Before the board is drawn: a check clicked in the list is marked by the
+    /// board's rule, on the step it folds it into, if it does.
+    pub(super) fn mark_on_board(&mut self, document_id: &str, model: &Document, cleanup: bool) {
+        let Some((check, None)) = self.steps.marks.get(document_id) else {
+            return;
+        };
+        let check = check.clone();
+        if !self
+            .selections
+            .get(document_id)
+            .is_some_and(|ids| ids.iter().eq([&check]))
+        {
+            self.steps.marks.remove(document_id);
+            return;
+        }
+        let step = self.canvases.get(document_id).and_then(|canvas| {
+            canvas.folded_into(graph_of(model, cleanup), later_of(model, cleanup), &check)
+        });
+        if let Some(step) = step {
+            self.show_checks(document_id, step.clone());
+            self.steps
+                .marks
+                .insert(document_id.to_owned(), (check, Some(step)));
+        }
+    }
+
+    /// A step selected by hand elsewhere takes the mark of the list.
+    pub(super) fn forget_mark(&mut self, document_id: &str) {
+        self.steps.marks.remove(document_id);
+    }
+
+    /// Whether a row of the list has the keyboard, which no field then has.
+    pub(super) fn steps_keyboard(&self) -> bool {
+        self.steps_shown(self.workbench.active()) && self.steps.list.has_keyboard()
+    }
+
+    /// The section a step is added to from outside the board: in *Steps* the
+    /// selected row's, Main while nothing is selected; else the board's.
+    pub(super) fn add_section(&mut self, document_id: &str, model: &Arc<Document>) -> bool {
+        if !self.steps_shown(Some(document_id)) {
+            return self.cleanup(document_id);
+        }
+        let rows = self.step_rows(model);
+        self.selections
+            .get(document_id)
+            .and_then(|ids| ids.first())
+            .is_some_and(|id| rows.in_cleanup(id))
     }
 
     /// The header of *Steps*: the board's own name and kind, and the summary.

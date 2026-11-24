@@ -1346,9 +1346,9 @@ fn req01a_code_with_errors_keeps_the_last_list() {
     let notice = harness.get_by_label("Show code").rect();
     assert!(notice.top() >= harness.get_by_label(STEPS).rect().bottom());
     assert!(notice.bottom() <= rows(&harness)[0].rect.top());
-    let name = row(&harness, "POST Weight 31 kg").name;
-    harness.get_by_label(&name).click();
-    settle(&mut harness);
+    let found = row(&harness, "POST Weight 31 kg");
+    let name = found.name;
+    click_at(&mut harness, found.rect.left_top() + egui::vec2(4.0, 6.0));
     assert_eq!(selected(&harness), [name]);
 }
 

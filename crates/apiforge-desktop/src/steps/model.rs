@@ -19,6 +19,8 @@ use std::collections::HashMap;
 pub struct Model {
     pub main: Vec<Row>,
     pub cleanup: Vec<Row>,
+    /// What the list calls each check, by node id.
+    check_names: HashMap<String, String>,
 }
 
 /// One row of the list.
@@ -64,8 +66,8 @@ pub enum Kind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Request {
     pub method: &'static str,
-    /// The URL without its scheme and host.
-    pub path: String,
+    /// The URL as it is written, its host included.
+    pub url: String,
     pub reads: Vec<String>,
     pub column: Column,
     pub checks: Vec<Check>,
@@ -142,14 +144,42 @@ impl Model {
         };
         let readers = Readers::of(&graphs, &texts);
         let section = |graph, phase| section(graph, phase, &graphs, &texts, &readers);
-        Self {
+        let mut model = Self {
             main: section(main, Phase::Main),
             cleanup: cleanup.map_or_else(Vec::new, |cleanup| section(cleanup, Phase::Cleanup)),
-        }
+            check_names: HashMap::new(),
+        };
+        model.check_names = model
+            .rows()
+            .flat_map(|row| {
+                let alone = match &row.kind {
+                    Kind::Check { text } => Some((row.id.clone(), text.clone())),
+                    _ => None,
+                };
+                let under = row.checks().iter().map(|check| {
+                    let name = format!("{} of {}", check.text, row.name);
+                    (check.id.clone(), name)
+                });
+                alone.into_iter().chain(under)
+            })
+            .collect();
+        model
     }
 
     pub fn rows(&self) -> impl Iterator<Item = &Row> {
         self.main.iter().chain(&self.cleanup)
+    }
+
+    /// What the list calls the check `id`: its text, and the request it is
+    /// under (`status == 201 of Request number 60`). `None` for a step, which
+    /// is called by its name.
+    pub fn check_name(&self, id: &str) -> Option<&str> {
+        self.check_names.get(id).map(String::as_str)
+    }
+
+    /// Whether the list shows the step or check `id` in Cleanup.
+    pub fn in_cleanup(&self, id: &str) -> bool {
+        self.cleanup.iter().any(|row| row.holds(id))
     }
 
     /// `16 steps · 33 checks`.
@@ -497,11 +527,7 @@ impl<'a> Section<'a> {
         let url = node.inputs.get("url").map(|url| self.texts.url(url));
         Request {
             method: sends::method(node),
-            path: url
-                .as_deref()
-                .map(crate::report::url_path)
-                .unwrap_or_default()
-                .to_owned(),
+            url: url.unwrap_or_default(),
             reads: self.reads(node),
             column: match self.readers.lines.get(id) {
                 Some(lines) => Column::Sets(lines.iter().cloned().collect()),

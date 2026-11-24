@@ -164,12 +164,12 @@ impl<'a> NotRun<'a> {
         }
     }
 
-    /// `checkout_total failed`, `valid_cart unmet`.
-    fn end(&self) -> Option<String> {
+    /// `checkout_total failed`, `valid_cart unmet`, the step named by `name`.
+    fn end(&self, name: impl Fn(&EndStep) -> String) -> Option<String> {
         self.0.step.as_ref().map(|end| {
             format!(
                 "{} {}",
-                end.name,
+                name(end),
                 if unmet_end(end) { "unmet" } else { "failed" }
             )
         })
@@ -178,6 +178,12 @@ impl<'a> NotRun<'a> {
     /// The words of the card and of the row: `Stopped · checkout_total
     /// failed`, `Skipped · outside path`, `Cancelled`.
     pub fn words(&self) -> String {
+        self.words_naming(|end| end.name.clone())
+    }
+
+    /// The same words, the step at the end of the cause named by `name`: a
+    /// list that shows no handles names a check as it writes it.
+    pub fn words_naming(&self, name: impl Fn(&EndStep) -> String) -> String {
         let word = self.word();
         let rest = match self.0.last {
             NotRunCause::OutsidePath => Some("outside path".to_owned()),
@@ -186,8 +192,8 @@ impl<'a> NotRun<'a> {
                 .0
                 .step
                 .as_ref()
-                .map(|end| format!("no value from {}", end.name)),
-            _ => self.end(),
+                .map(|end| format!("no value from {}", name(end))),
+            _ => self.end(&name),
         };
         match rest {
             Some(rest) => format!("{word} · {rest}"),
@@ -197,8 +203,14 @@ impl<'a> NotRun<'a> {
 
     /// The sentence of the step's details.
     pub fn sentence(&self) -> String {
+        self.sentence_naming(|end| end.name.clone())
+    }
+
+    /// The same sentence, the step named by `name`.
+    pub fn sentence_naming(&self, name: impl Fn(&EndStep) -> String) -> String {
         let end = self.0.step.as_ref();
-        let name = end.map(|end| end.name.as_str());
+        let name = end.map(name);
+        let name = name.as_deref();
         let condition = end.is_some_and(unmet_end);
         match (&self.0.last, name) {
             (NotRunCause::Stopped { .. }, Some(name)) if condition => format!(

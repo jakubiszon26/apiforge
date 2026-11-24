@@ -145,6 +145,8 @@ impl FolderApp {
                 .cloned()
                 .collect::<Vec<_>>()
         });
+        self.ensure_canvas(document_id);
+        self.mark_on_board(document_id, &model, cleanup);
         let graph = graph_of(&model, cleanup);
         // Built once per model, not every frame (UX-16).
         let combined = cleanup.then(|| self.cleanup_reference(&model));
@@ -201,7 +203,6 @@ impl FolderApp {
         // also while it is folded to its rail (KTLO-17).
         let library = (!library_in_view)
             .then(|| library_context(&project, document_id, &model, cleanup, snapshot.editable));
-        self.ensure_canvas(document_id);
         let mode = self.workbench.mode;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
         // An edit that is not the delete, made anywhere, ends its notice
@@ -442,6 +443,7 @@ impl FolderApp {
                     self.new_inputs.remove(document_id);
                     self.component_settings.remove(document_id);
                 }
+                self.forget_mark(document_id);
                 self.selections.insert(document_id.to_owned(), ids);
                 self.selected_inputs.remove(document_id);
                 None

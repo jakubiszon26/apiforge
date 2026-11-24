@@ -45,14 +45,22 @@ struct Sent {
 }
 
 impl Sent {
-    fn line(&self) -> Line {
+    /// The line of the place; a path without its host unless `host`.
+    fn line(&self, host: bool) -> Line {
         Line {
             text: match self.place {
+                Place::Path if host => format!("path {}", self.text),
                 Place::Path => format!("path {}", crate::report::url_path(&self.text)),
                 _ => format!("{}: {}", self.name, self.text),
             },
             quiet: false,
         }
+    }
+
+    /// The scheme and host of a path as it is written; empty without them.
+    fn host(&self) -> &str {
+        let path = crate::report::url_path(&self.text);
+        self.text.strip_suffix(path).unwrap_or(&self.text)
     }
 }
 
@@ -98,12 +106,20 @@ pub fn sends(requests: &[&Node], texts: &Texts<'_>) -> Vec<Sends> {
             continue;
         }
         let common = common(group.iter().map(|&index| sent[index].as_slice()));
+        // Where the group's hosts differ, the path line says the host.
+        let mut hosts = group
+            .iter()
+            .flat_map(|&index| &sent[index])
+            .filter(|sent| sent.place == Place::Path)
+            .map(Sent::host);
+        let first = hosts.next();
+        let host = hosts.any(|host| Some(host) != first);
         let peers: Vec<&Node> = group.iter().map(|&index| requests[index]).collect();
         let full = full(&peers, &common);
         for &index in &group {
             out[index] = Some(Sends {
                 common: Some(full.clone()),
-                lines: differing(&sent[index], &common),
+                lines: differing(&sent[index], &common, host),
             });
         }
     }
@@ -120,7 +136,7 @@ fn own(sent: &[Sent]) -> Vec<Line> {
         .filter(|sent| {
             sent.place != Place::Path && sent.place != Place::Header("content-type".into())
         })
-        .map(Sent::line)
+        .map(|sent| sent.line(true))
         .collect();
     if lines.is_empty() {
         vec![quiet("no body")]
@@ -160,7 +176,7 @@ fn common<'s>(group: impl ExactSizeIterator<Item = &'s [Sent]>) -> IndexMap<Plac
 }
 
 /// What one request sends differently from `common`, and what it leaves out.
-fn differing(sent: &[Sent], common: &IndexMap<Place, Sent>) -> Vec<Line> {
+fn differing(sent: &[Sent], common: &IndexMap<Place, Sent>, host: bool) -> Vec<Line> {
     let mut lines = Vec::new();
     for rank in 0..=3 {
         lines.extend(
@@ -171,7 +187,7 @@ fn differing(sent: &[Sent], common: &IndexMap<Place, Sent>) -> Vec<Line> {
                         .get(&sent.place)
                         .is_none_or(|common| common.text != sent.text)
                 })
-                .map(Sent::line),
+                .map(|sent| sent.line(host)),
         );
         lines.extend(
             common
@@ -190,8 +206,8 @@ fn differing(sent: &[Sent], common: &IndexMap<Place, Sent>) -> Vec<Line> {
     lines
 }
 
-/// The common request in full: its method and path, the group's pattern where
-/// the paths have no common text, then its places.
+/// The common request in full: its method and URL, the group's pattern where
+/// the URLs have no common text, then its places.
 fn full(peers: &[&Node], common: &IndexMap<Place, Sent>) -> String {
     // The pattern the group is of has the most `{{…}}`: those that join it
     // have literal segments in their place.
@@ -203,13 +219,13 @@ fn full(peers: &[&Node], common: &IndexMap<Place, Sent>) -> String {
             .unwrap_or_default()
     };
     let path = match common.get(&Place::Path) {
-        Some(path) => crate::report::url_path(&path.text).to_owned(),
-        None => crate::report::url_path(&pattern()).replace(BLANK, "{{…}}"),
+        Some(path) => path.text.clone(),
+        None => pattern().replace(BLANK, "{{…}}"),
     };
     let mut text = format!("The common request\n{} {path}", method(peers[0]));
     for sent in common.values().filter(|sent| sent.place != Place::Path) {
         text.push('\n');
-        text.push_str(&sent.line().text);
+        text.push_str(&sent.line(true).text);
     }
     text
 }

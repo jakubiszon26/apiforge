@@ -449,6 +449,7 @@ impl FolderApp {
                 {
                     tab.cleanup = cleanup;
                 }
+                self.forget_mark(document_id);
                 self.selections
                     .insert(document_id.to_owned(), vec![node_id]);
             }

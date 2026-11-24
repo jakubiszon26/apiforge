@@ -13,7 +13,7 @@ use crate::{
 };
 use apiforge_core::{
     model::NodeKind,
-    run::{CauseEnds, Phase, StepResult, StepStatus},
+    run::{CauseEnds, EndStep, Phase, StepResult, StepStatus},
 };
 use eframe::egui::{
     self, Align2, Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2,
@@ -24,16 +24,18 @@ use std::collections::HashMap;
 pub struct Results<'a> {
     steps: HashMap<(Phase, &'a str), &'a StepResult>,
     ends: &'a CauseEnds,
+    model: &'a Model,
 }
 
 impl<'a> Results<'a> {
-    pub fn new(steps: &'a [StepResult], ends: &'a CauseEnds) -> Self {
+    pub fn new(steps: &'a [StepResult], ends: &'a CauseEnds, model: &'a Model) -> Self {
         Self {
             steps: steps
                 .iter()
                 .map(|step| ((step.phase, step.node_id.as_str()), step))
                 .collect(),
             ends,
+            model,
         }
     }
 
@@ -67,7 +69,17 @@ impl Outcome {
             return Self {
                 words: "Not run".into(),
                 colour: theme::MUTED,
-                reason: Some((not_run.words(), not_run.sentence())),
+                reason: {
+                    // The list shows no handles: a check is named as written.
+                    let name = |end: &EndStep| {
+                        results
+                            .model
+                            .check_name(&end.node_id)
+                            .unwrap_or(&end.name)
+                            .to_owned()
+                    };
+                    Some((not_run.words_naming(name), not_run.sentence_naming(name)))
+                },
             };
         }
         let failed = checks
@@ -195,6 +207,91 @@ fn text(
     width
 }
 
+/// A URL on one line in `rect`, cut in its middle, so that its host and its
+/// end are read; whole on hover.
+fn url_text(ui: &Ui, id: egui::Id, rect: Rect, url: &str, colour: Color32) {
+    let response = ui.interact(rect, id, Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, url));
+    let fits = (rect.width() / width_of(ui, "0", mono())) as usize;
+    let shown = middle_cut(url, fits);
+    let cut = shown.is_some();
+    let galley =
+        ui.painter()
+            .layout_no_wrap(shown.unwrap_or_else(|| url.to_owned()), mono(), colour);
+    ui.painter().galley(
+        pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
+        galley,
+        colour,
+    );
+    if cut {
+        response.on_hover_text(url);
+    }
+}
+
+/// `text` in `fits` characters, its middle left out; `None` when it fits.
+fn middle_cut(text: &str, fits: usize) -> Option<String> {
+    let characters: Vec<char> = text.chars().collect();
+    if characters.len() <= fits {
+        return None;
+    }
+    let kept = fits.saturating_sub(1);
+    let start = kept.div_ceil(2);
+    let end = characters.len() - (kept - start);
+    let mut cut: String = characters[..start].iter().collect();
+    cut.push('…');
+    cut.extend(&characters[end..]);
+    Some(cut)
+}
+
+/// Gives the keyboard to what a click chose; whether `response` has it.
+fn keyboard(response: &Response) -> bool {
+    let key = egui::Id::new(POINTER_FOCUS);
+    let clicked = response.clicked_by(egui::PointerButton::Primary);
+    if clicked {
+        response.request_focus();
+        response
+            .ctx
+            .data_mut(|data| data.insert_temp(key, response.id));
+    } else if response.lost_focus() {
+        response.ctx.data_mut(|data| {
+            if data.get_temp::<egui::Id>(key) == Some(response.id) {
+                data.remove::<egui::Id>(key);
+            }
+        });
+    }
+    response.has_focus()
+}
+
+/// The row a click gave the keyboard to, which is marked as selected and
+/// needs no ring.
+const POINTER_FOCUS: &str = "steps-pointer-focus";
+
+/// Whether the keyboard's focus is drawn on `response`: the keyboard brought
+/// it there.
+fn focus_shown(response: &Response) -> bool {
+    response.has_focus()
+        && response.ctx.data(|data| {
+            data.get_temp::<egui::Id>(egui::Id::new(POINTER_FOCUS)) != Some(response.id)
+        })
+}
+
+/// The keyboard's focus: a dashed line, where the selection is a frame.
+fn focus_ring(painter: &egui::Painter, rect: Rect) {
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+        rect.left_top(),
+    ];
+    painter.extend(egui::Shape::dashed_line(
+        &corners,
+        Stroke::new(1.0, theme::TEXT),
+        3.0,
+        3.0,
+    ));
+}
+
 /// The columns of a request's card.
 #[derive(Clone, Copy)]
 struct Columns {
@@ -238,7 +335,10 @@ impl Columns {
 /// The list's state: the selection it last showed.
 #[derive(Default)]
 pub struct List {
-    shown: Option<(String, Option<String>)>,
+    /// What was selected when each document was last shown.
+    shown: HashMap<String, Option<String>>,
+    /// A row or a check of the list has the keyboard.
+    focused: bool,
 }
 
 /// What the rows are drawn from.
@@ -253,6 +353,12 @@ struct Drawing<'a> {
 }
 
 impl List {
+    /// Whether a row or a check of the list had the keyboard when it was last
+    /// drawn.
+    pub fn has_keyboard(&self) -> bool {
+        self.focused
+    }
+
     /// Draws `model` in the room left, and returns what was asked for.
     pub fn show(
         &mut self,
@@ -263,10 +369,13 @@ impl List {
         selected: Option<&str>,
     ) -> Option<Action> {
         let mut action = None;
-        let now = (document.to_owned(), selected.map(str::to_owned));
-        // A step selected anywhere is brought into view once.
-        let reveal = self.shown.as_ref() != Some(&now) && selected.is_some();
-        self.shown = Some(now);
+        // A step selected anywhere is brought into view once; another tab and
+        // back keeps the scroll.
+        let before = self
+            .shown
+            .insert(document.to_owned(), selected.map(str::to_owned));
+        let reveal = selected.is_some() && before.flatten().as_deref() != selected;
+        self.focused = false;
         let drawing = Drawing {
             document,
             results,
@@ -317,6 +426,7 @@ impl List {
                     }
                     for row in rows {
                         let response = drawing.row(ui, row);
+                        self.focused |= response.2;
                         if let Some(id) = response.1 {
                             action = Some(Action::Select {
                                 id,
@@ -345,8 +455,9 @@ impl List {
 }
 
 impl Drawing<'_> {
-    /// Draws one row; returns its place and the step a click chose.
-    fn row(&self, ui: &mut Ui, row: &Row) -> (Rect, Option<String>) {
+    /// Draws one row; returns its place, the step a click chose, and whether
+    /// it or a check of it has the keyboard.
+    fn row(&self, ui: &mut Ui, row: &Row) -> (Rect, Option<String>, bool) {
         let full = ui.available_width() - 2.0 * MARGIN;
         let indent = (row.depth as f32 * INDENT)
             .min(full - BADGE - BADGE_GAP - LEAST_CARD)
@@ -380,7 +491,7 @@ impl Drawing<'_> {
             .zip(result)
             .map(|(results, step)| Outcome::of(step, results, row.checks(), row.phase));
         let response = ui.interact(card, id, Sense::click());
-        let active = self.selected.is_some_and(|id| row.holds(id));
+        let active = self.selected == Some(row.id.as_str());
         response.widget_info(|| {
             let name = name(row, outcome.as_ref());
             egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name)
@@ -400,6 +511,7 @@ impl Drawing<'_> {
         if visible {
             self.frame(ui, row, line, card, indent, &response, active);
         }
+        let mut focused = keyboard(&response);
         let mut chosen = response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
@@ -418,11 +530,11 @@ impl Drawing<'_> {
         if let Kind::Request(request) = &row.kind {
             let top = head.bottom();
             let contents = Rect::from_min_max(pos2(inner.left(), top), inner.max);
-            chosen = self
-                .columns(ui, id, row, request, contents, columns, visible)
-                .or(chosen);
+            let (check, on_check) = self.columns(ui, id, row, request, contents, columns, visible);
+            chosen = check.or(chosen);
+            focused |= on_check;
         }
-        (line, chosen)
+        (line, chosen, focused)
     }
 
     /// The badge, the branch's name and the card's frame.
@@ -440,21 +552,14 @@ impl Drawing<'_> {
         let painter = ui.painter();
         let stroke = if active {
             Stroke::new(2.0, theme::ACCENT)
-        } else if response.has_focus() {
-            Stroke::new(1.5, theme::ACCENT)
         } else if response.hovered() {
             Stroke::new(1.0, theme::SOCKET)
         } else {
             Stroke::new(1.0, theme::BORDER)
         };
         painter.rect(card, 6, theme::WHITE, stroke, egui::StrokeKind::Inside);
-        if response.has_focus() && active {
-            painter.rect_stroke(
-                card.shrink(3.0),
-                4,
-                Stroke::new(1.0, theme::ACCENT),
-                egui::StrokeKind::Inside,
-            );
+        if focus_shown(response) {
+            focus_ring(painter, card.shrink(3.5));
         }
         let badge = pos2(
             line.left() + MARGIN + indent + BADGE / 2.0,
@@ -539,13 +644,15 @@ impl Drawing<'_> {
         let reason = outcome
             .and_then(|outcome| outcome.reason.as_ref())
             .map(|(words, _)| words.as_str());
+        let mut url = None;
         let arguments;
         let set;
         match &row.kind {
             Kind::Request(request) => {
                 pieces.push((request.method, mono(), theme::LINK));
                 pieces.push((&row.name, name_font(), theme::TEXT));
-                pieces.push((&request.path, mono(), theme::MUTED));
+                url = Some(pieces.len());
+                pieces.push((&request.url, mono(), theme::MUTED));
             }
             Kind::Call {
                 arguments: given,
@@ -593,17 +700,22 @@ impl Drawing<'_> {
             .collect();
         let widths = shared(&whole, right - 6.0 - x - gaps);
         for (index, ((piece, font, colour), width)) in pieces.into_iter().zip(widths).enumerate() {
+            let place = Rect::from_min_size(pos2(x, rect.top()), vec2(width, rect.height()));
+            x += width + 8.0;
+            if Some(index) == url {
+                url_text(ui, id.with(("head", index)), place, piece, colour);
+                continue;
+            }
             let hover = (Some(piece) == reason).then_some(sentence).flatten();
             text(
                 ui,
                 id.with(("head", index)),
-                Rect::from_min_size(pos2(x, rect.top()), vec2(width, rect.height())),
+                place,
                 piece,
                 font,
                 colour,
                 hover,
             );
-            x += width + 8.0;
         }
     }
 
@@ -619,10 +731,10 @@ impl Drawing<'_> {
         rect: Rect,
         columns: Columns,
         visible: bool,
-    ) -> Option<String> {
+    ) -> (Option<String>, bool) {
         let heights = heights(request);
         let mut at = rect.min;
-        let mut chosen = None;
+        let mut chosen = (None, false);
         for (index, (width, height)) in columns.widths.into_iter().zip(heights).enumerate() {
             let room = if index == 2 || columns.stacked {
                 width
@@ -716,14 +828,14 @@ impl Drawing<'_> {
         row: &Row,
         request: &Request,
         column: Rect,
-    ) -> Option<String> {
+    ) -> (Option<String>, bool) {
         if ui.is_rect_visible(column) {
             caption(ui, id.with("checks"), column, CHECKS, None);
         }
         let top = column.top() + CAPTION_HEIGHT;
         if request.checks.is_empty() {
             if !ui.is_rect_visible(column) {
-                return None;
+                return (None, false);
             }
             let rect =
                 Rect::from_min_size(pos2(column.left(), top), vec2(column.width(), TEXT_HEIGHT));
@@ -736,23 +848,26 @@ impl Drawing<'_> {
                 theme::MUTED,
                 None,
             );
-            return None;
+            return (None, false);
         }
         let mut chosen = None;
+        let mut focused = false;
         for (index, check) in request.checks.iter().enumerate() {
             let rect = Rect::from_min_size(
                 pos2(column.left(), top + index as f32 * CHECK_HEIGHT),
                 vec2(column.width(), CHECK_HEIGHT),
             );
-            if self.check(ui, id, row, check, rect) {
+            let response = self.check(ui, id, row, check, rect);
+            focused |= keyboard(&response);
+            if response.clicked() {
                 chosen = Some(check.id.clone());
             }
         }
-        chosen
+        (chosen, focused)
     }
 
-    /// One check under its request; whether it was clicked.
-    fn check(&self, ui: &Ui, row_id: egui::Id, row: &Row, check: &Check, rect: Rect) -> bool {
+    /// One check under its request.
+    fn check(&self, ui: &Ui, row_id: egui::Id, row: &Row, check: &Check, rect: Rect) -> Response {
         let id = row_id.with(("check", &check.id));
         let result = self
             .results
@@ -788,13 +903,8 @@ impl Drawing<'_> {
             } else if response.hovered() {
                 ui.painter().rect_filled(rect, 4.0, theme::BG);
             }
-            if response.has_focus() {
-                ui.painter().rect_stroke(
-                    rect.shrink(0.5),
-                    4.0,
-                    Stroke::new(1.5, theme::ACCENT),
-                    egui::StrokeKind::Inside,
-                );
+            if focus_shown(&response) {
+                focus_ring(ui.painter(), rect.shrink(0.5));
             }
             check_mark(ui, pos2(rect.left() + 7.0, rect.center().y), result);
             let failed = actual.map(|actual| format!("— {actual}"));
@@ -841,11 +951,11 @@ impl Drawing<'_> {
             }
             let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
             if !hover.is_empty() {
-                return response.on_hover_text(hover.join("\n")).clicked();
+                return response.on_hover_text(hover.join("\n"));
             }
-            return response.clicked();
+            return response;
         }
-        response.clicked()
+        response
     }
 }
 
@@ -1092,6 +1202,15 @@ pub fn switch_size(ui: &Ui) -> egui::Vec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_text_is_cut_in_its_middle() {
+        assert_eq!(middle_cut("abcdef", 6), None);
+        assert_eq!(middle_cut("abcdef", 5).as_deref(), Some("ab…ef"));
+        assert_eq!(middle_cut("abcdef", 4).as_deref(), Some("ab…f"));
+        assert_eq!(middle_cut("abcdef", 1).as_deref(), Some("…"));
+        assert_eq!(middle_cut("abcdef", 0).as_deref(), Some("…"));
+    }
 
     #[test]
     fn texts_side_by_side_give_way_from_the_last() {

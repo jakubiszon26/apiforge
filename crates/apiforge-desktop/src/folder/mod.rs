@@ -890,6 +890,7 @@ impl FolderApp {
     /// Selects `node` alone, as a click on its card does; the board brings
     /// a newly selected card into view (UX-18).
     fn select_step(&mut self, document_id: &str, node: String) {
+        self.forget_mark(document_id);
         self.new_inputs.remove(document_id);
         self.component_settings.remove(document_id);
         self.selections.insert(document_id.to_owned(), vec![node]);
@@ -1688,7 +1689,7 @@ impl FolderApp {
         }
         // A text field with the keyboard (the code or an inspector field) walks
         // its own history; otherwise Ctrl+Z and Ctrl+Y walk the model's.
-        if context.egui_wants_keyboard_input() {
+        if context.egui_wants_keyboard_input() && !self.steps_keyboard() {
             return;
         }
         let Some(active) = self.workbench.active().map(str::to_owned) else {
@@ -1794,7 +1795,7 @@ impl FolderApp {
         };
         let project = self.context_project();
         let library = board.as_ref().map(|(document_id, snapshot, model)| {
-            let cleanup = self.cleanup(document_id);
+            let cleanup = self.add_section(document_id, model);
             let context = library_context(&project, document_id, model, cleanup, snapshot.editable);
             (context, cleanup)
         });
@@ -1887,6 +1888,10 @@ impl FolderApp {
         let cleanup = library.map(|(_, cleanup)| cleanup);
         if let Some(((document_id, snapshot, model), cleanup)) = board.zip(cleanup) {
             for action in actions {
+                // What is added is selected on the board that holds it.
+                if let Some(tab) = self.workbench.tab_mut(document_id) {
+                    tab.cleanup = cleanup;
+                }
                 self.library_action(document_id, &model, cleanup, snapshot.editable, action);
             }
         }
