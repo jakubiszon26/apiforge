@@ -51,6 +51,9 @@ impl SavedVersion {
 
 impl FolderApp {
     pub(super) fn save_active(&mut self) {
+        if !self.commit_title() {
+            return;
+        }
         match self.workbench.active().map(str::to_owned) {
             Some(id) => {
                 if let Err(error) = self.save_document(&id) {
@@ -143,6 +146,9 @@ impl FolderApp {
     }
 
     pub(super) fn save_all(&mut self) {
+        if !self.commit_title() {
+            return;
+        }
         self.save_all_then(|_, _| {});
     }
 
@@ -304,6 +310,8 @@ impl FolderApp {
         if self.persistence.close_ready {
             return true;
         }
+        // A title typed in the board's header is work to protect (WS-05a).
+        self.commit_title();
         self.persistence.closing = true;
         self.watcher.stop();
         self.watcher.drain_stopped();

@@ -369,6 +369,9 @@ impl FolderApp {
         if self.runs.handle.is_some() {
             return;
         }
+        if !self.commit_title() {
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };

@@ -16,12 +16,9 @@ impl FolderApp {
     }
 
     pub(super) fn diagram_area(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
-        // A field left open on another document, or where no board is drawn,
-        // is closed without writing (WS-05a).
         let mut title_edit = self
             .title_edit
-            .take()
-            .filter(|edit| active == Some(edit.document.as_str()));
+            .take_if(|edit| active == Some(edit.document.as_str()));
         let Some(document_id) = active else {
             // The sleeping dog keeps the empty board company (KTLO-20); the
             // board's other hints announce a problem or a wait and stay plain.
@@ -95,18 +92,13 @@ impl FolderApp {
         // save or a publication holds the board for a moment, and the
         // analysis a publication starts checks code that did not change:
         // neither puts a notice above the board (UX-25).
-        let rechecking = snapshot.analysis == AnalysisState::Pending
-            && snapshot.model_describes_text
-            && !snapshot.held
-            && snapshot.conflict.is_none()
-            && snapshot.unavailable.is_none();
+        let held_briefly = held_briefly(&snapshot);
         // The field stays open while the board is held for a moment only, and
         // while the title is still the one it opened on.
-        let held_briefly = !snapshot.paused && (snapshot.busy || rechecking);
         title_edit = title_edit.filter(|edit| {
             (snapshot.editable || held_briefly) && header.title == Some(edit.title.as_str())
         });
-        if !snapshot.editable && !snapshot.paused && !snapshot.busy && !rechecking {
+        if !snapshot.editable && !snapshot.paused && !held_briefly {
             let text = read_only_reason(&snapshot);
             egui::Frame::new()
                 .fill(theme::ACCENT_SOFT)
@@ -270,7 +262,11 @@ impl FolderApp {
                     shared: &shared,
                     moves: true,
                 };
-                let fit = header.fit(ui, canvas.header_room(ui, &input), title_edit.is_some());
+                let draft = title_edit
+                    .as_ref()
+                    .filter(|edit| !edit.left)
+                    .map(|edit| edit.draft.as_str());
+                let fit = header.fit(ui, canvas.header_room(ui, &input), draft);
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
                 let row = canvas.leading_rect(ui, &input);
                 // Drawn before the board, so the keyboard reaches the header
@@ -290,9 +286,8 @@ impl FolderApp {
                 canvas.show(ui, &input)
             })
             .inner;
-        self.title_edit = title_edit;
-        if let Some(title) = renamed {
-            self.rename_document(document_id, &model, title);
+        if title_edit.is_some() {
+            self.title_edit = title_edit;
         }
         if chosen != cleanup {
             if let Some(tab) = self.workbench.tab_mut(document_id) {
@@ -304,6 +299,10 @@ impl FolderApp {
         for command in commands {
             self.board_command(document_id, &model, cleanup, snapshot.editable, command);
         }
+        // After the commands, which edit the model this frame drew.
+        if let Some(title) = renamed {
+            self.rename_document(document_id, title);
+        }
         // What Back restores beside the board lasts as long as Back.
         if !self
             .canvases
@@ -314,9 +313,68 @@ impl FolderApp {
         }
     }
 
+    /// Whether a title typed in the header's field waits to be written.
+    pub(super) fn title_typed(&self) -> bool {
+        self.title_edit
+            .as_ref()
+            .is_some_and(|edit| edit.written().is_some())
+    }
+
+    /// Closes the header's field and writes the title typed in it, when the
+    /// field is left and before a save or a run. `false` when there was one
+    /// and it was not written, of which the person is told: the title is the
+    /// one before, and the save or the run would take it.
+    pub(super) fn commit_title(&mut self) -> bool {
+        let Some(mut edit) = self.title_edit.take() else {
+            return true;
+        };
+        let Some(written) = edit.written() else {
+            return true;
+        };
+        let Some(snapshot) = self.snapshot(&edit.document) else {
+            return true;
+        };
+        if snapshot
+            .model
+            .as_deref()
+            .and_then(shown_title)
+            .as_ref()
+            .is_none_or(|title| *title != edit.title)
+        {
+            return true;
+        }
+        if !snapshot.editable {
+            if held_briefly(&snapshot) {
+                edit.left = true;
+                self.title_edit = Some(edit);
+            }
+            return true;
+        }
+        self.rename_document(&edit.document, written.clone());
+        self.shared_model(&edit.document)
+            .is_some_and(|model| shown_title(&model) == Some(written))
+    }
+
+    /// Writes the title of a field that was left: the keyboard went elsewhere
+    /// while the board was held, or the field is not drawn, in another view,
+    /// for another document or under maximised run results.
+    pub(super) fn tend_title_edit(&mut self, active: Option<&str>) {
+        let drawn = self.workbench.mode == Mode::Diagram && !self.report_maximised(active);
+        if self
+            .title_edit
+            .as_ref()
+            .is_some_and(|edit| edit.left || !drawn || active != Some(edit.document.as_str()))
+        {
+            self.commit_title();
+        }
+    }
+
     /// Writes `title` as the document's title, as one model edit (WS-05a).
-    fn rename_document(&mut self, document_id: &str, model: &Document, title: String) {
-        let mut next = model.clone();
+    fn rename_document(&mut self, document_id: &str, title: String) {
+        let Some(model) = self.shared_model(document_id) else {
+            return;
+        };
+        let mut next = Document::clone(&model);
         match &mut next {
             Document::Scenario(scenario) => scenario.name = title,
             Document::Component(component) => component.name = title,
@@ -1460,8 +1518,19 @@ fn one_line(text: &str) -> String {
         .collect()
 }
 
-/// The title being edited in the header (WS-05a). It is written on Return
-/// and dropped with the keyboard.
+/// Whether the board takes no edit for a moment only: a save, a publication,
+/// or the analysis of code that did not change.
+fn held_briefly(snapshot: &Snapshot) -> bool {
+    let rechecking = snapshot.analysis == AnalysisState::Pending
+        && snapshot.model_describes_text
+        && !snapshot.held
+        && snapshot.conflict.is_none()
+        && snapshot.unavailable.is_none();
+    !snapshot.paused && (snapshot.busy || rechecking)
+}
+
+/// The title being edited in the header (WS-05a). It is written when the
+/// field is left, before a save and before a run; Escape drops it.
 pub(super) struct TitleEdit {
     document: String,
     /// The title as it was shown when the field opened.
@@ -1470,6 +1539,17 @@ pub(super) struct TitleEdit {
     /// The field takes the keyboard, with the title selected, when it is
     /// next drawn.
     opening: bool,
+    /// The field was left and is no longer drawn: the title is written as
+    /// soon as the board takes an edit.
+    left: bool,
+}
+
+impl TitleEdit {
+    /// What the field writes; never the title it opened on, nor an empty one.
+    fn written(&self) -> Option<String> {
+        let written = one_line(&self.draft);
+        (written != self.title && !written.trim().is_empty()).then_some(written)
+    }
 }
 
 /// The document whose title the header shows and the edit of it, if one is
@@ -1499,6 +1579,9 @@ struct HeaderFit {
     /// The file name after the title, whole.
     file: bool,
     kind: bool,
+    /// Left free before Main and Cleanup, which stay in place while the
+    /// title is edited.
+    free: f32,
     width: f32,
 }
 
@@ -1528,7 +1611,7 @@ impl Header<'_> {
                 alone: f32::INFINITY,
                 with_summary: f32::INFINITY,
             },
-            false,
+            None,
         )
         .width
     }
@@ -1537,7 +1620,8 @@ impl Header<'_> {
     /// the title, then the full width of the title or, where there is none,
     /// of the file name (its full text stays on hover), then the steps
     /// summary, which the board leaves out once the header takes its room.
-    fn fit(&self, ui: &egui::Ui, room: canvas::HeaderRoom, editing: bool) -> HeaderFit {
+    /// While the title is edited, `draft` is the text in its field.
+    fn fit(&self, ui: &egui::Ui, room: canvas::HeaderRoom, draft: Option<&str>) -> HeaderFit {
         let gap = ui.spacing().item_spacing.x;
         let tabs = if self.tabs {
             widgets::tab_value_width(ui, "Main") + gap + widgets::tab_value_width(ui, "Cleanup")
@@ -1549,13 +1633,15 @@ impl Header<'_> {
                 name_width: 0.0,
                 file: false,
                 kind: false,
+                free: 0.0,
                 width: tabs,
             };
         };
         let mut full = Self::text_width(ui, self.title.unwrap_or(name), Self::bold());
-        if editing {
-            // The field is as wide as the title, its frame and the caret.
-            full = (full + TITLE_MARGIN.sum().x + TITLE_CARET).max(NAME_MIN_WIDTH);
+        // The field opens as wide as the title, its frame and the caret.
+        let field = |text: f32| (text + TITLE_MARGIN.sum().x + TITLE_CARET).max(NAME_MIN_WIDTH);
+        if draft.is_some() {
+            full = field(full);
         }
         let label = egui::FontId::proportional(theme::FONT_LABEL);
         let file_width = match self.title {
@@ -1585,19 +1671,43 @@ impl Header<'_> {
                     false,
                 )
             };
-        HeaderFit {
+        let used = |name: f32, file: bool, kind: bool| {
+            name + if file { file_width } else { 0.0 } + if kind { kind_width } else { 0.0 }
+        };
+        let mut fit = HeaderFit {
             name_width,
             file: file && self.title.is_some(),
             kind,
-            width: name_width
-                + if file { file_width } else { 0.0 }
-                + if kind { kind_width } else { 0.0 }
-                + fixed,
+            free: 0.0,
+            width: used(name_width, file, kind) + fixed,
+        };
+        // The field grows with its text: over the kind and the file name of a
+        // scenario, whose Main and Cleanup stay where the opened field put
+        // them, or to the room of a component's row.
+        if let Some(draft) = draft {
+            let wanted = field(Self::text_width(ui, draft, Self::bold())).max(name_width);
+            let held = fit.width - fixed;
+            let most = if self.tabs {
+                held
+            } else {
+                room.with_summary.max(held)
+            };
+            fit.kind = kind && used(wanted, file, true) <= most;
+            fit.file = fit.file && used(wanted, true, fit.kind) <= most;
+            fit.kind &= fit.file;
+            fit.name_width = wanted.min(most);
+            let taken = used(fit.name_width, fit.file, fit.kind);
+            if self.tabs {
+                fit.free = (held - taken).max(0.0);
+            } else {
+                fit.width = taken;
+            }
         }
+        fit
     }
 
     /// Draws the header into `row`, the left of the board's header row.
-    /// Returns the title Return wrote in its field.
+    /// Returns the title its field wrote when it was left.
     fn show(
         &self,
         ctx: &egui::Context,
@@ -1630,7 +1740,7 @@ impl Header<'_> {
                             widgets::hint(ui, kind);
                         }
                         if self.tabs {
-                            ui.add_space(theme::SPACE_LG);
+                            ui.add_space(theme::SPACE_LG + fit.free);
                         }
                     }
                     if self.tabs {
@@ -1652,8 +1762,7 @@ impl Header<'_> {
     }
 
     /// The title, which a double click makes a field on an editable board.
-    /// Returns what Return wrote in it: never the title it opened on, nor an
-    /// empty one.
+    /// Returns what it wrote when it was left.
     fn title(
         &self,
         ui: &mut egui::Ui,
@@ -1662,7 +1771,7 @@ impl Header<'_> {
         field: &mut TitleField<'_>,
     ) -> Option<String> {
         let id = egui::Id::new(("document-title", field.document));
-        if let Some(edit) = field.edit.as_mut() {
+        if let Some(edit) = field.edit.as_mut().filter(|edit| !edit.left) {
             if edit.opening {
                 // Before the field is drawn, so that it takes this frame's keys.
                 let end = egui::text::CCursor::new(edit.draft.chars().count());
@@ -1676,11 +1785,12 @@ impl Header<'_> {
                 state.store(ui.ctx(), id);
                 ui.memory_mut(|memory| memory.request_focus(id));
             } else if !ui.memory(|memory| memory.has_focus(id)) {
-                // The view was left while the field was open.
-                *field.edit = None;
+                // Another field took the keyboard before this one was drawn.
+                edit.left = true;
+                ui.ctx().request_repaint();
             }
         }
-        if let Some(edit) = field.edit.as_mut() {
+        if let Some(edit) = field.edit.as_mut().filter(|edit| !edit.left) {
             edit.opening = false;
             // Escape leaves the field and is not the board's: the field keeps
             // the key from egui, which would take the focus before anything
@@ -1709,21 +1819,15 @@ impl Header<'_> {
                 *field.edit = None;
                 return None;
             }
-            let entered =
-                response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-            if entered {
-                let written = one_line(&edit.draft);
-                let changed = written != edit.title && !written.trim().is_empty();
-                if changed && !field.editable {
-                    // Held for a moment: the text stays for the next Return.
-                    response.request_focus();
+            if !response.has_focus() {
+                // Left, by Return too.
+                let written = edit.written();
+                if written.is_some() && !field.editable {
+                    edit.left = true;
                     return None;
                 }
                 *field.edit = None;
-                return changed.then_some(written);
-            }
-            if !response.has_focus() {
-                *field.edit = None;
+                return written;
             }
             return None;
         }
@@ -1749,6 +1853,7 @@ impl Header<'_> {
                 title: title.to_owned(),
                 draft: title.to_owned(),
                 opening: true,
+                left: false,
             });
             ui.ctx().request_repaint();
         }

@@ -668,6 +668,8 @@ impl FolderApp {
         if self.handover.releasing.is_some() || self.handover.saving {
             return;
         }
+        // A title typed in the board's header is unsaved work (WS-05a).
+        self.commit_title();
         let Some(session) = self.session.as_ref() else {
             if !self.opening {
                 self.refuse(link, "the window has no project open");

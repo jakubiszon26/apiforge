@@ -1247,6 +1247,7 @@ impl FolderApp {
         // Across the whole window, under every panel and section (MCP-07).
         self.holder_bar(ui);
         let active = self.workbench.active().map(str::to_owned);
+        self.tend_title_edit(active.as_deref());
         self.run_report(ui, active.as_deref());
         // Maximised run results leave no room for anything else (KTLO-19).
         if self.report_maximised(active.as_deref()) {
@@ -1990,6 +1991,9 @@ impl FolderApp {
     }
 
     fn request_close_tab(&mut self, document_id: &str) {
+        if !self.commit_title() {
+            return;
+        }
         // Closing the tab following brought the person to lets it go
         // (MCP-16 decision 4).
         if self.workbench.active() == Some(document_id) {
