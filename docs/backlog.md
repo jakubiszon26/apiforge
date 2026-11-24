@@ -510,6 +510,15 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   an invented name, one check for several fields (with LANG-02 #129 and
   LANG-04 #132). Their format questions return to the owner with the
   analyses.
+- From LANG-23 [#589](https://github.com/jakubiszon26/apiforge/issues/589) (the reference read by a tester; decided
+  2026-11-24, [ticket](tickets/LANG-23.md)): LANG-24 [#591](https://github.com/jakubiszon26/apiforge/issues/591) the reference's
+  wording, `ready:sonnet`; LANG-25 [#592](https://github.com/jakubiszon26/apiforge/issues/592) a request's argument read as
+  `arg.name` ([ticket](tickets/LANG-25.md), M · `format`, awaits approval and a
+  second read); short-circuit `&&`/`||` goes into LANG-01 #127 with
+  LANG-09 #353, unary minus into LANG-03 #131; `start` stays required in a
+  scenario. Candidates for the owner: LANG-26 [#593](https://github.com/jakubiszon26/apiforge/issues/593) an export always
+  readable by name, LANG-27 [#594](https://github.com/jakubiszon26/apiforge/issues/594) a warning for a check written far
+  from its step.
 
 ## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (closed)
 
@@ -600,13 +609,17 @@ criteria:
 | [#533](https://github.com/jakubiszon26/apiforge/issues/533) | DIAG-12 A field of a response that a check already reads is marked | M · 20 · `visible UI` | decided 2026-11-23 ([ticket](tickets/DIAG-12.md)): the ✓ filled, checks only; `ready:opus` · after REP-08 merges, before REP-07 |
 | [#547](https://github.com/jakubiszon26/apiforge/issues/547) | DIAG-15 The Checks tab of a step can add a check | S · 15 · `visible UI` | class 2 of AB-01 round 1; decided 2026-11-23 ([ticket](tickets/DIAG-15.md)): a button, then a menu of fields; `ready:opus` |
 | [#550](https://github.com/jakubiszon26/apiforge/issues/550) | DIAG-16 Choose a response field takes a typed path | S · 10 · `visible UI` | decided 2026-11-23 ([ticket](tickets/DIAG-16.md)): a row *Use "…"*; `ready:opus`; the sprint is the owner's to name |
-| [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 The Steps view and the request beside its response: captures and decisions | S · 30 · `visible UI`, `default` | the planning model's; after LANG-13 |
-| [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01 Diagram → Steps | M · 30 · `visible UI` | waits for REQ-00's captures |
-| [#458](https://github.com/jakubiszon26/apiforge/issues/458) | REQ-02a The selected request and its response side by side | M · 30 · `visible UI` | waits for REQ-00's captures |
-| [#459](https://github.com/jakubiszon26/apiforge/issues/459) | REQ-02b The body editor; closes DIAG-04 [#365](https://github.com/jakubiszon26/apiforge/issues/365) | M · 20 · `visible UI` | waits for REQ-00's captures |
-| [#460](https://github.com/jakubiszon26/apiforge/issues/460) | REQ-03 Headers as a table; authorization from a list | M · 15 · `visible UI` | waits for REQ-00's captures |
-| [#461](https://github.com/jakubiszon26/apiforge/issues/461) | REQ-04 Run to here | S · 15 · `visible UI` | waits for REQ-00's captures |
-| [#462](https://github.com/jakubiszon26/apiforge/issues/462) | REQ-05 Send this request alone | M · 25 · `visible UI`, `default` | `decision-needed` |
+| [#456](https://github.com/jakubiszon26/apiforge/issues/456) | REQ-00 The Steps view and the request beside its response: captures and decisions; [ticket](tickets/REQ-00.md) | S · 30 · `visible UI`, `default` | decided 2026-11-24: every board A, P4, the rules ruled |
+| [#457](https://github.com/jakubiszon26/apiforge/issues/457) | REQ-01a Steps reads: the scenario as a numbered list; [ticket](tickets/REQ-01a.md) | M · 30 · `visible UI` | `ready:opus` · after REP-07a ([#588](https://github.com/jakubiszon26/apiforge/pull/588)) · owns the rules of SENDS |
+| [#599](https://github.com/jakubiszon26/apiforge/issues/599) | REQ-04a The engine runs through a step, and one request alone with its checks; [ticket](tickets/REQ-04a.md) | M · 10 | `ready:opus` · in parallel with REQ-01a |
+| [#600](https://github.com/jakubiszon26/apiforge/issues/600) | REQ-01b Steps adds and moves a step; the empty scenario; closes WS-04 [#548](https://github.com/jakubiszon26/apiforge/issues/548); [ticket](tickets/REQ-01b.md) | M · 20 · `visible UI`, `default` | `ready:opus` · after REQ-01a, DIAG-22 and WS-05b |
+| [#458](https://github.com/jakubiszon26/apiforge/issues/458) | REQ-02a The selected request and its response side by side; [ticket](tickets/REQ-02a.md) | M · 30 · `visible UI`, `default` | `ready:opus` · after REQ-01a, REP-07b and REQ-15 |
+| [#549](https://github.com/jakubiszon26/apiforge/issues/549) | REQ-14 A step is moved between Main and Cleanup, with its checks; [ticket](tickets/REQ-14.md) | M · 15 · `visible UI` | `ready:opus` · after REQ-01b and DIAG-22 (`canvas/menu.rs`) |
+| [#459](https://github.com/jakubiszon26/apiforge/issues/459) | REQ-02b The body editor; closes DIAG-04 [#365](https://github.com/jakubiszon26/apiforge/issues/365); [ticket](tickets/REQ-02b.md) | M · 20 · `visible UI` | `ready:opus` · after REQ-02a |
+| [#460](https://github.com/jakubiszon26/apiforge/issues/460) | REQ-03 Headers as a table; authorization from a list; [ticket](tickets/REQ-03.md) | M · 15 · `visible UI` | `ready:opus` · after REQ-02a |
+| [#461](https://github.com/jakubiszon26/apiforge/issues/461) | REQ-04b Run to here; [ticket](tickets/REQ-04b.md) | M · 20 · `visible UI` | `ready:opus` · after REQ-02a and REQ-04a |
+| [#462](https://github.com/jakubiszon26/apiforge/issues/462) | REQ-05 Send this request alone; [ticket](tickets/REQ-05.md) | M · 25 · `visible UI`, `default` | `ready:opus` · after REQ-04b |
+| [#601](https://github.com/jakubiszon26/apiforge/issues/601) | REQ-16 Send alone can send a secret the last run received | S–M · `default` | proposed 2026-11-24, `decision-needed` |
 | [#464](https://github.com/jakubiszon26/apiforge/issues/464) | REQ-07 A request in and out as cURL; a failed check copied as a report | S–M · 15 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REP-07 and REQ-02a |
 | [#465](https://github.com/jakubiszon26/apiforge/issues/465) | REQ-08 A new case duplicated from an existing one; run the failed ones again | S and M · 30 · `visible UI` | accepted into scope 2026-11-20; to analyse; after REQ-01 and REQ-04 |
 | [#477](https://github.com/jakubiszon26/apiforge/issues/477) | REQ-09 Hints for repetition: the same host or header in every request, each with a fix | S · 10 · `visible UI` | accepted into scope 2026-11-20; to analyse; the header half after LANG-18 |
@@ -614,6 +627,9 @@ criteria:
 | [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 A value of a response is used in a later request by choosing it | M · 20 · `visible UI` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
 | [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 A check made from a field offers what to compare with | S–M · 15 · `visible UI`, `default` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
 | [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 The window writes only what was set; [ticket](tickets/REQ-13.md) | S–M · 15 · `default` | in scope 2026-11-21; three questions open |
+| [#574](https://github.com/jakubiszon26/apiforge/issues/574) | WS-05a A scenario's title above its board, edited there; [ticket](tickets/WS-05a.md) | M · 15 · `visible UI` | decided 2026-11-24 (B, editable); `ready:opus` |
+| [#596](https://github.com/jakubiszon26/apiforge/issues/596) | WS-05b Files lists scenarios and components by title; [ticket](tickets/WS-05b.md) | M · 15 · `visible UI` | decided 2026-11-24 (B); `ready:opus` · after WS-05a |
+| [#576](https://github.com/jakubiszon26/apiforge/issues/576) | REQ-15 A request with no sample response leads to where one is set; [ticket](tickets/REQ-15.md) | S · 10 · `visible UI` | decided 2026-11-24 (A); `ready:opus` · after REP-07a and REP-07b |
 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the mandatory scenario and the owner's own run; [ticket](tickets/REQ-06.md) | S · 10 | after the rest |
 
 REQ-07 to REQ-10 are the planning model's proposals
