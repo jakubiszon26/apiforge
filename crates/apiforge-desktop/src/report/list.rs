@@ -11,7 +11,7 @@ use apiforge_core::{
     format::Graph,
     graph::{component_definition, sequence},
     model::NodeKind,
-    run::{CauseEnds, Phase, RunResult, StepStatus},
+    run::{CauseEnds, Phase, RunResult, StepResult, StepStatus},
 };
 use eframe::egui::{self, Color32, Sense, Stroke, Ui};
 use serde_json::Value;
@@ -358,7 +358,7 @@ fn one_line(value: &Value) -> String {
 /// The path of a request's URL, without its scheme and host. `://` is a
 /// scheme's only after a scheme at the start: a letter, then letters,
 /// digits, `+`, `-` or `.`; elsewhere it is part of the path or the query.
-pub(super) fn url_path(url: &str) -> &str {
+pub(crate) fn url_path(url: &str) -> &str {
     let scheme = url.split_once("://").filter(|(scheme, _)| {
         let mut chars = scheme.chars();
         chars
@@ -499,6 +499,29 @@ pub(super) fn counted(group: not_run::Group) -> bool {
     )
 }
 
+/// The mark of a step's status: `✓`, `✕` or `−` in a circle of its colour.
+pub(crate) fn mark(painter: &egui::Painter, centre: egui::Pos2, radius: f32, status: StepStatus) {
+    let colour = status_colour(status);
+    painter.circle_filled(centre, radius, colour.gamma_multiply(0.15));
+    painter.text(
+        centre,
+        egui::Align2::CENTER_CENTER,
+        super::status_mark(status),
+        egui::FontId::proportional(if radius < 8.0 { 9.5 } else { 11.0 }),
+        colour,
+    );
+}
+
+/// What a failed check says of the value it received: `actual "mass"`.
+pub(crate) fn actual_text(step: &StepResult) -> String {
+    match &step.actual {
+        apiforge_core::format::OptionalJson::Present(value) => {
+            format!("actual {}", one_line(value))
+        }
+        apiforge_core::format::OptionalJson::Missing => "actual (missing value)".into(),
+    }
+}
+
 /// Draws one row and returns its responses.
 pub(super) fn draw(ui: &mut Ui, view: &RowView<'_>) -> Drawn {
     let step = view.row.step;
@@ -568,14 +591,7 @@ pub(super) fn draw(ui: &mut Ui, view: &RowView<'_>) -> Drawn {
     }
     let radius = if view.shape == Shape::Check { 6.5 } else { 8.0 };
     let badge = egui::pos2(badge_x, top_line);
-    painter.circle_filled(badge, radius, colour.gamma_multiply(0.15));
-    painter.text(
-        badge,
-        egui::Align2::CENTER_CENTER,
-        super::status_mark(step.status),
-        egui::FontId::proportional(if radius < 8.0 { 9.5 } else { 11.0 }),
-        colour,
-    );
+    mark(&painter, badge, radius, step.status);
 
     // The right end: the duration of a step that ran, what the row says
     // of its checks or of itself.
@@ -595,15 +611,7 @@ pub(super) fn draw(ui: &mut Ui, view: &RowView<'_>) -> Drawn {
         right -= 10.0;
     }
     let tail: Option<(String, Color32)> = match view.shape {
-        Shape::Check if failed_check => Some((
-            match &step.actual {
-                apiforge_core::format::OptionalJson::Present(value) => {
-                    format!("actual {}", one_line(value))
-                }
-                apiforge_core::format::OptionalJson::Missing => "actual (missing value)".into(),
-            },
-            theme::DANGER,
-        )),
+        Shape::Check if failed_check => Some((actual_text(step), theme::DANGER)),
         Shape::Check | Shape::Lone if step.status != StepStatus::Passed || !view.ran => {
             Some((view.words.clone(), theme::MUTED))
         }

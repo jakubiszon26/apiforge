@@ -27,6 +27,8 @@ mod list;
 pub use list::Line;
 #[cfg(test)]
 pub use list::arrange;
+/// How a check's row is marked, and a URL's path, for *Steps* (REQ-01a).
+pub(crate) use list::{actual_text, mark, url_path};
 
 /// Requests from the report panel to the application.
 #[derive(Clone, Debug, PartialEq)]
@@ -2251,7 +2253,7 @@ fn run_pill(status: RunStatus) -> (&'static str, Color32) {
     }
 }
 
-fn status_color(status: StepStatus) -> Color32 {
+pub(crate) fn status_color(status: StepStatus) -> Color32 {
     match status {
         StepStatus::Passed => theme::SUCCESS,
         StepStatus::Failed | StepStatus::Error => theme::DANGER,

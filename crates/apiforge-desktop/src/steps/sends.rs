@@ -1,7 +1,60 @@
 //! SENDS: what a request sends that is special (REQ-01a, the rules of SENDS).
+//! Texts are compared as they are written, never as a run resolves them.
 
 use super::model::Texts;
-use apiforge_core::format::Node;
+use apiforge_core::format::{Binding, Node, TemplatePart};
+use apiforge_core::model::HttpMethod;
+use indexmap::IndexMap;
+use serde_json::Value;
+
+/// The least group that has a common request.
+const PEERS: usize = 3;
+/// The most lines a card lists.
+const LINES: usize = 4;
+/// A `{{…}}` in a blanked URL; no text of a document holds it.
+const BLANK: char = '\u{0}';
+
+/// Where a request sends a text. A header's name is the same in any case.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Place {
+    Path,
+    Body(String),
+    Query(String),
+    Header(String),
+}
+
+impl Place {
+    /// The order the places are listed in.
+    fn rank(&self) -> usize {
+        match self {
+            Self::Path => 0,
+            Self::Body(_) => 1,
+            Self::Query(_) => 2,
+            Self::Header(_) => 3,
+        }
+    }
+}
+
+/// One text a request sends: its place, the place's name as the request
+/// writes it, the text compared and the text shown.
+#[derive(Clone, Debug)]
+struct Sent {
+    place: Place,
+    name: String,
+    text: String,
+}
+
+impl Sent {
+    fn line(&self) -> Line {
+        Line {
+            text: match self.place {
+                Place::Path => format!("path {}", crate::report::url_path(&self.text)),
+                _ => format!("{}: {}", self.name, self.text),
+            },
+            quiet: false,
+        }
+    }
+}
 
 /// One line of the column.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14,28 +67,307 @@ pub struct Line {
 /// What the column says of one request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sends {
-    /// The common request in full, for the caption's hover.
+    /// The common request in full, for the caption's hover; `None` when the
+    /// request has too few peers to have one.
     pub common: Option<String>,
     pub lines: Vec<Line>,
 }
 
-pub fn cut(_count: usize) -> (usize, usize) {
-    (0, 0)
+/// How many of `count` lines a card lists, and how many `+ N more` counts.
+pub fn cut(count: usize) -> (usize, usize) {
+    if count <= LINES {
+        (count, 0)
+    } else {
+        (LINES - 1, count - (LINES - 1))
+    }
 }
 
-pub fn sends(_requests: &[&Node], _texts: &Texts<'_>) -> Vec<Sends> {
-    Vec::new()
+/// What each of `requests`, the requests of one section in written order,
+/// sends that is special.
+pub fn sends(requests: &[&Node], texts: &Texts<'_>) -> Vec<Sends> {
+    let sent: Vec<Vec<Sent>> = requests.iter().map(|node| places(node, texts)).collect();
+    let mut out: Vec<Option<Sends>> = vec![None; requests.len()];
+    for group in groups(requests) {
+        if group.len() < PEERS {
+            for &index in &group {
+                out[index] = Some(Sends {
+                    common: None,
+                    lines: own(&sent[index]),
+                });
+            }
+            continue;
+        }
+        let common = common(group.iter().map(|&index| sent[index].as_slice()));
+        let full = full(requests[group[0]], &common);
+        for &index in &group {
+            out[index] = Some(Sends {
+                common: Some(full.clone()),
+                lines: differing(&sent[index], &common),
+            });
+        }
+    }
+    out.into_iter()
+        .map(|sends| sends.expect("every request is in a group"))
+        .collect()
 }
 
-fn joins(_url: &str, _group: &str) -> bool {
-    false
+/// The places of fewer than three peers: the request's own, without the path,
+/// which the card's first line says, and without `Content-Type`.
+fn own(sent: &[Sent]) -> Vec<Line> {
+    let lines: Vec<Line> = sent
+        .iter()
+        .filter(|sent| {
+            sent.place != Place::Path && sent.place != Place::Header("content-type".into())
+        })
+        .map(Sent::line)
+        .collect();
+    if lines.is_empty() {
+        vec![quiet("no body")]
+    } else {
+        lines
+    }
+}
+
+fn quiet(text: &str) -> Line {
+    Line {
+        text: text.to_owned(),
+        quiet: true,
+    }
+}
+
+/// The text more than half of the group send, by place: a tie has none.
+fn common<'s>(group: impl ExactSizeIterator<Item = &'s [Sent]>) -> IndexMap<Place, Sent> {
+    let size = group.len();
+    let mut counts: IndexMap<Place, IndexMap<&str, (usize, &Sent)>> = IndexMap::new();
+    for sent in group.flatten() {
+        counts
+            .entry(sent.place.clone())
+            .or_default()
+            .entry(&sent.text)
+            .or_insert((0, sent))
+            .0 += 1;
+    }
+    let mut common: IndexMap<Place, Sent> = counts
+        .into_iter()
+        .filter_map(|(place, texts)| {
+            let (_, sent) = texts.into_values().find(|(count, _)| count * 2 > size)?;
+            Some((place, sent.clone()))
+        })
+        .collect();
+    common.sort_by(|a, _, b, _| a.rank().cmp(&b.rank()));
+    common
+}
+
+/// What one request sends differently from `common`, and what it leaves out.
+fn differing(sent: &[Sent], common: &IndexMap<Place, Sent>) -> Vec<Line> {
+    let mut lines = Vec::new();
+    for rank in 0..=3 {
+        lines.extend(
+            sent.iter()
+                .filter(|sent| sent.place.rank() == rank)
+                .filter(|sent| {
+                    common
+                        .get(&sent.place)
+                        .is_none_or(|common| common.text != sent.text)
+                })
+                .map(Sent::line),
+        );
+        lines.extend(
+            common
+                .values()
+                .filter(|common| common.place.rank() == rank)
+                .filter(|common| !sent.iter().any(|sent| sent.place == common.place))
+                .map(|common| Line {
+                    text: format!("no {}", common.name),
+                    quiet: false,
+                }),
+        );
+    }
+    if lines.is_empty() {
+        lines.push(quiet("nothing differs"));
+    }
+    lines
+}
+
+/// The common request in full: its method and path, then its places.
+fn full(first: &Node, common: &IndexMap<Place, Sent>) -> String {
+    let path = match common.get(&Place::Path) {
+        Some(path) => crate::report::url_path(&path.text).to_owned(),
+        None => crate::report::url_path(&blanked(first)).replace(BLANK, "{{…}}"),
+    };
+    let mut text = format!("The common request\n{} {path}", method(first));
+    for sent in common.values().filter(|sent| sent.place != Place::Path) {
+        text.push('\n');
+        text.push_str(&sent.line().text);
+    }
+    text
+}
+
+pub(super) fn method(node: &Node) -> &'static str {
+    crate::labels::method(node.config.method.unwrap_or(HttpMethod::Get))
+}
+
+/// What `node` sends, in the order of the column.
+fn places(node: &Node, texts: &Texts<'_>) -> Vec<Sent> {
+    let mut out = Vec::new();
+    if let Some(url) = node.inputs.get("url") {
+        out.push(Sent {
+            place: Place::Path,
+            name: "path".into(),
+            text: texts.url(url),
+        });
+    }
+    let mut leaf = |input: &str, path: &str, text: String| {
+        out.push(match input {
+            "body" => Sent {
+                place: Place::Body(path.to_owned()),
+                name: if path.is_empty() { "body" } else { path }.to_owned(),
+                text,
+            },
+            _ => {
+                let (what, whole) = if input == "query" {
+                    ("query", "query")
+                } else {
+                    ("header", "headers")
+                };
+                Sent {
+                    place: if input == "query" {
+                        Place::Query(path.to_owned())
+                    } else {
+                        Place::Header(path.to_lowercase())
+                    },
+                    name: if path.is_empty() {
+                        whole.to_owned()
+                    } else {
+                        format!("{what} {path}")
+                    },
+                    text,
+                }
+            }
+        });
+    };
+    for input in ["body", "query", "headers"] {
+        if let Some(binding) = node.inputs.get(input) {
+            // A query parameter or a header is one place, whatever it holds.
+            let deep = input == "body";
+            leaves(binding, "", deep, texts, &mut |path, text| {
+                leaf(input, path, text);
+            });
+        }
+    }
+    out
+}
+
+/// The leaves of `binding` by path: the fields of an object, and of the
+/// objects in it when `deep`.
+fn leaves(
+    binding: &Binding,
+    path: &str,
+    deep: bool,
+    texts: &Texts<'_>,
+    leaf: &mut impl FnMut(&str, String),
+) {
+    let inside = path.is_empty() || deep;
+    match binding {
+        Binding::Object { fields } if inside && !fields.is_empty() => {
+            for (key, field) in fields {
+                leaves(field, &joined(path, key), deep, texts, leaf);
+            }
+        }
+        Binding::Literal {
+            value: Value::Object(fields),
+        } if inside && !fields.is_empty() => {
+            for (key, value) in fields {
+                let field = Binding::literal(value.clone());
+                leaves(&field, &joined(path, key), deep, texts, leaf);
+            }
+        }
+        other => leaf(path, texts.written(other)),
+    }
+}
+
+fn joined(path: &str, key: &str) -> String {
+    if path.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{path}.{key}")
+    }
+}
+
+/// The URL with every `{{…}}` blanked.
+fn blanked(node: &Node) -> String {
+    match node.inputs.get("url") {
+        None => String::new(),
+        Some(Binding::Literal {
+            value: Value::String(text),
+        }) => text.clone(),
+        Some(Binding::Template { parts }) => parts
+            .iter()
+            .map(|part| match part {
+                TemplatePart::Text { text } => text.clone(),
+                TemplatePart::Value { .. } => BLANK.to_string(),
+            })
+            .collect(),
+        Some(_) => BLANK.to_string(),
+    }
+}
+
+/// Whether a request of the URL `url` joins the group of `group`: the same
+/// segments, but for literal ones exactly where the group has a `{{…}}`.
+fn joins(url: &str, group: &str) -> bool {
+    if url == group || url.split('/').count() != group.split('/').count() {
+        return false;
+    }
+    url.split('/').zip(group.split('/')).all(|(own, theirs)| {
+        own == theirs
+            || (theirs.len() == BLANK.len_utf8()
+                && theirs.starts_with(BLANK)
+                && !own.is_empty()
+                && !own.contains(BLANK))
+    })
+}
+
+/// The groups of peers, in written order, as indexes into `requests`.
+fn groups(requests: &[&Node]) -> Vec<Vec<usize>> {
+    let mut exact: IndexMap<(&'static str, String), Vec<usize>> = IndexMap::new();
+    for (index, node) in requests.iter().enumerate() {
+        exact
+            .entry((method(node), blanked(node)))
+            .or_default()
+            .push(index);
+    }
+    let shapes: Vec<&(&str, String)> = exact.keys().collect();
+    // The group each joins, the first in written order; joining is a strict
+    // order, so following it ends.
+    let parent: Vec<Option<usize>> = shapes
+        .iter()
+        .map(|(method, url)| {
+            shapes
+                .iter()
+                .position(|(other, group)| method == other && joins(url, group))
+        })
+        .collect();
+    let mut merged: IndexMap<usize, Vec<usize>> = IndexMap::new();
+    for (shape, indexes) in exact.values().enumerate() {
+        let mut root = shape;
+        while let Some(next) = parent[root] {
+            root = next;
+        }
+        merged.entry(root).or_default().extend(indexes);
+    }
+    merged
+        .into_values()
+        .map(|mut group| {
+            group.sort_unstable();
+            group
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::steps::model::{Model, testing::scenario};
-    use indexmap::IndexMap;
 
     /// What each request of `source` sends, by handle.
     fn of(source: &str) -> IndexMap<String, Sends> {

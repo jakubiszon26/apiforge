@@ -106,6 +106,15 @@ impl FolderApp {
                     });
                 });
         }
+        if self.steps_shown(active) {
+            let header = Header {
+                tabs: false,
+                ..header
+            };
+            self.steps_area(ui, document_id, &header, &model);
+            return;
+        }
+        let offered = self.steps_offered(active);
         let project = self.context_project();
         let run = self.fresh_run(document_id);
         // Resolved with the report, once per run (LAY-19).
@@ -212,6 +221,8 @@ impl FolderApp {
             self.notice_models.remove(document_id);
         }
         let mut chosen = cleanup;
+        let mut switched = None;
+        let mut above = false;
         let commands = ui
             .scope(|ui| {
                 if !snapshot.editable && !snapshot.paused {
@@ -252,15 +263,28 @@ impl FolderApp {
                     shared: &shared,
                     moves: true,
                 };
-                let fit = header.fit(ui, canvas.header_room(ui, &input));
-                input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
+                let room = canvas.header_room(ui, &input);
+                let fit = header.fit(ui, room);
+                let beside = offered
+                    .then(|| steps_view::beside(ui, header.full_width(ui), room))
+                    .flatten();
+                input.header_leading = Some(egui::vec2(
+                    beside.unwrap_or(fit.width),
+                    theme::CONTROL_HEIGHT,
+                ));
                 let row = canvas.leading_rect(ui, &input);
+                if beside.is_some() {
+                    switched = steps_view::board_switch(ui, row);
+                }
+                above = offered && beside.is_none();
                 // Drawn before the board, so the keyboard reaches the header
                 // first and then the board's toolbar on the same row.
                 header.show(ui.ctx(), ui.id(), row, &fit, &mut chosen);
                 canvas.show(ui, &input)
             })
             .inner;
+        self.steps_chosen(switched);
+        self.set_switch_above(above);
         if chosen != cleanup {
             if let Some(tab) = self.workbench.tab_mut(document_id) {
                 tab.cleanup = chosen;
@@ -1386,16 +1410,16 @@ const NAME_MIN_WIDTH: f32 = 80.0;
 /// The document's part of the board's header row (KTLO-12): in Diagram the
 /// file name and kind, then Main / Cleanup for a scenario; in Split only
 /// Main / Cleanup, since the tab strip beside the code names the file.
-struct Header<'a> {
+pub(super) struct Header<'a> {
     name: Option<(&'a str, &'static str)>,
     tabs: bool,
 }
 
 /// What of the header fits, and its width.
-struct HeaderFit {
+pub(super) struct HeaderFit {
     name_width: f32,
     kind: bool,
-    width: f32,
+    pub(super) width: f32,
 }
 
 impl Header<'_> {
@@ -1421,7 +1445,7 @@ impl Header<'_> {
     /// Gives up, as the row narrows, first the kind, then the name's full
     /// width (its full text stays on hover), then the steps summary, which the
     /// board leaves out once the header takes its room.
-    fn fit(&self, ui: &egui::Ui, room: canvas::HeaderRoom) -> HeaderFit {
+    pub(super) fn fit(&self, ui: &egui::Ui, room: canvas::HeaderRoom) -> HeaderFit {
         let gap = ui.spacing().item_spacing.x;
         let tabs = if self.tabs {
             widgets::tab_value_width(ui, "Main") + gap + widgets::tab_value_width(ui, "Cleanup")
@@ -1468,7 +1492,7 @@ impl Header<'_> {
     }
 
     /// Draws the header into `row`, the left of the board's header row.
-    fn show(
+    pub(super) fn show(
         &self,
         ctx: &egui::Context,
         id: egui::Id,

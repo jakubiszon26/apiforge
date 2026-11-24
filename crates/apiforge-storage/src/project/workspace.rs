@@ -79,6 +79,10 @@ pub struct PanelSizes {
     /// (REP-08). Written only when set.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub results_json: bool,
+    /// Whether Diagram shows a scenario as the list of *Steps* instead of its
+    /// board (REQ-01a). Written only when set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub steps: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -236,6 +240,7 @@ mod tests {
                 library_collapsed: true,
                 library_files: true,
                 results_json: true,
+                steps: true,
             }),
             expanded: vec!["flows".into(), "flows/nested".into()],
             ..WorkspaceState::new("project")

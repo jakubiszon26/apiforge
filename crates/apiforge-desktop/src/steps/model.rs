@@ -1,11 +1,18 @@
-//! The rows of *Steps* (REQ-01a).
+//! The rows of *Steps*: what the list shows of a scenario, read from its
+//! graphs alone (REQ-01a). Built once per model, never per frame.
 
-use super::sends::Sends;
+use super::sends::{self, Sends};
+use crate::canvas::check_text;
 use apiforge_core::{
-    format::{Graph, Project},
+    chain,
+    format::{Binding, Graph, Node, Position, Project, TemplatePart},
+    graph::{Subject, check_subjects_in, create_node, sequence},
+    model::{Branch, NodeKind},
     run::Phase,
-    template_text::Scope,
+    template_text::{Scope, print_reference, print_template},
 };
+use indexmap::{IndexMap, IndexSet};
+use std::collections::HashMap;
 
 /// Every row of a scenario, in the order of the list.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -116,16 +123,46 @@ impl Row {
 }
 
 impl Model {
-    pub fn of(_main: &Graph, _cleanup: Option<&Graph>, _project: &Project) -> Self {
-        Self::default()
+    /// The rows of `main` and of `cleanup`, which may read Main's steps.
+    pub fn of(main: &Graph, cleanup: Option<&Graph>, project: &Project) -> Self {
+        // A Cleanup step names the Main step it reads.
+        let mut both = main.clone();
+        if let Some(cleanup) = cleanup {
+            both.nodes.extend(cleanup.nodes.iter().cloned());
+        }
+        let mut graphs = vec![main];
+        graphs.extend(cleanup);
+        let texts = Texts {
+            scope: Scope {
+                nodes: &both.nodes,
+                project,
+                request: None,
+            },
+            graph: &both,
+        };
+        let readers = Readers::of(&graphs, &texts);
+        let section = |graph, phase| section(graph, phase, &graphs, &texts, &readers);
+        Self {
+            main: section(main, Phase::Main),
+            cleanup: cleanup.map_or_else(Vec::new, |cleanup| section(cleanup, Phase::Cleanup)),
+        }
     }
 
     pub fn rows(&self) -> impl Iterator<Item = &Row> {
         self.main.iter().chain(&self.cleanup)
     }
 
+    /// `16 steps · 33 checks`.
     pub fn summary(&self) -> String {
-        String::new()
+        let alone = self
+            .rows()
+            .filter(|row| matches!(row.kind, Kind::Check { .. }))
+            .count();
+        let steps = self.rows().count() - alone;
+        let checks = alone + self.rows().map(|row| row.checks().len()).sum::<usize>();
+        let count =
+            |count: usize, one: &str| format!("{count} {one}{}", if count == 1 { "" } else { "s" });
+        format!("{} · {}", count(steps, "step"), count(checks, "check"))
     }
 }
 
@@ -133,6 +170,369 @@ impl Model {
 pub struct Texts<'a> {
     pub scope: Scope<'a>,
     pub graph: &'a Graph,
+}
+
+impl Texts<'_> {
+    /// A binding as the code writes it, the way a check writes its operand.
+    pub fn written(&self, binding: &Binding) -> String {
+        let mut probe = create_node(NodeKind::Assert, Position { x: 0.0, y: 0.0 }, None);
+        probe.inputs.clear();
+        probe.inputs.insert("actual".into(), binding.clone());
+        let text = check_text(&probe, self.scope, self.graph, None);
+        text.actual
+            .and_then(|at| text.parts.into_iter().nth(at))
+            .map(|part| part.text)
+            .unwrap_or_default()
+    }
+
+    /// A URL: a text without its quotes.
+    pub fn url(&self, binding: &Binding) -> String {
+        print_template(binding, self.scope).unwrap_or_else(|| self.written(binding))
+    }
+
+    /// A reference, `None` for one to nothing.
+    fn reference(&self, binding: &Binding) -> Option<String> {
+        print_reference(binding, self.scope)
+    }
+}
+
+/// The fields later steps read, by the step read: `body.id → cancelled`.
+struct Readers<'a> {
+    lines: HashMap<&'a str, IndexSet<String>>,
+    steps: HashMap<&'a str, IndexSet<&'a str>>,
+}
+
+impl<'a> Readers<'a> {
+    /// What `graph::relations` lists as a step's readers, for every step at
+    /// once and over both graphs: a check that verifies the step is no reader
+    /// of it. In the order the steps are reached.
+    fn of(graphs: &[&'a Graph], texts: &Texts<'_>) -> Self {
+        let mut readers = Self {
+            lines: HashMap::new(),
+            steps: HashMap::new(),
+        };
+        let handles: HashMap<&str, &str> = graphs
+            .iter()
+            .flat_map(|graph| &graph.nodes)
+            .map(|node| (node.id.as_str(), node.handle.as_str()))
+            .collect();
+        for graph in graphs {
+            let nodes: HashMap<&str, &'a Node> = graph
+                .nodes
+                .iter()
+                .map(|node| (node.id.as_str(), node))
+                .collect();
+            for node in sequence(graph).into_iter().filter_map(|id| nodes.get(id)) {
+                let verified: Vec<Subject<'a>> = check_subjects_in(graphs, node).subjects;
+                for reference in node.inputs.values().flat_map(Binding::references) {
+                    let source = reference.node_id;
+                    let Some(handle) = handles.get(source) else {
+                        continue;
+                    };
+                    if verified.iter().any(|subject| subject.step == source) {
+                        continue;
+                    }
+                    let field = texts
+                        .reference(&Binding::Reference {
+                            node_id: source.to_owned(),
+                            port: reference.port.to_owned(),
+                            path: reference.path.to_owned(),
+                        })
+                        .unwrap_or_else(|| reference.port.to_owned());
+                    let field = field
+                        .strip_prefix(handle)
+                        .map(|rest| rest.strip_prefix('.').unwrap_or(rest))
+                        .filter(|rest| !rest.is_empty())
+                        .unwrap_or(&field);
+                    readers
+                        .lines
+                        .entry(source)
+                        .or_default()
+                        .insert(format!("{field} → {}", node.handle));
+                    readers.steps.entry(source).or_default().insert(&node.id);
+                }
+            }
+        }
+        readers
+    }
+}
+
+fn is_check(kind: NodeKind) -> bool {
+    kind == NodeKind::Assert
+}
+
+/// The rows of one graph.
+fn section(
+    graph: &Graph,
+    phase: Phase,
+    graphs: &[&Graph],
+    texts: &Texts<'_>,
+    readers: &Readers<'_>,
+) -> Vec<Row> {
+    let numbers: HashMap<&str, usize> = sequence(graph)
+        .into_iter()
+        .enumerate()
+        .map(|(index, id)| (id, index + 1))
+        .collect();
+    let braces = chain::braces(graph);
+    let mut blocks: IndexMap<Option<(&str, bool)>, Vec<&Node>> = IndexMap::new();
+    for node in &graph.nodes {
+        let own = braces
+            .get(node.id.as_str())
+            .map(|(step, branch)| (*step, *branch == Branch::True));
+        blocks.entry(own).or_default().push(node);
+    }
+    let requests: Vec<&Node> = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Request)
+        .collect();
+    let sends: HashMap<&str, Sends> = requests
+        .iter()
+        .map(|node| node.id.as_str())
+        .zip(sends::sends(&requests, texts))
+        .collect();
+    let mut section = Section {
+        phase,
+        graphs,
+        texts,
+        readers,
+        numbers,
+        blocks,
+        sends,
+        rows: Vec::new(),
+    };
+    section.block(None, 0);
+    section.rows
+}
+
+struct Section<'a> {
+    phase: Phase,
+    graphs: &'a [&'a Graph],
+    texts: &'a Texts<'a>,
+    readers: &'a Readers<'a>,
+    numbers: HashMap<&'a str, usize>,
+    /// The statements of each braces as they are written; whether the braces
+    /// are the *then* ones.
+    blocks: IndexMap<Option<(&'a str, bool)>, Vec<&'a Node>>,
+    sends: HashMap<&'a str, Sends>,
+    rows: Vec<Row>,
+}
+
+impl<'a> Section<'a> {
+    /// The rows of one braces, those of its `if`s under them. A check stands
+    /// where it is written: under the request written before it when it reads
+    /// one step, else on a row of its own.
+    fn block(&mut self, braces: Option<(&'a str, bool)>, depth: usize) {
+        let written = self.blocks.get(&braces).cloned().unwrap_or_default();
+        let place = |node: &Node| self.numbers.get(node.id.as_str()).copied().unwrap_or(0);
+        // The checks after each step, by the step; `None` before any.
+        let mut under: HashMap<Option<&str>, Vec<&'a Node>> = HashMap::new();
+        let mut items: Vec<&'a Node> = Vec::new();
+        let mut step: Option<&'a Node> = None;
+        let mut last: Option<&'a Node> = None;
+        for node in written {
+            if !is_check(node.kind) {
+                if chain::is_step(node.kind) {
+                    step = Some(node);
+                }
+                if last.is_none_or(|last| place(last) < place(node)) {
+                    last = Some(node);
+                }
+                items.push(node);
+                continue;
+            }
+            // Under a request, and else after the last row above it.
+            let after = match step {
+                Some(step) if step.kind == NodeKind::Request && self.single(node) => Some(step),
+                _ => last,
+            };
+            under
+                .entry(after.map(|node| node.id.as_str()))
+                .or_default()
+                .push(node);
+        }
+        items.sort_by_key(|node| place(node));
+        let first = self.rows.len();
+        for check in under.remove(&None).unwrap_or_default() {
+            self.check_row(check, depth);
+        }
+        for node in items {
+            let checks = under.remove(&Some(node.id.as_str())).unwrap_or_default();
+            let (listed, alone): (Vec<&Node>, Vec<&Node>) = checks
+                .into_iter()
+                .partition(|check| node.kind == NodeKind::Request && self.single(check));
+            if node.kind != NodeKind::Start {
+                let kind = self.kind(node, &listed);
+                self.row(node, depth, kind);
+            }
+            if node.kind == NodeKind::If {
+                self.block(Some((node.id.as_str(), true)), depth + 1);
+                self.block(Some((node.id.as_str(), false)), depth + 1);
+            }
+            for check in alone {
+                self.check_row(check, depth);
+            }
+        }
+        if let Some((_, then)) = braces {
+            let rows = self.rows.get_mut(first..).unwrap_or_default();
+            if let Some(row) = rows.first_mut() {
+                row.opens = true;
+            }
+            // Those of an inner branch have theirs already.
+            for row in rows.iter_mut().filter(|row| row.branch.is_none()) {
+                row.branch = Some(if then { "then" } else { "else" });
+            }
+        }
+    }
+
+    /// Whether `check` reads one step.
+    fn single(&self, check: &Node) -> bool {
+        check_subjects_in(self.graphs, check).subjects.len() == 1
+    }
+
+    fn row(&mut self, node: &Node, depth: usize, kind: Kind) {
+        self.rows.push(Row {
+            id: node.id.clone(),
+            handle: node.handle.clone(),
+            name: node.display_name().to_owned(),
+            number: self.numbers.get(node.id.as_str()).copied().unwrap_or(0),
+            phase: self.phase,
+            depth,
+            branch: None,
+            opens: false,
+            kind,
+        });
+    }
+
+    fn check_row(&mut self, check: &Node, depth: usize) {
+        let text = self.check(check, None);
+        self.row(check, depth, Kind::Check { text });
+    }
+
+    /// The check as its card writes it (DIAG-02), without the name of `own`.
+    fn check(&self, check: &Node, own: Option<&str>) -> String {
+        let scope = Scope {
+            request: Some(check),
+            ..self.texts.scope
+        };
+        check_text(check, scope, self.texts.graph, own).text()
+    }
+
+    fn kind(&self, node: &Node, checks: &[&Node]) -> Kind {
+        let line = |keyword, text| Kind::Line { keyword, text };
+        match node.kind {
+            NodeKind::Request => Kind::Request(Box::new(self.request(node, checks))),
+            NodeKind::Component => Kind::Call {
+                arguments: node
+                    .inputs
+                    .iter()
+                    .map(|(name, binding)| format!("{name}: {}", self.texts.written(binding)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                readers: self
+                    .readers
+                    .steps
+                    .get(node.id.as_str())
+                    .map_or(0, IndexSet::len),
+            },
+            NodeKind::If => line("if", self.check(node, None)),
+            NodeKind::Condition => line(
+                "condition",
+                format!("{} = {}", node.handle, self.check(node, None)),
+            ),
+            NodeKind::Assert => Kind::Check {
+                text: self.check(node, None),
+            },
+            NodeKind::Value | NodeKind::Export | NodeKind::Start => {
+                let value = node
+                    .inputs
+                    .values()
+                    .next()
+                    .map_or_else(|| "missing value".to_owned(), |it| self.texts.written(it));
+                line(
+                    if node.kind == NodeKind::Export {
+                        "export"
+                    } else {
+                        "value"
+                    },
+                    format!("{} = {value}", node.handle),
+                )
+            }
+        }
+    }
+
+    fn request(&self, node: &Node, checks: &[&Node]) -> Request {
+        let id = node.id.as_str();
+        let url = node.inputs.get("url").map(|url| self.texts.url(url));
+        Request {
+            method: sends::method(node),
+            path: url
+                .as_deref()
+                .map(crate::report::url_path)
+                .unwrap_or_default()
+                .to_owned(),
+            reads: self.reads(node),
+            column: match self.readers.lines.get(id) {
+                Some(lines) => Column::Sets(lines.iter().cloned().collect()),
+                None => Column::Sends(self.sends.get(id).cloned().unwrap_or(Sends {
+                    common: None,
+                    lines: Vec::new(),
+                })),
+            },
+            checks: checks
+                .iter()
+                .map(|check| Check {
+                    id: check.id.clone(),
+                    handle: check.handle.clone(),
+                    // Under another step than the one it reads the check
+                    // keeps that step's name.
+                    text: self.check(
+                        check,
+                        check_subjects_in(self.graphs, check)
+                            .subjects
+                            .iter()
+                            .any(|subject| subject.step == id)
+                            .then_some(id),
+                    ),
+                })
+                .collect(),
+        }
+    }
+
+    /// The names of what `node` reads, each once.
+    fn reads(&self, node: &Node) -> Vec<String> {
+        fn walk(binding: &Binding, texts: &Texts<'_>, out: &mut IndexSet<String>) {
+            match binding {
+                // A named input of the request itself.
+                Binding::Literal { .. } | Binding::Argument { .. } => {}
+                Binding::Object { fields } => {
+                    fields.values().for_each(|field| walk(field, texts, out));
+                }
+                Binding::Array { items } => items.iter().for_each(|item| walk(item, texts, out)),
+                Binding::Expression { inputs, .. } => {
+                    inputs.values().for_each(|input| walk(input, texts, out));
+                }
+                Binding::Template { parts } => parts.iter().for_each(|part| {
+                    if let TemplatePart::Value { binding } = part {
+                        walk(binding, texts, out);
+                    }
+                }),
+                other => {
+                    out.insert(
+                        texts
+                            .reference(other)
+                            .unwrap_or_else(|| crate::labels::binding(other, texts.graph)),
+                    );
+                }
+            }
+        }
+        let mut out = IndexSet::new();
+        for binding in node.inputs.values() {
+            walk(binding, self.texts, &mut out);
+        }
+        out.into_iter().collect()
+    }
 }
 
 #[cfg(test)]

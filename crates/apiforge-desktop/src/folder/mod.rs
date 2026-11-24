@@ -34,6 +34,7 @@ mod runs;
 mod save_component;
 mod saving;
 mod settings;
+mod steps_view;
 mod storage;
 mod text_view;
 mod transaction_view;
@@ -339,6 +340,8 @@ pub struct FolderApp {
     /// context are the same: deriving it reads every block and sample.
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
+    /// The list of *Steps* (REQ-01a).
+    steps: steps_view::StepsView,
     /// The model each board's notice after a delete was written for
     /// (DIAG-06b): its *Undo* undoes the delete only while the document is
     /// still at it, and any other edit ends the notice.
@@ -595,6 +598,7 @@ impl FolderApp {
             caret_statement: None,
             completion_names: None,
             canvases: HashMap::new(),
+            steps: steps_view::StepsView::default(),
             notice_models: HashMap::new(),
             checks_here: checks_here::ChecksHere::default(),
             cleanup_reference: None,
@@ -1285,7 +1289,10 @@ impl FolderApp {
             }
             Mode::Diagram => {
                 self.library_panel(ui, active.as_deref());
-                self.inspector_panel(ui, active.as_deref());
+                // *Steps* has no Inspector (REQ-00, decision 2).
+                if !self.steps_shown(active.as_deref()) {
+                    self.inspector_panel(ui, active.as_deref());
+                }
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::BG))
                     .show(ui, |ui| self.diagram_area(ui, active.as_deref()));
