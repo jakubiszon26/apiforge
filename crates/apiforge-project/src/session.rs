@@ -6,8 +6,8 @@ use crate::{
     language,
     layout::{FixedPlacer, Placer},
 };
-use apiforge_core::format::Project;
-use apiforge_script::Document;
+use apiforge_core::{ImportError, format::Project};
+use apiforge_script::{Diagnostic, Document, Severity};
 use apiforge_storage::project::{
     DiagramFile, DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, Holder,
     MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath, ProjectSnapshot,
@@ -983,7 +983,9 @@ impl ProjectSession {
             None,
             self.placer.as_ref(),
         );
-        let (model, _) = model.ok_or(Error::InvalidModel)?;
+        let Some((model, _)) = model else {
+            return Err(refused_text(&diagnostics));
+        };
         let document = &mut self.documents[index];
         let document_id = document.entry.document_id.clone();
         document.model = Some(Arc::new(model));
@@ -1026,7 +1028,7 @@ impl ProjectSession {
     ) -> Result<()> {
         let context = apiforge_script::LowerContext::folder(&self.context);
         apiforge_script::validate_document_model(&model, &context)
-            .map_err(|_| Error::InvalidModel)?;
+            .map_err(|error| refused_model(&model, &self.context, error))?;
         let document = &self.documents[index];
         let previous = document.model.as_ref().ok_or(Error::ModelLocked)?;
         let semantic = apiforge_script::semantic(previous, &self.context)
@@ -1622,11 +1624,61 @@ fn kept_chain(previous: &Document, mut model: Document) -> Document {
     model
 }
 
+/// The refusal of an edited model (#565): the validation's message, and the
+/// step its path points at. The path itself is never shown.
+fn refused_model(model: &Document, context: &Project, error: ImportError) -> Error {
+    match error {
+        ImportError::InvalidDocument { path, message } => Error::EditRefused {
+            reason: message.to_owned(),
+            step: refused_step(model, context, &path),
+        },
+        error => Error::EditRefused {
+            reason: error.to_string(),
+            step: None,
+        },
+    }
+}
+
+/// The handle of the step a validation path points at, when the path is one
+/// of the edited document's own nodes.
+fn refused_step(model: &Document, context: &Project, path: &str) -> Option<String> {
+    let path = path.strip_prefix("project.")?;
+    let (graph, path) = match model {
+        Document::Scenario(scenario) => {
+            let path = path.strip_prefix("scenarios[0].")?;
+            match path.strip_prefix("graph.") {
+                Some(path) => (&scenario.graph, path),
+                None => (&scenario.cleanup, path.strip_prefix("cleanup.")?),
+            }
+        }
+        // Validated after every published revision of the project.
+        Document::Component(component) => {
+            let own = format!("components[{}].", context.components.len());
+            (&component.graph, path.strip_prefix(&own)?)
+        }
+    };
+    let (index, _) = path.strip_prefix("nodes[")?.split_once(']')?;
+    let node = graph.nodes.get(index.parse::<usize>().ok()?)?;
+    Some(node.handle.clone())
+}
+
+/// The refusal of a text that no longer makes a valid definition (#565): its
+/// first error, in the words of the text's check.
+fn refused_text(diagnostics: &[Diagnostic]) -> Error {
+    diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == Severity::Error)
+        .map_or(Error::InvalidModel, |diagnostic| Error::EditRefused {
+            reason: diagnostic.message.clone(),
+            step: None,
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Origin;
-    use apiforge_script::{Diagnostic, FAR_READ, SyntaxTree};
+    use apiforge_script::{FAR_READ, SyntaxTree};
 
     /// Places as [`FixedPlacer`] and warns of far reads as the window does,
     /// after `.0` copies of the first, which fill the list.
