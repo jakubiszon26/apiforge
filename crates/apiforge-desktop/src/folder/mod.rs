@@ -803,6 +803,25 @@ impl FolderApp {
         self.is_settled() && !self.analyser.is_busy()
     }
 
+    /// Whether a test is settling the window ([`Watcher::settling`]).
+    #[cfg(test)]
+    pub(crate) fn debug_settling(&mut self, settling: bool) {
+        self.watcher.settling(settling);
+    }
+
+    /// What keeps the window from settling, for a test's message.
+    #[cfg(test)]
+    pub(crate) fn debug_in_flight(&self) -> String {
+        format!(
+            "storage {} (shown as {:?}), opening {}, analysis {}, a redraw asked for by {:?}",
+            self.storage.is_busy(),
+            self.storage.label(),
+            self.opening,
+            self.analyser.is_busy(),
+            self.ui_context.repaint_causes()
+        )
+    }
+
     pub(crate) fn new_canvas(&self) -> Canvas {
         let mut canvas = Canvas::default();
         canvas.wire_style = self.preferences.wire_style;
