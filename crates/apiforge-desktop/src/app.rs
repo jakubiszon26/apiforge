@@ -2123,6 +2123,8 @@ impl App {
                 }),
                 checks: None,
             };
+            self.report
+                .adopt_list_width(self.preferences.run_list_width);
             self.report.show(ui, &context)
         };
         for action in actions {
@@ -2219,6 +2221,10 @@ impl App {
                 if let Some(run) = self.run.clone() {
                     self.files.export_report(run);
                 }
+            }
+            report::Action::RememberListWidth(width) => {
+                self.preferences.run_list_width = Some(width);
+                self.preferences.save(Preference::RunListWidth);
             }
         }
     }

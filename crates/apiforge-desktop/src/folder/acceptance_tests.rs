@@ -56,6 +56,37 @@ fn editor(harness: &FolderHarness, document_id: &str) -> String {
     )
 }
 
+/// A Run results row's label read as `{name} · {what it says}`, if the row
+/// is the step `name`'s: a step's label starts with its name; a check's
+/// starts with its predicate and names the check after what it says
+/// (REP-07): `status == 422 · Passed · weight_31_status of Weight 31 kg`.
+fn step_row(label: &str, name: &str) -> Option<String> {
+    if label.starts_with(&format!("{name} · ")) {
+        return Some(label.to_owned());
+    }
+    let named = format!(" · {name}");
+    let at = label.rfind(&named)?;
+    let after = &label[at + named.len()..];
+    if !(after.is_empty() || after.starts_with(" of ") || after.starts_with(" · in ")) {
+        return None;
+    }
+    let (_, words) = label[..at].split_once(" · ")?;
+    Some(format!("{name} · {words}"))
+}
+
+/// The accessible label of the first Run results row of the step `name`.
+fn step_row_label(harness: &FolderHarness, name: &str) -> Option<String> {
+    harness
+        .query_all_by_label_contains(&format!("{name} · "))
+        .chain(harness.query_all_by_label_contains(&format!(" · {name}")))
+        .filter_map(|found| {
+            egui_kittest::kittest::NodeT::accesskit_node(&found)
+                .label()
+                .map(|label| label.to_string())
+        })
+        .find(|label| step_row(label, name).is_some())
+}
+
 fn only(harness: &FolderHarness, kind: DocumentKind) -> String {
     folder(harness)
         .session
@@ -13515,10 +13546,10 @@ mod ux18 {
             choose(&mut harness, "Run simulation");
             let report = finish_run(&mut harness);
             assert_eq!(report.status, RunStatus::Passed, "{:?}", report.error);
-            let step = format!("{} · ", PRICE.1);
-            harness.get_by_label_contains(&step).scroll_to_me();
+            let step = step_row_label(&harness, PRICE.1).expect("the check has a row");
+            harness.get_by_label(&step).scroll_to_me();
             settle(&mut harness);
-            harness.get_by_label_contains(&step).click();
+            harness.get_by_label(&step).click();
             settle(&mut harness);
             assert!(
                 has_label(&harness, CLOSE_INSPECTOR),

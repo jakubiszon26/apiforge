@@ -212,15 +212,18 @@ fn text_of(node: egui_kittest::Node<'_>) -> Option<String> {
     node.label().or_else(|| node.value())
 }
 
-/// The accessible labels of the Run results rows of `name`: one at the top
-/// level, more where a component holds a step of the same name.
+/// The accessible labels of the Run results rows of `name`, read as
+/// `{name} · {what it says}` (a check's row starts with its predicate since
+/// REP-07): one at the top level, more where a component holds a step of
+/// the same name.
 fn rows(harness: &FolderHarness, name: &str) -> Vec<String> {
-    let prefix = format!("{name} · ");
-    harness
-        .query_all_by_label_contains(&prefix)
+    let mut found: Vec<String> = harness
+        .query_all_by_role(egui::accesskit::Role::Button)
         .filter_map(text_of)
-        .filter(|label| label.starts_with(&prefix))
-        .collect()
+        .filter_map(|label| step_row(&label, name))
+        .collect();
+    found.dedup();
+    found
 }
 
 /// The accessible label of the one Run results row of `name`.
