@@ -12,7 +12,10 @@ const FIT: &str = "Fit the view";
 
 fn canvas(harness: &FolderHarness) -> &crate::canvas::Canvas {
     let id = only(harness, DocumentKind::Scenario);
-    folder(harness).canvases.get(&id).expect("the board is drawn")
+    folder(harness)
+        .canvases
+        .get(&id)
+        .expect("the board is drawn")
 }
 
 /// `shop-30` with no positions, its window not yet on the board.
