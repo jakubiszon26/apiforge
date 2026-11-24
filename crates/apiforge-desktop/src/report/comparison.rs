@@ -65,6 +65,16 @@ impl Side {
         }
     }
 
+    /// What is laid out: before the mark, marked and after it.
+    fn pieces(&self) -> (&str, &str, &str) {
+        let mark = self.mark.clone().unwrap_or(0..0);
+        (
+            &self.shown[..mark.start],
+            &self.shown[mark.clone()],
+            &self.shown[mark.end..],
+        )
+    }
+
     /// Marks `range` of the line, as far as it is laid out.
     fn mark(&mut self, range: Range<usize>, line: &str) {
         let laid_out = if self.shown.len() == line.len() {
@@ -342,13 +352,9 @@ fn job(ui: &Ui, side: &Side, tone: Color32, width: f32) -> LayoutJob {
         underline: Stroke::new(1.5, underline(tone)),
         ..Default::default()
     };
-    let mark = side.mark.clone().unwrap_or(0..0);
+    let (before, differs, after) = side.pieces();
     let mut job = LayoutJob::default();
-    for (text, format) in [
-        (&side.shown[..mark.start], &plain),
-        (&side.shown[mark.clone()], &marked),
-        (&side.shown[mark.end..], &plain),
-    ] {
+    for (text, format) in [(before, &plain), (differs, &marked), (after, &plain)] {
         if !text.is_empty() {
             job.append(text, 0.0, format.clone());
         }
@@ -675,6 +681,60 @@ mod tests {
         let text = format!("{}e\u{301}xx", "a".repeat(SHOWN_CHARS - 2));
         let side = Side::new(&one_line(&json!(text)), String::new(), false);
         assert!(side.shown.ends_with("aa…"), "{}", &side.shown[3990..]);
+    }
+
+    /// Review of #613: what is cut off may be as long as the … in its place.
+    #[test]
+    fn a_mark_stays_within_what_is_laid_out() {
+        let check = |left: &str, right: &str| {
+            let comparison =
+                Comparison::of(one(Predicate::Equals), &step(json!(left), json!(right)));
+            for side in [&comparison.expected, &comparison.actual] {
+                let line = serde_json::from_str::<String>(&side.whole)
+                    .map(|text| one_line(&json!(text)))
+                    .unwrap();
+                let kept = match line.chars().count() > SHOWN_CHARS {
+                    true => side.shown.strip_suffix('…').expect("it is cut"),
+                    false => side.shown.as_str(),
+                };
+                assert!(line.starts_with(kept), "what is kept is its beginning");
+                let (before, marked, after) = side.pieces();
+                assert_eq!(format!("{before}{marked}{after}"), side.shown);
+                assert!(
+                    before.len() + marked.len() <= kept.len(),
+                    "{} and {} of {}",
+                    before.len(),
+                    marked.len(),
+                    kept.len()
+                );
+            }
+        };
+        let a = "a".repeat(SHOWN_CHARS - 1);
+        check(&format!("{a}é"), &format!("{a}è"));
+        let units = [
+            "b",
+            "é",
+            "€",
+            "😀",
+            "e\u{301}",
+            "🇵🇱",
+            "👩‍💻",
+            "\n",
+            "\u{1}",
+            "\\",
+            "\"",
+        ];
+        for filler in ["a", "é", "€"] {
+            for length in SHOWN_CHARS - 8..=SHOWN_CHARS + 4 {
+                let text = filler.repeat(length);
+                for left in units {
+                    for right in units {
+                        check(&format!("{text}{left}"), &format!("{text}{right}"));
+                        check(&format!("{text}{left}{right}"), &format!("{text}{right}"));
+                    }
+                }
+            }
+        }
     }
 
     #[test]
