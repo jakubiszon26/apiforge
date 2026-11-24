@@ -35,34 +35,46 @@ fn failing() -> String {
     failing
 }
 
-/// `text` as `labels`' only document, open on its board at `size`.
+/// `text` as the project's only scenario, open on its board at `size`.
 fn labels_with(size: egui::Vec2, text: &str) -> (tempfile::TempDir, FolderHarness) {
+    let (project, harness, _) = opened(size, None, text);
+    (project, harness)
+}
+
+/// `text` as the project's only scenario, open on its board at `size`,
+/// beside the published component `component`.
+fn opened(
+    size: egui::Vec2,
+    component: Option<&str>,
+    text: &str,
+) -> (tempfile::TempDir, FolderHarness, String) {
     let directory = tempfile::tempdir().unwrap();
     let mut project = apiforge_core::demos::empty_project();
     project.scenarios.clear();
     project.name = "Label validation".into();
     apiforge_project::prepare_project(directory.path(), &project).unwrap();
     let mut session = apiforge_project::ProjectSession::open(directory.path()).unwrap();
-    session
+    if let Some(component) = component {
+        let id = session
+            .create_document(DocumentKind::Component, "components/lookup.afs", component)
+            .unwrap();
+        session
+            .publish(&id, apiforge_project::Origin::SESSION)
+            .unwrap();
+    }
+    let id = session
         .create_document(DocumentKind::Scenario, LABELS, text)
         .unwrap();
     drop(session);
     let mut harness = crate::testing::folder_harness_in(directory.path(), size, Mode::Diagram);
     app(&mut harness).review_open(LABELS, None);
     settle(&mut harness);
-    (directory, harness)
+    (directory, harness, id)
 }
 
 /// A simulation of the active scenario, finished, with Run results
-/// maximised. The board shows every check first, so that choosing a
-/// check's row selects the check there (a folded check's row stays chosen
-/// with REP-07a).
+/// maximised.
 fn ran(harness: &mut FolderHarness) -> RunResult {
-    if folder(harness).preferences.checks_collapsed {
-        harness.get_by_label("Checks").click();
-        settle(harness);
-    }
-    assert!(!folder(harness).preferences.checks_collapsed);
     choose(harness, "Run simulation");
     let result = finish_run(harness);
     choose(harness, MAXIMISE);
@@ -188,6 +200,270 @@ fn rep07b_a_request_keeps_its_details() {
         "a request's own Outputs are its response"
     );
     assert!(!details_mention(&harness, " · of step "), "no check's line");
+}
+
+/// Whether a text of the details is written inside them, right of their
+/// left edge and left of the window's right edge.
+fn assert_inside(harness: &FolderHarness, text: &str, rect: egui::Rect) {
+    let left = details(harness) - 1.0;
+    let right = harness.ctx.content_rect().right();
+    assert!(
+        rect.left() >= left && rect.right() <= right,
+        "{text:?} at {rect:?} is outside the details {left}..{right}"
+    );
+}
+
+/// The rect of the details' text containing `text`.
+fn details_rect(harness: &FolderHarness, text: &str) -> egui::Rect {
+    let left = details(harness);
+    harness
+        .query_all_by_label_contains(text)
+        .map(|node| node.rect())
+        .find(|rect| rect.left() >= left - 1.0)
+        .unwrap_or_else(|| panic!("the details write {text:?}"))
+}
+
+const LONG_LABEL: &str =
+    "Printing a label of a parcel heavier than the courier takes on this route is refused";
+const LONG_FIELD: &str = "reasons_the_courier_gave_for_refusing_the_parcel_at_the_counter";
+
+/// A request with a long name and a check with a long name of a long field.
+fn long() -> String {
+    format!(
+        r#"scenario "Long" {{
+  begin = start
+  @label("{LONG_LABEL}")
+  refused_label_of_a_heavy_parcel = POST "https://parcels.example.test/parcels/pc-001/labels/for/the/courier/of/this/route" {{
+    body {{ weight: 31 }}
+    sample 422 {{ error: {{ {LONG_FIELD}: {{ first_reason_given: "The parcel weighs more than 30 kg and the van has no lift." }} }} }}
+  }}
+  the_first_reason_given_names_the_weight_of_the_parcel = assert refused_label_of_a_heavy_parcel.body.error.{LONG_FIELD}.first_reason_given == "The parcel weighs more than 25 kg and the van has no lift."
+}}
+"#
+    )
+}
+
+/// Review of 2026-11-24: beside the list as it opens and beside the widest
+/// one, at 960 × 540 and 1600 × 1000, what the details write of a check is
+/// not cut, and the status beside the title covers none of it.
+#[test]
+fn rep07b_the_texts_of_a_check_are_not_cut() {
+    for size in [MINIMUM, WIDE] {
+        let (_project, mut harness) = labels_with(size, &long());
+        ran(&mut harness);
+        choose_check(
+            &mut harness,
+            "the_first_reason_given_names_the_weight_of_the_parcel",
+        );
+        for widest in [false, true] {
+            if widest {
+                let from = harness.get_by_label("Resize the step list").rect().center();
+                super::lay16::drag(&mut harness, from, from + egui::vec2(size.x, 0.0));
+            }
+            // The pill's text and the 8 px on each side of it.
+            let status = harness
+                .query_all_by_label("Failed")
+                .map(|node| node.rect())
+                .find(|rect| rect.left() >= details(&harness))
+                .expect("the details say the status")
+                .expand2(egui::vec2(8.0, 0.0));
+            assert_inside(&harness, "Failed", status);
+            for text in [
+                "first_reason_given == ",
+                " · of step 2 ",
+                "refused_label_of_a_heavy_parcel.body.error.",
+                "Response of ",
+            ] {
+                let rect = details_rect(&harness, text);
+                assert_inside(&harness, text, rect);
+                assert!(
+                    !rect.intersects(status),
+                    "{size:?}: {text:?} at {rect:?} is under the status at {status:?}"
+                );
+            }
+            let title = details_rect(&harness, "first_reason_given == ");
+            let line = details_rect(&harness, " · of step 2 ");
+            let checked = details_rect(&harness, "refused_label_of_a_heavy_parcel.body.error.");
+            assert!(
+                title.bottom() <= line.top() + 0.5,
+                "the line under the title"
+            );
+            assert!(line.bottom() <= checked.top(), "CHECKED under the line");
+            for text in ["EXPECTED", "ACTUAL"] {
+                let rect = details_rect(&harness, text);
+                assert_inside(&harness, text, rect);
+                assert!(checked.bottom() <= rect.top(), "{text} under CHECKED");
+            }
+        }
+    }
+}
+
+/// A check in each of the places a check can be in.
+const PLACES: &str = r#"scenario "Places" {
+  on_error continue
+  begin = start
+  first = GET "https://shop.example.test/first" {
+    sample 200 { size: 1, items: [] }
+  }
+  missing_field = assert first.body.nothing == 1
+  second = GET "https://shop.example.test/second" {
+    sample 200 { size: 2 }
+  }
+  across = assert first.body.size == second.body.size
+  unsent = GET "https://shop.example.test/{{first.body.items[0].id}}" {
+    sample 200 {}
+  }
+  of_unsent = assert unsent.status == 200
+  cleanup {
+    removed = DELETE "https://shop.example.test/first" {
+      sample 204 {}
+    }
+    gone = assert removed.status == 200
+    still = assert first.body.size == 3
+  }
+}
+"#;
+
+/// Review of 2026-11-24: the details name the step of a check that reads
+/// two, of one in Cleanup and of one whose step did not run, and show the
+/// response that holds the checked field; they say a field is marked only
+/// where one is.
+#[test]
+fn rep07b_the_details_of_a_check_wherever_it_is() {
+    let (_project, mut harness) = labels_with(WIDE, PLACES);
+    let result = ran(&mut harness);
+    assert_eq!(result.status, RunStatus::Failed);
+
+    // Two steps: it runs after the second, what it checked is in the first.
+    choose_check(&mut harness, "across");
+    assert!(details_mention(
+        &harness,
+        "Check across · of step 4 second · GET /second → 200"
+    ));
+    assert!(details_show(&harness, "first.body.size"), "what it checked");
+    assert!(
+        details_show(&harness, "Response of first · the checked field is marked"),
+        "the response that holds what it checked"
+    );
+
+    // A field the response has not: nothing is marked.
+    choose_check(&mut harness, "missing_field");
+    assert!(details_show(&harness, "first.body.nothing"));
+    assert!(details_show(&harness, "(missing value)"));
+    assert!(details_show(&harness, "Response of first"));
+
+    // Its step did not run: there is no response.
+    choose_check(&mut harness, "of_unsent");
+    assert!(details_mention(
+        &harness,
+        "Check of_unsent · of step 6 unsent"
+    ));
+    assert!(!details_mention(&harness, "Response of "));
+
+    // Cleanup: its own request, and a step of Main.
+    choose_check(&mut harness, "gone");
+    assert!(details_mention(
+        &harness,
+        "Check gone · of step 1 removed · DELETE /first → 204"
+    ));
+    assert!(details_show(
+        &harness,
+        "Response of removed · the checked field is marked"
+    ));
+    choose_check(&mut harness, "still");
+    assert!(details_show(&harness, "first.body.size == 3"), "every name");
+    assert!(
+        details_show(&harness, "Check still"),
+        "it runs after no step"
+    );
+    assert!(details_show(
+        &harness,
+        "Response of first · the checked field is marked"
+    ));
+}
+
+/// Review of 2026-11-24: a check inside a component call names the request
+/// of its component; its fields, which the scenario's checks do not read,
+/// are not said to be marked.
+#[test]
+fn rep07b_a_check_inside_a_component_call_names_its_request() {
+    let (_project, mut harness, _) = opened(
+        WIDE,
+        Some(
+            r#"component lookup "Look up" {
+  fetch = GET "https://shop.example.test/lookup" {
+    sample 200 { size: 1 }
+  }
+  sized = assert fetch.body.size == 2
+  export size: number = fetch.body.size
+}
+"#,
+        ),
+        r#"scenario "Call" {
+  begin = start
+  looked_up = lookup@1()
+}
+"#,
+    );
+    ran(&mut harness);
+    choose_check(&mut harness, "sized");
+    assert!(details_show(&harness, "size == 2"));
+    assert!(details_mention(
+        &harness,
+        "Check sized · of step 1 fetch · GET /lookup → 200"
+    ));
+    assert!(details_show(&harness, "fetch.body.size"));
+    assert!(details_show(&harness, "Response of fetch"));
+}
+
+/// Review of 2026-11-24: after the run, the details keep what the run
+/// executed: the check deleted since, its step deleted since, and a source
+/// that does not read; a deleted check's field is not said to be marked. A
+/// second run's details are its own.
+#[test]
+fn rep07b_the_details_keep_what_the_run_executed() {
+    let (_project, mut harness, id) = opened(WIDE, None, &failing());
+    ran(&mut harness);
+    choose_check(&mut harness, FAILED_CHECK);
+    let line = format!("Check {FAILED_CHECK} · of step 6 {WEIGHT_31} · POST");
+    let marked = format!("Response of {WEIGHT_31} · the checked field is marked");
+    assert!(details_show(&harness, &marked));
+    let check = r#"  weight_31_field = assert weight_31.body.error.field == "weight"
+"#;
+    let without_check = failing().replacen(check, "", 1);
+    assert_ne!(without_check, failing());
+    let edit = |harness: &mut FolderHarness, text: &str| {
+        app(harness)
+            .session
+            .as_mut()
+            .unwrap()
+            .edit_source(&id, text, apiforge_project::Origin::SESSION)
+            .unwrap();
+        settle(harness);
+        choose_check(harness, FAILED_CHECK);
+    };
+
+    edit(&mut harness, &without_check);
+    assert!(details_mention(&harness, &line), "the check is deleted");
+    assert!(details_show(&harness, &format!("Response of {WEIGHT_31}")));
+
+    // Its request is deleted too: the text from its label to the next one.
+    let from = without_check.find("  @label(\"Weight 31 kg\")").unwrap();
+    let to = without_check.find("  @label(\"Weight 0 kg\")").unwrap();
+    let without_step = format!("{}{}", &without_check[..from], &without_check[to..]);
+    edit(&mut harness, &without_step);
+    assert!(details_mention(&harness, &line), "the step is deleted");
+    assert!(details_show(&harness, &format!("Response of {WEIGHT_31}")));
+
+    edit(&mut harness, &format!("{}\n}}\n", failing()));
+    assert!(details_mention(&harness, &line), "the source does not read");
+
+    edit(&mut harness, &failing());
+    assert!(details_show(&harness, &marked), "the check is back");
+    choose(&mut harness, "Run simulation");
+    finish_run(&mut harness);
+    choose_check(&mut harness, FAILED_CHECK);
+    assert!(details_show(&harness, &marked), "a second run's details");
 }
 
 /// Design review: the details of the failed check of `labels`, maximised,
