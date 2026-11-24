@@ -475,11 +475,11 @@ fn after_the_place(board_graph: &Graph, from: &str) -> Vec<String> {
     moved
 }
 
-/// After `edit`, the cards after the place stand where a whole Tidy up
-/// would put them, and every other card keeps its position; the camera
-/// does not move. `from` names the first step whose place changed, on the
-/// board after the edit. A card is moved by hand before the place
-/// (`early`) and after it (`late`) first.
+/// After `edit`, the cards after the place stand as a whole Tidy up
+/// arranges them, measured from the step they follow (DIAG-23), and every
+/// other card keeps its position; the camera does not move. `from` names
+/// the first step whose place changed, on the board after the edit. A card
+/// is moved by hand before the place (`early`) and after it (`late`) first.
 fn makes_room(
     view: &[&str],
     edit: impl FnOnce(&mut FolderHarness, &str),
@@ -523,7 +523,27 @@ fn makes_room(
     passes(&harness, &id);
     let after = graph(&harness, &id);
     let tidied = folder(&harness).debug_tidied(&id).expect("a tidied board");
-    let moved = after_the_place(&after, &from(&after));
+    let first = from(&after);
+    let moved = after_the_place(&after, &first);
+    // The step before the place in its braces.
+    let follows = {
+        let written = apiforge_core::chain::braces(&after);
+        let own: Vec<&str> = after
+            .nodes
+            .iter()
+            .filter(|node| apiforge_core::chain::is_step(node.kind))
+            .map(|node| node.id.as_str())
+            .filter(|id| written.get(id) == written.get(first.as_str()))
+            .collect();
+        let at = own.iter().position(|id| *id == first).expect("a step");
+        own[at - 1].to_owned()
+    };
+    let stands = |graph: &Graph, id: &str| {
+        let node = graph.nodes.iter().find(|node| node.id == id).unwrap();
+        (node.position.x, node.position.y)
+    };
+    let (at, tidy_at) = (stands(&after, &follows), stands(&tidied, &follows));
+    let offset = (at.0 - tidy_at.0, at.1 - tidy_at.1);
     let early_id = id_of(&after, early);
     assert!(
         !moved.contains(&early_id),
@@ -535,10 +555,11 @@ fn makes_room(
     );
     for node in &after.nodes {
         if moved.contains(&node.id) {
-            let tidy = tidied.nodes.iter().find(|n| n.id == node.id).unwrap();
+            let tidy = stands(&tidied, &node.id);
             assert_eq!(
-                node.position, tidy.position,
-                "`{}` stands where Tidy up puts it",
+                (node.position.x, node.position.y),
+                (tidy.0 + offset.0, tidy.1 + offset.1),
+                "`{}` stands as Tidy up arranges it",
                 node.handle
             );
         } else if let Some(old) = before.nodes.iter().find(|n| n.id == node.id) {
