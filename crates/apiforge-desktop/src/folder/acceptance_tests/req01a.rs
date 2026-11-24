@@ -1702,6 +1702,165 @@ fn req01a_a_click_gives_the_keyboard_to_its_row() {
     );
 }
 
+/// The requests of Main and of Cleanup.
+fn requests(harness: &FolderHarness, id: &str) -> [usize; 2] {
+    let (main, cleanup, _) = graphs(harness, id);
+    [main, cleanup].map(|graph| {
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Request)
+            .count()
+    })
+}
+
+/// Third review, 1: a check deleted while the board was shown is not brought
+/// back into the selection; the step the board marks keeps it.
+#[test]
+fn req01a_a_mark_of_a_deleted_check_is_forgotten() {
+    let (_project, mut harness, id) = rooms(WIDE);
+    let (main, _, _) = graphs(&harness, &id);
+    steps(&mut harness);
+    choose(&mut harness, "status == 409 · refused of second");
+    canvas(&mut harness);
+    let second = node(&main, "second").id.clone();
+    assert_eq!(
+        folder(&harness).selections[&id],
+        std::slice::from_ref(&second)
+    );
+    let source = source_of(&harness, &id);
+    let without = source.replacen("    refused = assert second.status == 409\n", "", 1);
+    assert_ne!(without, source);
+    edit_source(&mut harness, &id, &without);
+    steps(&mut harness);
+    assert_eq!(
+        folder(&harness).selections[&id],
+        std::slice::from_ref(&second)
+    );
+    assert!(selected(&harness)[0].contains("second"));
+}
+
+/// Third review, 2: a paste in *Steps* goes where the list adds: to Main
+/// while nothing is selected, whichever board was shown last, and to Cleanup
+/// with a Cleanup row selected.
+#[test]
+fn req01a_a_paste_goes_where_the_list_adds() {
+    let (_project, mut harness, id) = rooms(WIDE);
+    steps(&mut harness);
+    let cancelled = row(&harness, "DELETE cancelled").name;
+    let heading = row(&harness, "GET rooms").name;
+    choose(&mut harness, &heading);
+    harness.event(egui::Event::Copy);
+    harness.step();
+    settle(&mut harness);
+    choose(&mut harness, &cancelled);
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    assert!(selected(&harness).is_empty() && folder(&harness).cleanup(&id));
+    let paste = |harness: &mut FolderHarness| {
+        harness.event(egui::Event::Paste(String::new()));
+        harness.step();
+        settle(harness);
+    };
+    paste(&mut harness);
+    assert_eq!(requests(&harness, &id), [5, 1], "nothing selected: Main");
+    assert!(selected(&harness)[0].starts_with("Step "));
+    choose(&mut harness, &cancelled);
+    paste(&mut harness);
+    assert_eq!(requests(&harness, &id), [5, 2], "a Cleanup row: Cleanup");
+    assert!(selected(&harness)[0].starts_with("Cleanup step "));
+}
+
+/// Third review, 3: several steps selected on the board are one in the list,
+/// and a command there acts on that one; the board's selection is kept.
+#[test]
+fn req01a_a_command_acts_on_what_the_list_shows() {
+    let (_project, mut harness, id) = rooms(WIDE);
+    let (main, _, _) = graphs(&harness, &id);
+    let both: Vec<String> = ["first", "rooms"]
+        .map(|handle| node(&main, handle).id.clone())
+        .to_vec();
+    app(&mut harness)
+        .selections
+        .insert(id.clone(), both.clone());
+    settle(&mut harness);
+    steps(&mut harness);
+    assert_eq!(selected(&harness).len(), 1);
+    harness.event(egui::Event::Copy);
+    harness.step();
+    settle(&mut harness);
+    assert_eq!(
+        folder(&harness).selections[&id],
+        both,
+        "a copy selects nothing"
+    );
+    let copied = folder(&harness).clipboard.as_ref().unwrap();
+    assert_eq!(
+        copied
+            .graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Request)
+            .map(|node| node.handle.as_str())
+            .collect::<Vec<_>>(),
+        ["first"]
+    );
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    settle(&mut harness);
+    assert_eq!(requests(&harness, &id), [5, 1], "one duplicated");
+    // A step the list does not show, *Start*, is no one's command.
+    let start = node(&main, "begin").id.clone();
+    app(&mut harness).selections.insert(id.clone(), vec![start]);
+    settle(&mut harness);
+    let before = source_of(&harness, &id);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    settle(&mut harness);
+    assert_eq!(source_of(&harness, &id), before);
+}
+
+/// Third review, 4: Escape clears the selection of a row a click gave the
+/// keyboard to.
+#[test]
+fn req01a_escape_clears_after_a_click() {
+    let (_project, mut harness, _) = rooms(WIDE);
+    steps(&mut harness);
+    for name in [
+        row(&harness, "POST first").name,
+        "status == 409 · refused of second".to_owned(),
+    ] {
+        choose(&mut harness, &name);
+        assert!(harness.get_by_label(&name).is_focused());
+        assert_eq!(marked(&harness).len(), 1);
+        harness.key_press(egui::Key::Escape);
+        settle(&mut harness);
+        assert!(marked(&harness).is_empty(), "{name}");
+    }
+}
+
+/// Third review, 5: while Run results fill the window, the list behind them
+/// takes no command, whatever had the keyboard before.
+#[test]
+fn req01a_the_list_behind_run_results_takes_no_command() {
+    let (_project, mut harness, id) = rooms(WIDE);
+    steps(&mut harness);
+    ran(&mut harness);
+    let first = row(&harness, "POST first").name;
+    choose(&mut harness, &first);
+    choose(&mut harness, "Maximise run results");
+    let before = source_of(&harness, &id);
+    let duplicate = |harness: &mut FolderHarness| {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+        settle(harness);
+        source_of(harness, &id)
+    };
+    assert_eq!(duplicate(&mut harness), before);
+    harness.get_by_label("Run mode").focus();
+    harness.step();
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    assert_eq!(duplicate(&mut harness), before);
+    assert_eq!(source_of(&harness, &id), before);
+}
+
 /// Design review: the list at both sizes, before and after a run, its
 /// hovers and the header of the board.
 #[test]
