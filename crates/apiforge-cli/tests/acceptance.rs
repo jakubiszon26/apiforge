@@ -109,6 +109,7 @@ fn execute(project: apiforge_core::format::Project, scenario_id: &str) -> RunRes
             mode: RunMode::Simulation,
             target_node_id: None,
             single_node_id: None,
+            partial: None,
             previous_run: None,
             secrets: Default::default(),
         })

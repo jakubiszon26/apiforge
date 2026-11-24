@@ -506,6 +506,7 @@ impl FolderApp {
             },
             target_node_id: None,
             single_node_id: None,
+            partial: None,
             previous_run: None,
             secrets: self.runs.secrets.clone(),
         };

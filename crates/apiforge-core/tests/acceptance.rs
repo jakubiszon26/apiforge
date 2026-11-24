@@ -43,6 +43,7 @@ async fn simulate(mut project: Project, scenario: &Scenario) -> RunResult {
         mode: RunMode::Simulation,
         target_node_id: None,
         single_node_id: None,
+        partial: None,
         previous_run: None,
         secrets: Default::default(),
     };
