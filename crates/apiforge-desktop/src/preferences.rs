@@ -50,6 +50,10 @@ struct Stored {
     /// (decision 2 of 2026-11-12).
     #[serde(default)]
     wires: StoredWires,
+    /// The width of Run results' step list (REP-07); absent until it is
+    /// dragged, and from a file written before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run_list_width: Option<f32>,
 }
 
 /// *Wires* (LAY-23) as the file holds it.
@@ -74,10 +78,11 @@ pub enum Preference {
     CompactCards,
     ChecksCollapsed,
     Wires,
+    RunListWidth,
 }
 
 /// The preferences of this session.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub wire_style: WireStyle,
     /// Whether a wire crossing is drawn as a bridge.
@@ -92,6 +97,9 @@ pub struct Preferences {
     /// Which data wires the board draws (LAY-23); chips for a new install
     /// and for one whose file does not name it (decision 2).
     pub wires: WireMode,
+    /// The width of Run results' step list as it was last dragged
+    /// (REP-07); `None` keeps the list's default.
+    pub run_list_width: Option<f32>,
     /// Where to write them, or `None` when the system has no configuration
     /// directory and preferences last only for this session.
     path: Option<PathBuf>,
@@ -106,6 +114,7 @@ impl Default for Preferences {
             compact_cards: true,
             checks_collapsed: true,
             wires: WireMode::Chips,
+            run_list_width: None,
             path: default_path(),
         }
     }
@@ -137,6 +146,7 @@ impl Preferences {
                 StoredWires::All => WireMode::All,
                 StoredWires::Chips => WireMode::Chips,
             };
+            preferences.run_list_width = stored.run_list_width.filter(|width| width.is_finite());
         }
         preferences
     }
@@ -168,6 +178,7 @@ impl Preferences {
             Preference::CompactCards => stored.compact_cards = self.compact_cards,
             Preference::ChecksCollapsed => stored.checks_collapsed = self.checks_collapsed,
             Preference::Wires => stored.wires = stored_wires(self.wires),
+            Preference::RunListWidth => stored.run_list_width = self.run_list_width,
         }
         let Ok(bytes) = serde_json::to_vec_pretty(&stored) else {
             return;
@@ -187,6 +198,7 @@ impl Preferences {
             compact_cards: self.compact_cards,
             checks_collapsed: self.checks_collapsed,
             wires: stored_wires(self.wires),
+            run_list_width: self.run_list_width,
         }
     }
 }

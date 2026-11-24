@@ -420,7 +420,8 @@ fn lay11_criterion_8_run_results_navigates_to_the_subject() {
     let (_project, mut harness) = open(&shop_30(), WIDE);
     simulate(&mut harness);
     assert!(hidden(&harness, "logged_in"));
-    harness.get_by_label_contains("logged_in · Passed").click();
+    let row = step_row_label(&harness, "logged_in").expect("logged_in has a row");
+    harness.get_by_label(&row).click();
     settle(&mut harness);
     harness.step();
     assert_eq!(selected(&harness), vec![id_of(&harness, "login")]);
