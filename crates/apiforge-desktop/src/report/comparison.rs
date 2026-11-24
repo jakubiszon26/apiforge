@@ -680,6 +680,15 @@ mod tests {
         assert!(side.shown.ends_with("aa…"), "{}", &side.shown[3990..]);
     }
 
+    /// Second test in the real window, 2026-11-24, finding 3: the tint of a
+    /// row stands under the line of the row above, and covers none of it.
+    #[test]
+    fn a_rows_tint_leaves_the_line_above_it() {
+        for tone in [theme::SUCCESS, theme::DANGER] {
+            assert!(!tint(tone).is_opaque());
+        }
+    }
+
     /// Review of #613: what is cut off may be as long as the … in its place.
     #[test]
     fn a_mark_stays_within_what_is_laid_out() {

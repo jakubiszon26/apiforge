@@ -419,6 +419,7 @@ fn kinds() -> String {
   lines = assert r.body.lines == "one\ttwo"
   long = assert r.body.long == "LONGa"
   nothing = assert r.body.code == "too_heavy"
+  wide = assert r.body.long == 1
   tags = assert r.body.tags == ["a", "b"]
   same = assert r.body.count == 250
   other = assert r.body.count != 250
@@ -736,6 +737,69 @@ fn rep07b_a_check_chosen_at_the_normal_height_settles() {
     }
 }
 
+/// A response of over 2000 values, checked far from its first rows.
+fn big() -> String {
+    let items: Vec<String> = (0..400)
+        .map(|at| {
+            format!(
+                "{{ id: {at}, name: \"Thing {at}\", price: 1, tags: [\"a\", \"b\"], on: true }}"
+            )
+        })
+        .collect();
+    format!(
+        r#"scenario "Big" {{
+  on_error continue
+  begin = start
+  list = GET "https://shop.example.test/big" {{
+    sample 200 {{ items: [{}] }}
+  }}
+  far = assert list.body.items[200].name == "Thing 201"
+  last = assert list.body.items[399].name == "Thing 400"
+}}
+"#,
+        items.join(", ")
+    )
+}
+
+/// Second test in the real window, 2026-11-24, finding 1: the response is
+/// opened to the checked field, on its page, however large it is and also
+/// with *Expand all*; the heading says that the field is marked only while
+/// its row is shown.
+#[test]
+fn rep07b_a_large_response_is_opened_to_the_checked_field() {
+    use crate::inspector::MarkTone;
+    let (_project, mut harness) = labels_with(WIDE, &big());
+    ran(&mut harness);
+    let drawn = |harness: &mut FolderHarness, path: &str| {
+        crate::inspector::debug_forget_marks();
+        harness.step();
+        crate::inspector::debug_marks().into_iter().any(|mark| {
+            mark.path == path
+                && mark.results
+                && mark.shown
+                && mark.tone == MarkTone::Failed
+                && mark.words == "This check"
+        })
+    };
+    let marked = "Response of list · the checked field is marked";
+    for (check, path) in [("far", "items[200].name"), ("last", "items[399].name")] {
+        choose_check(&mut harness, check);
+        assert!(drawn(&mut harness, path), "{check}");
+        assert!(details_show(&harness, marked), "{check}");
+    }
+    // Expand all opens everything, but not past the rows drawn at once.
+    for label in ["Expand all", "Collapse all"] {
+        harness.get_by_label(label).scroll_to_me();
+        settle(&mut harness);
+        harness.get_by_label(label).click();
+        settle(&mut harness);
+        let expanded = label == "Expand all";
+        assert_eq!(drawn(&mut harness, "items[399].name"), expanded, "{label}");
+        assert_eq!(details_show(&harness, marked), expanded, "{label}");
+        assert!(details_mention(&harness, "Response of list"));
+    }
+}
+
 /// A check in each of the places a check can be in.
 const PLACES: &str = r#"scenario "Places" {
   on_error continue
@@ -922,6 +986,8 @@ fn review_rep07b_check_details() {
             ("passed", crossed(), "weight_31_text"),
             ("two-steps", crossed(), "same_text"),
             ("missing", crossed(), "hint"),
+            ("big", big(), "far"),
+            ("rows", kinds(), "wide"),
         ] {
             let (_project, mut harness) = labels_with(size, &text);
             ran(&mut harness);
