@@ -408,12 +408,14 @@ fn title_is_edited_in_the_header() {
     let (_project, mut harness, id) = open(REFUSED, WIDE);
     let before = source_of(&harness, &id);
     let shown = on_header(&harness, REFUSED_TITLE).unwrap();
-    type_title(&mut harness, REFUSED_TITLE, "A second booking is refused");
+    open_field(&mut harness, REFUSED_TITLE);
     let field = harness.get_by_label(FIELD).rect();
     assert!(
         field.width() >= shown.width() && field.width() <= shown.width() + 16.0,
         "the field is the title's width: {field:?} over {shown:?}"
     );
+    press(&mut harness, egui::Modifiers::NONE, egui::Key::Escape);
+    type_title(&mut harness, REFUSED_TITLE, "A second booking is refused");
     assert_eq!(source_of(&harness, &id), before, "nothing until Return");
     enter(&mut harness);
     assert!(!editing(&harness));
@@ -476,8 +478,21 @@ fn title_edit_changes_one_line() {
     }
 }
 
-/// Criterion 7: Escape, a click elsewhere, and Return on an unchanged or an
-/// empty text write nothing.
+/// A point of the board with nothing on it.
+fn empty_board(harness: &FolderHarness) -> egui::Pos2 {
+    let board = harness.get_by_label("Diagram board").rect();
+    board.left_bottom() + vec2(120.0, -120.0)
+}
+
+fn click_the_board(harness: &mut FolderHarness) {
+    let at = empty_board(harness);
+    click_at(harness, at, egui::PointerButton::Primary, 1);
+    harness.step();
+}
+
+/// Criterion 7 (amended by the owner, 2026-11-24): Escape discards; an
+/// unchanged or empty text goes back to the title before, however the field
+/// is left.
 #[test]
 fn title_edit_is_abandoned() {
     let (_project, mut harness, id) = open(REFUSED, WIDE);
@@ -486,40 +501,105 @@ fn title_edit_is_abandoned() {
     type_title(&mut harness, REFUSED_TITLE, "Gone with Escape");
     press(&mut harness, egui::Modifiers::NONE, egui::Key::Escape);
     assert_nothing_written(&mut harness, &id, &before, "Escape");
-
-    type_title(&mut harness, REFUSED_TITLE, "Gone with a click");
-    let board = harness.get_by_label("Diagram board").rect();
-    click_at(
-        &mut harness,
-        board.left_bottom() + vec2(120.0, -120.0),
-        egui::PointerButton::Primary,
-        1,
-    );
-    assert_nothing_written(&mut harness, &id, &before, "a click elsewhere");
+    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::S);
+    assert_nothing_written(&mut harness, &id, &before, "a save after Escape");
 
     open_field(&mut harness, REFUSED_TITLE);
     enter(&mut harness);
     assert_nothing_written(&mut harness, &id, &before, "Return, unchanged");
+    open_field(&mut harness, REFUSED_TITLE);
+    click_the_board(&mut harness);
+    assert_nothing_written(&mut harness, &id, &before, "a click, unchanged");
 
     for text in ["", "   "] {
         type_title(&mut harness, REFUSED_TITLE, text);
         enter(&mut harness);
         assert_nothing_written(&mut harness, &id, &before, "Return, empty");
+        type_title(&mut harness, REFUSED_TITLE, text);
+        click_the_board(&mut harness);
+        assert_nothing_written(&mut harness, &id, &before, "a click, empty");
+        assert!(on_header(&harness, REFUSED_TITLE).is_some());
+    }
+}
+
+/// Criterion 7 (amended by the owner, 2026-11-24): however else the field is
+/// left, the title typed is written, as one step of Undo.
+#[test]
+fn title_is_committed_when_the_field_is_left() {
+    const TYPED: &str = "A second booking is refused";
+    type Act = fn(&mut FolderHarness);
+    let leave: [(&str, Act); 9] = [
+        ("the board", click_the_board),
+        ("Code", |harness| click_on(harness, "Code")),
+        ("Cleanup", |harness| click_on(harness, "Cleanup")),
+        ("Files", |harness| click_on(harness, "Files")),
+        ("Add step", |harness| click_on(harness, "Add step")),
+        ("another tab", |harness| {
+            click_on(harness, "booking-day.afs")
+        }),
+        ("Tab", |harness| {
+            press(harness, egui::Modifiers::NONE, egui::Key::Tab);
+        }),
+        ("Ctrl+E", |harness| {
+            press(harness, egui::Modifiers::COMMAND, egui::Key::E);
+        }),
+        ("Ctrl+Tab", |harness| {
+            press(harness, egui::Modifiers::COMMAND, egui::Key::Tab);
+        }),
+    ];
+    for (name, leave) in leave {
+        let (_project, mut harness, id) = open(REFUSED, WIDE);
+        let before = source_of(&harness, &id);
+        type_title(&mut harness, REFUSED_TITLE, TYPED);
+        leave(&mut harness);
+        assert!(!editing(&harness), "{name}: the field is closed");
+        assert_eq!(
+            source_of(&harness, &id),
+            before.replacen(REFUSED_TITLE, TYPED, 1),
+            "{name}"
+        );
+        assert!(dirty(&harness, &id), "{name}");
+        let session = app(&mut harness).session.as_mut().unwrap();
+        assert!(session.undo(&id, DIAGRAM).unwrap(), "{name}");
+        assert_eq!(source_of(&harness, &id), before, "{name}: one undo step");
     }
 
-    // A field left open goes with its view and with its tab.
-    type_title(&mut harness, REFUSED_TITLE, "Gone with the view");
-    choose(&mut harness, "Code");
-    choose(&mut harness, "Diagram");
-    assert_nothing_written(&mut harness, &id, &before, "another view");
-    type_title(&mut harness, REFUSED_TITLE, "Gone with the tab");
-    app(&mut harness).review_open(DAY, None);
-    settle(&mut harness);
-    assert!(!editing(&harness), "the field is not another tab's");
-    assert!(on_header(&harness, DAY_TITLE).is_some());
-    app(&mut harness).review_open(REFUSED, None);
-    settle(&mut harness);
-    assert_nothing_written(&mut harness, &id, &before, "another tab");
+    // Closing the tab asks about the title typed, as about any unsaved work.
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    type_title(&mut harness, REFUSED_TITLE, TYPED);
+    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::W);
+    assert_eq!(title_of(&harness, &id), TYPED);
+    assert!(matches!(folder(&harness).prompt, Some(Prompt::CloseTab(_))));
+    // So does closing the window: the title is in the work it protects.
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    type_title(&mut harness, REFUSED_TITLE, TYPED);
+    let _ = app(&mut harness).prepare_close();
+    assert_eq!(title_of(&harness, &id), TYPED);
+}
+
+/// A title typed and left while a board edit is made in the same frame: the
+/// edit and the title are both written.
+#[test]
+fn title_left_for_a_wire_or_a_card_keeps_both() {
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    type_title(&mut harness, REFUSED_TITLE, "Both are kept");
+    click_on(&mut harness, "Add step");
+    let item = harness
+        .get_all_by_label("HTTP request")
+        .max_by(|a, b| a.rect().left().total_cmp(&b.rect().left()))
+        .unwrap()
+        .rect()
+        .center();
+    click_at(&mut harness, item, egui::PointerButton::Primary, 1);
+    harness.step();
+    assert_eq!(title_of(&harness, &id), "Both are kept");
+    assert_eq!(
+        source_of(&harness, &id).matches(" = GET ").count()
+            + source_of(&harness, &id).matches(" = POST ").count(),
+        3,
+        "{}",
+        source_of(&harness, &id)
+    );
 }
 
 /// Presses and releases the pointer on `label` in frames of their own, as a
@@ -620,30 +700,22 @@ fn title_that_is_refused_holds_the_save_back() {
     );
 }
 
-/// Finding 6, with criterion 7: what was left is not written by a later save.
+/// A refused title goes back to the one before when the field is left.
 #[test]
-fn an_abandoned_title_is_not_committed_later() {
+fn title_that_is_refused_goes_back() {
     let (_project, mut harness, id) = open(REFUSED, WIDE);
     let before = source_of(&harness, &id);
-    type_title(&mut harness, REFUSED_TITLE, "Left with Ctrl+E");
-    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::E);
-    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::S);
-    assert_eq!(source_of(&harness, &id), before, "another view");
-    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::E);
+    type_title(&mut harness, REFUSED_TITLE, "{{{");
+    click_the_board(&mut harness);
     assert!(!editing(&harness));
-
-    for elsewhere in ["Code", "Diagram", "Library", "Cleanup"] {
-        app(&mut harness).workbench.mode = Mode::Diagram;
-        settle(&mut harness);
-        choose(&mut harness, "Main");
-        type_title(&mut harness, REFUSED_TITLE, "Left with a click");
-        click_on(&mut harness, elsewhere);
-        click_on(&mut harness, "Run simulation");
-        finish_run(&mut harness);
-        assert_eq!(source_of(&harness, &id), before, "{elsewhere}, a run");
-        press(&mut harness, egui::Modifiers::COMMAND, egui::Key::S);
-        assert_eq!(source_of(&harness, &id), before, "{elsewhere}");
-    }
+    assert!(on_header(&harness, REFUSED_TITLE).is_some());
+    assert_eq!(source_of(&harness, &id), before);
+    assert!(!dirty(&harness, &id));
+    let app = folder(&harness);
+    assert!(
+        app.prompt.is_some() || app.notice().is_some(),
+        "the person is told"
+    );
 }
 
 /// Finding 8: the field grows with what is typed, over the kind and the file
