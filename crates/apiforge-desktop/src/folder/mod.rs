@@ -2053,7 +2053,9 @@ impl FolderApp {
             Document::Scenario(scenario) => (&scenario.graph, Some(&scenario.cleanup)),
             Document::Component(component) => (&component.graph, None),
         };
-        let index = Arc::new(crate::inspector::CheckIndex::build(main, cleanup, &project));
+        let index = Arc::new(crate::inspector::CheckIndex::build_with_board(
+            main, cleanup, &project,
+        ));
         self.check_index = Some((model.clone(), project, index.clone()));
         index
     }
