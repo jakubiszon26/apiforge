@@ -236,6 +236,17 @@ impl CheckIndex {
         self.ports.get(&(node.to_owned(), port.to_owned()))
     }
 
+    /// Whether the mark of the field at `path` of `port` of `node` is, among
+    /// others, the check `check`'s (REP-07b).
+    pub fn marks(&self, check: &str, node: &str, port: &str, path: &str) -> bool {
+        let Ok(path) = JsonPath::parse(path) else {
+            return false;
+        };
+        self.port(node, port)
+            .and_then(|marks| marks.on.get(&path.to_string()))
+            .is_some_and(|on| on.iter().any(|&at| self.checks[at].id == check))
+    }
+
     /// The checks that name the field at `path` of `port` of `node`.
     #[cfg(test)]
     pub fn on(&self, node: &str, port: &str, path: &str) -> Vec<&IndexedCheck> {

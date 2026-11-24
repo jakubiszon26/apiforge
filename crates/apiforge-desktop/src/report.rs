@@ -1169,14 +1169,11 @@ impl ReportPanel {
             self.tab = DetailTab::Outputs;
         }
         // What the details say of a check: its predicate, what it compared
-        // and the step it runs after (REP-07b).
-        let check = selected
-            .as_ref()
-            .zip(context.graphs)
-            .and_then(|(selected, graphs)| {
-                let index = rows.iter().position(|row| row.key == selected.key)?;
-                detail::of(&rows, index, graphs)
-            });
+        // and the step it is listed under (REP-07b).
+        let check = selected.as_ref().and_then(|selected| {
+            let index = rows.iter().position(|row| row.key == selected.key)?;
+            detail::of(&rows, index, &self.arranged)
+        });
 
         // The outcomes that colour the marks, once per frame (DIAG-12).
         let outcomes = context.checks.map(|_| crate::inspector::Outcomes::of(run));
@@ -1545,8 +1542,12 @@ impl ReportPanel {
         // component's own graph (KTLO-23 criterion 11); exports appear at the
         // top level only when a component runs on its own.
         let checkable = selected.depth == 0 && step.kind != NodeKind::Export;
+        let word = selected.word(ends);
         ui.horizontal(|ui| {
+            // What is written of the step keeps off its status.
+            let room = ui.available_width() - pill_width(ui, word) - ui.spacing().item_spacing.x;
             ui.vertical(|ui| {
+                ui.set_max_width(room.max(0.0));
                 match check {
                     // A check is titled by its predicate, its handle and
                     // its step under it (REP-07b).
@@ -1581,8 +1582,13 @@ impl ReportPanel {
                     widgets::hint(ui, format!("Step inside component · {}", step.node_id));
                 }
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                widgets::pill(ui, selected.word(ends), status_color(step.status));
+            // Beside a check's several lines, it stays at the first.
+            let align = match check {
+                Some(_) => egui::Align::Min,
+                None => egui::Align::Center,
+            };
+            ui.with_layout(egui::Layout::right_to_left(align), |ui| {
+                widgets::pill(ui, word, status_color(step.status));
             });
         });
 
@@ -1626,16 +1632,16 @@ impl ReportPanel {
                 &step.actual,
             );
         }
-        // The response of the step a check runs after, the field it read
-        // marked by DIAG-12's mark (REP-07b).
-        if let Some((head, _)) = check.and_then(|check| check.head.as_ref())
-            && !head.step.outputs.is_empty()
+        // The response that holds what a check compared, marked by DIAG-12's
+        // mark (REP-07b). A check of a component's inner step has no mark:
+        // it is the component's, not its caller's.
+        let marks_here = marks.filter(|_| selected.depth == 0);
+        if let Some(check) = check
+            && let Some(source) = check.source
+            && !source.step.outputs.is_empty()
+            && let Some(heading) = check.heading(&step.node_id, marks_here.map(|marks| marks.index))
         {
             ui.add_space(6.0);
-            let heading = format!(
-                "Response of {} · the checked field is marked",
-                head.step.display_name()
-            );
             let said = ui.label(
                 RichText::new(&heading)
                     .size(theme::FONT_LABEL)
@@ -1647,14 +1653,14 @@ impl ReportPanel {
             self.trees.insert(document);
             let none = |_: &str| false;
             ui.push_id(("report-response", run_id, &selected.key), |ui| {
-                for (port, value) in &head.step.outputs {
+                for (port, value) in &source.step.outputs {
                     let (opening, large) = match self.folding {
                         Folding::Default => *self
                             .openings
                             .entry(egui::Id::new((
                                 "report-opening",
                                 run_id,
-                                head.key.as_str(),
+                                source.key.as_str(),
                                 "response",
                                 port,
                             )))
@@ -1667,7 +1673,7 @@ impl ReportPanel {
                         crate::inspector::results_tree(
                             ui,
                             document,
-                            &head.step.node_id,
+                            &source.step.node_id,
                             port,
                             value,
                             crate::inspector::Results {
@@ -1675,7 +1681,7 @@ impl ReportPanel {
                                 fields: true,
                                 offers: false,
                                 checked: &none,
-                                marks,
+                                marks: marks_here,
                             },
                         )
                     {
@@ -1995,6 +2001,11 @@ fn request_headers(request: &apiforge_core::run::RequestSnapshot) -> Value {
             .map(|(k, v)| (k.clone(), Value::String(v.clone())))
             .collect::<Map<String, Value>>(),
     )
+}
+
+/// The width of a step's status beside its title.
+fn pill_width(ui: &Ui, text: &str) -> f32 {
+    text_width(ui, text, theme::FONT_META) + 16.0
 }
 
 /// The width `text` takes at `size`.

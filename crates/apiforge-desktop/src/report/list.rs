@@ -8,8 +8,8 @@
 use super::{RunGraphs, StepRow};
 use crate::{not_run, theme};
 use apiforge_core::{
-    format::Graph,
-    graph::{component_definition, sequence},
+    format::{Graph, Node},
+    graph::{component_definition, condition_inputs, condition_predicates, sequence},
     model::NodeKind,
     run::{CauseEnds, Phase, RunResult, StepStatus},
 };
@@ -35,7 +35,7 @@ fn is_check(kind: NodeKind) -> bool {
 
 /// The key of the level a row is at: its own key up to its last step, the
 /// same for the steps of one graph.
-fn level(key: &str) -> &str {
+pub(super) fn level(key: &str) -> &str {
     key.rfind('/').map_or("", |at| &key[..=at])
 }
 
@@ -149,6 +149,14 @@ pub fn arrange(rows: &[StepRow<'_>], graphs: Option<RunGraphs<'_>>) -> Vec<Line>
     lines
 }
 
+/// A field a check compared: the step, its output and the path inside it.
+#[derive(Clone, Debug)]
+pub(super) struct Read {
+    pub node: String,
+    pub port: String,
+    pub path: String,
+}
+
 /// What the list writes of one row, beside what the run says.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Entry {
@@ -157,6 +165,10 @@ pub(super) struct Entry {
     pub number: Option<usize>,
     /// A check's predicate as its card writes it (DIAG-02).
     pub predicate: Option<String>,
+    /// What a check of one comparison compared, with every name (REP-07b).
+    pub checked: Option<String>,
+    /// The fields a check's comparisons are about (REP-07b).
+    pub reads: Vec<Read>,
     /// The second line of a value, an `if`, a component call or an export.
     pub second: Option<String>,
     /// The name of the component call that holds a nested row.
@@ -318,10 +330,39 @@ fn entries(rows: &[StepRow<'_>], lines: &[Line], graphs: Option<RunGraphs<'_>>) 
                     .then(|| crate::canvas::own_step(check, lookup))
                     .flatten();
                 entry.predicate = Some(crate::canvas::check_text(check, scope, lookup, own).text());
+                let actuals = actuals(check);
+                if actuals.len() == 1 {
+                    let whole = crate::canvas::check_text(check, scope, lookup, None);
+                    entry.checked = whole
+                        .actual
+                        .and_then(|at| whole.parts.get(at))
+                        .filter(|part| part.role == crate::canvas::PartRole::Operand)
+                        .map(|part| part.text.clone());
+                }
+                entry.reads = actuals
+                    .into_iter()
+                    .filter_map(|name| check.inputs.get(&name))
+                    .flat_map(|binding| binding.references())
+                    .map(|reference| Read {
+                        node: reference.node_id.to_owned(),
+                        port: reference.port.to_owned(),
+                        path: reference.path.to_owned(),
+                    })
+                    .collect();
             }
             entry
         })
         .collect()
+}
+
+/// The inputs a check's comparisons are about, one per comparison.
+fn actuals(check: &Node) -> Vec<String> {
+    match check.kind {
+        NodeKind::Condition => (1..=condition_predicates(check).len())
+            .map(|index| condition_inputs(index).0)
+            .collect(),
+        _ => vec!["actual".into()],
+    }
 }
 
 /// The second line of a value, an `if`, a component call or an export:

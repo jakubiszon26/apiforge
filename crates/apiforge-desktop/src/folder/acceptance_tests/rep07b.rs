@@ -81,17 +81,15 @@ fn ran(harness: &mut FolderHarness) -> RunResult {
     result
 }
 
-/// Chooses the row of the check `handle` in the step list: the row's
-/// accessible name holds the handle whether it starts with it or with the
-/// check's predicate (REP-07a).
+/// Chooses the row of the check `handle` in the step list: under its step
+/// its accessible name ends `· ‹handle› of ‹step›`, by itself `· ‹handle›`
+/// (REP-07a).
 fn choose_check(harness: &mut FolderHarness, handle: &str) {
     let label = harness
         .query_all_by_role(egui::accesskit::Role::Button)
         .filter_map(|node| node.accesskit_node().label().map(|label| label.to_string()))
         .find(|label| {
-            label.contains(" · ")
-                && (label.starts_with(&format!("{handle} · "))
-                    || label.contains(&format!(" · {handle} of ")))
+            label.contains(&format!(" · {handle} of ")) || label.ends_with(&format!(" · {handle}"))
         })
         .unwrap_or_else(|| panic!("{handle} has a row in the step list"));
     harness.get_by_label(&label).scroll_to_me();
@@ -225,6 +223,7 @@ fn details_rect(harness: &FolderHarness, text: &str) -> egui::Rect {
 
 const LONG_LABEL: &str =
     "Printing a label of a parcel heavier than the courier takes on this route is refused";
+const LONG_CHECK: &str = "the_first_reason_given_names_the_weight_of_the_parcel";
 const LONG_FIELD: &str = "reasons_the_courier_gave_for_refusing_the_parcel_at_the_counter";
 
 /// A request with a long name and a check with a long name of a long field.
@@ -237,7 +236,7 @@ fn long() -> String {
     body {{ weight: 31 }}
     sample 422 {{ error: {{ {LONG_FIELD}: {{ first_reason_given: "The parcel weighs more than 30 kg and the van has no lift." }} }} }}
   }}
-  the_first_reason_given_names_the_weight_of_the_parcel = assert refused_label_of_a_heavy_parcel.body.error.{LONG_FIELD}.first_reason_given == "The parcel weighs more than 25 kg and the van has no lift."
+  {LONG_CHECK} = assert refused_label_of_a_heavy_parcel.body.error.{LONG_FIELD}.first_reason_given == "The parcel weighs more than 25 kg and the van has no lift."
 }}
 "#
     )
@@ -251,10 +250,7 @@ fn rep07b_the_texts_of_a_check_are_not_cut() {
     for size in [MINIMUM, WIDE] {
         let (_project, mut harness) = labels_with(size, &long());
         ran(&mut harness);
-        choose_check(
-            &mut harness,
-            "the_first_reason_given_names_the_weight_of_the_parcel",
-        );
+        choose_check(&mut harness, LONG_CHECK);
         for widest in [false, true] {
             if widest {
                 let from = harness.get_by_label("Resize the step list").rect().center();
@@ -348,8 +344,10 @@ fn rep07b_the_details_of_a_check_wherever_it_is() {
 
     // A field the response has not: nothing is marked.
     choose_check(&mut harness, "missing_field");
-    assert!(details_show(&harness, "first.body.nothing"));
-    assert!(details_show(&harness, "(missing value)"));
+    assert!(details_mention(
+        &harness,
+        "Check missing_field · of step 2 first · GET /first → 200"
+    ));
     assert!(details_show(&harness, "Response of first"));
 
     // Its step did not run: there is no response.
@@ -360,11 +358,12 @@ fn rep07b_the_details_of_a_check_wherever_it_is() {
     ));
     assert!(!details_mention(&harness, "Response of "));
 
-    // Cleanup: its own request, and a step of Main.
+    // Cleanup: its own request, and a step of Main. The check that reads
+    // only Main's step runs first.
     choose_check(&mut harness, "gone");
     assert!(details_mention(
         &harness,
-        "Check gone · of step 1 removed · DELETE /first → 204"
+        "Check gone · of step 2 removed · DELETE /first → 204"
     ));
     assert!(details_show(
         &harness,
@@ -458,23 +457,36 @@ fn rep07b_the_details_keep_what_the_run_executed() {
     edit(&mut harness, &format!("{}\n}}\n", failing()));
     assert!(details_mention(&harness, &line), "the source does not read");
 
+    // A check written again is another check than the one that ran.
     edit(&mut harness, &failing());
-    assert!(details_show(&harness, &marked), "the check is back");
+    assert!(details_show(&harness, &format!("Response of {WEIGHT_31}")));
     choose(&mut harness, "Run simulation");
     finish_run(&mut harness);
     choose_check(&mut harness, FAILED_CHECK);
     assert!(details_show(&harness, &marked), "a second run's details");
 }
 
-/// Design review: the details of the failed check of `labels`, maximised,
-/// at both windows.
+/// Design review: the details of the failed check of `labels` and of a
+/// check with long names, maximised, at both windows.
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_rep07b_check_details() {
     for (size, suffix) in [(MINIMUM, "960"), (WIDE, "1600")] {
-        let (_project, mut harness) = labels_with(size, &failing());
-        ran(&mut harness);
-        choose_check(&mut harness, FAILED_CHECK);
-        crate::testing::capture(&mut harness, &format!("rep07b-details-{suffix}"), None);
+        for (name, text, check) in [
+            ("details", failing(), FAILED_CHECK),
+            ("long", long(), LONG_CHECK),
+            ("cleanup", PLACES.into(), "gone"),
+        ] {
+            let (_project, mut harness) = labels_with(size, &text);
+            ran(&mut harness);
+            choose_check(&mut harness, check);
+            crate::testing::capture(&mut harness, &format!("rep07b-{name}-{suffix}"), None);
+            if name == "details" {
+                harness.get_by_label("Copy as JSON").scroll_to_me();
+                settle(&mut harness);
+                let name = format!("rep07b-{name}-end-{suffix}");
+                crate::testing::capture(&mut harness, &name, None);
+            }
+        }
     }
 }
