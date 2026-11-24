@@ -841,11 +841,12 @@ fn lang13_criterion_11_every_example_of_the_documentation_is_language_2() {
     }
 }
 
-/// Whether the example obeys rule 1: a main flow with a step starts with
-/// `start`. An example is not always lowerable alone (it may call a
+/// Whether the example obeys rule 1: a scenario with a step starts with
+/// `start`. A component needs none (criterion 4); a `start` it has is the
+/// first step. An example is not always lowerable alone (it may call a
 /// component of its own project), so the rule is read off the syntax.
 fn check_start(code: &str) -> bool {
-    use apiforge_script::ast::Form;
+    use apiforge_script::ast::{FileKind, Form};
     let tree = parse(code);
     let Some(file) = &tree.file else {
         return true;
@@ -863,7 +864,12 @@ fn check_start(code: &str) -> bool {
     };
     match file.statements.iter().position(|s| step(&s.form)) {
         None => true,
-        Some(first) => matches!(file.statements[first].form, Form::Start),
+        Some(first) => {
+            let starts = |s: &apiforge_script::ast::Statement| matches!(s.form, Form::Start);
+            starts(&file.statements[first])
+                || matches!(file.kind, FileKind::Component { .. })
+                    && !file.statements.iter().any(starts)
+        }
     }
 }
 

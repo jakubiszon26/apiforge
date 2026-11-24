@@ -3454,6 +3454,80 @@ mod tests {
         assert_eq!(graph.nodes[0].position, occupied);
     }
 
+    /// DIAG-22, criterion 5: in the single-file window a request taken from a
+    /// step's menu still reads the step and is written last, as its *Add
+    /// step* still adds last (DIAG-06a, criterion 9).
+    #[test]
+    fn a_steps_menu_adds_as_before_in_the_single_file_window() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = crate::testing::workspace_harness(egui::vec2(1600.0, 1000.0));
+        let app = harness.state_mut().as_mut().unwrap();
+        let text = "scenario \"Order\" {\n  begin = start\n  cart = POST \"/carts\" {\n    \
+                    sample 201 { total: 1 }\n  }\n  pay = POST \"/pay\" {\n    \
+                    sample 200 { ok: true }\n  }\n}\n";
+        app.buffers
+            .typed(&app.code_context(), text.into(), Instant::now());
+        app.settle_code();
+        assert!(!app.document_locked());
+        let before = app.editor.graph().clone();
+        let cart = before
+            .nodes
+            .iter()
+            .find(|node| node.handle == "cart")
+            .unwrap()
+            .id
+            .clone();
+        harness.run();
+        let app = harness.state_mut().as_mut().unwrap();
+        app.canvas.debug_show(&cart, 1.0);
+        harness.run();
+        let canvas = &harness.state().as_ref().unwrap().canvas;
+        let at = canvas.debug_card_rect(&cart).expect("drawn").center();
+        harness.hover_at(at);
+        harness.step();
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.step();
+        }
+        harness.run();
+        harness.get_by_label("AFTER: CART");
+        let menu = harness
+            .ctx
+            .memory(|memory| memory.area_rect(egui::Id::new("board-action-menu")))
+            .expect("the menu is drawn");
+        harness
+            .query_all_by_label("HTTP request")
+            .find(|node| menu.contains_rect(node.rect()))
+            .expect("the menu offers a request")
+            .click();
+        harness.run();
+
+        let graph = harness.state().as_ref().unwrap().editor.graph();
+        assert_eq!(graph.nodes.len(), before.nodes.len() + 1);
+        let added = graph.nodes.last().unwrap();
+        assert!(
+            before.nodes.iter().all(|node| node.id != added.id),
+            "written last"
+        );
+        assert_eq!(
+            added.inputs.get("body"),
+            Some(&Binding::reference(&cart, "body", "")),
+            "bound to the step's first output"
+        );
+        assert!(
+            graph
+                .edges
+                .iter()
+                .all(|edge| edge.source != cart || edge.target != added.id),
+            "and not ordered after it"
+        );
+    }
+
     #[test]
     fn a_placed_variable_lives_and_dies_with_it_in_single_undo_steps() {
         let context = egui::Context::default();

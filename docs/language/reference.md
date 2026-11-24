@@ -59,7 +59,6 @@ scenario "Smoke test" {
 ```afs
 component ping_shop "Ping the shop" {
   description "One request and its status."
-  begin = start
   ping = GET "/products/123" {
     sample 200 { id: 123 }
   }
@@ -110,7 +109,6 @@ component add_to_cart "Add to cart" {
   @optional
   input quantity: number = 1
   action productId
-  begin = start
   added = POST "/carts" {
     body { productId: param.productId, quantity: param.quantity }
     sample 201 { id: "c-1" }
@@ -135,10 +133,12 @@ component add_to_cart "Add to cart" {
 
 ## Start and ordering
 
-`begin = start` is the first step of the main flow: **a scenario or a
-component with a step has a `start`, and it is the first step written**. A
-file has at most one `start`. A cleanup and a branch need none: their braces
-place the first step.
+`begin = start` is the first step of a scenario's main flow: **a scenario
+with a step has a `start`, and it is the first step written**. It is the
+*Start* card of the board. A file has at most one `start`. A component, a
+cleanup and a branch need none: a component's body runs from its first step
+written (a `start` it has stays valid), and the braces of a cleanup or a
+branch place the first step.
 
 After `start`, the steps of the flow run in the order they are written, each
 when the one before it has finished. A step written in a block always runs;
@@ -166,6 +166,8 @@ Here `catalogue`, `health` and `allowed` run in that order; `listed` runs
 right after `catalogue`, before `health`, although its line comes later. The
 step written after an `if` runs after the whole `if` (see
 [Branches](#branches-if-and-else)).
+
+The formatter leaves `listed` where it is written; it never moves a check to the step it follows. Written directly under `catalogue`, the file reads in the order it runs.
 
 ## Requests
 
@@ -590,7 +592,6 @@ types.
 ```afs
 component product_price "Product price" {
   input productId: number
-  begin = start
   product = GET "/products/{{param.productId}}" {
     sample 200 { id: 123, price: 100, promotion: { active: true, price: 80 } }
   }
@@ -678,6 +679,39 @@ and an `input`'s in the order
 The language reads them in any order, a board edit keeps the order you
 wrote, and Format keeps a note you wrote as `@note`.
 
+## Coming from code
+
+Five rules differ from a general-purpose language; the example shows the
+spelling to use for each.
+
+- **A check runs when its values exist, not where its line stands**
+  ([Start and ordering](#start-and-ordering)). Write a check directly under
+  the step it judges.
+- **`&&` and `||` evaluate both sides.** `exists a.b && a.b.c > 0` does not
+  protect the read on the right: when `b` is missing the check ends in an
+  error, not in "no". Guard with an `if`: the statements in its braces run
+  only on that branch.
+- **Nothing negates a computed value.** Write `0 - x`.
+- **Equality is strict.** `"1" == 1` is false; no value is converted for a
+  comparison.
+- **Text never becomes a number**, and `+` does not join text. Join with
+  `concat(a, b)` or a template, `"{{a}} {{b}}"`.
+
+```afs
+scenario "Coming from code" {
+  begin = start
+  cart = GET "/carts/c-1" {
+    sample 200 { id: "c-1", total: 160 }
+  }
+  has_coupon = if exists cart.body.coupon {
+    discounted = assert cart.body.coupon.discount > 0
+  }
+  strict = assert "1" != 1
+  negative = 0 - cart.body.total
+  label = concat("total ", cart.body.total)
+}
+```
+
 ## What cannot be expressed
 
 The text holds everything a run uses. It deliberately does not hold:
@@ -713,7 +747,6 @@ component find_product "Find a product" {
   @optional
   input currency: string = "EUR"
   action productId
-  begin = start
   // The product as the shop sells it.
   response = GET "/products/{{param.productId}}" {
     headers { Accept: "application/json" }

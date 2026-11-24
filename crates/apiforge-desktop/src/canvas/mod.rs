@@ -2525,6 +2525,7 @@ impl Canvas {
                     camera.to_world(pointer.unwrap_or(rect.center())),
                     source,
                 );
+                menu.after_step = input.moves && menu::steps_go_after(card.kind);
                 if input.moves && menu::in_a_branch(input.graph, &card.id) {
                     menu.out_of_branch = Some(card.id.clone());
                 }
@@ -3694,11 +3695,13 @@ impl Canvas {
             .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, editable, &name));
         if editable && response.clicked() {
             let source = menu::default_source(input.graph, input.project, &card.id);
-            self.menu = Some(ActionMenu::new(
+            let mut menu = ActionMenu::new(
                 action.left_bottom(),
                 camera.to_world(action.left_bottom()),
                 source,
-            ));
+            );
+            menu.after_step = input.moves && menu::steps_go_after(card.kind);
+            self.menu = Some(menu);
         }
         for (index, (port, label)) in card.controls.iter().enumerate() {
             if !card.buttons {
