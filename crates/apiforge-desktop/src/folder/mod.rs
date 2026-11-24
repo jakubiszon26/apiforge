@@ -383,6 +383,9 @@ pub struct FolderApp {
     clipboard: Option<edit::Fragment>,
     /// The last paste, until its edit is applied (UX-34).
     pasted: Option<PastedOutcome>,
+    /// The edit being applied comes from a field of the side panel being
+    /// typed in, which writes every key that can be read (#565).
+    typed: bool,
     inspector: Inspector,
     /// What the Inspector showed when a board's first jump started, by
     /// document, while that board shows *Back* (LAY-15).
@@ -608,6 +611,7 @@ impl FolderApp {
             agreed_fields: HashMap::new(),
             clipboard: None,
             pasted: None,
+            typed: false,
             inspector: Inspector::default(),
             jump_views: HashMap::new(),
             changed_at: None,

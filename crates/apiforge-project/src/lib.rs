@@ -63,7 +63,7 @@ pub enum Error {
     /// A change of the board, or a step of the history, that does not make a
     /// valid definition (#565): the validation's message as it is, and the
     /// step it is about when it names one. Nothing of it is applied.
-    #[error("This edit was not applied: {}. Nothing was changed.", refusal(reason, step.as_deref()))]
+    #[error("{} Nothing was changed.", refusal(reason, step.as_deref()))]
     EditRefused {
         reason: String,
         step: Option<String>,
@@ -156,7 +156,18 @@ pub enum Error {
     ChangedWhileConverting { path: String },
 }
 
-/// The reason of [`Error::EditRefused`] within its sentence: in lower case,
+impl Error {
+    /// The first sentence of a refused edit alone, for text being typed: the
+    /// keys before the refused one are edits already applied (#565).
+    pub fn refusal(&self) -> Option<String> {
+        match self {
+            Self::EditRefused { reason, step } => Some(refusal(reason, step.as_deref())),
+            _ => None,
+        }
+    }
+}
+
+/// The first sentence of [`Error::EditRefused`]: its reason in lower case,
 /// except a first word written in capitals and the block name `Start`, and
 /// without a full stop of its own.
 fn refusal(reason: &str, step: Option<&str>) -> String {
@@ -171,8 +182,8 @@ fn refusal(reason: &str, step: Option<&str>) -> String {
         _ => reason.to_owned(),
     };
     match step {
-        Some(step) => format!("{reason} (step \"{step}\")"),
-        None => reason,
+        Some(step) => format!("This edit was not applied: {reason} (step \"{step}\")."),
+        None => format!("This edit was not applied: {reason}."),
     }
 }
 

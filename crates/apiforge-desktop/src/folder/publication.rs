@@ -164,7 +164,15 @@ impl FolderApp {
                     });
                 }
             }
-            Err(error) => self.notify(error.to_string(), true),
+            Err(error) => {
+                // Text is written to the document as it is typed, so a
+                // refused key follows keys that did change it (#565).
+                let message = error
+                    .refusal()
+                    .filter(|_| self.typed)
+                    .unwrap_or_else(|| error.to_string());
+                self.notify(message, true);
+            }
         }
     }
 

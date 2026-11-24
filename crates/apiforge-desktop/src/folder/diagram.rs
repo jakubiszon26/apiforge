@@ -1216,11 +1216,15 @@ impl FolderApp {
                     let mut next = graph.clone();
                     if let Some(slot) = next.nodes.iter_mut().find(|node| node.id == updated.id) {
                         *slot = *updated;
+                        self.typed = self.ui_context.text_edit_focused();
                         self.apply_edit(document_id, &model, cleanup, Ok(next.into()));
+                        self.typed = false;
                     }
                 }
                 inspector::Action::UpdateGraph(next) => {
-                    self.apply_edit(document_id, &model, cleanup, Ok(next.into()))
+                    self.typed = self.ui_context.text_edit_focused();
+                    self.apply_edit(document_id, &model, cleanup, Ok(next.into()));
+                    self.typed = false;
                 }
                 inspector::Action::EditComponent => self.open_component(graph, &node.id),
                 inspector::Action::ReadDirectly => {
