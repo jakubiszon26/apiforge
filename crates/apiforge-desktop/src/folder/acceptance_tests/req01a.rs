@@ -1401,7 +1401,6 @@ fn req01a_frame_budget() {
             harness.step();
         }
         let frame = start.elapsed() / 100;
-        eprintln!("{size:?}: {frame:?} a frame");
         assert!(frame < Duration::from_millis(16), "{size:?}: {frame:?}");
     }
 }
