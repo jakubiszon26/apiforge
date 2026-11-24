@@ -108,6 +108,29 @@ impl FolderApp {
         }
         let project = self.context_project();
         let run = self.fresh_run(document_id);
+        if crate::mock::on()
+            && let Document::Scenario(scenario) = &*model
+        {
+            let mut both = scenario.cleanup.clone();
+            both.nodes.extend(scenario.graph.nodes.iter().cloned());
+            crate::mock::steps(
+                ui,
+                &crate::mock::View {
+                    main: &scenario.graph,
+                    cleanup: Some(&both),
+                    project: &project,
+                    run: run.as_ref(),
+                    file: file_name(&snapshot.path),
+                    cleanup_own: scenario
+                        .cleanup
+                        .nodes
+                        .iter()
+                        .map(|node| node.id.clone())
+                        .collect(),
+                },
+            );
+            return;
+        }
         // Resolved with the report, once per run (LAY-19).
         let ends = self.run_ends(document_id);
         let phase = if cleanup {

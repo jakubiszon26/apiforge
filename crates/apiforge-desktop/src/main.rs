@@ -47,6 +47,7 @@ mod icons;
 mod inspector;
 mod labels;
 mod library;
+mod mock;
 mod navigator;
 mod not_run;
 mod persistence;

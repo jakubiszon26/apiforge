@@ -1285,7 +1285,9 @@ impl FolderApp {
             }
             Mode::Diagram => {
                 self.library_panel(ui, active.as_deref());
-                self.inspector_panel(ui, active.as_deref());
+                if !crate::mock::on() {
+                    self.inspector_panel(ui, active.as_deref());
+                }
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::BG))
                     .show(ui, |ui| self.diagram_area(ui, active.as_deref()));
