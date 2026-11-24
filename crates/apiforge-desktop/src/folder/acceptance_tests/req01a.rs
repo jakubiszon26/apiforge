@@ -1347,7 +1347,10 @@ fn req01a_criterion_8_a_check_selected_before_the_board_was_drawn() {
     assert_eq!(rows(&harness).len(), 10, "opened on the list");
     choose(&mut harness, "status == 409 · refused of second");
     let second = node(&main, "second").id.clone();
-    assert_eq!(folder(&harness).selections[&id], [second.clone()]);
+    assert_eq!(
+        folder(&harness).selections[&id],
+        std::slice::from_ref(&second)
+    );
     canvas(&mut harness);
     assert!(folder(&harness).canvases[&id].debug_selected(&second));
 }
