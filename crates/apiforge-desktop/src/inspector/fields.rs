@@ -752,6 +752,201 @@ pub fn forget_results_tree(ctx: &egui::Context, document: Id) {
     });
 }
 
+/// The shown rows of one value of Run results, as [`results_tree`] draws
+/// them, for a field in it (REP-07b).
+#[derive(Clone, Copy)]
+pub struct Shown<'a> {
+    pub document: Id,
+    pub node: &'a str,
+    pub port: &'a str,
+    pub value: &'a Value,
+    pub opening: Opening,
+}
+
+impl Shown<'_> {
+    fn branch(&self, path: &JsonPath) -> Id {
+        branch_id(self.document, self.node, self.port, &path.to_string())
+    }
+
+    fn keep<T: Clone + Send + Sync + 'static>(&self, ctx: &egui::Context, id: Id, value: T) {
+        keep_results(ctx, self.document, id, value);
+    }
+
+    /// Opens the rows to the field at `path` and turns to its page, once:
+    /// what is folded or turned by hand afterwards stays. Where the rows
+    /// before it are more than are drawn at once, they are folded.
+    pub fn open_to(&self, ctx: &egui::Context, path: &JsonPath) {
+        let once = self.branch(path).with("opened-to");
+        if ctx.data(|data| data.get_temp::<bool>(once)).is_some() {
+            return;
+        }
+        self.keep(ctx, once, true);
+        let steps = self.steps(path);
+        for (parent, _, at) in &steps {
+            let id = self.branch(parent);
+            self.keep(ctx, id, true);
+            self.keep(ctx, id.with("page"), at / JSON_PAGE_SIZE);
+        }
+        if self.shows(ctx, path) {
+            return;
+        }
+        for (parent, value, at) in &steps {
+            let first = at / JSON_PAGE_SIZE * JSON_PAGE_SIZE;
+            for (name, _) in children(value).take(*at).skip(first) {
+                self.keep(ctx, self.branch(&name.under(parent)), false);
+            }
+        }
+    }
+
+    /// The branches above the field at `path`, outermost first: each with
+    /// its value and the place in it of the next; empty where the value has
+    /// no such field.
+    fn steps(&self, path: &JsonPath) -> Vec<(JsonPath, &Value, usize)> {
+        let mut steps = Vec::new();
+        let mut parent = JsonPath::root();
+        let mut value = self.value;
+        for segment in path.segments() {
+            let found = match value {
+                Value::Array(items) => segment
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|at| Some((at, ChildName::Index(at), items.get(at)?))),
+                Value::Object(fields) => fields
+                    .iter()
+                    .position(|(key, _)| key == segment)
+                    .map(|at| (at, ChildName::Key(segment), &fields[segment.as_str()])),
+                _ => None,
+            };
+            let Some((at, name, child)) = found else {
+                return Vec::new();
+            };
+            let next = name.under(&parent);
+            steps.push((parent, value, at));
+            parent = next;
+            value = child;
+        }
+        steps
+    }
+
+    /// Whether the row of the field at `path` is drawn: its branches open,
+    /// on their pages, to ten levels and within the rows drawn at once.
+    pub fn shows(&self, ctx: &egui::Context, path: &JsonPath) -> bool {
+        fn walk(
+            shown: &Shown<'_>,
+            ctx: &egui::Context,
+            target: &str,
+            (path, value, depth): (&JsonPath, &Value, usize),
+            budget: &mut usize,
+        ) -> bool {
+            if *budget == 0 {
+                return false;
+            }
+            *budget -= 1;
+            let text = path.to_string();
+            if text == target {
+                return true;
+            }
+            let count = match value {
+                Value::Array(items) => items.len(),
+                Value::Object(fields) => fields.len(),
+                _ => 0,
+            };
+            if count == 0 || depth >= 10 {
+                return false;
+            }
+            let id = branch_id(shown.document, shown.node, shown.port, &text);
+            let (open, page) = ctx.data(|data| {
+                (
+                    data.get_temp::<bool>(id)
+                        .unwrap_or_else(|| shown.opening.open(depth)),
+                    data.get_temp::<usize>(id.with("page")).unwrap_or(0),
+                )
+            });
+            if !open {
+                return false;
+            }
+            let range = page_range(count, page);
+            children(value)
+                .take(range.end)
+                .skip(range.start)
+                .any(|(name, child)| {
+                    walk(
+                        shown,
+                        ctx,
+                        target,
+                        (&name.under(path), child, depth + 1),
+                        budget,
+                    )
+                })
+        }
+        let mut budget = JSON_ROWS_PER_FRAME;
+        let root = JsonPath::root();
+        walk(
+            self,
+            ctx,
+            &path.to_string(),
+            (&root, self.value, 0),
+            &mut budget,
+        )
+    }
+}
+
+/// The name of a value in the one that holds it.
+#[derive(Clone, Copy)]
+enum ChildName<'a> {
+    Index(usize),
+    Key(&'a str),
+}
+
+impl ChildName<'_> {
+    fn under(self, parent: &JsonPath) -> JsonPath {
+        let mut path = parent.clone();
+        match self {
+            Self::Index(index) => path.push_index(index),
+            Self::Key(key) => path.push_key(key),
+        }
+        path
+    }
+}
+
+/// The values an array or an object holds, in order.
+fn children(value: &Value) -> Box<dyn Iterator<Item = (ChildName<'_>, &Value)> + '_> {
+    match value {
+        Value::Array(items) => Box::new(
+            items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| (ChildName::Index(index), item)),
+        ),
+        Value::Object(fields) => {
+            Box::new(fields.iter().map(|(key, item)| (ChildName::Key(key), item)))
+        }
+        _ => Box::new(std::iter::empty()),
+    }
+}
+
+/// Where the field at `path` keeps whether it is open.
+fn branch_id(document: Id, node: &str, port: &str, path: &str) -> Id {
+    document.with(("json-branch", node, port, path))
+}
+
+/// Keeps `value` at `id` for the Run results tree `document`, freed with its
+/// run ([`forget_results_tree`]).
+fn keep_results<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    document: Id,
+    id: Id,
+    value: T,
+) {
+    ctx.data_mut(|data| {
+        data.insert_temp(id, value);
+        let kept = data.get_temp_mut_or_default::<Vec<Id>>(kept_id(document));
+        if !kept.contains(&id) {
+            kept.push(id);
+        }
+    });
+}
+
 /// What Run results' rows do that the Inspector's do not (REP-08 on
 /// DIAG-10's row): they open by `opening`; *Check* and *To variable* keep
 /// their words where the panel has room and follow the value; a field
@@ -859,22 +1054,17 @@ impl Tree<'_> {
     /// step's output in its document, not per frame of the panel: a branch
     /// opened stays open while another step is selected.
     fn branch(&self, path: &str) -> Id {
-        self.document
-            .with(("json-branch", self.node, self.port, path))
+        branch_id(self.document, self.node, self.port, path)
     }
 
     /// Keeps `value` at `id`; Run results also list `id`, so that it is
     /// freed with its run ([`forget_results_tree`]).
     fn keep<T: Clone + Send + Sync + 'static>(&self, ctx: &egui::Context, id: Id, value: T) {
-        ctx.data_mut(|data| {
-            data.insert_temp(id, value);
-            if self.results.is_some() {
-                let kept = data.get_temp_mut_or_default::<Vec<Id>>(kept_id(self.document));
-                if !kept.contains(&id) {
-                    kept.push(id);
-                }
-            }
-        });
+        if self.results.is_some() {
+            keep_results(ctx, self.document, id, value);
+        } else {
+            ctx.data_mut(|data| data.insert_temp(id, value));
+        }
     }
 
     /// Whether a row `depth` levels under the first opens before it is

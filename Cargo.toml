@@ -58,6 +58,8 @@ schemars = "=1.2.2"
 jsonschema = { version = "=0.59.0", default-features = false }
 # Keep the tested egui release while the native editor is migrated.
 eframe = { version = "=0.36.2", default-features = false, features = ["accesskit", "default_fonts", "wayland", "wgpu", "x11"] }
+# The release egui itself uses; a mark never splits a character (REP-07b).
+unicode-segmentation = "=1.13.3"
 rfd = "=0.17.2"
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 # Interface tests and agent inspection (ADR 0013); same egui release as eframe.
