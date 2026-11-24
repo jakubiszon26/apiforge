@@ -891,7 +891,16 @@ impl Fields<'_, '_> {
             egui::pos2(left, rect.top()),
         );
         anchor.interact_rect = anchor.rect;
-        if let Some(check) = super::fields::check_menu(&anchor, subject, value) {
+        // The checks it offers are written against the board the step is
+        // on, as their cards will read them (DIAG-19).
+        let field = super::fields::Field {
+            node: &context.node.id,
+            port: &port.name,
+            path: &text,
+            board: Some((context.graph, context.project)),
+            shown: subject,
+        };
+        if let Some(check) = super::fields::check_menu(&anchor, field, value) {
             self.chosen = Some((port.name.clone(), text.clone(), check));
         }
 
