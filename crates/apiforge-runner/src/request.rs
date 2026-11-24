@@ -2,6 +2,7 @@
 
 use crate::{
     http::{HttpTransport, TransportError},
+    partial::Partial,
     support::{SeededRandom, is_rfc3339},
 };
 use apiforge_core::{
@@ -45,6 +46,8 @@ pub struct RunRequest {
     pub target_node_id: Option<String>,
     /// Run only this node, reading its inputs from `previous_run`.
     pub single_node_id: Option<String>,
+    /// Run a part of the scenario (ADR 0016); excludes the two fields above.
+    pub partial: Option<Partial>,
     /// An earlier, already redacted report of the same scenario and mode.
     pub previous_run: Option<RunResult>,
     /// Session secrets: environment values that are never published.
@@ -61,6 +64,7 @@ impl RunRequest {
             mode,
             target_node_id: None,
             single_node_id: None,
+            partial: None,
             previous_run: None,
             secrets: IndexMap::new(),
         }

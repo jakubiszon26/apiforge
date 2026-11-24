@@ -10,6 +10,7 @@
 //! owns its own runtime and exposes the newest snapshot of each run.
 mod engine;
 mod http;
+mod partial;
 pub mod plan;
 pub mod redact;
 mod request;
@@ -18,6 +19,7 @@ mod support;
 
 pub use engine::run_scenario;
 pub use http::{HttpTransport, TransportError};
+pub use partial::Partial;
 pub use request::{RunError, RunLimits, RunOptions, RunRequest, RunTarget, validate};
 pub use service::{MAX_ACTIVE_RUNS, Notify, RunHandle, RunnerService};
 pub use support::{SeededRandom, rfc3339_millis};

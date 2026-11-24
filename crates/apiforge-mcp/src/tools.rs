@@ -1115,6 +1115,7 @@ pub(crate) fn prepare(
             mode,
             target_node_id: None,
             single_node_id: None,
+            partial: None,
             previous_run: None,
             secrets,
         },
