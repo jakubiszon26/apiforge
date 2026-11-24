@@ -160,6 +160,64 @@ pub fn place(
     Ok((result, moved))
 }
 
+/// *Move earlier* and *Move later* (DIAG-06b): the step `step` one step
+/// earlier or later in its braces, with what goes with it, by [`place`].
+/// Later puts it after the step that follows it; earlier puts the step
+/// before it after it, so that an `if` on either side goes whole. Refused,
+/// naming the step, at the first place of its braces (after *Start* in the
+/// main flow) and at the last, and with [`place`]'s sentence where what it
+/// reads forbids the move.
+pub fn move_by_one(
+    graph: &Graph,
+    project: &Project,
+    step: &str,
+    later: bool,
+) -> Result<(Graph, Vec<String>), EditError> {
+    let node = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == step)
+        .ok_or(EditError::NodeNotFound)?;
+    if node.kind == NodeKind::Start {
+        return Err(EditError::StartHasPredecessor);
+    }
+    if !is_step(node.kind) {
+        return Err(EditError::OnlyStepsOrdered);
+    }
+    let written = braces(graph);
+    let own = written.get(step).copied();
+    let siblings: Vec<&Node> = graph
+        .nodes
+        .iter()
+        .filter(|node| is_step(node.kind) && written.get(node.id.as_str()).copied() == own)
+        .collect();
+    let index = siblings
+        .iter()
+        .position(|node| node.id == step)
+        .ok_or(EditError::NodeNotFound)?;
+    if later {
+        let next = siblings.get(index + 1).ok_or_else(|| {
+            EditError::PlaceRefused(format!(
+                "`{}` is already the last step in its braces.",
+                node.handle
+            ))
+        })?;
+        place(graph, project, step, Place::After(&next.id))
+    } else {
+        let previous = index
+            .checked_sub(1)
+            .map(|before| siblings[before])
+            .filter(|previous| previous.kind != NodeKind::Start)
+            .ok_or_else(|| {
+                EditError::PlaceRefused(format!(
+                    "`{}` is already the first step in its braces.",
+                    node.handle
+                ))
+            })?;
+        place(graph, project, &previous.id, Place::After(step))
+    }
+}
+
 /// What goes with the statement `node` when it is moved (DIAG-06a) or
 /// duplicated (DIAG-06f), each with what it goes with: an `if`'s braces at
 /// any depth, and for a step the checks, values and variables written
@@ -1342,5 +1400,107 @@ mod tests {
             first(&scenario.graph, "x", Branch::True),
         );
         assert_eq!(braced(&into.graph, "b_ok"), yes("x"));
+    }
+
+    // DIAG-06b ----------------------------------------------------------------
+
+    fn by_one(project: &Project, scenario: &Scenario, step: &str, later: bool) -> Scenario {
+        let (graph, _) = move_by_one(&scenario.graph, project, &id(&scenario.graph, step), later)
+            .unwrap_or_else(|error| panic!("`{step}` moves by one: {error}"));
+        let mut result = scenario.clone();
+        result.graph = graph;
+        reads_back(
+            project,
+            apiforge_script::Document::Scenario(crossed(&result)),
+        );
+        result
+    }
+
+    fn by_one_refused(project: &Project, scenario: &Scenario, step: &str, later: bool) -> String {
+        match move_by_one(&scenario.graph, project, &id(&scenario.graph, step), later) {
+            Ok(_) => panic!("moving `{step}` by one is refused"),
+            Err(error) => error.to_string(),
+        }
+    }
+
+    #[test]
+    fn move_by_one_moves_a_step_in_its_braces() {
+        let (project, shop) = shop();
+        let original = steps(&shop.graph);
+        let later = by_one(&project, &shop, "address", true);
+        let order = steps(&later.graph);
+        let at = |step: &str| order.iter().position(|s| s == step).unwrap();
+        assert_eq!(at("address"), at("checkout") + 1, "{order:?}");
+        let back = by_one(&project, &later, "address", false);
+        assert_eq!(steps(&back.graph), original, "earlier undoes later");
+        // In a branch.
+        let branch = by_one(&project, &shop, "refund", false);
+        assert_eq!(
+            steps(&branch.graph)[10..],
+            ["paid", "payment", "refund", "receipt", "logout"]
+        );
+    }
+
+    #[test]
+    fn move_by_one_takes_an_if_whole() {
+        let (project, scenario) = small(
+            r#"scenario "Whole" {
+  begin = start
+  x = if 1 == 1 {
+    inside = GET "/inside" {
+      sample 200 {}
+    }
+  }
+  d = GET "/d" {
+    sample 200 {}
+  }
+}
+"#,
+        );
+        let earlier = by_one(&project, &scenario, "d", false);
+        assert_eq!(written(&earlier.graph), ["begin", "d", "x", "inside"]);
+        let later = by_one(&project, &earlier, "d", true);
+        assert_eq!(written(&later.graph), ["begin", "x", "inside", "d"]);
+        assert_eq!(
+            by_one_refused(&project, &scenario, "inside", true),
+            "`inside` is already the last step in its braces."
+        );
+    }
+
+    #[test]
+    fn move_by_one_is_refused_at_the_ends_and_by_a_read() {
+        let (project, scenario) = small(
+            r#"scenario "Ends" {
+  begin = start
+  a = GET "/a" {
+    sample 200 { id: 1 }
+  }
+  b = GET "/b/{{a.body.id}}" {
+    sample 200 {}
+  }
+  c = GET "/c" {
+    sample 200 {}
+  }
+}
+"#,
+        );
+        assert_eq!(
+            by_one_refused(&project, &scenario, "a", false),
+            "`a` is already the first step in its braces."
+        );
+        assert_eq!(
+            by_one_refused(&project, &scenario, "c", true),
+            "`c` is already the last step in its braces."
+        );
+        assert_eq!(
+            by_one_refused(&project, &scenario, "b", false),
+            "`b` reads `a.body.id`; it stays below `a`."
+        );
+        assert_eq!(
+            by_one_refused(&project, &scenario, "a", true),
+            "`b` reads `a.body.id`; it stays below `a`."
+        );
+        let moved = by_one(&project, &scenario, "c", false);
+        assert_eq!(steps(&moved.graph), ["begin", "a", "c", "b"]);
     }
 }

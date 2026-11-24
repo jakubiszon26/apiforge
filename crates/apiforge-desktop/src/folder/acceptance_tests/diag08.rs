@@ -208,7 +208,7 @@ fn with(lines: &str) -> String {
 fn diag08_criterion_1_type_check_from_a_field() {
     let (project, mut harness, id) = opened(WIDE);
     run(&mut harness);
-    let check = add(&mut harness, &id, "total", "total is a number");
+    let check = add(&mut harness, &id, "total", "total is \"number\"");
     assert_check(
         &harness,
         &id,
@@ -232,18 +232,18 @@ fn diag08_criterion_2_the_type_is_the_values() {
     let (_project, mut harness, id) = opened(WIDE);
     output_data(&mut harness, &id);
     for (field, item) in [
-        ("id", "id is a string"),
-        ("total", "total is a number"),
-        ("paid", "paid is a boolean"),
-        ("owner", "owner is an object"),
-        ("items", "items is an array"),
-        ("coupon", "coupon is null"),
+        ("id", "id is \"string\""),
+        ("total", "total is \"number\""),
+        ("paid", "paid is \"boolean\""),
+        ("owner", "owner is \"object\""),
+        ("items", "items is \"array\""),
+        ("coupon", "coupon is \"null\""),
     ] {
         open_menu(&mut harness, field);
         assert!(has_label(&harness, item), "{field}'s menu offers {item}");
         close_menu(&mut harness);
     }
-    let check = add(&mut harness, &id, "items", "items is an array");
+    let check = add(&mut harness, &id, "items", "items is \"array\"");
     assert_check(
         &harness,
         &id,
@@ -251,7 +251,7 @@ fn diag08_criterion_2_the_type_is_the_values() {
         ("items", Predicate::Type),
         Some(serde_json::json!("array")),
     );
-    let check = add(&mut harness, &id, "coupon", "coupon is null");
+    let check = add(&mut harness, &id, "coupon", "coupon is \"null\"");
     assert_check(
         &harness,
         &id,
@@ -268,7 +268,7 @@ fn diag08_criterion_2_the_type_is_the_values() {
 fn diag08_criterion_3_the_other_checks() {
     let (project, mut harness, id) = opened(WIDE);
     run(&mut harness);
-    let check = add(&mut harness, &id, "total", "total equals 172.5");
+    let check = add(&mut harness, &id, "total", "total == 172.5");
     assert_check(
         &harness,
         &id,
@@ -276,9 +276,9 @@ fn diag08_criterion_3_the_other_checks() {
         ("total", Predicate::Equals),
         Some(serde_json::json!(172.5)),
     );
-    let check = add(&mut harness, &id, "id", "id exists");
+    let check = add(&mut harness, &id, "id", "exists id");
     assert_check(&harness, &id, &check, ("id", Predicate::Exists), None);
-    let check = add(&mut harness, &id, "items", "items is not empty");
+    let check = add(&mut harness, &id, "items", "nonempty items");
     assert_check(&harness, &id, &check, ("items", Predicate::NotEmpty), None);
     assert_eq!(
         save_and_check(&mut harness, project.path()),
@@ -315,10 +315,10 @@ fn diag08_criterion_4_one_undo_step() {
     );
     assert_eq!(checks_line(&mut harness, &id), None, "cart has no check");
     for (field, item, line) in [
-        ("total", "total is a number", "is \"number\""),
-        ("id", "id exists", "exists"),
-        ("items", "items is not empty", "nonempty"),
-        ("total", "total equals 172.5", "== 172.5"),
+        ("total", "total is \"number\"", "is \"number\""),
+        ("id", "exists id", "exists"),
+        ("items", "nonempty items", "nonempty"),
+        ("total", "total == 172.5", "== 172.5"),
     ] {
         let before = source_of(&harness, &id);
         add(&mut harness, &id, field, item);
@@ -385,10 +385,10 @@ fn diag08_criterion_5_one_vocabulary() {
     }
     // The menu (criterion 2) and the card's line (criterion 4) say
     // `number`; the new check is selected, its Expected list is open.
-    add(&mut harness, &id, "total", "total is a number");
+    add(&mut harness, &id, "total", "total is \"number\"");
     assert_lists_the_words(&mut harness, "Expected type", &WORDS);
     // A literal's type list: null for the empty value, then the five.
-    add(&mut harness, &id, "total", "total equals 172.5");
+    add(&mut harness, &id, "total", "total == 172.5");
     assert_lists_the_words(&mut harness, "Value type", &WORDS);
     // Run results: the step's data and the type check's requirement.
     run(&mut harness);
@@ -411,11 +411,7 @@ fn diag08_criterion_5_one_vocabulary() {
 /// Chooses the first row of a step named `name` in the step list of Run
 /// results: its label, or its handle where it has none.
 fn select(harness: &mut FolderHarness, name: &str) {
-    let row = format!("{name} · ");
-    let label = harness
-        .query_all_by_label_contains(&row)
-        .filter_map(|found| found.accesskit_node().label())
-        .find(|label| label.starts_with(&row))
+    let label = step_row_label(harness, name)
         .unwrap_or_else(|| panic!("{name} has a row in the step list"));
     harness
         .query_all_by_label(&label)
@@ -454,14 +450,14 @@ fn diag08_criterion_6_run_results() {
         "Check opens the menu Add a check"
     );
     for item in [
-        "total equals 172.5",
-        "total is a number",
-        "total exists",
-        "total is not empty",
+        "total == 172.5",
+        "total is \"number\"",
+        "exists total",
+        "nonempty total",
     ] {
         assert!(has_label(&harness, item), "the menu offers {item}");
     }
-    pick(&mut harness, "total is a number");
+    pick(&mut harness, "total is \"number\"");
     let after = graph(&harness, &id);
     let new = added(&before, &after);
     assert_eq!(new.len(), 1, "one step added: {new:?}");
@@ -493,18 +489,18 @@ fn diag08_criterion_7_before_a_run() {
     for (field, item, predicate, expected) in [
         (
             "total",
-            "total is a number",
+            "total is \"number\"",
             Predicate::Type,
             Some(serde_json::json!("number")),
         ),
         (
             "total",
-            "total equals 172.5",
+            "total == 172.5",
             Predicate::Equals,
             Some(serde_json::json!(172.5)),
         ),
-        ("id", "id exists", Predicate::Exists, None),
-        ("items", "items is not empty", Predicate::NotEmpty, None),
+        ("id", "exists id", Predicate::Exists, None),
+        ("items", "nonempty items", Predicate::NotEmpty, None),
     ] {
         let check = add(&mut harness, &id, field, item);
         assert_check(&harness, &id, &check, (field, predicate), expected);

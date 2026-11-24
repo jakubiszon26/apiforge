@@ -380,14 +380,20 @@ pub fn field_row(harness: &FolderHarness, field: &str) -> f32 {
         .unwrap_or_else(|| panic!("a row named {field}"))
 }
 
-/// Chooses *equals ‹value›* in the open menu *Add a check* of `field`
-/// (DIAG-08). The pointer then leaves for the header's empty top margin.
+/// Chooses `‹field› == ‹value›` in the open menu *Add a check* of `field`
+/// (DIAG-08, DIAG-19). The pointer then leaves for the header's empty top margin.
 pub fn choose_equals(harness: &mut FolderHarness, field: &str) {
     use egui_kittest::kittest::NodeT;
     harness
-        .query_all_by_label_contains(" equals ")
-        .find(|item| item.accesskit_node().role() == egui::accesskit::Role::Button)
-        .unwrap_or_else(|| panic!("the menu of {field} offers equals"))
+        .query_all_by_label_contains(" == ")
+        .find(|item| {
+            let node = item.accesskit_node();
+            // A check's row in Run results says `‹check› · ‹status› · …`
+            // (REP-07); an item of the menu is the check alone.
+            let row = node.label().is_some_and(|label| label.contains(" · "));
+            node.role() == egui::accesskit::Role::Button && !row
+        })
+        .unwrap_or_else(|| panic!("the menu of {field} offers =="))
         .click();
     harness.hover_at(egui::pos2(480.0, 3.0));
     settle(harness);

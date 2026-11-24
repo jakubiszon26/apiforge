@@ -2123,6 +2123,8 @@ impl App {
                 }),
                 checks: None,
             };
+            self.report
+                .adopt_list_width(self.preferences.run_list_width);
             self.report.show(ui, &context)
         };
         for action in actions {
@@ -2219,6 +2221,10 @@ impl App {
                 if let Some(run) = self.run.clone() {
                     self.files.export_report(run);
                 }
+            }
+            report::Action::RememberListWidth(width) => {
+                self.preferences.run_list_width = Some(width);
+                self.preferences.save(Preference::RunListWidth);
             }
         }
     }
@@ -2503,6 +2509,9 @@ impl App {
             }
             // The legacy window has no moves across braces (DIAG-06d).
             Command::MoveOutOfBranch(_) => {}
+            // Nor moves by one, nor the notice after a delete (DIAG-06b).
+            Command::MoveStep { .. } => {}
+            Command::Undo => self.editor.undo(),
             // The legacy window keeps adding last (DIAG-06a, criterion 9).
             Command::AddStep {
                 block,

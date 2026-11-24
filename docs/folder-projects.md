@@ -157,6 +157,7 @@ exact.
 | Ctrl+Space | Offer completions in code |
 | Arrow keys, Enter, F2, Delete | Explorer: move and fold, open, rename, delete |
 | Ctrl+D, Ctrl+C, Ctrl+V | Diagram: duplicate, copy, paste blocks |
+| Alt+↑, Alt+↓ | Diagram: move the selected step one step earlier, later in its braces |
 
 In the code editor Tab indents. Press Escape first, then Tab, to move on to the
 next control. Every control carries a name for screen readers, and the explorer is

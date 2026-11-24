@@ -12,7 +12,7 @@
 use apiforge_core::{
     block::Block,
     chain::{braces, is_step},
-    edit::{OutputRef, Place, add_node, add_step_after, place},
+    edit::{OutputRef, Place, add_node, add_step_after, move_by_one, place},
     format::{Graph, Position},
     graph::ORDER_PORT,
     model::{Branch, NodeKind},
@@ -651,5 +651,69 @@ fn diag06a_criterion_10_edits_keep_the_check() {
     assert!(
         refused > 20 && moved > 60 && added > 20,
         "refused {refused}, moved {moved}, added {added}"
+    );
+}
+
+/// DIAG-06b, criterion 5: *Move earlier* and *Move later* on generated
+/// chains with `if`s leave a text that passes the check after each move,
+/// move only the lines of what moved, and are one step of Undo and Redo;
+/// a refused one is never applied.
+#[test]
+fn diag06b_criterion_5_moves_by_one_keep_the_check() {
+    let directory = tempfile::tempdir().unwrap();
+    prepare_project(directory.path(), &apiforge_core::demos::shop_project()).unwrap();
+    let mut session = ProjectSession::open(directory.path()).unwrap();
+    let (mut refused, mut moved) = (0, 0);
+    for seed in 1..=40u64 {
+        let source = generated(seed);
+        let id = session
+            .create_document(
+                DocumentKind::Scenario,
+                &format!("diag06b/generated-{seed}.afs"),
+                &source,
+            )
+            .unwrap_or_else(|error| panic!("seed {seed}: {error}\n{source}"));
+        let name = format!("seed {seed}");
+        passes(&mut session, &id, &name);
+        let mut random = Random(seed | 1);
+        for _ in 0..8 {
+            let before_text = text(&session, &id);
+            let before = model(&session, &id);
+            let graph = main_graph(&before);
+            let steps: Vec<&str> = graph
+                .nodes
+                .iter()
+                .filter(|node| is_step(node.kind) && node.kind != NodeKind::Start)
+                .map(|node| node.id.as_str())
+                .collect();
+            if steps.is_empty() {
+                break;
+            }
+            let step = steps[random.below(steps.len())].to_owned();
+            let later = random.chance(50);
+            let context = session.context().clone();
+            match move_by_one(graph, &context, &step, later) {
+                Err(_) => refused += 1,
+                Ok((graph, lines)) => {
+                    let mut next = before.clone();
+                    *main_graph_mut(&mut next) = graph;
+                    session
+                        .apply_move(&id, next, &lines, ORIGIN)
+                        .unwrap_or_else(|error| {
+                            panic!("{name}: a move by one is written: {error}")
+                        });
+                    passes(&mut session, &id, &name);
+                    let after_text = text(&session, &id);
+                    assert_ne!(after_text, before_text, "{name}: a move by one moves");
+                    moved += 1;
+                    only_moved(&before_text, &after_text, &name);
+                    undone_and_redone(&mut session, &id, &before_text, &name);
+                }
+            }
+        }
+    }
+    assert!(
+        refused > 10 && moved > 60,
+        "refused {refused}, moved {moved}"
     );
 }

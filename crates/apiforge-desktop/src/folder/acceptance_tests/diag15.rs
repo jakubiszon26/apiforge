@@ -334,7 +334,7 @@ fn diag15_criterion_2_the_check_of_dia08s_menu() {
         .expect("the row total has ✓")
         .click();
     settle(&mut harness);
-    pick(&mut harness, "total is a number");
+    pick(&mut harness, "total is \"number\"");
     let expected = saved(&mut harness, project.path());
     drop(harness);
 
@@ -351,14 +351,14 @@ fn diag15_criterion_2_the_check_of_dia08s_menu() {
         "total opens DIAG-08's menu Add a check"
     );
     for item in [
-        "total equals 172.5",
-        "total is a number",
-        "total exists",
-        "total is not empty",
+        "total == 172.5",
+        "total is \"number\"",
+        "exists total",
+        "nonempty total",
     ] {
         assert!(shows(&harness, item), "the menu offers {item}");
     }
-    pick(&mut harness, "total is a number");
+    pick(&mut harness, "total is \"number\"");
     let after = graph(&harness, &id);
     let new = added(&before, &after);
     assert_eq!(new.len(), 1, "one step added: {new:?}");
@@ -534,7 +534,7 @@ fn diag15_criterion_4_the_menu_scrolls_inside_the_window() {
     get_row(&harness, "HTTP status").click();
     settle(&mut harness);
     assert!(
-        shows(&harness, "status equals 200"),
+        shows(&harness, "status == 200"),
         "the last row opens its checks"
     );
     assert_within_window(&harness, &[MENU, FIELD_MENU]);
@@ -551,10 +551,7 @@ fn diag15_criterion_5_no_sample() {
     assert!(row(&harness, "Response").is_none(), "no response to list");
     get_row(&harness, "HTTP status").click();
     settle(&mut harness);
-    assert!(
-        shows(&harness, "status equals 200"),
-        "the status is offered"
-    );
+    assert!(shows(&harness, "status == 200"), "the status is offered");
 }
 
 /// Criterion 6: a click on a check's card selects the check; Return on a
