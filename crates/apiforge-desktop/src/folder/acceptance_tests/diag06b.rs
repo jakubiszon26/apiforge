@@ -1030,3 +1030,81 @@ fn review_diag06b() {
         crate::testing::capture(&mut harness, &format!("diag06b-menu-{suffix}"), None);
     }
 }
+
+// DIAG-22's escalation: making room ---------------------------------------------
+
+/// No card of the board stands on another.
+fn no_card_on_a_card(harness: &FolderHarness, id: &str, case: &str) {
+    let cards = board(harness, id).debug_cards();
+    for (index, (one, a)) in cards.iter().enumerate() {
+        for (other, b) in &cards[index + 1..] {
+            assert!(
+                !a.shrink(0.5).intersects(b.shrink(0.5)),
+                "{case}: {one} {a:?} stands on {other} {b:?}"
+            );
+        }
+    }
+}
+
+/// Selects `profile`, opens *Add step* on the bar and takes `label`.
+fn add_after_profile(harness: &mut FolderHarness, id: &str, label: &str) {
+    let model = graph(harness, id);
+    app(harness)
+        .selections
+        .insert(id.to_owned(), vec![id_of(&model, "profile")]);
+    settle(harness);
+    harness.step();
+    harness.get_by_label("Add step").click();
+    settle(harness);
+    harness.step();
+    // The menu's entry of that name, found by typing it into the search.
+    harness.event(egui::Event::Text(label.to_owned()));
+    harness.step();
+    harness.step();
+    let menu = harness
+        .ctx
+        .memory(|memory| memory.area_rect(egui::Id::new("board-action-menu")))
+        .expect("the menu is drawn");
+    let entry = harness
+        .query_all_by_label(label)
+        .map(|node| node.rect())
+        .filter(|rect| menu.contains_rect(*rect))
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap_or_else(|| panic!("the menu offers {label}"));
+    click_at(harness, entry.center(), egui::PointerButton::Primary, 1);
+    settle(harness);
+    harness.step();
+    assert_eq!(
+        graph(harness, id).nodes.len(),
+        model.nodes.len() + 1,
+        "{label} is added"
+    );
+}
+
+/// Reproduction (found by DIAG-22, #598): `Board::make_room` puts the steps
+/// from the change onwards where a whole *Tidy up* puts them and keeps
+/// every other card; when that tidy's rows stand at another height than
+/// the kept cards', a moved card lands on a kept one. *Add step* with
+/// `profile` selected on `booking-day`, as the board opens: a component
+/// call.
+#[test]
+fn make_room_puts_no_card_on_a_kept_card_after_a_component_call() {
+    let (_project, mut harness, id) = booking_day();
+    no_card_on_a_card(&harness, &id, "as opened");
+    add_after_profile(&mut harness, &id, "Sign in");
+    no_card_on_a_card(&harness, &id, "Sign in after profile");
+}
+
+/// The same with *Compact cards* off and the board tidied: a request.
+#[test]
+fn make_room_puts_no_card_on_a_kept_card_at_full_density() {
+    let (_project, mut harness, id) = booking_day();
+    app(&mut harness).switch_density(crate::canvas::CardDensity::Full);
+    settle(&mut harness);
+    choose(&mut harness, "Tidy up");
+    settle(&mut harness);
+    harness.step();
+    no_card_on_a_card(&harness, &id, "tidied at Full");
+    add_after_profile(&mut harness, &id, "HTTP request");
+    no_card_on_a_card(&harness, &id, "HTTP request after profile at Full");
+}
