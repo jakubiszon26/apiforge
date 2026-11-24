@@ -367,6 +367,8 @@ pub struct FolderApp {
     /// its text, analysis and the project's context are the same: finding
     /// out prints the component (UX-25).
     unchanged: Option<(publication::UnchangedKey, Option<u32>)>,
+    /// The title being edited in the board's header (WS-05a).
+    title_edit: Option<diagram::TitleEdit>,
     /// The *New input* form open on a component's board, by document
     /// (UX-32). While it is open the Inspector shows it.
     new_inputs: HashMap<String, inputs::NewInput>,
@@ -603,6 +605,7 @@ impl FolderApp {
             selections: HashMap::new(),
             selected_inputs: HashMap::new(),
             unchanged: None,
+            title_edit: None,
             new_inputs: HashMap::new(),
             component_settings: HashSet::new(),
             agreed_fields: HashMap::new(),
