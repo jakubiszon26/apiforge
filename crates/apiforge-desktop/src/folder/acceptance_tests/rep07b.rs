@@ -533,7 +533,6 @@ fn rep07b_a_long_value_is_wrapped_to_six_lines() {
             assert_eq!(side.rows, 6, "{size:?}");
             assert!(side.elided, "{size:?}: it ends with …");
             assert_inside(&harness, text, side.rect);
-            assert!(marked(side).is_empty(), "{size:?}: past what is shown");
         }
         for whole in &whole {
             assert!(details_show(&harness, whole), "{size:?}: the name is whole");

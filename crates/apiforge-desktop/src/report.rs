@@ -7,7 +7,6 @@
 
 use crate::icons::Icon;
 use crate::{
-    labels,
     not_run::{self, NotRun},
     theme, widgets,
 };
@@ -23,6 +22,7 @@ use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 
+mod comparison;
 mod detail;
 mod list;
 pub use list::Line;
@@ -510,6 +510,8 @@ pub struct ReportPanel {
     asked: Option<String>,
     /// The list arranged for the run shown.
     arranged: list::Arranged,
+    /// The two sides of the check shown, written once.
+    comparison: Option<comparison::Kept>,
 }
 
 /// The step list's width before it is dragged (the owner's default of
@@ -555,6 +557,7 @@ impl Default for ReportPanel {
             focus: None,
             asked: None,
             arranged: Default::default(),
+            comparison: None,
         }
     }
 }
@@ -1552,16 +1555,7 @@ impl ReportPanel {
                     // A check is titled by its predicate, its handle and
                     // its step under it (REP-07b).
                     Some(check) => {
-                        let title = ui.add(
-                            egui::Label::new(
-                                RichText::new(&check.predicate)
-                                    .monospace()
-                                    .size(13.5)
-                                    .strong(),
-                            )
-                            .wrap(),
-                        );
-                        widgets::named(title, check.predicate.as_str());
+                        comparison::title(ui, check);
                         let line = check.line(step);
                         let said = ui.label(
                             RichText::new(&line)
@@ -1621,16 +1615,8 @@ impl ReportPanel {
             || !step.actual.is_missing()
             || requirement.is_some_and(Requirement::always_compared)
         {
-            let expected = match requirement {
-                Some(requirement) => requirement.text(&step.expected),
-                None => expected_text(Predicate::Equals, &step.expected, 0.0),
-            };
-            comparison_box(
-                ui,
-                check.and_then(|check| check.checked.as_deref()),
-                &expected,
-                &step.actual,
-            );
+            let written = comparison::Kept::of(&mut self.comparison, run_id, selected, requirement);
+            written.show(ui);
         }
         // The response that holds what a check compared, marked by DIAG-12's
         // mark (REP-07b). A check of a component's inner step has no mark:
@@ -2306,61 +2292,6 @@ fn group_label(ui: &mut Ui, group: not_run::Group, count: usize) {
             .strong()
             .color(color),
     );
-}
-
-/// The EXPECTED and ACTUAL sides of a check, under what it compared when
-/// that is known (REP-07b).
-fn comparison_box(ui: &mut Ui, checked: Option<&str>, expected: &str, actual: &OptionalJson) {
-    egui::Frame::new()
-        .fill(theme::FIELD)
-        .stroke(Stroke::new(1.0, theme::BORDER))
-        .corner_radius(6)
-        .inner_margin(egui::Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            if let Some(checked) = checked {
-                widgets::subcaption(ui, "CHECKED");
-                let value = ui.add(egui::Label::new(RichText::new(checked).monospace()).wrap());
-                widgets::named(value, checked);
-                ui.add_space(4.0);
-            }
-            ui.horizontal(|ui| {
-                let col_width = ((ui.available_width() - 28.0) * 0.5).max(80.0);
-                ui.allocate_ui(egui::vec2(col_width, 36.0), |ui| {
-                    ui.vertical(|ui| {
-                        widgets::subcaption(ui, "EXPECTED");
-                        let value = ui
-                            .add(
-                                egui::Label::new(
-                                    RichText::new(labels::truncate(expected, 120)).monospace(),
-                                )
-                                .truncate(),
-                            )
-                            .on_hover_text(expected);
-                        // Named by its text, which the label may cut (REP-07b).
-                        widgets::named(value, expected);
-                    });
-                });
-                ui.label(RichText::new("→").color(theme::MUTED));
-                ui.allocate_ui(egui::vec2(col_width, 36.0), |ui| {
-                    ui.vertical(|ui| {
-                        widgets::subcaption(ui, "ACTUAL");
-                        let text = match actual {
-                            OptionalJson::Present(value) => compact_json(value),
-                            OptionalJson::Missing => "(missing value)".into(),
-                        };
-                        let value = ui
-                            .add(
-                                egui::Label::new(
-                                    RichText::new(labels::truncate(&text, 120)).monospace(),
-                                )
-                                .truncate(),
-                            )
-                            .on_hover_text(&text);
-                        widgets::named(value, text);
-                    });
-                });
-            });
-        });
 }
 
 fn compact_json(value: &Value) -> String {

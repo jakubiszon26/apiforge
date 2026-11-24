@@ -15,7 +15,8 @@ use serde_json::Value;
 pub(super) struct CheckDetail<'a> {
     /// Its predicate as its card writes it.
     pub predicate: String,
-    /// What it compared, with every name: `weight_31.body.error.field`.
+    /// What it compared, with every name, the hover of its title:
+    /// `weight_31.body.error.field`.
     pub checked: Option<String>,
     /// The step it is listed under, and that step's number on the board.
     head: Option<(&'a StepResult, Option<usize>)>,
