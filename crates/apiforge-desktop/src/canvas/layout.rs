@@ -1251,15 +1251,21 @@ impl CheckText {
     /// The text with every value written in the check cut at `limit`
     /// characters, for a list that has no hover (the Inspector).
     pub fn capped(&self, limit: usize) -> String {
-        self.parts
-            .iter()
-            .map(|part| match part.role {
-                PartRole::Text | PartRole::Number | PartRole::Literal | PartRole::Data => {
-                    labels::truncate(&part.text, limit)
-                }
-                _ => part.text.clone(),
-            })
-            .collect()
+        self.clone().values_cut(limit).text()
+    }
+
+    /// The same text, every value written in the check cut at `limit`
+    /// characters.
+    pub fn values_cut(mut self, limit: usize) -> Self {
+        for part in &mut self.parts {
+            if matches!(
+                part.role,
+                PartRole::Text | PartRole::Number | PartRole::Literal | PartRole::Data
+            ) {
+                part.text = labels::truncate(&part.text, limit);
+            }
+        }
+        self
     }
 
     fn push(&mut self, text: impl Into<String>, role: PartRole) {

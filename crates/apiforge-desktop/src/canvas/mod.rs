@@ -21,7 +21,6 @@ pub use collapse::collapsible;
 #[cfg(test)]
 pub(crate) use edge::{DrawnEdge, Side};
 pub use layout::{Card, CardDensity, Chip, check_text, own_step, parse_inline};
-#[cfg(test)]
 pub use layout::{CheckText, Part, PartRole, fit_title};
 /// The halo of a related step, which a test compares with the selection's.
 #[cfg(test)]
@@ -63,6 +62,55 @@ const MAX_ZOOM: f32 = 1.6;
 /// Below this zoom, inline fields are drawn as text and edited in the inspector.
 const INLINE_EDIT_ZOOM: f32 = 0.8;
 const SOCKET_HIT: f32 = 10.0;
+/// The side of the `+` on a line of a chain (DIAG-06b).
+const PLUS_SIZE: f32 = 20.0;
+/// The shortest segment of a line, on screen, that takes a `+`: the `+`
+/// and 14 px clear at each end for the socket there (DIAG-06b).
+const PLUS_SEGMENT: f32 = PLUS_SIZE + 28.0;
+
+/// The `+` on the line of a chain under the pointer (DIAG-06b): the line,
+/// by its source, port and target, and where the `+` stands on screen.
+#[derive(Clone, Debug)]
+struct Plus {
+    source: String,
+    port: String,
+    target: String,
+    centre: Pos2,
+}
+
+impl Plus {
+    fn rect(&self) -> Rect {
+        Rect::from_center_size(self.centre, Vec2::splat(PLUS_SIZE))
+    }
+}
+
+/// The part of the segment from `a` to `b` inside `rect`, if any.
+fn clip_segment(a: Pos2, b: Pos2, rect: Rect) -> Option<(Pos2, Pos2)> {
+    let (mut low, mut high) = (0.0_f32, 1.0_f32);
+    let along = b - a;
+    for (delta, from, min, max) in [
+        (along.x, a.x, rect.min.x, rect.max.x),
+        (along.y, a.y, rect.min.y, rect.max.y),
+    ] {
+        if delta.abs() <= f32::EPSILON {
+            if from < min || from > max {
+                return None;
+            }
+            continue;
+        }
+        let (t0, t1) = ((min - from) / delta, (max - from) / delta);
+        low = low.max(t0.min(t1));
+        high = high.min(t0.max(t1));
+    }
+    (low <= high).then(|| (a + along * low, a + along * high))
+}
+
+/// The room beside the notice's sentence for its *Undo* (DIAG-06b).
+const NOTICE_UNDO_ROOM: f32 = 120.0;
+
+/// The fill of the reason at the pointer while a carried wire is refused
+/// (DIAG-06b), the board banner's.
+const REFUSED_FILL: Color32 = Color32::from_rgb(253, 236, 232);
 /// Why *Copy* and *Duplicate* are disabled with only chips selected (UX-34).
 const CHIP_NOT_COPIED: &str =
     "Select a step to copy or duplicate. A variable chip shows a value; it is not copied.";
@@ -107,6 +155,16 @@ pub enum Command {
     /// *Move out of the branch* on a check, value, variable or export in
     /// the braces of an `if` (DIAG-06d): it is written after the `if`.
     MoveOutOfBranch(String),
+    /// *Move earlier* and *Move later* in a step's menu, and Alt+↑ and
+    /// Alt+↓ on the board (DIAG-06b): the step goes one step earlier or
+    /// later in its braces, with what goes with it.
+    MoveStep {
+        id: String,
+        later: bool,
+    },
+    /// *Undo* on the board's notice after a delete (DIAG-06b): the
+    /// window's Undo, as Ctrl+Z.
+    Undo,
     /// A block from *Add step* on the board's bar: a step goes after the
     /// selection, in its braces; with nothing selected, and for any other
     /// block, last (DIAG-06a). The legacy window adds it last.
@@ -515,9 +573,24 @@ pub struct Canvas {
     /// The step after the source of a wire of the order being carried from
     /// its *Next*, whose line fades (DIAG-06c).
     successor: Option<String>,
-    /// The lines of the chains the last frame drew, by source and port, on
-    /// the board: where a step carried from the Library lands (DIAG-06c).
-    chain_lines: Vec<(String, String, Vec<Pos2>)>,
+    /// The lines of the chains the last frame drew, by source, port and
+    /// target, on the board: where a step carried from the Library lands
+    /// (DIAG-06c), and where the `+` stands (DIAG-06b).
+    chain_lines: Vec<(String, String, String, Vec<Pos2>)>,
+    /// The step a carried wire of the order is over that will refuse it,
+    /// and why (DIAG-06b): its socket is crossed, the wire red and the
+    /// reason at the pointer.
+    refusal: Option<(String, String)>,
+    /// The last answer to whether a wire from a source and port is taken by
+    /// a step, so that a wire held still asks once.
+    refusal_asked: Option<((String, String, String), Option<String>)>,
+    /// The `+` on the line of a chain under the pointer (DIAG-06b).
+    plus: Option<Plus>,
+    /// The notice after a delete that names what now follows what, with
+    /// *Undo*, until the next action (DIAG-06b); where the last frame drew
+    /// it, and its *Undo*.
+    notice: Option<String>,
+    notice_drawn: Option<(Rect, egui::Id)>,
     last_size: Vec2,
     last_focus: Option<Rect>,
     last_viewport: Rect,
@@ -747,6 +820,11 @@ impl Default for Canvas {
             drop_mark: None,
             successor: None,
             chain_lines: Vec::new(),
+            refusal: None,
+            refusal_asked: None,
+            plus: None,
+            notice: None,
+            notice_drawn: None,
             last_size: Vec2::ZERO,
             last_focus: None,
             last_viewport: Rect::NOTHING,
@@ -1129,6 +1207,22 @@ impl Canvas {
         self.caption.as_deref()
     }
 
+    /// The step a carried wire of the order is over that will refuse it,
+    /// and why (DIAG-06b): its socket is drawn crossed and the wire red.
+    #[cfg(test)]
+    pub(crate) fn debug_refusal(&self) -> Option<(&str, &str)> {
+        self.refusal
+            .as_ref()
+            .map(|(target, reason)| (target.as_str(), reason.as_str()))
+    }
+
+    /// Where the last frame drew the notice after a delete, its frame
+    /// (DIAG-06b).
+    #[cfg(test)]
+    pub(crate) fn debug_notice(&self) -> Option<Rect> {
+        self.notice_drawn.map(|(rect, _)| rect)
+    }
+
     /// Where a step carried from the Library would land (DIAG-06c).
     #[cfg(test)]
     pub(crate) fn debug_drop_mark(&self) -> Option<&DropMark> {
@@ -1494,6 +1588,56 @@ impl Canvas {
     /// Shows an error banner on the board, e.g. a rejected connection.
     pub fn set_error(&mut self, message: impl Into<String>) {
         self.error = Some(message.into());
+        self.notice = None;
+    }
+
+    /// Shows the notice after a delete in the banner's place, with *Undo*,
+    /// until the next action (DIAG-06b).
+    pub fn set_notice(&mut self, message: impl Into<String>) {
+        self.notice = Some(message.into());
+        self.notice_drawn = None;
+        self.error = None;
+    }
+
+    /// Whether the board shows the notice after a delete (DIAG-06b).
+    pub fn has_notice(&self) -> bool {
+        self.notice.is_some()
+    }
+
+    /// Ends the notice after a delete (DIAG-06b).
+    pub fn clear_notice(&mut self) {
+        self.notice = None;
+        self.notice_drawn = None;
+    }
+
+    /// The notice goes with the next action: a press of the pointer away
+    /// from it, a key or typed text, except a key that activates its *Undo*
+    /// while it has the keyboard (DIAG-06b). Tab and Shift+Tab, which bring
+    /// the keyboard to *Undo*, are no action.
+    fn tend_notice(&mut self, ui: &egui::Ui) {
+        if self.notice.is_none() {
+            return;
+        }
+        let (rect, focused) = self
+            .notice_drawn
+            .map_or((Rect::NOTHING, false), |(rect, undo)| {
+                (rect, ui.memory(|memory| memory.has_focus(undo)))
+            });
+        let acted = ui.input(|input| {
+            input.events.iter().any(|event| match event {
+                egui::Event::PointerButton {
+                    pressed: true, pos, ..
+                } => !rect.contains(*pos),
+                egui::Event::Key { key: Key::Tab, .. } => false,
+                egui::Event::Key { pressed: true, .. } => !focused,
+                egui::Event::Text(_) | egui::Event::Paste(_) => true,
+                _ => false,
+            })
+        });
+        if acted {
+            self.notice = None;
+            self.notice_drawn = None;
+        }
     }
 
     /// Board position of the visible centre, for blocks added from the library.
@@ -1526,8 +1670,10 @@ impl Canvas {
             self.selected_wires.clear();
             self.shown_port = None;
             self.error = None;
+            self.notice = None;
             self.edges_reset();
         }
+        self.tend_notice(ui);
         let viewport = Self::viewport(ui);
         let measures = self.measure_overlays(ui, input);
         let overlays = layout::board_overlays(viewport, &measures);
@@ -2104,7 +2250,12 @@ impl Canvas {
                     .iter()
                     .find(|(id, _)| *id == wire.id)
                     .map(|(_, points)| points.clone())?;
-                Some((cards[*card].id.clone(), port.to_owned(), points))
+                Some((
+                    cards[*card].id.clone(),
+                    port.to_owned(),
+                    cards[wire.target].id.clone(),
+                    points,
+                ))
             })
             .collect();
         // The wires of chips brought back, over the others and apart from
@@ -2376,6 +2527,12 @@ impl Canvas {
                 );
                 if input.moves && menu::in_a_branch(input.graph, &card.id) {
                     menu.out_of_branch = Some(card.id.clone());
+                }
+                if input.moves
+                    && apiforge_core::chain::is_step(card.kind)
+                    && card.kind != NodeKind::Start
+                {
+                    menu.moves = Some(menu::Moves::of(input.graph, input.project, &card.id));
                 }
                 self.menu = Some(menu);
             }
@@ -2898,6 +3055,7 @@ impl Canvas {
             }
         }
 
+        self.chain_plus(&board_ui, overlays.board, &cards, camera, pointer, input);
         self.handle_wire_drag(&board_ui, &cards, camera, input, &mut commands);
         self.handle_box_selection(
             &board_ui,
@@ -2955,7 +3113,7 @@ impl Canvas {
                 input,
                 &mut commands,
             );
-            self.handle_keys(ui, input, &mut commands);
+            self.handle_keys(ui, overlays.board, input, &mut commands);
         } else {
             self.handle_escape(ui, input, &mut commands);
         }
@@ -3014,6 +3172,7 @@ impl Canvas {
             self.empty_state(ui, overlays.board, input, &mut commands);
         }
         self.error_banner(ui, &overlays);
+        self.notice_banner(ui, &overlays, &mut commands);
         // The right-click menu ends with *Save shared values as variables*
         // where the board proposes variables (LAY-25).
         let shared = input.scenario.map(|_| menu::Shared {
@@ -3182,7 +3341,11 @@ impl Canvas {
                 theme::MUTED,
             )
         });
-        let error_size = self.error.as_ref().map(|_| vec2(320.0, 32.0));
+        let error_size = self
+            .error
+            .as_ref()
+            .or(self.notice.as_ref())
+            .map(|_| vec2(320.0, 32.0));
         OverlayMeasures {
             strip_height: if input.inputs.is_some() {
                 strip::HEIGHT
@@ -3743,10 +3906,13 @@ impl Canvas {
         commands: &mut Vec<Command>,
     ) {
         self.caption = None;
+        self.refusal = None;
         let Some(Drag::Wire { start, from }) = &self.drag else {
+            self.refusal_asked = None;
             return;
         };
-        let (source, port) = match start {
+        let (start, from) = (start.clone(), *from);
+        let (source, port) = match &start {
             WireStart::Output { node, port } => (Some(node.clone()), port.clone()),
             // A proxy carries a value, not an output: it fits any argument.
             WireStart::Proxy { .. } => (None, String::new()),
@@ -3816,16 +3982,30 @@ impl Canvas {
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, target)| target);
 
-        // What a wire from a *Next* with a successor will do (DIAG-06c).
+        // A step that will refuse the wire says why before it is let go
+        // (DIAG-06b): the drop asks the board the same question.
         if input.moves
-            && port == ORDER_PORT
-            && let (Some(after), Some(before)) = (&source, &self.successor)
+            && control
+            && let (Some(after), Some((over, ..))) = (&source, &target)
+            && let Some(reason) = self.refused(input, after, &port, over)
         {
-            let over = target.as_ref().map(|(card, ..)| card.as_str());
-            let text = carry_caption(input.graph, after, before, over);
+            self.refusal = Some((over.clone(), reason));
+        }
+        // What a wire from a *Next* with a successor will do (DIAG-06c), or
+        // why the step under it refuses it (DIAG-06b).
+        let caption = match (&self.refusal, &source, &self.successor) {
+            (Some((_, reason)), ..) => Some((reason.clone(), true)),
+            (None, Some(after), Some(before)) if input.moves && port == ORDER_PORT => {
+                let over = target.as_ref().map(|(card, ..)| card.as_str());
+                Some((carry_caption(input.graph, after, before, over), false))
+            }
+            _ => None,
+        };
+        if let Some((text, refused)) = caption {
+            let colour = if refused { theme::DANGER } else { theme::TEXT };
             let painter = ui.painter();
             let galley =
-                painter.layout_no_wrap(text.clone(), egui::FontId::proportional(12.0), theme::TEXT);
+                painter.layout_no_wrap(text.clone(), egui::FontId::proportional(12.0), colour);
             // Below and right of the pointer, inside the board: above it or
             // left of it where the board ends (DIAG-06c).
             let within = ui.max_rect();
@@ -3838,29 +4018,38 @@ impl Canvas {
                 at.y = (pointer.y - 16.0 - size.y).max(within.top());
             }
             let rect = Rect::from_min_size(at, size);
+            let (fill, border) = if refused {
+                (REFUSED_FILL, theme::DANGER)
+            } else {
+                (theme::WHITE, theme::BORDER)
+            };
             painter.rect(
                 rect,
                 6.0,
-                theme::WHITE,
-                Stroke::new(1.0, theme::BORDER),
+                fill,
+                Stroke::new(1.0, border),
                 StrokeKind::Inside,
             );
-            painter.galley(rect.min + vec2(8.0, 5.0), galley, theme::TEXT);
+            painter.galley(rect.min + vec2(8.0, 5.0), galley, colour);
             ui.interact(rect, ui.id().with("carry-caption"), Sense::hover())
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
             self.caption = Some(text);
         }
         let end = target.as_ref().map_or(pointer, |(.., anchor)| *anchor);
         let painter = ui.painter();
-        paint::wire(
-            painter,
-            *from,
-            end,
-            control,
-            branch_of(&port),
-            true,
-            camera.zoom,
-        );
+        if self.refusal.is_some() {
+            paint::refused_wire(painter, from, end, branch_of(&port), camera.zoom);
+        } else {
+            paint::wire(
+                painter,
+                from,
+                end,
+                control,
+                branch_of(&port),
+                true,
+                camera.zoom,
+            );
+        }
 
         if released {
             let binding = match start {
@@ -3921,6 +4110,188 @@ impl Canvas {
                 }
             }
         }
+    }
+
+    /// The `+` on the line of a chain under the pointer (DIAG-06b): in the
+    /// middle of the part of the line's nearest segment in view, while the
+    /// pointer is within reach of the line or on the `+`. A segment shorter
+    /// on screen than [`PLUS_SEGMENT`] gives way to the line's longest that
+    /// is not; a `+` that would cover a card or a socket is not offered, nor
+    /// one on a line with no such segment. Activated, it opens *Add step*,
+    /// which puts a step on that line, in its braces.
+    fn chain_plus(
+        &mut self,
+        ui: &egui::Ui,
+        board: Rect,
+        cards: &[Card],
+        camera: Camera,
+        pointer: Option<Pos2>,
+        input: &Input<'_>,
+    ) {
+        const REACH: f32 = 8.0;
+        let editable = input.moves && !input.read_only && ui.is_enabled();
+        let Some(pointer) = pointer.filter(|pointer| editable && board.contains(*pointer)) else {
+            self.plus = None;
+            return;
+        };
+        if self.drag.is_some() || self.menu.is_some() {
+            self.plus = None;
+            return;
+        }
+        let view = board.shrink(PLUS_SIZE);
+        let nearest = self
+            .chain_lines
+            .iter()
+            .enumerate()
+            .flat_map(|(line, (.., points))| {
+                points
+                    .windows(2)
+                    .enumerate()
+                    .filter_map(move |(segment, pair)| {
+                        let (a, b) = (camera.to_screen(pair[0]), camera.to_screen(pair[1]));
+                        let distance = routing::distance_to_segment(pointer, a, b);
+                        (distance <= REACH).then_some((distance, line, segment))
+                    })
+            })
+            .min_by(|x, y| x.0.total_cmp(&y.0));
+        let nearest = nearest.and_then(|(_, line, segment)| {
+            let (source, port, target, points) = &self.chain_lines[line];
+            // What the `+` must leave clear: every card, a little around
+            // it, and every socket of the order.
+            let hit = (SOCKET_HIT * camera.zoom).max(3.0) * 2.0;
+            let clear = |centre: Pos2| {
+                let plus = Rect::from_center_size(centre, Vec2::splat(PLUS_SIZE));
+                cards.iter().all(|card| {
+                    !plus.expand(4.0).intersects(camera.rect(card.rect()))
+                        && [card.input_anchor(ORDER_PORT, &[])]
+                            .into_iter()
+                            .chain(
+                                card.order_outputs()
+                                    .into_iter()
+                                    .chain([ORDER_PORT])
+                                    .map(|port| card.output_anchor(port)),
+                            )
+                            .flatten()
+                            .all(|socket| {
+                                !plus.intersects(Rect::from_center_size(
+                                    camera.to_screen(socket),
+                                    Vec2::splat(hit),
+                                ))
+                            })
+                })
+            };
+            let offered = |pair: &[Pos2]| {
+                let (a, b) =
+                    clip_segment(camera.to_screen(pair[0]), camera.to_screen(pair[1]), view)?;
+                let centre = a + (b - a) * 0.5;
+                (a.distance(b) >= PLUS_SEGMENT && clear(centre)).then_some((a.distance(b), centre))
+            };
+            let centre = offered(&points[segment..segment + 2])
+                .or_else(|| {
+                    points
+                        .windows(2)
+                        .filter_map(offered)
+                        .max_by(|x, y| x.0.total_cmp(&y.0))
+                })?
+                .1;
+            Some(Plus {
+                source: source.clone(),
+                port: port.clone(),
+                target: target.clone(),
+                centre,
+            })
+        });
+        let kept = self.plus.take().filter(|plus| {
+            plus.rect().contains(pointer)
+                && self.chain_lines.iter().any(|(source, port, target, _)| {
+                    *source == plus.source && *port == plus.port && *target == plus.target
+                })
+        });
+        let Some(plus) = kept.or(nearest) else {
+            return;
+        };
+        let handle = |id: &str| {
+            input
+                .graph
+                .nodes
+                .iter()
+                .find(|node| node.id == id)
+                .map_or_else(|| id.to_owned(), |node| node.handle.clone())
+        };
+        let label = format!(
+            "Add a step between `{}` and `{}`",
+            handle(&plus.source),
+            handle(&plus.target)
+        );
+        let rect = plus.rect();
+        // The `+` takes clicks only: a drag that starts on it goes to the
+        // socket or the board under it, and a right-click on it opens the
+        // board's menu, as on the board.
+        let response = ui
+            .interact(rect, ui.id().with("chain-plus"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(&label);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        paint::plus(
+            ui.painter(),
+            plus.centre,
+            PLUS_SIZE / 2.0,
+            response.hovered(),
+        );
+        if response.secondary_clicked() {
+            self.menu = Some(ActionMenu::new(pointer, camera.to_world(pointer), None));
+            self.plus = None;
+        } else if response.clicked() {
+            let mut menu = ActionMenu::new(
+                pointer,
+                camera.to_world(pointer),
+                Some((plus.source.clone(), plus.port.clone())),
+            );
+            menu.on_line = true;
+            self.menu = Some(menu);
+            self.plus = None;
+        } else {
+            self.plus = Some(plus);
+        }
+    }
+
+    /// Why the statement `over` refuses a wire of the order from `port` of
+    /// the step `source`, as the folder window's drop will (DIAG-06a,
+    /// DIAG-06d): `None` when it takes it, or when the wire is no move.
+    /// Asked once while the wire is held over the same statement.
+    fn refused(
+        &mut self,
+        input: &Input<'_>,
+        source: &str,
+        port: &str,
+        over: &str,
+    ) -> Option<String> {
+        let key = (source.to_owned(), port.to_owned(), over.to_owned());
+        if let Some((asked, reason)) = &self.refusal_asked
+            && *asked == key
+        {
+            return reason.clone();
+        }
+        let is_step = input
+            .graph
+            .nodes
+            .iter()
+            .any(|node| node.id == source && apiforge_core::chain::is_step(node.kind));
+        let at = match port {
+            apiforge_core::graph::TRUE_PORT => edit::Place::First(source, Branch::True),
+            apiforge_core::graph::FALSE_PORT => edit::Place::First(source, Branch::False),
+            ORDER_PORT => edit::Place::After(source),
+            _ => return None,
+        };
+        let reason = if is_step && input.graph.nodes.iter().any(|node| node.id == over) {
+            edit::place(input.graph, input.project, over, at)
+                .err()
+                .map(|error| error.to_string())
+        } else {
+            None
+        };
+        self.refusal_asked = Some((key, reason.clone()));
+        reason
     }
 
     fn handle_box_selection(
@@ -4001,7 +4372,7 @@ impl Canvas {
         let nearest = self
             .chain_lines
             .iter()
-            .filter_map(|(source, port, points)| {
+            .filter_map(|(source, port, _, points)| {
                 points
                     .windows(2)
                     .map(|pair| {
@@ -4270,7 +4641,13 @@ impl Canvas {
         self.drag = None;
     }
 
-    fn handle_keys(&mut self, ui: &egui::Ui, input: &Input<'_>, commands: &mut Vec<Command>) {
+    fn handle_keys(
+        &mut self,
+        ui: &egui::Ui,
+        board: Rect,
+        input: &Input<'_>,
+        commands: &mut Vec<Command>,
+    ) {
         // Keys belong to text fields while one has focus.
         if ui.ctx().egui_wants_keyboard_input()
             || ui.ctx().memory(|memory| memory.top_modal_layer().is_some())
@@ -4285,6 +4662,40 @@ impl Canvas {
             ))
         }) {
             commands.push(Command::TidyUp(input.selection.to_vec()));
+        }
+        // Alt+↑ and Alt+↓ move the one selected step by one in its braces
+        // (DIAG-06b) while the board has the keyboard: nothing has it, or
+        // something on the board. A text field keeps them (above).
+        let on_board = ui
+            .ctx()
+            .memory(|memory| memory.focused())
+            .is_none_or(|focused| {
+                ui.ctx()
+                    .read_response(focused)
+                    .is_some_and(|response| board.contains_rect(response.rect))
+            });
+        if input.moves
+            && !input.read_only
+            && on_board
+            && let [id] = input.selection
+            && input.graph.nodes.iter().any(|node| {
+                &node.id == id
+                    && apiforge_core::chain::is_step(node.kind)
+                    && node.kind != NodeKind::Start
+            })
+        {
+            let (earlier, later) = ui.input_mut(|state| {
+                (
+                    state.consume_key(Modifiers::ALT, Key::ArrowUp),
+                    state.consume_key(Modifiers::ALT, Key::ArrowDown),
+                )
+            });
+            if earlier != later {
+                commands.push(Command::MoveStep {
+                    id: id.clone(),
+                    later,
+                });
+            }
         }
         let delete =
             ui.input(|state| state.key_pressed(Key::Delete) || state.key_pressed(Key::Backspace));
@@ -4727,6 +5138,80 @@ impl Canvas {
         });
     }
 
+    /// The notice after a delete (DIAG-06b), where the banner stands: what
+    /// now follows what, and *Undo*.
+    fn notice_banner(
+        &mut self,
+        ui: &mut egui::Ui,
+        overlays: &BoardOverlays,
+        commands: &mut Vec<Command>,
+    ) {
+        let Some(message) = self.notice.clone() else {
+            self.notice_drawn = None;
+            return;
+        };
+        let pos = overlays
+            .error_banner
+            .map_or(overlays.board.center_top() + vec2(0.0, 24.0), |r| {
+                r.center_top()
+            });
+        let shown = egui::Area::new(ui.id().with("board-notice"))
+            .fixed_pos(pos)
+            .pivot(Align2::CENTER_TOP)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(theme::WHITE)
+                    .stroke(Stroke::new(1.0, theme::BORDER))
+                    .corner_radius(8)
+                    .inner_margin(egui::Margin::symmetric(12, 6))
+                    .show(ui, |ui| {
+                        // The sentence wraps at `width`; *Undo* keeps its
+                        // own width beside it, wider than the area the
+                        // last frame measured.
+                        let width = (overlays.board.width() - 240.0).clamp(160.0, 520.0);
+                        ui.set_max_width(width + NOTICE_UNDO_ROOM);
+                        ui.horizontal(|ui| {
+                            // As high as *Undo*, so that one line of the
+                            // sentence stands level with it.
+                            ui.allocate_ui_with_layout(
+                                vec2(width, ui.spacing().interact_size.y),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    let text = ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(&message).color(theme::TEXT),
+                                        )
+                                        .wrap(),
+                                    );
+                                    // A status a screen reader announces,
+                                    // named by its sentence.
+                                    ui.ctx().accesskit_node_builder(text.id, |node| {
+                                        node.set_role(egui::accesskit::Role::Status);
+                                        node.set_live(egui::accesskit::Live::Polite);
+                                        node.clear_value();
+                                        node.set_label(message.as_str());
+                                    });
+                                },
+                            );
+                            ui.separator();
+                            let undo =
+                                ui.add(widgets::action(Icon::Undo, "Undo").compact().quiet());
+                            if undo.clicked() {
+                                commands.push(Command::Undo);
+                                self.notice = None;
+                            }
+                            undo.id
+                        })
+                        .inner
+                    })
+                    .inner
+            });
+        self.notice_drawn = self
+            .notice
+            .is_some()
+            .then_some((shown.response.rect, shown.inner));
+    }
+
     fn error_banner(&mut self, ui: &mut egui::Ui, overlays: &BoardOverlays) {
         let Some(message) = self.error.clone() else {
             return;
@@ -4741,7 +5226,7 @@ impl Canvas {
             .pivot(Align2::CENTER_TOP)
             .show(ui.ctx(), |ui| {
                 egui::Frame::new()
-                    .fill(Color32::from_rgb(253, 236, 232))
+                    .fill(REFUSED_FILL)
                     .stroke(Stroke::new(1.0, theme::DANGER))
                     .corner_radius(8)
                     .inner_margin(egui::Margin::symmetric(12, 8))

@@ -5,7 +5,7 @@ use crate::icons::Icon;
 use crate::{dnd::Payload, theme, widgets};
 use apiforge_core::{
     edit::FieldCheck,
-    format::Binding,
+    format::{Binding, Graph, Project},
     js::{json_stringify, type_name},
     model::ValueType,
     path::JsonPath,
@@ -455,14 +455,31 @@ pub enum MenuChoice {
     Select(String),
 }
 
-/// The menu *Add a check* that `button` opens on a field showing `value`
-/// (DIAG-08): *equals ‹value›*, *is a ‹type›*, *exists*, *is not empty*,
-/// each read as a sentence about `subject` before it is written. The one
-/// place that draws it, for the Inspector's tree and Run results alike.
+/// The field a menu *Add a check* is opened on (DIAG-19): the step, its
+/// output and the path in it the check reads, and the board it is written
+/// against.
+#[derive(Clone, Copy)]
+pub struct Field<'a> {
+    pub node: &'a str,
+    pub port: &'a str,
+    pub path: &'a str,
+    /// The graph that holds the step and the project; `None` where the
+    /// window knows no board, which writes the subject as `shown`.
+    pub board: Option<(&'a Graph, &'a Project)>,
+    /// The field as its row names it.
+    pub shown: &'a str,
+}
+
+/// The menu *Add a check* that `button` opens on `field` showing `value`
+/// (DIAG-08): it equals the value, is of its type, exists, is not empty,
+/// each written in the signs of the code as its card will read it
+/// (DIAG-19): `total == 172.5`, `total is "number"`, `exists total`,
+/// `nonempty total`. The one place that draws it, for the Inspector's tree
+/// and Run results alike.
 // The Checks tab's *Add check* opens it on a field no tree draws (DIAG-15).
 #[allow(dead_code)]
-pub fn check_menu(button: &egui::Response, subject: &str, value: &Value) -> Option<FieldCheck> {
-    match check_menu_with(button, subject, value, &[], Adding::Offered) {
+pub fn check_menu(button: &egui::Response, field: Field<'_>, value: &Value) -> Option<FieldCheck> {
+    match check_menu_with(button, field, value, &[], Adding::Offered) {
         Some(MenuChoice::Add(check)) => Some(check),
         _ => None,
     }
@@ -471,15 +488,26 @@ pub fn check_menu(button: &egui::Response, subject: &str, value: &Value) -> Opti
 /// [`check_menu`] on a field that `listed` checks already read: the menu
 /// lists them first, as DIAG-02 writes them and in Run results with their
 /// outcome, and a click selects one; *Add a check* follows as `adding`
-/// says (DIAG-12).
+/// says (DIAG-12), without the checks the field already has (DIAG-19).
 pub fn check_menu_with(
     button: &egui::Response,
-    subject: &str,
+    field: Field<'_>,
     value: &Value,
     listed: &[super::marks::Listed],
     adding: Adding,
 ) -> Option<MenuChoice> {
     let mut chosen = None;
+    let offers: Vec<FieldCheck> = FieldCheck::offered(value)
+        .into_iter()
+        .filter(|check| {
+            !listed.iter().any(|listed| {
+                listed
+                    .asks
+                    .as_ref()
+                    .is_some_and(|asks| asks.same(field.node, field.port, field.path, check))
+            })
+        })
+        .collect();
     egui::Popup::menu(button).show(|ui| {
         // Escape closes the menu and leaves the selection under it.
         if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -522,14 +550,14 @@ pub fn check_menu_with(
                     ui.close();
                 }
             }
-            if adding == Adding::Hidden {
+            if adding == Adding::Hidden || offers.is_empty() {
                 return;
             }
             ui.separator();
         }
         widgets::caption(ui, "ADD A CHECK");
-        for check in FieldCheck::offered(value) {
-            let item = egui::Button::new(check_sentence(subject, &check));
+        for check in offers {
+            let item = egui::Button::new(offer_text(field, &check));
             if ui.add_enabled(adding == Adding::Offered, item).clicked() {
                 chosen = Some(MenuChoice::Add(check));
                 ui.close();
@@ -550,18 +578,66 @@ fn menu_action(choice: MenuChoice, path: &str) -> TreeAction {
     }
 }
 
-/// A check of `subject` as the menu reads it: *total is a number*.
-fn check_sentence(subject: &str, check: &FieldCheck) -> String {
-    let subject = crate::labels::truncate(subject, 48);
-    match check {
-        FieldCheck::Equals(value) => format!(
-            "{subject} equals {}",
-            crate::labels::truncate(&json_stringify(value), 40)
-        ),
-        FieldCheck::Type(word) if word == "null" => format!("{subject} is null"),
-        FieldCheck::Type(word) => format!("{subject} is {}", with_article(word)),
-        FieldCheck::Exists => format!("{subject} exists"),
-        FieldCheck::NotEmpty => format!("{subject} is not empty"),
+/// How many characters an offer of the menu *Add a check* takes, as many
+/// as the field's checks listed above it.
+const OFFER_CHARACTERS: usize = 60;
+
+/// `check` of `field` as the menu offers it: the check it writes, as
+/// DIAG-02's [`crate::canvas::check_text`] writes it under the step it
+/// reads, so that what is chosen is what its card reads (DIAG-19). A value
+/// is cut at 40 characters, and a text still too long in the middle of its
+/// path, as a card's title is cut ([`crate::canvas::fit_title`]).
+fn offer_text(field: Field<'_>, check: &FieldCheck) -> String {
+    let written = field.board.and_then(|(graph, project)| {
+        let step = graph.nodes.iter().find(|node| node.id == field.node)?;
+        let written = apiforge_core::edit::field_check(step, field.port, field.path, check);
+        let scope = Scope {
+            nodes: &graph.nodes,
+            project,
+            request: Some(&written),
+        };
+        let own = crate::canvas::own_step(&written, graph);
+        Some(crate::canvas::check_text(&written, scope, graph, own))
+    });
+    let text = written
+        .unwrap_or_else(|| unboarded_text(field, check))
+        .values_cut(40);
+    crate::canvas::fit_title(&text, OFFER_CHARACTERS, 1).shown
+}
+
+/// `check` of `field` where the step is on no board the window knows: the
+/// same signs, the field named as [`apiforge_core::edit::field_check`]
+/// names it, by its path in the output or else the output.
+fn unboarded_text(field: Field<'_>, check: &FieldCheck) -> crate::canvas::CheckText {
+    use crate::canvas::{Part, PartRole};
+    let part = |text: String, role| Part { text, role };
+    let subject = if field.path.is_empty() {
+        field.port
+    } else {
+        field.path
+    };
+    let operand = part(subject.to_owned(), PartRole::Operand);
+    let sign = apiforge_script::predicate_symbol(check.predicate());
+    let (parts, actual) = match check.expected() {
+        Some(expected) => {
+            let role = match expected {
+                Value::String(_) => PartRole::Text,
+                Value::Number(_) => PartRole::Number,
+                Value::Bool(_) | Value::Null => PartRole::Literal,
+                _ => PartRole::Data,
+            };
+            let sign = part(format!(" {sign} "), PartRole::Sign);
+            (
+                vec![operand, sign, part(json_stringify(&expected), role)],
+                0,
+            )
+        }
+        None => (vec![part(format!("{sign} "), PartRole::Sign), operand], 1),
+    };
+    crate::canvas::CheckText {
+        parts,
+        actual: Some(actual),
+        missing: false,
     }
 }
 
@@ -594,6 +670,7 @@ pub fn json_tree(
             step: TREE_INDENT,
             results: None,
             marks: marks.and_then(|marks| TreeMarks::new(marks, node, port)),
+            board: marks.and_then(|marks| marks.index.board()),
         },
         heading,
         value,
@@ -715,6 +792,7 @@ pub fn results_tree(
                 .marks
                 .filter(|_| results.fields)
                 .and_then(|marks| TreeMarks::new(marks, node, port)),
+            board: results.marks.and_then(|marks| marks.index.board()),
         },
         port,
         value,
@@ -769,6 +847,9 @@ struct Tree<'a> {
     results: Option<Results<'a>>,
     /// The checks that read this output's fields (DIAG-12).
     marks: Option<TreeMarks<'a>>,
+    /// The board the step is on, which the menu *Add a check* writes its
+    /// checks against (DIAG-19).
+    board: Option<(&'a Graph, &'a Project)>,
 }
 
 impl Tree<'_> {
@@ -1020,7 +1101,14 @@ fn inspector_actions(
     } else {
         Adding::Offered
     };
-    if let Some(choice) = check_menu_with(&check, shown, value, listed, adding) {
+    let field = Field {
+        node: tree.node,
+        port: tree.port,
+        path: text,
+        board: tree.board,
+        shown,
+    };
+    if let Some(choice) = check_menu_with(&check, field, value, listed, adding) {
         *action = Some(menu_action(choice, text));
     }
     let variable = why(put_at(
@@ -1171,11 +1259,11 @@ impl End {
         ui: &mut Ui,
         x: f32,
         middle: f32,
-        shown: &str,
+        field: Field<'_>,
         value: &Value,
-        path: &str,
         mark: Option<&RowMark>,
     ) -> Option<TreeAction> {
+        let (shown, path) = (field.shown, field.path);
         let at = |x: f32, width: f32| {
             egui::Rect::from_min_size(
                 egui::pos2(x, middle - TREE_BUTTON / 2.0),
@@ -1222,7 +1310,7 @@ impl End {
                     super::marks::button(ui, "Checks of this field", mark, words, width)
                 })
                 .on_hover_text(&mark.said);
-                return check_menu_with(&check, shown, value, &mark.listed, Adding::Hidden)
+                return check_menu_with(&check, field, value, &mark.listed, Adding::Hidden)
                     .map(|choice| menu_action(choice, path));
             }
             Self::Column | Self::Nothing => return None,
@@ -1251,7 +1339,7 @@ impl End {
             }
         };
         let listed = mark.map_or(&[][..], |mark| &mark.listed);
-        if let Some(choice) = check_menu_with(&check, shown, value, listed, Adding::Offered) {
+        if let Some(choice) = check_menu_with(&check, field, value, listed, Adding::Offered) {
             chosen = Some(menu_action(choice, path));
         }
         let variable_hover = format!("Assign {shown} to a variable");
@@ -1502,7 +1590,14 @@ fn tree_row(
     if tree.results.is_some() {
         // Run results: right after the value, at most at the panel's edge.
         let x = (value_x + value_width + TREE_GAP).min(actions_x);
-        if let Some(chosen) = end.show(row_ui, x, middle, shown, value, &text, mark.as_ref()) {
+        let field = Field {
+            node: tree.node,
+            port: tree.port,
+            path: &text,
+            board: tree.board,
+            shown,
+        };
+        if let Some(chosen) = end.show(row_ui, x, middle, field, value, mark.as_ref()) {
             *action = Some(chosen);
         }
     } else {
@@ -1649,6 +1744,42 @@ mod tests {
 mod tree_tests {
     use super::*;
 
+    /// A field of `cart`'s `port` at `path`, on no board (DIAG-19).
+    fn unboarded<'a>(port: &'a str, path: &'a str, shown: &'a str) -> Field<'a> {
+        Field {
+            node: "cart",
+            port,
+            path,
+            board: None,
+            shown,
+        }
+    }
+
+    #[test]
+    fn an_offer_off_the_board_names_the_field_as_its_check_does() {
+        let status = unboarded("status", "", "HTTP status");
+        assert_eq!(
+            offer_text(status, &FieldCheck::Equals(serde_json::json!(200))),
+            "status == 200"
+        );
+        let total = unboarded("body", "total", "total");
+        assert_eq!(offer_text(total, &FieldCheck::Exists), "exists total");
+        assert_eq!(
+            offer_text(total, &FieldCheck::Type("number".into())),
+            "total is \"number\""
+        );
+    }
+
+    #[test]
+    fn a_long_path_is_cut_in_its_middle_as_a_card_cuts_it() {
+        let path = "customer.addresses.primary.street.lines.first.text.value";
+        let field = unboarded("body", path, "value");
+        assert_eq!(
+            offer_text(field, &FieldCheck::Exists),
+            "exists customer…primary.street.lines.first.text.value"
+        );
+    }
+
     #[test]
     fn pagination_covers_the_tail_and_clamps_after_the_source_shrinks() {
         assert_eq!(page_range(250, 0), 0..100);
@@ -1672,6 +1803,7 @@ mod tree_tests {
             step: TREE_INDENT,
             results: None,
             marks: None,
+            board: None,
         };
         let mut output = context.run_ui(Default::default(), |ui| {
             let mut budget = JSON_ROWS_PER_FRAME;
@@ -1734,6 +1866,7 @@ mod tree_tests {
             step: TREE_INDENT,
             results: None,
             marks: None,
+            board: None,
         };
         context.data_mut(|data| data.insert_temp(tree("first").branch("customer"), true));
         let mut visited = Vec::new();
