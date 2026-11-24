@@ -15,6 +15,7 @@
 
 use crate::{
     http::{self, HttpError, Reached},
+    partial::Partial,
     plan::ExecutionPlan,
     redact::Redactor,
     request::{RunError, RunLimits, RunOptions, RunRequest, RunTarget, target_component, validate},
@@ -310,7 +311,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             finished_at: None,
             status: RunStatus::Running,
             steps: Vec::new(),
-            diagnostic: request.single_node_id.is_some() || request.target_node_id.is_some(),
+            diagnostic: request.is_diagnostic(),
             snapshot: Some(RunSnapshot {
                 graph: scenario.graph.clone(),
                 cleanup: scenario.cleanup.clone(),
@@ -368,14 +369,26 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
             phase: Phase::Main,
         };
 
-        let selection: Option<IndexSet<String>> = if let Some(single) = &request.single_node_id {
+        let selection: Option<IndexSet<String>> = match &request.partial {
+            Some(partial) => Some(partial.selection(&scenario.graph)),
+            None => request.single_node_id.clone().map_or_else(
+                || {
+                    request
+                        .target_node_id
+                        .as_deref()
+                        .map(|target| ancestors_and_self(&scenario.graph, target))
+                },
+                |single| Some(IndexSet::from([single])),
+            ),
+        };
+        if let (Some((_, previous)), Some(selection)) = (request.single(), &selection) {
             // History is redacted; it shows what an earlier run saw, not real secrets.
-            for step in request.previous_run.iter().flat_map(|run| &run.steps) {
-                if step.phase == Phase::Main && &step.node_id != single {
+            for step in previous.iter().flat_map(|run| &run.steps) {
+                if step.phase == Phase::Main && !selection.contains(&step.node_id) {
                     context.outputs.insert(step.node_id.clone(), step.clone());
                 }
             }
-            self.run.notice = Some(match &request.previous_run {
+            self.run.notice = Some(match previous {
                 Some(previous) => format!(
                     "Historical inputs from run {}, {}.",
                     previous.id,
@@ -383,13 +396,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 ),
                 None => "Single step: no historical inputs.".to_owned(),
             });
-            Some(IndexSet::from([single.clone()]))
-        } else {
-            request
-                .target_node_id
-                .as_deref()
-                .map(|target| ancestors_and_self(&scenario.graph, target))
-        };
+        }
         self.notify();
 
         // A live run announces itself before it can send anything, so a process that
@@ -413,8 +420,9 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         // independent deadline and must not turn a successful main phase into a timeout.
         let main_budget_exceeded = Instant::now() >= main_deadline;
         // Cleanup gets its own budget, unaffected by cancellation of the main phase.
-        // A component run on its own has no cleanup phase.
-        if self.component_inputs.is_none() {
+        // A component run on its own has no cleanup phase, and neither has one
+        // request alone (ADR 0016).
+        if self.component_inputs.is_none() && self.alone(&context).is_none() {
             self.journal_cleanup_started();
             context.phase = Phase::Cleanup;
             context.signal = Signal {
@@ -616,6 +624,7 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
                 if self.scenario.error_policy == apiforge_core::model::ErrorPolicy::Stop
                     && context.phase == Phase::Main
                     && stopped.is_none()
+                    && self.alone(context).is_none()
                     && matches!(
                         step.status,
                         StepStatus::Failed | StepStatus::Error | StepStatus::Blocked
@@ -635,11 +644,21 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         })
     }
 
+    /// The request a run of one request alone executes, while its own graph
+    /// runs: the steps inside a component follow the rules of every run.
+    fn alone(&self, context: &Context) -> Option<&'a str> {
+        match &self.request.partial {
+            Some(Partial::Alone { node_id, .. }) if context.stack.is_empty() => Some(node_id),
+            _ => None,
+        }
+    }
+
     /// Decides whether a ready node is on the active path and has usable inputs.
     ///
     /// The main flow under `on_error stop` keeps the gate it had before RUN-01;
     /// the main flow under `continue` and every cleanup wait for a step to
-    /// have finished and judge only the values a step reads (ADR 0015).
+    /// have finished and judge only the values a step reads (ADR 0015). One
+    /// request alone and its checks wait for values only (ADR 0016).
     fn gate(
         &self,
         graph: &Graph,
@@ -648,7 +667,9 @@ impl<'a, F: FnMut(&RunResult) + Send> Engine<'a, F> {
         context: &Context,
         bypass: bool,
     ) -> Gate {
-        if context.phase == Phase::Main && self.scenario.error_policy == ErrorPolicy::Stop {
+        if let Some(request) = self.alone(context) {
+            gate_alone(plan, node, request, context)
+        } else if context.phase == Phase::Main && self.scenario.error_policy == ErrorPolicy::Stop {
             Self::gate_until_stop(graph, plan, node, context, bypass)
         } else {
             gate_after_finished(graph, plan, node, context, bypass)
@@ -1499,24 +1520,8 @@ fn gate_after_finished(
         if used.is_empty() {
             continue;
         }
-        // A false Data condition guards the data of the steps that read it.
-        if context.phase == Phase::Main
-            && source.kind == NodeKind::Condition
-            && source.cause.is_none()
-            && source.outputs.get("passed") == Some(&Value::Bool(false))
-        {
-            return not_run(NotRunCause::ConditionUnmet {
-                condition: id.to_owned(),
-            });
-        }
-        // A value exists when its statement made the output, whatever that
-        // statement's result. The field read inside it is the reading step's
-        // own concern in the main flow; the cleanup judges the whole path.
-        if used
-            .iter()
-            .any(|reference| !source.outputs.contains_key(reference.port))
-        {
-            return blocked_by();
+        if let Some(cause) = missing_value(id, source, &used, context.phase) {
+            return not_run(cause);
         }
         if context.phase == Phase::Cleanup
             && missing_cleanup_input.is_none()
@@ -1532,6 +1537,89 @@ fn gate_after_finished(
         blocked: None,
         missing_cleanup_input,
     }
+}
+
+/// Why the values `used` of the step `id` cannot be read: a Data condition
+/// that is false, or an output its statement did not make.
+fn missing_value(
+    id: &str,
+    source: &StepResult,
+    used: &[&Reference<'_>],
+    phase: Phase,
+) -> Option<NotRunCause> {
+    // A false Data condition guards the data of the steps that read it.
+    if phase == Phase::Main
+        && source.kind == NodeKind::Condition
+        && source.cause.is_none()
+        && source.outputs.get("passed") == Some(&Value::Bool(false))
+    {
+        return Some(NotRunCause::ConditionUnmet {
+            condition: id.to_owned(),
+        });
+    }
+    // A value exists when its statement made the output, whatever that
+    // statement's result. The field read inside it is the reading step's
+    // own concern in the main flow; the cleanup judges the whole path.
+    used.iter()
+        .any(|reference| !source.outputs.contains_key(reference.port))
+        .then(|| NotRunCause::BlockedBy {
+            step: id.to_owned(),
+        })
+}
+
+/// The gate of one request alone and its checks (ADR 0016). Nothing else
+/// runs, so nothing is ordered: each waits for the values it reads, which the
+/// earlier run or this one made. The request is on the path by being asked
+/// for, and so is a check that stands in the same braces; in any other braces
+/// a check follows what their `if` decided in the earlier run.
+fn gate_alone(plan: &ExecutionPlan<'_>, node: &Node, request: &str, context: &Context) -> Gate {
+    let not_run = |blocked: Option<NotRunCause>| Gate {
+        inactive: None,
+        blocked,
+        missing_cleanup_input: None,
+    };
+    let references: Vec<Reference<'_>> =
+        node.inputs.values().flat_map(Binding::references).collect();
+    for reference in &references {
+        let id = reference.node_id;
+        let cause = match context.outputs.get(id) {
+            Some(source) => missing_value(id, source, &[reference], context.phase),
+            None => Some(NotRunCause::BlockedBy {
+                step: id.to_owned(),
+            }),
+        };
+        if cause.is_some() {
+            return not_run(cause);
+        }
+    }
+    let around: HashMap<&str, Branch> = plan.enclosing(request).collect();
+    let mut undecided = None;
+    for (id, branch) in plan.enclosing(&node.id) {
+        let taken = match around.get(id) {
+            Some(taken) => Some(*taken == branch),
+            None => context
+                .outputs
+                .get(id)
+                .and_then(|source| source.outputs.get("passed"))
+                .and_then(Value::as_bool)
+                .map(|passed| passed == (branch == Branch::True)),
+        };
+        match taken {
+            Some(true) => {}
+            Some(false) => {
+                return Gate {
+                    inactive: Some(NotRunCause::OutsidePath),
+                    blocked: None,
+                    missing_cleanup_input: None,
+                };
+            }
+            // The outermost one, as in every run.
+            None => undecided = Some(id),
+        }
+    }
+    not_run(undecided.map(|id| NotRunCause::BlockedBy {
+        step: id.to_owned(),
+    }))
 }
 
 /// The scheduler's verdict on a ready node.

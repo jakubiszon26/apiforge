@@ -191,6 +191,7 @@ pub(super) fn execute_run(args: super::run::Args) -> Result<apiforge_core::run::
         mode: apiforge_core::run::RunMode::Simulation,
         target_node_id: None,
         single_node_id: None,
+        partial: None,
         previous_run: None,
         secrets,
     };

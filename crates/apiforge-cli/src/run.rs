@@ -121,6 +121,7 @@ fn execute(args: Args) -> Result<RunStatus, String> {
         },
         target_node_id: None,
         single_node_id: None,
+        partial: None,
         previous_run: None,
         secrets,
     };
