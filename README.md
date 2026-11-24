@@ -295,7 +295,7 @@ Secrets come from `APIFORGE_SECRET_<NAME>` in the server's environment or a
 Windows and WSL. The setup with `.mcp.json` and the full contract are in the
 [development guide](docs/development.md#mcp-server).
 
-![The window while an agent holds the project: Observing in the header, editing paused, the agent named in the bottom bar](docs/images/agent-observer.png)
+![The window while an agent holds the project, after a simulated run: Observing in the header, editing paused, the agent named in the bottom bar](docs/images/agent-observer.png)
 
 ## Install
 
