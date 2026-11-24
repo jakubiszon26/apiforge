@@ -314,7 +314,7 @@ impl FolderApp {
     }
 
     /// Whether a title typed in the header's field waits to be written.
-    pub(super) fn title_typed(&self) -> bool {
+    pub(super) fn title_typed(&self, _document: Option<&str>) -> bool {
         self.title_edit
             .as_ref()
             .is_some_and(|edit| edit.written().is_some())

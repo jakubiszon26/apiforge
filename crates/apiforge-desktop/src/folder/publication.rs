@@ -57,6 +57,12 @@ impl FolderApp {
         revision
     }
 
+    pub(super) fn publish_component(&mut self, id: &str) {
+        if self.commit_title() {
+            self.component_action(id, Action::Publish);
+        }
+    }
+
     pub(super) fn component_action(&mut self, id: &str, action: Action) {
         if self.watcher.recovery_required {
             self.notify(

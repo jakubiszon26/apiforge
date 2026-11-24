@@ -25,7 +25,7 @@ impl FolderApp {
             || session.text_files().iter().any(|file| file.is_dirty())
             || session.is_manifest_dirty()
             // Typed in the board's header, and written by a save (WS-05a).
-            || self.title_typed();
+            || self.title_typed(None);
         let active = self.workbench.active();
         let run_document = active
             .and_then(|id| session.document(id))
@@ -53,7 +53,7 @@ impl FolderApp {
                 .and_then(|active| active.strip_prefix(TEXT_TAB))
                 .and_then(|path| session.text_file(path))
                 .is_some_and(apiforge_project::TextFileSession::is_dirty)
-            || self.title_typed();
+            || self.title_typed(active);
         // The latest revision of any component, for the room *rN · no
         // changes* takes beside *Publish* (UX-25). A read-only window
         // publishes nothing, so it shows no caption and keeps no room.
@@ -249,8 +249,8 @@ impl FolderApp {
                             "The component equals its latest revision: nothing to publish",
                         );
                     }
-                    if button.clicked() && self.commit_title() {
-                        self.component_action(id, publication::Action::Publish);
+                    if button.clicked() {
+                        self.publish_component(id);
                     }
                 }
                 // Right to left: the caption stands at *Publish*'s left.

@@ -718,6 +718,292 @@ fn title_that_is_refused_goes_back() {
     );
 }
 
+const WAITING: &str = "A second booking is refused";
+
+/// `WAITING` typed in the field, and the board not editable for a moment: the
+/// code waits for its analysis, as after an outside change of the project.
+fn typed_on_a_waiting_board() -> (tempfile::TempDir, FolderHarness, String, String) {
+    let (project, mut harness, id) = open(REFUSED, WIDE);
+    type_title(&mut harness, REFUSED_TITLE, WAITING);
+    let text = format!("{}// Outside.\n", source_of(&harness, &id));
+    let session = app(&mut harness).session.as_mut().unwrap();
+    session.edit_source(&id, &text, CODE).unwrap();
+    assert!(!folder(&harness).snapshot(&id).unwrap().editable);
+    let after = text.replacen(REFUSED_TITLE, WAITING, 1);
+    (project, harness, id, after)
+}
+
+fn analysed(harness: &mut FolderHarness, id: &str) {
+    let session = app(harness).session.as_mut().unwrap();
+    let _ = session.settle(id);
+    settle(harness);
+    harness.step();
+    settle(harness);
+}
+
+/// The second review of #624, 1: what waits for the title waits while the
+/// board takes no edit, and then goes on with the title typed.
+#[test]
+fn a_waiting_title_holds_what_takes_it() {
+    let (project, mut harness, id, after) = typed_on_a_waiting_board();
+    app(&mut harness).save_active();
+    assert!(!app(&mut harness).storage.is_busy(), "not saved yet");
+    analysed(&mut harness, &id);
+    assert_eq!(
+        fs::read_to_string(project.path().join(REFUSED)).unwrap(),
+        after,
+        "then saved with the title"
+    );
+    assert!(!dirty(&harness, &id));
+
+    let (project, mut harness, id, after) = typed_on_a_waiting_board();
+    app(&mut harness).save_all();
+    assert!(!app(&mut harness).storage.is_busy(), "not saved yet");
+    analysed(&mut harness, &id);
+    assert_eq!(
+        fs::read_to_string(project.path().join(REFUSED)).unwrap(),
+        after
+    );
+
+    let (_project, mut harness, id, after) = typed_on_a_waiting_board();
+    app(&mut harness).request_run(&id, false);
+    assert!(folder(&harness).runs.handle.is_none(), "not run yet");
+    analysed(&mut harness, &id);
+    finish_run(&mut harness);
+    assert_eq!(source_of(&harness, &id), after);
+    assert!(folder(&harness).fresh_run(&id).is_some());
+
+    let (_project, mut harness, id, after) = typed_on_a_waiting_board();
+    app(&mut harness).request_close_tab(&id);
+    assert!(
+        folder(&harness)
+            .workbench
+            .tabs()
+            .iter()
+            .any(|tab| tab.document_id == id)
+            && folder(&harness).prompt.is_none(),
+        "not closed yet"
+    );
+    analysed(&mut harness, &id);
+    assert_eq!(source_of(&harness, &id), after);
+    assert!(matches!(folder(&harness).prompt, Some(Prompt::CloseTab(_))));
+}
+
+/// 1, *Publish*: it takes the name typed, at once or when the board takes an
+/// edit again.
+#[test]
+fn publish_takes_the_title_typed() {
+    for waiting in [false, true] {
+        let project = crate::testing::shop_project();
+        let (mut harness, id) = open_at(project.path(), "components/product.afs", WIDE);
+        let name = title_of(&harness, &id);
+        // Something to publish, for the button.
+        let text = source_of(&harness, &id).replacen("description \"", "description \"New. ", 1);
+        write_code(&mut harness, &id, &text);
+        type_title(&mut harness, &name, "One product");
+        if waiting {
+            let session = app(&mut harness).session.as_mut().unwrap();
+            let text = format!("{text}// Outside.\n");
+            session.edit_source(&id, &text, CODE).unwrap();
+            app(&mut harness).publish_component(&id);
+            assert!(!app(&mut harness).storage.is_busy(), "not published yet");
+            analysed(&mut harness, &id);
+        } else {
+            click_on(&mut harness, "Publish");
+        }
+        settle(&mut harness);
+        let session = folder(&harness).session.as_ref().unwrap();
+        let latest = session
+            .manifest()
+            .revisions
+            .iter()
+            .filter(|revision| revision.handle == "product")
+            .max_by_key(|revision| revision.revision)
+            .unwrap();
+        assert_eq!(latest.revision, 2, "{waiting}: published");
+        let written = fs::read_to_string(project.path().join(latest.path.as_str())).unwrap();
+        assert!(written.contains("\"One product\""), "{waiting}: {written}");
+    }
+}
+
+/// The window is closed and the project opened again: the work kept is the
+/// text with the title typed.
+fn closed_with(mut harness: FolderHarness, project: &std::path::Path) -> String {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !app(&mut harness).prepare_close() {
+        assert!(Instant::now() < deadline, "the window closes");
+        harness.step();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    drop(harness);
+    let session = ProjectSession::open(project).unwrap();
+    let id = session
+        .documents()
+        .iter()
+        .find(|document| document.entry().path.as_str() == REFUSED)
+        .unwrap()
+        .id()
+        .to_owned();
+    session
+        .recovered_drafts()
+        .iter()
+        .map(|(_, draft)| draft)
+        .find(|draft| draft.document_id == id)
+        .map(|draft| format!("{draft:?}"))
+        .unwrap_or_default()
+        + session.document(&id).unwrap().text()
+}
+
+/// 2: the window closes once the title is written, whatever it waits for.
+#[test]
+fn closing_the_window_waits_for_the_title() {
+    let (project, mut harness, _, _) = typed_on_a_waiting_board();
+    assert!(!app(&mut harness).prepare_close());
+    assert!(app(&mut harness).save_pending(), "the window stays for it");
+    assert!(closed_with(harness, project.path()).contains(WAITING));
+
+    // A storage job that blocks edits.
+    let (project, mut harness, _) = open(REFUSED, WIDE);
+    type_title(&mut harness, REFUSED_TITLE, WAITING);
+    let release = block_edits(&mut harness);
+    assert!(!app(&mut harness).prepare_close());
+    harness.step();
+    assert!(!app(&mut harness).prepare_close());
+    release.send(()).unwrap();
+    assert!(closed_with(harness, project.path()).contains(WAITING));
+
+    // A refused title stops the closing, and the person is told which.
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    let before = source_of(&harness, &id);
+    type_title(&mut harness, REFUSED_TITLE, "Not {{{ written");
+    assert!(!app(&mut harness).prepare_close());
+    let error = app(&mut harness).close_error().expect("the close stops");
+    assert!(error.contains("Not {{{ written"), "{error}");
+    assert!(!app(&mut harness).persistence.closing);
+    app(&mut harness).abort_close(error);
+    settle(&mut harness);
+    choose(&mut harness, "Keep editing");
+    assert_eq!(source_of(&harness, &id), before);
+}
+
+/// Holds the storage with a job that blocks edits, until the sender is used.
+fn block_edits(harness: &mut FolderHarness) -> std::sync::mpsc::Sender<()> {
+    let (started, ready) = std::sync::mpsc::channel();
+    let (release, resume) = std::sync::mpsc::channel::<()>();
+    app(harness).storage_project(
+        "Blocking…",
+        apiforge_project::StorageMode::Read,
+        true,
+        move |_| {
+            started.send(()).unwrap();
+            let _ = resume.recv();
+            Ok(())
+        },
+        |_, _| {},
+    );
+    harness.step();
+    ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(folder(harness).storage.blocks_edits());
+    release
+}
+
+/// 3: an agent that asks for the project finds the title typed as unsaved
+/// work, which the person is asked about, also when the board takes no edit
+/// at that moment.
+#[test]
+fn an_agent_does_not_take_the_project_over_a_typed_title() {
+    use super::mcp08b::{SCENARIO, agent, await_endpoint, await_until, commented, read, read_only};
+    for waiting in [false, true] {
+        let project = shop();
+        let root = project.path();
+        let mut harness = crate::testing::folder_harness_in(root, WIDE, Mode::Diagram);
+        app(&mut harness).review_open(SCENARIO, None);
+        settle(&mut harness);
+        await_endpoint(&mut harness, root, HolderRole::Window);
+        let id = id_at(&harness, SCENARIO);
+        let title = title_of(&harness, &id);
+        let mut server = agent(root, "Claude Code");
+        let (text, hash) = read(&mut server, SCENARIO);
+        type_title(&mut harness, &title, WAITING);
+        let release = waiting.then(|| block_edits(&mut harness));
+        let asked = server.start_call(
+            "write_source",
+            serde_json::json!({
+                "path": SCENARIO,
+                "text": commented(&text, "Agent."),
+                "expected_source_sha256": hash,
+            }),
+        );
+        if let Some(release) = release {
+            let until = Instant::now() + Duration::from_millis(1500);
+            while Instant::now() < until {
+                harness.step();
+                std::thread::sleep(Duration::from_millis(5));
+                assert!(!read_only(&harness), "the project stays");
+            }
+            release.send(()).unwrap();
+        }
+        await_until(&mut harness, Instant::now(), "the prompt", |harness| {
+            matches!(folder(harness).prompt, Some(Prompt::Handover { .. }))
+        });
+        assert_eq!(title_of(&harness, &id), WAITING);
+        assert!(dirty(&harness, &id));
+        assert!(!read_only(&harness));
+        assert!(
+            server.poll(asked).is_none(),
+            "the agent waits for the person"
+        );
+        drop(harness);
+    }
+}
+
+/// 4: a title typed on one document is not another's unsaved work.
+#[test]
+fn a_title_typed_is_its_own_documents_work() {
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    type_title(&mut harness, REFUSED_TITLE, WAITING);
+    let other = id_at(&harness, DAY);
+    assert!(folder(&harness).title_typed(Some(&id)));
+    assert!(!folder(&harness).title_typed(Some(&other)));
+    assert!(folder(&harness).title_typed(None));
+    let release = block_edits(&mut harness);
+    app(&mut harness).activate_tab(&other);
+    harness.step();
+    harness.step();
+    assert!(harness.get_by_label("Save").accesskit_node().is_disabled());
+    release.send(()).unwrap();
+    settle(&mut harness);
+    harness.step();
+    settle(&mut harness);
+    assert_eq!(title_of(&harness, &id), WAITING, "written when it could be");
+    assert!(harness.get_by_label("Save").accesskit_node().is_disabled());
+}
+
+/// No path drops a typed title without Escape or a word: code that breaks
+/// under the open field refuses it and says which title it was.
+#[test]
+fn a_title_the_board_no_longer_takes_is_named() {
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    type_title(&mut harness, REFUSED_TITLE, WAITING);
+    let text = source_of(&harness, &id);
+    write_code(&mut harness, &id, &broken(&text));
+    assert!(!editing(&harness));
+    assert!(
+        harness
+            .query_all_by_label_contains(WAITING)
+            .next()
+            .is_some(),
+        "the notice names the title"
+    );
+    // A title changed in the code meanwhile: the one typed is written last.
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    type_title(&mut harness, REFUSED_TITLE, WAITING);
+    let text = source_of(&harness, &id).replace(REFUSED_TITLE, "Changed outside");
+    write_code(&mut harness, &id, &text);
+    click_the_board(&mut harness);
+    assert_eq!(title_of(&harness, &id), WAITING);
+}
+
 /// Finding 8: the field grows with what is typed, over the kind and the file
 /// name of a scenario, whose Main and Cleanup stay where the opened field put
 /// them; a component's grows to the room of its row.
