@@ -58,9 +58,10 @@ stored settings. The instruction, and nothing else:
 > any product and quantity and use the cart that comes back.
 
 The pass check, on files and with the CLI: the demo API
-received at least six `POST /demo/shop/carts` (read from the project's
-run journal, or from a request log the demo API is given for the round:
-it prints none today), among them three product
+received at least six `POST /demo/shop/carts`, read from its request
+log (`apiforge-demo-api --request-log <file>`, REQ-19 #610: the run
+journal holds only interrupted runs and the window one report per
+document, so neither can count sends), among them three product
 ids, two quantities and one with the header; the project has one
 published component with inputs for the product and the quantity whose
 output is the response body, and `apiforge run` of a one-step scenario
@@ -103,11 +104,11 @@ were not tries (a whole scenario run to send one).
    records the result on #463: done, or the findings.
 8. Each finding becomes an issue or is fixed before the sprint closes.
 9. **Part 3 is done in the window** by its pass check, by an agents'
-   baseline round first and then by the owner. Until REQ-17 and REQ-18
-   are decided it is run as a baseline on the decided path and its
-   figures are recorded, not judged: no file named before the first
-   send and nothing left in the project are the bar only for what the
-   owner takes of those two tickets.
+   baseline round first and then by the owner. REQ-17 and REQ-18 are
+   decided (2026-11-24): after they merge the bar is no file named
+   before the first send, nothing left in the project but the
+   component, and fewer actions than the baseline on the decided path,
+   which is run once after REQ-05 and recorded.
 
 ## What the owner will see
 

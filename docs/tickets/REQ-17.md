@@ -1,13 +1,10 @@
 # REQ-17: One request tried without making a test of it
 
-- Size: L, to split once question 1 is answered (17a the try, 17b
-  keeping it; each M) · Owner review: 25 min · Risk: `visible UI`,
-  `default`, a permission control
-- State: **Analysis; five questions wait for the owner.** From the
-  owner's wish of 2026-11-24. Not scheduled, no `ready:*` label ·
-  issue [#603](https://github.com/jakubiszon26/apiforge/issues/603)
-  · REQ sprint
-- Analysis model: Fable 5.2 · Implementation model: —
+- Size: split into four tickets of at most M · Risk: per ticket
+- State: **Decided** by the owner on 2026-11-24 ([#603](https://github.com/jakubiszon26/apiforge/issues/603)): 1 A,
+  2 A, 3 A, 4 A, 5 A; the board is approved, its named defects are
+  criteria of REQ-17b. **One question is open, for REQ-17c only.**
+- Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
 
@@ -60,8 +57,8 @@ A run does not ask for a save (`prepare_run` settles the open text), so
   response panes and no list of steps; *Send*; *Keep ▾*.
 - Default behaviour that changes: nothing for a scenario. How a try is
   sent is question 3.
-- Removed, hidden, migrated: nothing. The project format is not changed
-  under A with question 2 = A or B.
+- Removed, hidden, migrated: nothing. The project format is not
+  changed.
 
 ## Mock-up
 
@@ -79,53 +76,40 @@ be copied: the address shortened to `…/shop/carts` with room left
 (REQ-01a 9); *PASSED* in the bottom bar of a try, which has no run;
 "1 steps" in B.
 
-## Questions for the owner
+## Decisions (owner, 2026-11-24)
 
-Recommended first.
+| | Decided | Not chosen |
+| --- | --- | --- |
+| 1 = A | A try is a request with no file, in its own tab | a scenario made for it; nothing new |
+| 2 = A | Kept with the person, outside the project, back after a restart | the window only; an unregistered folder of the project |
+| 3 = A | Sent by the run-mode switch, as every run | always live |
+| 4 = A | *Keep ▾*: *Add to a scenario…*, *Save as a new scenario…*, *Save as component…* | without *Add to a scenario* |
+| 5 = A | Several, a tab each, listed in *Files* | one at a time |
 
-1. **What a try is.** **A — a request with no file**: its own tab, the
-   two panes, nothing in the project until kept. · B — a scenario made
-   for it in one action (*Try a request* writes `scratch/request-1.afs`
-   with one request and opens it in *Steps*): no new kind of tab, S, but
-   it is a registered test that `apiforge run` and Git see. · C — nothing
-   new: the decided path, and only the acceptance task of
-   [REQ-06](REQ-06.md#the-task) part 3.
-2. **Where a try lives** (under A). **A — with the person, outside the
-   project**: kept in the application's data folder per project, as the
-   run mode is, back after a restart; never in the folder, in Git or
-   before an agent. · B — in the window only; closing asks. · C — a
-   folder of the project that is not registered: changes what Git sees
-   (`format`).
-3. **How a try is sent.** **A — by the run-mode switch, as every run**
-   (REQ-00's 3.3 stands); in *Simulation* with no sample the pane
-   offers the switch, not a sample. · B — a try is always live, confirmed
-   once per project. · C — always live, never asked.
-4. **Keeping.** **A — *Keep ▾*: *Add to a scenario…* (after its selected
-   step, or last), *Save as a new scenario…*, *Save as component…*
-   ([REQ-18](REQ-18.md)); a name is asked only here.** · B — a new
-   scenario and a component only.
-5. **How many.** **A — several, a tab each, listed in *Files* under
-   *Requests, not saved*.** · B — one at a time.
+## Tickets and order
 
-## Acceptance criteria
+| Ticket | Issue | Size · review | Risk | After | Label |
+| --- | --- | --- | --- | --- | --- |
+| [REQ-17a](REQ-17a.md) the session holds a detached document | [#607](https://github.com/jakubiszon26/apiforge/issues/607) | M · 10 | none visible; the session | — | none: a second model reads it first |
+| [REQ-17b](REQ-17b.md) the try in the window | [#603](https://github.com/jakubiszon26/apiforge/issues/603) | M · 25 | `visible UI`, `permission` | REQ-17a, REQ-02a, REQ-05, REQ-16 | none until REQ-17a is read |
+| [REQ-17c](REQ-17c.md) kept across a restart | [#608](https://github.com/jakubiszon26/apiforge/issues/608) | S–M · 10 | `permission` (a secret at rest) | REQ-17b | `decision-needed` |
+| [REQ-17d](REQ-17d.md) *Keep* | [#609](https://github.com/jakubiszon26/apiforge/issues/609) | M · 15 | `visible UI` | REQ-17b, REQ-01b; REQ-18 for its last entry | none until REQ-17a is read |
 
-Written for 1 = A; numbered again per split ticket once decided.
+No ticket has a `format` flag: nothing a project keeps changes.
+REQ-17c adds a file of the person's own, versioned in itself.
 
-1. *New request* opens a try with the caret in the address; no prompt,
-   no file, the manifest unchanged.
-2. The panes are REQ-02a's own (`steps/request.rs`,
-   `steps/response.rs`), not copies; the project's base URL and
-   environment apply as in a scenario.
-3. *Send* sends exactly one request through `request_run`'s gates
-   (REQ-05, criterion 6); a live send is journalled.
-4. A changed field and *Send* again replace the response; nothing asks
-   to save.
-5. `apiforge run`, `apiforge check`, the MCP server's `project_overview`
-   and Git see no try.
-6. Each *Keep* entry writes what typing the request into that place
-   writes; kept to a scenario, the try's checks go with it.
-7. At 960 × 540 both panes hold 320 px and nothing is cut.
-8. QA step: part 3 of REQ-06.
+**`prepare_run`, resolved from the code.** A run does not need a
+session document: the window hands the runner a `RunRequest` holding a
+whole `Project` and a scenario id (`folder/runs.rs`, `start_run_with`).
+Editing does: every field of REQ-02a's panes writes through
+`ProjectSession::apply_model_edit`, and analysis, undo and the text
+live in a `DocumentSession`. A try built outside the session would need
+a copy of each. So a try is a document of the session that the session
+keeps out of the manifest, the files and everything written or shown to
+others: REQ-17a, the one owner of that rule. REQ-05 is not needed by
+the engine (a scenario of one request with no Cleanup is the request);
+it is needed for the one place in `folder/runs.rs` that keeps a result
+away from the document's report.
 
 ## Not in scope
 
@@ -137,19 +121,7 @@ client's collections (INT-01 #141); cURL (REQ-07).
 | # | Proposal | Problem it removes | Size · trade-off | Goes to |
 | --- | --- | --- | --- | --- |
 | 1 | The sends of a try are kept as a short history; two can be compared | "What did it answer before I changed that?" is lost on every send | S–M · memory only; a response can hold a secret, so never written | with 17b, or later |
-| 2 | Values changed between sends are the suggested inputs of a component | The person already showed which values vary | S, inside REQ-18 (its question 1) | REQ-18 |
+| 2 | Values changed between sends are the suggested inputs of a component | The person already showed which values vary | decided: REQ-18's 1 = A | REQ-18 |
 | 3 | *Try this request* on a request of a scenario: a copy as a try, with the values of the last run | Exploring around a test without changing the test | S after 17a | REQ, after 17a |
 | 4 | A `curl …` pasted into an empty try's address fills it | A try usually starts in a browser's network tab | a criterion of REQ-07 | REQ-07 (#464) |
 | 5 | Ctrl+Enter sends | One pointer action per try | REQ-00's P5, which waits for the owner | — |
-
-## Technical appendix
-
-- Reuse: REQ-02a's panes, REQ-04a's `Partial::Alone`, REQ-05's result
-  kept beside a report, `run_mode.rs` as the model for a per-person,
-  per-project file outside the project.
-- Open: `prepare_run` takes a document of the session
-  (`apiforge-project/src/execution.rs:112`); a try is not one. Either
-  the session learns a document that is never in the manifest, or the
-  window builds the one-request graph itself. This decides whether 17a
-  is M; to be read before the split is labelled.
-- Under B the whole ticket is S on REQ-01b and REQ-05.

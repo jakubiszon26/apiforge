@@ -510,6 +510,15 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   an invented name, one check for several fields (with LANG-02 #129 and
   LANG-04 #132). Their format questions return to the owner with the
   analyses.
+- From LANG-23 [#589](https://github.com/jakubiszon26/apiforge/issues/589) (the reference read by a tester; decided
+  2026-11-24, [ticket](tickets/LANG-23.md)): LANG-24 [#591](https://github.com/jakubiszon26/apiforge/issues/591) the reference's
+  wording, `ready:sonnet`; LANG-25 [#592](https://github.com/jakubiszon26/apiforge/issues/592) a request's argument read as
+  `arg.name` ([ticket](tickets/LANG-25.md), M · `format`, awaits approval and a
+  second read); short-circuit `&&`/`||` goes into LANG-01 #127 with
+  LANG-09 #353, unary minus into LANG-03 #131; `start` stays required in a
+  scenario. Candidates for the owner: LANG-26 [#593](https://github.com/jakubiszon26/apiforge/issues/593) an export always
+  readable by name, LANG-27 [#594](https://github.com/jakubiszon26/apiforge/issues/594) a warning for a check written far
+  from its step.
 
 ## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (closed)
 
@@ -614,8 +623,16 @@ criteria:
 | [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 A value of a response is used in a later request by choosing it | M · 20 · `visible UI` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
 | [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 A check made from a field offers what to compare with | S–M · 15 · `visible UI`, `default` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
 | [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 The window writes only what was set; [ticket](tickets/REQ-13.md) | S–M · 15 · `default` | in scope 2026-11-21; three questions open |
-| [#603](https://github.com/jakubiszon26/apiforge/issues/603) | REQ-17 One request tried without making a test of it; [ticket](tickets/REQ-17.md) | L, to split · 25 · `visible UI`, `default` | proposed 2026-11-24 from the owner's wish; `decision-needed`, five questions |
-| [#604](https://github.com/jakubiszon26/apiforge/issues/604) | REQ-18 A request saved as a component in one action; [ticket](tickets/REQ-18.md) | S–M · 15 · `visible UI`, `default` | proposed 2026-11-24 from the owner's wish; `decision-needed`, four questions |
+| [#574](https://github.com/jakubiszon26/apiforge/issues/574) | WS-05a A scenario's title above its board, edited there; [ticket](tickets/WS-05a.md) | M · 15 · `visible UI` | decided 2026-11-24 (B, editable); `ready:opus` |
+| [#596](https://github.com/jakubiszon26/apiforge/issues/596) | WS-05b Files lists scenarios and components by title; [ticket](tickets/WS-05b.md) | M · 15 · `visible UI` | decided 2026-11-24 (B); `ready:opus` · after WS-05a |
+| [#576](https://github.com/jakubiszon26/apiforge/issues/576) | REQ-15 A request with no sample response leads to where one is set; [ticket](tickets/REQ-15.md) | S · 10 · `visible UI` | decided 2026-11-24 (A); `ready:opus` · after REP-07a and REP-07b |
+| [#607](https://github.com/jakubiszon26/apiforge/issues/607) | REQ-17a The session holds a document in no file and not in the manifest; [ticket](tickets/REQ-17a.md) | M · 10 · the session | decided as a need 2026-11-24; a second model reads the design first |
+| [#603](https://github.com/jakubiszon26/apiforge/issues/603) | REQ-17b One request tried without making a test of it: New request, its tab, Send; [ticket](tickets/REQ-17b.md) | M · 25 · `visible UI`, `permission` | decided 2026-11-24 (1 A, 3 A, 5 A); after REQ-17a, REQ-02a, REQ-05, REQ-16 |
+| [#608](https://github.com/jakubiszon26/apiforge/issues/608) | REQ-17c A try is kept with the person across a restart; [ticket](tickets/REQ-17c.md) | S–M · 10 · `permission` | decided 2026-11-24 (2 A); `decision-needed`: one question |
+| [#609](https://github.com/jakubiszon26/apiforge/issues/609) | REQ-17d A try is kept: added to a scenario or saved as a new one; [ticket](tickets/REQ-17d.md) | M · 15 · `visible UI` | decided 2026-11-24 (4 A); after REQ-17b, REQ-01b |
+| [#604](https://github.com/jakubiszon26/apiforge/issues/604) | REQ-18 A request saved as a component in one action; [ticket](tickets/REQ-18.md) | M · 15 · `visible UI`, `default` | decided 2026-11-24 (1 A, 2 A, 3 B, 4 A); the ticket file waits for approval · after REQ-02a, REQ-05 |
+| [#601](https://github.com/jakubiszon26/apiforge/issues/601) | REQ-16 Send alone can send a secret the last run received; [ticket](tickets/REQ-16.md) | M · 10 · `permission`, `default` | decided 2026-11-24 (A); the ticket file waits for approval · after REQ-05 |
+| [#610](https://github.com/jakubiszon26/apiforge/issues/610) | REQ-19 The demo API can write a log of the requests it received | S · 5 | proposed 2026-11-24; tooling for REQ-06 part 3 |
 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the mandatory scenario and the owner's own run; [ticket](tickets/REQ-06.md) | S · 10 | after the rest |
 
 REQ-07 to REQ-10 are the planning model's proposals

@@ -1,14 +1,12 @@
 # REQ-18: A request is saved as a component in one action
 
-- Size: S–M · Owner review: 15 min · Risk: `visible UI`, `default` (what
+- Size: M · Owner review: 15 min · Risk: `visible UI`, `default` (what
   the dialog ticks)
-- State: **Analysis; four questions wait for the owner.** From the
-  owner's wish of 2026-11-24: "It would be nice if such a request could
-  be saved as a component straight away." Not scheduled, no `ready:*`
-  label · issue [#604](https://github.com/jakubiszon26/apiforge/issues/604)
-  · REQ sprint · after REQ-02a; from a try, after
-  [REQ-17](REQ-17.md)
-- Analysis model: Fable 5.2 · Implementation model: —
+- State: **Decided** by the owner on 2026-11-24 ([#604](https://github.com/jakubiszon26/apiforge/issues/604)): 1 A,
+  2 A, **3 B**, 4 A. Mock-up approved (panel A; the built dialog is
+  UX-30's own, not the compact drawing). After REQ-02a and REQ-05;
+  from a try through REQ-17d.
+- Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
 
@@ -41,7 +39,7 @@ inputs: **6 pointer actions and 3 text entries** today (select,
 *Selection actions*, *Save as component*, two ticks, *Save and
 publish*; the name and two input names); one more after the decided REQ
 tickets (the switch to *Canvas*); **2 pointer actions and at most 1
-text entry** under A.
+text entry** as decided.
 
 ## What the owner will see
 
@@ -64,58 +62,69 @@ Branch `mock/req-17`, commit `df0b06c1`.
 The dialog of A is drawn compact; the built one is UX-30's own with its
 rows.
 
-## Questions for the owner
+## Decisions (owner, 2026-11-24)
 
-Recommended first.
-
-1. **Which values are inputs.** Listed always: each field of a literal
-   body, each segment of the address after the host, each query value,
-   each header value except `Content-Type`. Never offered with its value
-   as a default: `Authorization` (it is offered as an environment
-   secret, the rule of REQ-07). **A — ticked: the values the person
-   changed between sends in this window; none when nothing was
-   changed.** · B — ticked: every body field and every path segment that
-   is a number or an id. · C — nothing ticked, as today.
-2. **A dialog, or one action.** **A — UX-30's dialog, opened with the
-   name taken from the request.** · B — no dialog: the component is
-   written with question 1's inputs and a line offers *Edit inputs* and
-   *Undo*.
-3. **The output.** **A — the response body, as today; *HTTP status*
-   offered unticked.** · B — body and status. · C — also fields picked
-   from the last response.
-4. **Revision and the step.** **A — as COMP-00 decided (5): *Publish
-   revision 1* is the default and *Only create the file* the other
-   choice; a step of a scenario is replaced by the call and its checks
-   read the call's output; a try stays open as it was.** · B — a draft
-   by default. · C — the step is always kept.
+| | Decided | Not chosen |
+| --- | --- | --- |
+| 1 = A | Ticked: the values the person changed between sends in this window; none when nothing changed | every body field and id; none ever |
+| 2 = A | UX-30's dialog, improved, from a try, *Steps* and Canvas | one action with no dialog |
+| 3 = B | Outputs: the response **body and the status, both ticked** | body only; fields picked from the response |
+| 4 = A | Publishes revision 1 by default; a scenario's step is replaced by the call; a try stays open | a draft by default; the step always kept |
 
 ## Acceptance criteria
 
-For A in each.
+Tests in `folder/acceptance_tests/req18.rs`; unit tests in
+`apiforge-core/src/edit/component.rs`.
 
-1. *Save as component…* is offered in the three places named and opens
-   the same dialog as the board's for that one request.
-2. The dialog lists the values of question 1 with where each comes from
-   and its value; a ticked one becomes an input whose default is that
-   value and is optional (KTLO-36).
-3. The component's text passes the check and equals what the hand path
-   writes; called with no inputs it sends the request as it was.
-4. A value changed between two sends of this request in this window is
-   ticked and says so; a new window ticks none.
-5. `Authorization` is never written as a default; `Content-Type` is not
-   offered.
-6. From a scenario the result is UX-30's (one undoable edit; the checks
-   after the step read the call); from a try the try is unchanged and
-   the component is in *Project components*.
-7. At 960 × 540 the dialog's rows are not cut; a long value is shortened
-   with its full text on hover.
-8. QA step: part 3 of REQ-06, its last sentence.
+1. *Save as component…* is in the request pane's menu and the card's
+   menu in *Steps*, and stays in the board's *Selection actions*; each
+   opens the one dialog for that request. `req18_criterion_1_*`
+2. For one request the rows are: each field of a literal body, each
+   header except `Content-Type`, each query value, and each segment of
+   the address after the host. A row shows where the value is and the
+   value. The board's dialog for several steps lists what it lists
+   today. `req18_criterion_2_*`
+3. A row's proposed name is its last path segment (`productId`, not
+   `body_productId`), made unique by a number. `req18_criterion_3_*`
+4. A value that differed between two sends of this request in this
+   window (a run, *Send alone* or a try's *Send*) is ticked and says in
+   how many; with no such value nothing is ticked; a new window ticks
+   nothing. `req18_criterion_4_*`
+5. A ticked literal becomes an input whose default is that value and is
+   optional (KTLO-36); a ticked segment of the address rewrites that
+   part to `param.<name>`; called with no inputs the component sends
+   the request as it was. `req18_criterion_5_*`
+6. A value under a sensitive name (`is_sensitive_key`) is listed
+   without its value, never ticked by criterion 4, and when ticked by
+   the person becomes a required input with no default.
+   `req18_criterion_6_*`
+7. **Outputs: *Response* (body) and *HTTP status* are both ticked** for
+   one request, with whatever a later step reads; headers and duration
+   offered unticked. For several steps the outputs are as today.
+   `req18_criterion_7_*`
+8. *Publish revision 1…* is the default. From a scenario the result is
+   UX-30's: one undoable edit, the step replaced by the call, the
+   checks after it reading the call's `body` and `status`.
+   `req18_criterion_8_*`
+9. The component's text passes the check and is what adding those
+   inputs and typing the placeholders writes: no format change.
+   `req18_criterion_9_*`
+10. At 960 × 540 the dialog's rows are not cut: a long value is
+    shortened with its full text on hover. `assert_within_window`
+11. QA step: part 3 of REQ-06, its last sentence.
+
+## Captures the owner judges on the pull request
+
+The dialog for one request with two ticked rows, at 960 × 540 and
+1600 × 1000; a row of the address; a row under a sensitive name; the
+scenario after the call replaced the step.
 
 ## Not in scope
 
 Several requests at once from *Steps* (the board's selection does it);
 updating a call to a newer revision (COMP-01); a component made from a
-cURL command (REQ-07 then this).
+cURL command (REQ-07 then this); the entry in a try's *Keep ▾*
+(REQ-17d, criterion 6).
 
 ## Technical appendix
 
@@ -124,5 +133,12 @@ cURL command (REQ-07 then this).
   the leaves of the body and the headers already. New: the literal
   parts of the address template as leaves, a ticked one rewritten to
   `param.<name>`; the last path segment as the proposed name; the ticks.
-- Regression: the board's dialog for several steps (UX-30's and UX-37's
-  tests unchanged); KTLO-32 and KTLO-36 on required inputs.
+- Files: `apiforge-core/src/edit/component.rs`, `edit/extract.rs`;
+  `folder/save_component.rs`; new `steps/changed.rs` (what differed
+  between sends, fed where `folder/runs.rs` takes a finished run or
+  single send; memory only); `steps/request.rs`, `steps/list_edit.rs`
+  (the entries); the test file.
+- Regression: the board's dialog for several steps — UX-30's and
+  UX-37's tests unchanged, and criterion 2's last sentence; KTLO-32 and
+  KTLO-36 on required inputs; the default of the outputs (criterion 7)
+  is new for one request only.
