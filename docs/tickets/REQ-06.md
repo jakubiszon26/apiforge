@@ -45,6 +45,34 @@ opening Code:
    holds only those edits.
 5. Send one request alone.
 
+**Part 3 — one request, tried** (added on 2026-11-24 from the owner's
+wish; [REQ-17](REQ-17.md), [REQ-18](REQ-18.md)). A project that already
+holds other tests, the demo API on loopback, window 1280 × 800, no
+stored settings. The instruction, and nothing else:
+
+> You want to see what the shop's API answers when a cart is created
+> for a product that does not exist. Find out. Try at least three
+> different products and two quantities, and send once with an extra
+> header `X-Client: tester`. You are not writing a test. When you have
+> seen enough, keep the request so that a test could create a cart with
+> any product and quantity and use the cart that comes back.
+
+The pass check, on files and with the CLI: the demo API
+received at least six `POST /demo/shop/carts`, read from its request
+log (`apiforge-demo-api --request-log <file>`, REQ-19 #610: the run
+journal holds only interrupted runs and the window one report per
+document, so neither can count sends), among them three product
+ids, two quantities and one with the header; the project has one
+published component with inputs for the product and the quantity whose
+output is the response body, and `apiforge run` of a one-step scenario
+calling it with `productId: 123, quantity: 2` passes live; `apiforge
+check` passes; `git status` shows that component and nothing else new —
+no scenario was added for the trying. Counted besides the standard
+measures: actions and text entries to the first response; actions per
+further try; whether a file was named before the first send; files
+left in the project that the task did not ask for; requests sent that
+were not tries (a whole scenario run to send one).
+
 ## Acceptance criteria
 
 1. **The mandatory scenario is done in the window.** Code is not opened
@@ -75,6 +103,12 @@ opening Code:
 7. The owner does part 1 and part 2 on a release build of `main` and
    records the result on #463: done, or the findings.
 8. Each finding becomes an issue or is fixed before the sprint closes.
+9. **Part 3 is done in the window** by its pass check, by an agents'
+   baseline round first and then by the owner. REQ-17 and REQ-18 are
+   decided (2026-11-24): after they merge the bar is no file named
+   before the first send, nothing left in the project but the
+   component, and fewer actions than the baseline on the decided path,
+   which is run once after REQ-05 and recorded.
 
 ## What the owner will see
 
@@ -147,6 +181,8 @@ scenario has real alternatives:
 | REQ-11's analysis, after DIAG-08 | A value from a response into a later request | Today · A completion fed by the last run · B *Use in…* on the response field · C dragging the field onto the request's field | REQ-11 |
 | REQ-12's analysis | A check from a field | Today (literal) · DIAG-08 as built · A the offer of sources in the ✓ menu · B the source chosen in the new check's row | REQ-12 |
 | After REQ-05 merges | Baseline of the request view: change a body, see the response | *Run to here* · *Send alone* | nothing; findings before REQ-06 |
+| After REQ-05 merges | Baseline of part 3, one request tried and kept | the decided path | nothing; the figures REQ-17 and REQ-18 are judged against |
+| REQ-17's analysis, if the owner asks for the numbers | One request tried | Today · A a request with no file · B a scenario made for the try | REQ-17 |
 | REQ-06 | Baseline of the whole scenario on the release build | one | the owner's run |
 
 ## Decisions (owner, 2026-11-21)
