@@ -82,22 +82,22 @@ fn text(node: &egui_kittest::Node<'_>) -> String {
     node.label().or_else(|| node.value()).unwrap_or_default()
 }
 
-/// The text under the comparison box's `caption`, or `None` when the card
-/// has no box.
+/// The text beside the comparison box's `caption` (REP-07b), or `None` when
+/// the card has no box.
 fn side(harness: &FolderHarness, caption: &str) -> Option<String> {
     let caption = harness.query_by_label(caption)?.rect();
-    let below = harness
+    let beside = harness
         .query_all_by_role(Role::Label)
         .filter(|node| {
             let rect = node.rect();
-            (rect.left() - caption.left()).abs() <= 2.0
-                && rect.top() >= caption.bottom() - 1.0
-                && rect.top() <= caption.bottom() + 24.0
+            rect.left() > caption.right()
+                && rect.top() <= caption.center().y
+                && rect.bottom() >= caption.center().y
                 && !text(node).is_empty()
         })
-        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
-        .unwrap_or_else(|| panic!("a text under {caption:?}"));
-    Some(text(&below))
+        .min_by(|a, b| a.rect().left().total_cmp(&b.rect().left()))
+        .unwrap_or_else(|| panic!("a text beside {caption:?}"));
+    Some(text(&beside))
 }
 
 /// What the selected step's card says on each side.

@@ -718,9 +718,18 @@ fn rep07a_the_controls_above_a_value_are_not_cut() {
     let (_project, mut harness, _) = labels_with(MINIMUM, &failing());
     ran(&mut harness);
     assert_eq!(widths(&harness), whole, "beside the list as it opens");
+    // They are under the response of the check's step (REP-07b).
+    harness
+        .get_by_label(crate::report::COPY_JSON)
+        .scroll_to_me();
+    settle(&mut harness);
     assert_within_window(&harness, &CONTROLS);
     drag_edge(&mut harness, MINIMUM.x);
     assert_eq!(widths(&harness), whole, "beside the widest list");
+    harness
+        .get_by_label(crate::report::COPY_JSON)
+        .scroll_to_me();
+    settle(&mut harness);
     assert_within_window(&harness, &CONTROLS);
 }
 
