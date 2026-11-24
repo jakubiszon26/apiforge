@@ -2979,8 +2979,8 @@ mod tests {
         // Where each is pressed: the grip's centre, 8 px under the panel's
         // top, and the edge on the top, left of the grip.
         for (way, pressed) in [
-            ("grip", egui::pos2(600.0, 700.0 - 320.0 + 8.0)),
-            ("edge", egui::pos2(100.0, 700.0 - 320.0)),
+            ("grip", egui::pos2(600.0, 700.0 - 350.0 + 8.0)),
+            ("edge", egui::pos2(100.0, 700.0 - 350.0)),
         ] {
             let context = egui::Context::default();
             crate::theme::apply(&context);
