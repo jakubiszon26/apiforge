@@ -1564,11 +1564,22 @@ impl ReportPanel {
                 .inner_margin(egui::Margin::symmetric(10, 6))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(
-                        RichText::new(message.as_ref())
-                            .size(12.0)
-                            .color(theme::TEXT),
-                    );
+                    if crate::mock::sample() != 0 && message.as_ref() == crate::mock::REFUSAL {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                RichText::new(message.as_ref())
+                                    .size(12.0)
+                                    .color(theme::TEXT),
+                            );
+                            let _ = ui.add(widgets::action(Icon::Plus, crate::mock::ACTION));
+                        });
+                    } else {
+                        ui.label(
+                            RichText::new(message.as_ref())
+                                .size(12.0)
+                                .color(theme::TEXT),
+                        );
+                    }
                 });
         }
 

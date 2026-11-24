@@ -520,8 +520,12 @@ impl Inspector {
             check(ui, id, node);
         }
 
+        let sample_up = crate::mock::sample() == 2 && node.kind == NodeKind::Request;
         if let Some(handle) = self.arguments(ui, id, context, node) {
             actions.push(Action::Reveal(handle));
+        }
+        if sample_up {
+            samples(ui, id, context, node);
         }
         // Keep the values being configured near the top; ordering remains
         // available below them as a keyboard alternative to canvas wires.
@@ -531,7 +535,7 @@ impl Inspector {
         if node.kind == NodeKind::Condition {
             condition_checks(ui, id, context, node);
         }
-        if node.kind == NodeKind::Request {
+        if node.kind == NodeKind::Request && !sample_up {
             samples(ui, id, context, node);
         }
     }
@@ -1341,12 +1345,16 @@ fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
     ui.add_space(8.0);
     let shown = egui::CollapsingHeader::new(RichText::new("Contract and sample response").strong())
         .id_salt(id.with("samples"))
+        .open(crate::mock::opened().then_some(true))
         .show(ui, |ui| {
             contract_combo(ui, id.with("contract"), context, &mut node.config.contract_id);
             widgets::field_label(ui, "Sample HTTP status");
             let mut status = node.config.sample_status.unwrap_or(200);
             if ui.add(egui::DragValue::new(&mut status).range(100..=599)).changed() {
                 node.config.sample_status = Some(status);
+            }
+            if crate::mock::opened() && crate::mock::scroll() {
+                ui.scroll_to_cursor(Some(egui::Align::TOP));
             }
             widgets::field_label(ui, "Sample body");
             let current = match &node.config.sample_response {
@@ -1363,6 +1371,16 @@ fn samples(ui: &mut Ui, id: Id, context: &Context<'_>, node: &mut Node) {
 
 fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
     let node = context.node;
+    let nothing = !output_ports(node, context.project).iter().any(|port| match context.step {
+        Some(step) => step.outputs.contains_key(&port.name),
+        None => response::sample_output(node, &port.name, context.project).is_some(),
+    });
+    if nothing && crate::mock::sample() != 0 && node.kind == NodeKind::Request {
+        widgets::hint(ui, "No response yet. Run the step, or add a sample.");
+        ui.add_space(6.0);
+        let _ = ui.add(widgets::action(Icon::Plus, crate::mock::ACTION));
+        return;
+    }
     // Where the data comes from: a mark and a sentence (DIAG-10).
     ui.horizontal(|ui| {
         if context.step.is_some() {
@@ -1412,7 +1430,15 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
             });
         }
     }
-    if !any {
+    if !any && crate::mock::sample() != 0 && node.kind == NodeKind::Request {
+        ui.add_space(12.0);
+        widgets::hint(
+            ui,
+            "No data yet. Run the step, or give the request a sample response.",
+        );
+        ui.add_space(6.0);
+        let _ = ui.add(widgets::action(Icon::Plus, crate::mock::ACTION));
+    } else if !any {
         ui.add_space(12.0);
         widgets::hint(
             ui,

@@ -328,6 +328,19 @@ impl FolderApp {
             return;
         };
         let writable = !session.is_read_only();
+        *crate::mock::TITLES.lock().unwrap() = Some(
+            session
+                .documents()
+                .iter()
+                .filter_map(|document| {
+                    let name = match &**document.shared_model()? {
+                        Document::Scenario(scenario) => scenario.name.clone(),
+                        Document::Component(component) => component.name.clone(),
+                    };
+                    Some((document.entry().path.as_str().to_owned(), name))
+                })
+                .collect(),
+        );
         let rows = self.explorer_rows();
         let selected_row = self
             .explorer
@@ -971,7 +984,12 @@ fn explorer_row(
         (RowKind::Source, _) => format!("{} — not registered in this project", row.path),
         (RowKind::Link, _) => format!("{} — a link; not followed", row.path),
         _ if row.is_manifest() => format!("{} — the project file, kept by API Forge", row.path),
-        _ => row.path.clone(),
+        _ => match crate::mock::title_of(&row.path) {
+            Some(title) if matches!(crate::mock::title(), 1 | 2) => {
+                format!("{title}\n{}", row.path)
+            }
+            _ => row.path.clone(),
+        },
     });
     let painter = ui.painter_at(rect);
     let drop_target = row.is_folder()
@@ -1024,10 +1042,20 @@ fn explorer_row(
         _ => theme::MUTED,
     };
     let badge_width = if status.is_some() { 16.0 } else { 0.0 };
+    let by_title = (crate::mock::title() == 2)
+        .then(|| crate::mock::title_of(&row.path))
+        .flatten();
     let mut job = egui::text::LayoutJob::single_section(
-        row.name().to_owned(),
+        by_title.clone().unwrap_or_else(|| row.name().to_owned()),
         egui::TextFormat::simple(egui::FontId::proportional(theme::FONT_BODY), text_colour),
     );
+    if by_title.is_some() {
+        job.append(
+            row.name(),
+            10.0,
+            egui::TextFormat::simple(egui::FontId::proportional(theme::FONT_LABEL), theme::MUTED),
+        );
+    }
     job.wrap = egui::text::TextWrapping::truncate_at_width(
         (rect.right() - x - badge_width - 6.0).max(0.0),
     );

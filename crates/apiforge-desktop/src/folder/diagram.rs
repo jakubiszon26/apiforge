@@ -75,10 +75,15 @@ impl FolderApp {
         let cleanup = self.cleanup(document_id);
         // The document's header shares the board's header row (KTLO-12): Split
         // leaves the file name and kind to the tab strip beside the code.
+        let document_title = match &*model {
+            Document::Scenario(scenario) => scenario.name.clone(),
+            Document::Component(component) => component.name.clone(),
+        };
         let header = Header {
             name: (self.workbench.mode == Mode::Diagram)
                 .then(|| (file_name(&snapshot.path), kind_label(snapshot.kind))),
             tabs: matches!(*model, Document::Scenario(_)),
+            title: (crate::mock::title() != 0).then_some(document_title.as_str()),
         };
         // While observing, the bar at the bottom says why (MCP-08a, M1). A
         // save or a publication holds the board for a moment, and the
@@ -1389,10 +1394,14 @@ const NAME_MIN_WIDTH: f32 = 80.0;
 struct Header<'a> {
     name: Option<(&'a str, &'static str)>,
     tabs: bool,
+    /// WS-05 mock: the document's title, shown before the file name.
+    title: Option<&'a str>,
 }
 
 /// What of the header fits, and its width.
 struct HeaderFit {
+    /// WS-05 mock: the room of the file name after the title; 0 leaves it out.
+    file_width: f32,
     name_width: f32,
     kind: bool,
     width: f32,
@@ -1430,6 +1439,7 @@ impl Header<'_> {
         };
         let Some((name, kind)) = self.name else {
             return HeaderFit {
+                file_width: 0.0,
                 name_width: 0.0,
                 kind: false,
                 width: tabs,
@@ -1447,6 +1457,38 @@ impl Header<'_> {
         } else {
             0.0
         };
+        if let Some(title) = self.title {
+            let title_full = Self::text_width(
+                ui,
+                title,
+                egui::FontId::new(theme::FONT_BODY, theme::bold_family()),
+            );
+            let file_full =
+                gap + Self::text_width(ui, name, egui::FontId::proportional(theme::FONT_LABEL));
+            let alone = room.alone - fixed - 1.0;
+            let room = room.with_summary - fixed - 1.0;
+            let (name_width, file_width, kind) = if title_full + file_full + kind_width <= room {
+                (title_full, file_full, true)
+            } else if title_full + file_full <= room {
+                (title_full, file_full, false)
+            } else if title_full <= room {
+                (title_full, 0.0, false)
+            } else if room >= NAME_MIN_WIDTH {
+                (room, 0.0, false)
+            } else {
+                (
+                    alone.clamp(NAME_MIN_WIDTH.min(title_full), title_full),
+                    0.0,
+                    false,
+                )
+            };
+            return HeaderFit {
+                file_width,
+                name_width,
+                kind,
+                width: name_width + file_width + if kind { kind_width } else { 0.0 } + fixed,
+            };
+        }
         // A point to spare keeps rounding from pushing the summary out.
         let (name_width, kind) = if full + kind_width + fixed <= room.with_summary {
             (full, true)
@@ -1461,6 +1503,7 @@ impl Header<'_> {
             )
         };
         HeaderFit {
+            file_width: 0.0,
             name_width,
             kind,
             width: name_width + if kind { kind_width } else { 0.0 } + fixed,
@@ -1483,6 +1526,17 @@ impl Header<'_> {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     if let Some((name, kind)) = self.name {
+                        let file = name;
+                        let name = self.title.unwrap_or(name);
+                        if self.title.is_some() && crate::mock::EDIT.load(std::sync::atomic::Ordering::Relaxed) {
+                            let mut text = name.to_owned();
+                            let field = ui.add(
+                                egui::TextEdit::singleline(&mut text)
+                                    .desired_width(fit.name_width + 12.0)
+                                    .font(egui::FontId::new(theme::FONT_BODY, theme::bold_family())),
+                            );
+                            field.request_focus();
+                        } else {
                         ui.scope(|ui| {
                             ui.set_max_width(fit.name_width);
                             ui.add(
@@ -1492,8 +1546,23 @@ impl Header<'_> {
                                         .family(theme::bold_family()),
                                 )
                                 .truncate(),
-                            );
+                            )
+                            .on_hover_text(format!("{name}\n{file}"));
                         });
+                        }
+                        if self.title.is_some() && fit.file_width > 0.0 {
+                            ui.scope(|ui| {
+                                ui.set_max_width(fit.file_width - ui.spacing().item_spacing.x);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(file)
+                                            .size(theme::FONT_LABEL)
+                                            .color(theme::MUTED),
+                                    )
+                                    .truncate(),
+                                );
+                            });
+                        }
                         if fit.kind {
                             widgets::hint(ui, kind);
                         }

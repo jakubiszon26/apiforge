@@ -59,6 +59,7 @@ mod stop;
 mod testing;
 mod theme;
 mod widgets;
+mod mock;
 mod window_fit;
 mod windows_console;
 
