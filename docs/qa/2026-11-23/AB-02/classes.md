@@ -5,7 +5,8 @@ Proposed by the planning model on 2026-11-24 from [results.md](results.md)
 against v0.1.0's one recorded run of
 [AB-01 round 4](../AB-01/round-4/results.md). It closes the point
 [AB-01's classes](../AB-01/classes.md#not-decidable-reordering-a-step-t6)
-left open. **The owner confirms the list and the classes**
+left open. **Confirmed by the owner on 2026-11-24** (quiz; recorded on
+#583 and #598), with #598 answered A
 ([regressions](../../../process/ab-testing.md#regressions)).
 
 ## Is T6 decidable now
@@ -39,7 +40,7 @@ two lines asked for, and no wrong turn was made in every first-time run.
 
 | | Wrong turn | Runs | Class | Goes to |
 | --- | --- | --- | --- | --- |
-| W1 | The menu of `profile`, headed "After: profile · What should happen next?", adds the request last (step 30), bound to `profile`'s data | Run 2; the void attempt | **3** as a cost (one Undo, one of three counted runs). **A defect apart from its class**: the heading promises what *Add step* and the `+` do from the same place, and a tester who does not look at the end keeps a request that runs last | DIAG-22 [#598](https://github.com/jakubiszon26/apiforge/issues/598), new, `decision-needed` |
+| W1 | The menu of `profile`, headed "After: profile · What should happen next?", adds the request last (step 30), bound to `profile`'s data | Run 2; the void attempt | **3** as a cost (one Undo, one of three counted runs). **A defect apart from its class**: the heading promises what *Add step* and the `+` do from the same place, and a tester who does not look at the end keeps a request that runs last | DIAG-22 [#598](https://github.com/jakubiszon26/apiforge/issues/598), new; decided A, `ready:opus` |
 | W2 | *Output data* does not take the sample response | Run 2; the void attempt | None: **the same on both versions** (round 4) | REQ-15 [#576](https://github.com/jakubiszon26/apiforge/issues/576) |
 | W3 | A right-click on the line `profile` → `team` opens the board's general *Add a step to the scenario* | Run 3; the void attempt | **None**: v0.1.0 has no insertion on a line, and it cost one Escape, after which the `+` showed and was used | No ticket ([below](#w3-the-right-click-on-a-line)) |
 
@@ -56,9 +57,9 @@ output is bound to it and written last
 after its step (`nodes.rs:120`). Since LANG-13 written last is run last.
 Reproduced by a failing headless test on the branch
 `test/repro-ab-02-insert-after` (`40dff6f2`): the new step is at place
-17 of 18, expected 3. Where a step lands is a default, so the fix waits
-for one answer on #598; A, recommended, is to insert after the step as
-the other two ways do.
+17 of 18, expected 3. Where a step lands is a default, so the fix
+waited for the owner: **A**, the step is inserted after the step it was
+taken on, unbound, as the other two ways do, in the folder window.
 
 ### W3: the right-click on a line
 
@@ -114,9 +115,9 @@ with input sent unseen is void (one line, with KTLO-48 #581).
   driver tried a drag once the menu had *Move earlier*. Fable's proposal:
   answer C on #580 (neither) until a task needs a move over many places.
 
-## For the owner
+## The owner's answers (2026-11-24)
 
-1. Confirm: T6 decided, better on `main`; nothing worse than v0.1.0; W1
-   class 3 and a defect (#598), W2 the same on both, W3 no ticket; the
+1. Confirmed: T6 decided, better on `main`; nothing worse than v0.1.0;
+   W1 class 3 and a defect (#598), W2 the same on both, W3 no ticket; the
    void ruling stands.
-2. #598: A (recommended), B or C.
+2. #598: **A**.
