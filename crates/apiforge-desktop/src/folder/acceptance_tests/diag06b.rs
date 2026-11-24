@@ -1030,3 +1030,57 @@ fn review_diag06b() {
         crate::testing::capture(&mut harness, &format!("diag06b-menu-{suffix}"), None);
     }
 }
+
+// AB-02, run 2 ------------------------------------------------------------------
+
+/// Reproduction of AB-02's wrong turn in run 2 (#583): the menu a
+/// right-click on `profile` opens is headed "AFTER: PROFILE · What should
+/// happen next?", and the *HTTP request* taken from it is written last on
+/// the board and runs last, while *Add step* with `profile` selected and
+/// the `+` on the line after it put the step directly after `profile`.
+#[test]
+fn ab02_a_step_from_the_menu_headed_after_a_step_runs_directly_after_it() {
+    let (_project, mut harness, id) = booking_day();
+    let before = graph(&harness, &id);
+    let original = steps(&harness, &id);
+    let next = original[position(&original, "profile") + 1].clone();
+    menu_of(&mut harness, &id, "profile");
+    assert!(
+        harness.query_by_label("AFTER: PROFILE").is_some(),
+        "the menu is headed with the step it was opened on"
+    );
+    assert!(harness.query_by_label("What should happen next?").is_some());
+    let card = board(&harness, &id)
+        .debug_card_rect(&id_of(&before, "profile"))
+        .unwrap();
+    harness
+        .get_all_by_label("HTTP request")
+        .min_by(|a, b| {
+            let distance = |rect: Rect| rect.center().distance(card.center());
+            distance(a.rect()).total_cmp(&distance(b.rect()))
+        })
+        .expect("the menu offers a request")
+        .click();
+    settle(&mut harness);
+    harness.step();
+    let after = graph(&harness, &id);
+    let new = after
+        .nodes
+        .iter()
+        .find(|node| !before.nodes.iter().any(|old| old.id == node.id))
+        .expect("one step added")
+        .handle
+        .clone();
+    passes(&harness, &id);
+    let order = steps(&harness, &id);
+    assert_eq!(
+        position(&order, &new),
+        position(&order, "profile") + 1,
+        "`{new}` runs directly after `profile`: {order:?}"
+    );
+    assert_eq!(
+        position(&order, &next),
+        position(&order, &new) + 1,
+        "`{next}` follows `{new}`: {order:?}"
+    );
+}
