@@ -21,31 +21,25 @@ language is small on purpose, so that a person, the window and an AI model
 can all write the same file and read each other's changes. It is written in
 Rust with [egui](https://github.com/emilk/egui).
 
-![The window in Split after a simulated run: the scenario's code, the same scenario as a board with its checks drawn, the selected request's output data, and Run results](docs/images/main-window.png)
-
-The scenario in the picture is the example of the next section, run as a
-simulation.
+![The window in Split after a simulated run: the scenario's code, the same scenario as a board with the checks of each request, and Run results with the selected request's response](docs/images/main-window.png)
 
 ## What it is
 
 - **One document, three views.** *Code*, *Diagram* and *Split* show one
   `.afs` file. A statement is a block; a value one statement reads from
   another is a wire. Invalid code keeps the last valid board on screen,
-  read-only, until the text is valid again.
-- **Runs without a server, or against one.** *Simulation* answers every
-  request with the sample response written beside it and sends nothing.
-  *Live* sends real requests to the project's base URL. The switch is beside
-  the Run button.
+  read-only.
+- **Simulation and live runs.** *Simulation* answers every request with the
+  sample response written beside it and sends nothing; *Live* sends the
+  requests. The switch is beside the Run button.
 - **Run results that lead back to the test.** A request is listed with its
   checks under it; a failed check shows what it expected and what it got. A
   field of a response becomes a check or a variable from its row.
-- **Components with published revisions.** A reusable step has typed inputs
-  and outputs. A scenario calls an exact revision, `product@1(...)`, so a
-  later change to the component does not alter a scenario until its call is
-  moved to the new revision.
-- **A command line and an MCP server.** `apiforge check`, `fmt`, `print`,
-  `apply`, `fix` and `run` work on the same files; `apiforge mcp` gives them
-  to an AI agent ([below](#working-with-an-agent-over-mcp)).
+- **Components with published revisions.** A scenario calls an exact
+  revision of a reusable step, `product@1(...)`; a later change to the
+  component does not alter the scenario until its call is moved.
+- **A command line and an MCP server** over the same files:
+  `apiforge check`, `fmt`, `print`, `apply`, `fix`, `run` and `mcp`.
 
 ![Run results of a failed simulation: the request with its checks under it, and the failed check with the expected and the actual value](docs/images/run-results.png)
 
@@ -76,44 +70,32 @@ scenario "Create and read a booking" {
 }
 ```
 
-A simulated run from the command line:
-
-```console
-$ apiforge run --folder . --scenario scenarios/booking.afs
-       ok  begin
-       ok  created
-       ok  accepted
-       ok  bookingId
-       ok  booking
-       ok  found
-       ok  same_room
-       ok  booked
-       ok  removed
-       ok  gone
-Passed
-```
-
-The exit code is 0 when the run passed, 1 when it did not and 2 for wrong
-arguments; `--json` prints every step with its inputs, its outputs and the
-request it sent; `--live` sends the requests.
+`apiforge run --folder . --scenario scenarios/booking.afs` simulates it and
+prints `ok` for each of its ten statements, then `Passed`. `--live` sends the
+requests; `--json` prints every statement's inputs and outputs and each
+request sent. The exit code is 0 when the run passed, 1 when it did not and
+2 for wrong arguments.
 
 ### What it can do today
 
 - **Requests**: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`
-  with headers, query, a JSON or text body, a timeout, and a `sample`
-  response for simulation. A request's `status`, `body`, `headers` and
-  `duration` are values the following statements read.
-- **Order by position.** Steps run top to bottom as written. A check or a
-  value is not a step: it runs as soon as what it reads exists.
+  with headers, query, a JSON or text body, a timeout and a `sample`
+  response. A path is joined to the project's base URL; an absolute URL is
+  sent as written. A request's `status`, `body`, `headers` and `duration`
+  are values the following statements read.
+- **Order by position.** The steps (`start`, requests, component calls and
+  `if`) run top to bottom as written. Checks and values are placed by what
+  they read: each runs as soon as its inputs exist, and a run lists it with
+  its result like a step.
 - **Checks**: `assert` with `==`, `!=`, `<`, `>`, `<=`, `>=`, a numeric
   tolerance (`~= … within`), `contains`, a type (`is "number"`), `exists`,
   `nonempty`, and any Boolean expression; `condition all { … }` and
   `condition any { … }` guard the data later steps read.
 - **Values and expressions**: literals, objects, lists, string templates
-  (`"/bookings/{{bookingId}}"`), arithmetic, comparison and logic, and built-in
-  functions such as `round`, `length`, `concat`, `uuid` and `random`. `var`
-  names a value several steps read.
-- **Branches**: `if … { } else { }` on one predicate.
+  (`"/bookings/{{bookingId}}"`), arithmetic, comparison and logic, and
+  built-in functions such as `round`, `length`, `concat`, `uuid` and
+  `random`. `var` names a value several steps read.
+- **Branches**: `if … { } else { }` on a check or any Boolean expression.
 - **Cleanup**: a `cleanup { }` block runs after the main flow whatever
   happened in it. A cleanup step whose input never came into being is
   skipped, and the ones after it still run.
@@ -129,12 +111,12 @@ request it sent; `--live` sends the requests.
 - **One printed form**: `apiforge fmt` writes the one canonical layout and
   keeps every comment; `fmt --check` fails on a file that is not in it.
 - **Diagnostics before a run**: `apiforge check` reports each problem with
-  its file, line, column and message. Over MCP the same diagnostics carry,
-  for some problems, a fix: the replacement text and the range it goes to.
+  its file, line, column and message.
 
-The whole language is on one page, [docs/language/reference.md](docs/language/reference.md),
-and a test of the repository parses every example on it. The grammar and the
-round trip between text and board are decided in
+The whole language is on one page,
+[docs/language/reference.md](docs/language/reference.md) (848 lines), and a
+test of the repository parses every example on it. The grammar and the round
+trip between text and board are decided in
 [ADR 0005](docs/decisions/0005-scenario-language.md); what runs after a
 failure in [ADR 0015](docs/decisions/0015-run-after-an-error.md).
 
@@ -143,18 +125,19 @@ failure in [ADR 0015](docs/decisions/0015-run-after-an-error.md).
 No loops, no table of cases, no waiting or retrying, no user-defined
 functions, no imports and one scenario per file. `&&` and `||` evaluate both
 sides, so a guard does not protect the read after it. A check that reads a
-field the response lacks ends as an error, not as a failed check. Headers
-are written in every request. Bodies are JSON or text: no multipart upload.
-There is no automatic OAuth flow, and a redirect is reported as an error,
-not followed. `check` does not know the shape of a response: a misspelt field
-name passes it and is found by the run.
+field the response lacks ends as an error, not as a failed check. There are
+no shared headers: each request that needs a header writes it. Bodies are
+JSON or text: no multipart upload. There is no automatic OAuth flow, and a
+redirect is reported as an error, not followed. `check` does not know the
+shape of a response: a misspelt field name passes it and is found by the
+run.
 
-## Why this helps a language model
+## Why it suits a language model
 
-A model can already write API tests in JavaScript; with
+A model can already write API tests in JavaScript or TypeScript; with
 [Playwright](https://playwright.dev/docs/api-testing) it needs no special
-language. The same test both ways, first as above and then with Playwright's
-`request` fixture:
+language. The scenario above as a Playwright test, with the `request`
+fixture:
 
 ```ts
 import { test, expect } from '@playwright/test';
@@ -176,74 +159,81 @@ test('create and read a booking', async ({ request }) => {
 ```
 
 Both were run against one local test server, passing and with a wrong room
-in the answer; in both the booking was deleted after the failure (Playwright
-1.65.1, API Forge at this commit). The Playwright file is the shorter one:
-16 lines and 594 characters against 22 and 668 (`wc -l -m`), beside a
-five-line `playwright.config.ts` for the base URL. Three of the `.afs` lines
-are the sample responses, which the Playwright test has no counterpart for.
-The case for `.afs` rests on what the smaller language rules out and what
-its tools can promise because of that, not on brevity:
+in the answer, and both deleted the booking after the failure (Playwright
+1.65.1, API Forge at this commit). The Playwright test is the shorter one:
+16 lines and 594 characters against 22 and 668 (`wc -l -m`); each also has
+a project file for the base URL, `playwright.config.ts` there and
+`apiforge.project.json` here. Three of the `.afs` lines are the sample
+responses. The case for `.afs` rests on what a small language and its own
+tools can promise to a model and to the person beside it, not on brevity:
 
-- **A scenario can only send requests, compute and check.** There is no
-  `import`, no file or process access and no function to define. A reviewer
-  of a model's scenario reads requests and checks, not a program; a
-  Playwright test is a Node.js program and can do whatever one can. That is
-  also the language's limit, as the next list says. A request may name any
-  absolute URL, not only the project's API.
-- **Wrong text is reported before anything runs, in a form a model can
-  apply.** The server's `check_text` takes a proposed text, saves nothing and
-  answers with diagnostics: line, column, message and, where one exists, the
-  replacement. A missing `begin = start`, a missing brace, a type written
-  without quotes and a component call without its revision each come back
-  with their fix; an unknown name comes back with its position. TypeScript
-  has a compiler and quick fixes too; here, in addition, the server's write
-  tools refuse to save a text that has an error (`invalid_text`).
-- **A run that sends nothing.** The sample responses are part of the file,
-  so a model can run what it wrote and read each step's result without a
-  server, credentials or permission. Playwright documents
-  [mocking for a page's network traffic](https://playwright.dev/docs/mock);
-  for the `request` fixture the test needs a server or a mock server. The
-  limit is plain: a simulation proves the scenario against samples its
-  author wrote, not against the API.
-- **Sending real requests is a separate permission a model cannot give
-  itself.** Over MCP a live run answers `live_disabled` until the person
-  allows it in the window or starts the server with `--allow-live`.
-- **Order and cleanup are part of the language.** There is no `await` to
-  forget and no shared variable assigned in one hook and read in another: a
-  statement names what it reads. Cleanup is a block, not a choice between
-  `try`/`finally`, [hooks](https://playwright.dev/docs/api/class-test#test-after-each)
-  and [fixtures](https://playwright.dev/docs/test-fixtures#creating-a-fixture),
-  and a cleanup step with nothing to clean is skipped by rule.
-- **One way to write it, so edits are small.** There is one canonical layout,
-  and an edit on the board rewrites only the statements it changes. A change
-  made by a model shows in a diff as the lines that changed.
-- **A person reviews the board, not only the text.** What a model wrote is
-  the diagram the window draws: which request feeds which, and which checks
-  stand under each.
-- **The reference travels with the tool.** `language_reference` returns the
-  page linked above (848 lines at this commit) with the diagnostics a model
-  will meet and what to do about each.
+1. **A run that sends nothing, and a live run only the person allows.** The
+   sample responses are part of the file, so a model runs what it wrote
+   without a server or credentials. Over MCP a live run answers
+   `live_disabled` until the person allows it in the window or starts the
+   server with `--allow-live`; a model cannot allow it. Playwright documents
+   [mocking for a page's traffic](https://playwright.dev/docs/mock); a test
+   with the `request` fixture needs a server or a mock server. The limit: a
+   simulation proves the scenario against samples its author wrote, not
+   against the API.
+2. **A result sized for a context window.** The server's `run` answers with
+   one status per statement and, for a failed comparison, the expected and
+   the actual value, not with a terminal log. A statement's outputs above
+   4 KiB are left out with their size, and a result above 2 MiB is the error
+   `result_too_large`.
+3. **Secret values do not reach the model.** The project lists secret names
+   only; a run's report shows `[REDACTED]` in their place; a text that
+   contains a known secret's value is refused (`secret_in_text`). A test
+   that is a program can print its environment.
+4. **The model and the person cannot overwrite each other.** A write names
+   the hash of the text it read and is refused when the file has changed
+   (`stale_source`); a text with an error is not saved (`invalid_text`); the
+   open window hands the project over, watches the agent's changes and can
+   take it back.
+5. **Cleanup and live runs are accounted for.** Cleanup is a block of the
+   language. When a check fails and the cleanup fails too, the run reports
+   both; in the `try`/`finally` above the cleanup's error replaces the
+   check's (a Playwright
+   [fixture](https://playwright.dev/docs/test-fixtures#creating-a-fixture)
+   reports both; tried on 1.65.1). Each live request is written to the
+   project's run journal before it is sent, the result marks every step that
+   may have reached the API, a cancelled run still runs its cleanup, and the
+   next run lists what an interrupted one left behind.
+6. **A scenario can only send requests, compute and check.** There is no
+   `import`, no file or process access and no function to define, so a
+   reviewer reads requests and checks, not a program. A request may still
+   name any URL, which is why live runs need the permission of point 1.
+7. **Wrong text comes back with its position, sometimes with its fix.**
+   `check_text` takes a proposed text and saves nothing. A missing
+   `begin = start`, a missing brace, a type written without quotes and a
+   component call without its revision come back with the replacement text
+   and its range; an unknown name with its position only. TypeScript's
+   compiler does more in one respect: it can type a response body.
+8. **One form, a board, and the reference in the tool.** There is one
+   canonical layout, and an edit on the board rewrites only the statements
+   it changes, so a model's change is a small diff. The person reviews it as
+   a diagram: which request feeds which, and the checks under each. The
+   reference linked above is served by the `language_reference` tool.
 
-### Where Playwright and JavaScript are the better choice
+### Where Playwright is the better choice
 
 - **Anything in a browser.** Playwright is "an end-to-end test framework for
   modern web apps" ([its documentation](https://playwright.dev/docs/intro));
   API Forge tests REST APIs and nothing else.
 - **Arbitrary logic.** Loops, retries, polling, a computed set of cases, a
-  signature or a token built by a library: ordinary code there, absent here
-  ([what `.afs` cannot do yet](#what-it-cannot-do-yet)).
+  signature or a token built by a library: ordinary code there, absent here.
 - **The ecosystem.** Every npm package, reporters,
   [steps in the report](https://playwright.dev/docs/api/class-test#test-step),
   [soft assertions](https://playwright.dev/docs/test-assertions#soft-assertions),
-  parallel workers, CI integrations and years of answered questions.
-  Playwright has its own [MCP server](https://playwright.dev/docs/getting-started-mcp)
-  and [test agents](https://playwright.dev/docs/test-agents), built for
-  browser tests.
-- **What models already know.** A model has seen far more JavaScript and
-  Playwright than `.afs`, which it has most likely never seen: it writes the
-  first from memory and the second from the reference it has to read first.
-- **Evidence.** The points above are properties of the design, each checked
-  on the current build. No benchmark of models writing `.afs` against models
+  parallel workers, and its own
+  [MCP server](https://playwright.dev/docs/getting-started-mcp) and
+  [test agents](https://playwright.dev/docs/test-agents), built for browser
+  tests.
+- **What models already know.** A model has seen far more Playwright than
+  `.afs`, which it has most likely never seen: it writes the first from
+  memory and the second from a reference it has to read first.
+- **Evidence.** The points above are properties of the design, each tried on
+  the current build. No benchmark of models writing `.afs` against models
   writing Playwright tests has been run.
 
 ## Planned
@@ -252,94 +242,60 @@ Planned, not promised, and without dates. Each item is accepted into scope or
 decided on its issue; its design can still change, and nothing in this list
 works today.
 
-The language ([LANG milestone](https://github.com/jakubiszon26/apiforge/milestone/1)):
+The language (decisions in [LANG-16](docs/tickets/LANG-16.md) and
+[LANG-23](docs/tickets/LANG-23.md)):
 
 - A loop: `for` over a list as a block, with `collect` and `count` as what
-  it gives back ([#352](https://github.com/jakubiszon26/apiforge/issues/352),
-  shape decided in [#413](https://github.com/jakubiszon26/apiforge/issues/413)).
+  it gives back ([#352](https://github.com/jakubiszon26/apiforge/issues/352)).
 - Waiting for an asynchronous state: `retry until` on one request
   ([#212](https://github.com/jakubiszon26/apiforge/issues/212)).
 - A table of cases: one request written once and run for every row
   ([#470](https://github.com/jakubiszon26/apiforge/issues/470)).
 - A check on a missing field fails instead of ending as an error, and `??`
-  says what stands in for a missing value
+  says what stands in for a missing value; `&&` and `||` short-circuit
   ([#127](https://github.com/jakubiszon26/apiforge/issues/127)).
-- `&&` and `||` short-circuit
-  ([#589](https://github.com/jakubiszon26/apiforge/issues/589), designed
-  with #127).
 - One check for several fields, `matches { … }`, and a check that needs no
   invented name ([#472](https://github.com/jakubiszon26/apiforge/issues/472)).
-- Headers and authorization stated once for a scenario
-  ([#471](https://github.com/jakubiszon26/apiforge/issues/471)).
+- Headers and authorization stated once for a scenario ([#471](https://github.com/jakubiszon26/apiforge/issues/471)).
 - A request's argument read as `arg.name`
-  ([#592](https://github.com/jakubiszon26/apiforge/issues/592)).
+  ([#592](https://github.com/jakubiszon26/apiforge/issues/592), [LANG-25](docs/tickets/LANG-25.md)), and a component's
+  export always read by its name ([#593](https://github.com/jakubiszon26/apiforge/issues/593)).
 
-The window ([REQ milestone](https://github.com/jakubiszon26/apiforge/milestone/3)):
+The window:
 
 - *Steps*: the scenario as a numbered list of steps with their checks, a
-  second presentation beside the board
-  ([#456](https://github.com/jakubiszon26/apiforge/issues/456),
-  [#457](https://github.com/jakubiszon26/apiforge/issues/457)).
-- The selected request and its response side by side
-  ([#458](https://github.com/jakubiszon26/apiforge/issues/458)).
-- *Run to here* and *Send this request alone*
-  ([#461](https://github.com/jakubiszon26/apiforge/issues/461),
-  [#462](https://github.com/jakubiszon26/apiforge/issues/462)).
-- Headers as a table and authorization chosen from a list
-  ([#460](https://github.com/jakubiszon26/apiforge/issues/460)).
+  second presentation beside the board, where a step is also added and moved
+  ([#457](https://github.com/jakubiszon26/apiforge/issues/457), [#600](https://github.com/jakubiszon26/apiforge/issues/600)).
+- The selected request and its response side by side ([#458](https://github.com/jakubiszon26/apiforge/issues/458)), with
+  headers as a table and authorization chosen from a list ([#460](https://github.com/jakubiszon26/apiforge/issues/460)).
+- *Run to here* and *Send this request alone* ([#461](https://github.com/jakubiszon26/apiforge/issues/461), [#462](https://github.com/jakubiszon26/apiforge/issues/462)).
+- One request tried without making a test of it: no file, its own tab
+  ([#603](https://github.com/jakubiszon26/apiforge/issues/603)), and a request saved as a component in one action
+  ([#604](https://github.com/jakubiszon26/apiforge/issues/604)).
 
 ## Working with an agent over MCP
 
 `apiforge mcp` serves a folder project to a model over the
-[Model Context Protocol](https://modelcontextprotocol.io). The agent works
-through API Forge's own project session, on the same files the window
-writes, while the window stays open beside it.
+[Model Context Protocol](https://modelcontextprotocol.io), through the same
+project session the window uses. Register it in the project folder:
 
-1. **Install** API Forge from [Releases](#install) (on Linux, the `.tar.gz`
-   holds the `apiforge` command line; the AppImage is the window only).
-2. **Register the server** in the project folder:
+```bash
+claude mcp add apiforge -- /path/to/apiforge mcp
+```
 
-   ```bash
-   claude mcp add apiforge -- /path/to/apiforge mcp
-   ```
+The server has eleven tools: `project_overview`, `language_reference`,
+`read_source`, `check`, `check_text`, `print`, `run`, `write_source`,
+`create_document`, `publish` and `finish_editing`. While the agent holds the
+project the window pauses editing, names the agent in its bottom bar and
+shows each change the agent saves; *Take back* returns the project. A window
+with unsaved work asks first: *Save all and hand over* or *Keep editing*.
+Live requests are allowed in *Project settings → Agent*, off by default.
+Secrets come from `APIFORGE_SECRET_<NAME>` in the server's environment or a
+`--secrets` file. The window and the server run on the same side of
+Windows and WSL. The setup with `.mcp.json` and the full contract are in the
+[development guide](docs/development.md#mcp-server).
 
-   or check in a `.mcp.json` at the project root:
-
-   ```json
-   {
-     "mcpServers": {
-       "apiforge": { "command": "/path/to/apiforge", "args": ["mcp"] }
-     }
-   }
-   ```
-
-3. **The tools.** In Claude Code they appear as `mcp__apiforge__<tool>`:
-
-   | Tools | What the agent can do |
-   | --- | --- |
-   | `project_overview`, `read_source`, `check`, `print`, `language_reference` | Learn the project and the language; read every source with its diagnostics, line, column and hash |
-   | `check_text` | Check a proposed text before saving anything |
-   | `run` | Simulate a scenario or a component; with permission, run it live |
-   | `write_source`, `create_document`, `finish_editing` | Save a source or register a new one, only when the text has no error and only over the version it read (`stale_source` otherwise) |
-   | `publish` | Turn a component into its next immutable revision, the same transaction as *Publish* in the window |
-
-4. **Watch in the window.** A window with nothing unsaved hands the project
-   over when the agent first writes. While the agent holds it, editing
-   pauses in the window, the bottom bar names the agent and each change the
-   agent saves appears on the board. *Take back* in the bottom bar returns
-   the project; when the agent calls `finish_editing` the window takes it
-   back by itself. A window with unsaved work asks the person: *Save all
-   and hand over*, or *Keep editing*, which refuses the agent's write.
-5. **Live requests stay yours.** *Project settings → Agent* has *Allow the
-   MCP agent to send live requests*, off by default. Without a window the
-   person starts the server with `--allow-live`. Secrets come from
-   `APIFORGE_SECRET_<NAME>` in the server's environment or a `--secrets`
-   file, and a text that contains a known secret's value is refused
-   (`secret_in_text`).
-
-On Windows with WSL, run the window and the MCP server on the same side; a
-Windows window with a Linux server (or the reverse) is unsupported. The full
-contract is in the [development guide](docs/development.md#mcp-server).
+![The window while an agent holds the project: Observing in the header, editing paused, the agent named in the bottom bar](docs/images/agent-observer.png)
 
 ## Install
 
@@ -378,25 +334,14 @@ cargo run -p apiforge-cli --locked -- --help          # the command line
 cargo run -p apiforge-demo-api --locked               # the demo API, http://127.0.0.1:4318/demo
 ```
 
-The first start, in an empty data directory, opens *Demo shop* on the board of
-its scenario *Buy coffee on promotion*: a product looked up through the
-component `product`, a cart created and checked, an `if` on the promotion and
-a cleanup that deletes the cart. A second scenario, *The cart refuses bad
-orders*, sends three orders the shop must refuse under `on_error continue`.
-Both run as a simulation, or live against the small local demo API. A data
-directory that already holds a project opens that project as it is. The
-[development guide](docs/development.md) covers the toolchain, the
-verification every change passes and how releases are made.
+The first start, in an empty data directory, opens the *Demo shop* project;
+its two scenarios run as a simulation, or live against the demo API above.
 
-## Upgrading a project from 0.1.0
+## Upgrading from 0.1.0
 
-In 0.1.0 steps were ordered with `@after`; since 0.2.0 they run in the order
-written. A 0.1.0 project opens and can be edited but does not run until
-`apiforge fix --folder <project>` has converted it. The command converts
-every source and the project file in one step, or writes nothing and lists,
-file by file and line by line, what to change by hand; `--check` prints the
-same report without writing. The conversion is done from the command line
-only, and 0.1.0 cannot open a converted project. The
+A 0.1.0 project opens but does not run until
+`apiforge fix --folder <project>` has converted it
+([how](docs/folder-projects.md#projects-written-for-010)); the
 [release notes](https://github.com/jakubiszon26/apiforge/releases) list what
 each version changed.
 
