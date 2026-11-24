@@ -61,6 +61,7 @@ pub struct ActionMenu {
     /// Opened on a step of the folder window's board: the menu offers *Move
     /// earlier* and *Move later* for it (DIAG-06b).
     pub moves: Option<Moves>,
+    pub mock_place: Option<String>,
 }
 
 /// *Move earlier* and *Move later* for a step, and why each is refused,
@@ -135,6 +136,11 @@ fn adds_step(block: Block) -> bool {
     apiforge_core::chain::is_step(block.kind()) && block.kind() != NodeKind::Start
 }
 
+thread_local! {
+    /// Mock of DIAG-24: 0 today, 1 option A, 2 option B.
+    pub static MOCK_DIAG24: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
 struct Action {
     block: Block,
     name: String,
@@ -156,6 +162,7 @@ impl ActionMenu {
             after_step: false,
             on_line: false,
             moves: None,
+            mock_place: None,
         }
     }
 
@@ -256,6 +263,9 @@ impl ActionMenu {
     /// menu's source.
     fn source_for(&self, block: Block) -> Option<(String, String)> {
         let (node, port) = self.source.clone()?;
+        if MOCK_DIAG24.with(std::cell::Cell::get) == 1 && adds_step(block) {
+            return Some((self.mock_place.clone().unwrap_or(node), ORDER_PORT.to_owned()));
+        }
         if self.after_step && adds_step(block) {
             Some((node, ORDER_PORT.to_owned()))
         } else {
@@ -285,7 +295,53 @@ impl ActionMenu {
             .source
             .as_ref()
             .and_then(|(id, _)| graph.nodes.iter().find(|node| &node.id == id));
-        let actions = self.actions(graph, project, component);
+        let mock = MOCK_DIAG24.with(std::cell::Cell::get);
+        let data_card = source_node.is_some_and(|node| node.kind.is_data());
+        // The step the card belongs to: itself; for a check the step it
+        // checks; for a value the last step that runs before it.
+        let place = source_node.and_then(|node| {
+            use apiforge_core::chain::is_step;
+            if is_step(node.kind) {
+                return Some(node.id.clone());
+            }
+            let order = apiforge_core::graph::sequence(graph);
+            let step = |id: &str| graph.nodes.iter().any(|n| n.id == id && is_step(n.kind));
+            let read = order
+                .iter()
+                .rev()
+                .find(|id| step(id) && node.inputs.values().any(|b| b.references_node(id)));
+            let at = order.iter().position(|id| *id == node.id)?;
+            read.or_else(|| order[..at].iter().rev().find(|id| step(id)))
+                .map(|id| (*id).to_owned())
+        });
+        let place_name = place
+            .as_ref()
+            .and_then(|id| graph.nodes.iter().find(|node| &node.id == id))
+            .or(source_node)
+            .map_or_else(String::new, |node| node.display_name().to_owned());
+        let source_name = source_node.map_or_else(String::new, |node| node.display_name().to_owned());
+        let is_if = source_node.is_some_and(|node| node.kind == NodeKind::If);
+        self.mock_place = place.clone();
+        let mut actions = self.actions(graph, project, component);
+        if mock == 1 && self.source.is_some() {
+            // Every component is offered: a step put after reads nothing.
+            actions.retain(|action| action.block != Block::Component);
+            for component in library::offered_components(project, component) {
+                actions.push(Action {
+                    block: Block::Component,
+                    name: component.name.clone(),
+                    description: if component.description.is_empty() {
+                        format!("Component · revision {}", component.revision)
+                    } else {
+                        component.description.clone()
+                    },
+                    component: Some((component.id.clone(), component.revision)),
+                });
+            }
+        }
+        if mock == 2 && data_card {
+            actions.retain(|action| !adds_step(action.block));
+        }
         let area = egui::Area::new(egui::Id::new("board-action-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(self.screen)
@@ -301,17 +357,28 @@ impl ActionMenu {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.label(
-                                    RichText::new(match source_node {
-                                        Some(node) => {
+                                    RichText::new(match (source_node, mock) {
+                                        (Some(_), 1) => format!("AFTER: {}", place_name.to_uppercase()),
+                                        (Some(node), 2) if data_card => {
+                                            format!("USE: {}", node.display_name().to_uppercase())
+                                        }
+                                        (Some(node), 2) if node.kind == NodeKind::If => {
+                                            format!("IN YES OF: {}", node.display_name().to_uppercase())
+                                        }
+                                        (Some(node), _) => {
                                             format!("AFTER: {}", node.display_name().to_uppercase())
                                         }
-                                        None => "STEP LIBRARY".into(),
+                                        (None, _) => "STEP LIBRARY".into(),
                                     })
                                     .size(10.0)
                                     .color(theme::MUTED),
                                 );
                                 ui.label(
-                                    RichText::new(if source_node.is_some() {
+                                    RichText::new(if mock == 2 && data_card {
+                                        "What should read it?"
+                                    } else if mock == 2 && source_node.is_some_and(|node| node.kind == NodeKind::If) {
+                                        "What should happen when it is true?"
+                                    } else if source_node.is_some() {
                                         "What should happen next?"
                                     } else if component.is_some() {
                                         "Add a step to the component"
@@ -335,6 +402,7 @@ impl ActionMenu {
                         });
                         if let (Some(node), Some((_, port))) = (source_node, &mut self.source)
                             && !port.starts_with("__")
+                            && mock != 1
                         {
                             let outputs = output_ports(node, project);
                             ui.horizontal(|ui| {
@@ -443,7 +511,42 @@ impl ActionMenu {
                                         RichText::new("No matching steps").color(theme::MUTED),
                                     );
                                 }
-                                for action in matching {
+                                let grouped = mock == 1 && source_node.is_some() && !self.on_line;
+                                let mut ordered: Vec<&Action> = matching.clone();
+                                if grouped {
+                                    ordered.sort_by_key(|action| !adds_step(action.block));
+                                }
+                                let first_data = ordered.iter().position(|action| !adds_step(action.block));
+                                let has_steps = ordered.first().is_some_and(|action| adds_step(action.block));
+                                let caption = |ui: &mut egui::Ui, text: String| {
+                                    ui.add_space(8.0);
+                                    ui.label(RichText::new(text).size(10.0).color(theme::MUTED));
+                                    ui.add_space(2.0);
+                                };
+                                for (index, action) in ordered.into_iter().enumerate() {
+                                    if grouped && index == 0 && has_steps {
+                                        caption(ui, format!("NEXT STEP · RUNS RIGHT AFTER {}", place_name.to_uppercase()));
+                                    }
+                                    if grouped && first_data == Some(index) {
+                                        if is_if {
+                                            caption(ui, format!("IN THE YES BRANCH OF {}", source_name.to_uppercase()));
+                                        } else {
+                                            caption(ui, format!("READ {} · A CHECK OR A VALUE OF IT", source_name.to_uppercase()));
+                                            if let (Some(node), Some((_, port))) = (source_node, &mut self.source) {
+                                                let outputs = output_ports(node, project);
+                                                ui.horizontal(|ui| {
+                                                    ui.label(RichText::new("Data from").color(theme::MUTED));
+                                                    egui::ComboBox::from_id_salt("menu-source-port")
+                                                        .selected_text(port.as_str())
+                                                        .show_ui(ui, |ui| {
+                                                            for output in &outputs {
+                                                                ui.selectable_value(port, output.name.clone(), output.display_name());
+                                                            }
+                                                        });
+                                                });
+                                            }
+                                        }
+                                    }
                                     if action_row(ui, action).clicked() {
                                         let position = source_node.map_or(
                                             Position {

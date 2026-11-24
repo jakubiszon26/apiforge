@@ -8,6 +8,7 @@ mod collapse;
 mod edge;
 mod layout;
 mod menu;
+pub(crate) use menu::MOCK_DIAG24;
 mod paint;
 mod readers;
 mod resting;
@@ -918,6 +919,23 @@ impl Canvas {
         let at = self.last_viewport.min + vec2(16.0, 48.0);
         let camera = self.screen_camera(self.last_viewport);
         self.menu = Some(ActionMenu::bar(at, camera.to_world(at)));
+    }
+
+    /// Mock of DIAG-24: the menu of a card, open at `at`.
+    #[cfg(test)]
+    pub(crate) fn debug_menu_from(&mut self, at: Pos2, source: (String, String), after_step: bool) {
+        let camera = self.screen_camera(self.last_viewport);
+        let mut menu = ActionMenu::new(at, camera.to_world(at), Some(source));
+        menu.after_step = after_step;
+        self.menu = Some(menu);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_set_camera(&mut self, (pan, zoom): (Vec2, f32)) {
+        self.camera.pan = pan;
+        self.camera.zoom = zoom;
+        self.camera_moved_by_user = true;
+        self.fit_pending = false;
     }
 
     #[cfg(test)]
