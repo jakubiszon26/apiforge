@@ -703,6 +703,39 @@ fn rep07b_stale_results_do_not_offer_to_add_a_check() {
     assert!(!details_mention(&harness, OFFER));
 }
 
+/// Review of 2026-11-24: at Run results' normal height, choosing each
+/// check's row, scrolled to, leaves the window at rest.
+#[test]
+fn rep07b_a_check_chosen_at_the_normal_height_settles() {
+    for size in [MINIMUM, egui::vec2(1280.0, 800.0)] {
+        for (text, checks) in [
+            (crossed(), &["weight_31_text", "same_text"][..]),
+            (kinds(), &["object", "long"]),
+        ] {
+            let (_project, mut harness) = labels_with(size, &text);
+            choose(&mut harness, "Run simulation");
+            finish_run(&mut harness);
+            for check in checks {
+                choose_check(&mut harness, check);
+                let rect = |harness: &FolderHarness| details_rect(harness, "Outputs  ");
+                let at = rect(&harness);
+                for _ in 0..6 {
+                    harness.step();
+                    assert_eq!(rect(&harness), at, "{size:?}: {check} moves");
+                    // Only the folder's own watch of its files and its
+                    // storage ask for a frame.
+                    for cause in harness.ctx.repaint_causes() {
+                        assert!(
+                            cause.file.contains("folder"),
+                            "{size:?}: {check} asks for repaint: {cause:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A check in each of the places a check can be in.
 const PLACES: &str = r#"scenario "Places" {
   on_error continue
