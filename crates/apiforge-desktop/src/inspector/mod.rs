@@ -12,7 +12,8 @@ mod response;
 pub mod source_change;
 
 pub use fields::{
-    Opening, Results, TreeAction, forget_field_text, forget_results_tree, results_tree, type_combo,
+    Opening, Results, Shown, TreeAction, forget_field_text, forget_results_tree, results_tree,
+    type_combo,
 };
 pub use marks::{CheckIndex, Marks, Outcomes};
 #[cfg(test)]
@@ -1396,7 +1397,11 @@ fn outputs(ui: &mut Ui, context: &Context<'_>, actions: &mut Vec<Action>) {
             port.display_name(),
             &value,
             context.read_only,
-            context.checks.map(|index| Marks { index, run: None }),
+            context.checks.map(|index| Marks {
+                index,
+                run: None,
+                chosen: None,
+            }),
         ) {
             actions.push(match action {
                 fields::TreeAction::Check { path, check } => Action::AssertField {

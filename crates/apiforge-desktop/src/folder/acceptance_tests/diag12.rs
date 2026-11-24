@@ -767,6 +767,7 @@ fn tree_drawn(
                         offers: true,
                         checked: &|_| false,
                         marks: Some(Marks {
+                            chosen: None,
                             index,
                             run: Some(&Outcomes::of(outcomes)),
                         }),

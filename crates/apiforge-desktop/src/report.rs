@@ -7,7 +7,6 @@
 
 use crate::icons::Icon;
 use crate::{
-    labels,
     not_run::{self, NotRun},
     theme, widgets,
 };
@@ -23,6 +22,8 @@ use eframe::egui::{self, Color32, RichText, Sense, Stroke, Ui};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 
+mod comparison;
+mod detail;
 mod list;
 pub use list::Line;
 #[cfg(test)]
@@ -509,6 +510,8 @@ pub struct ReportPanel {
     asked: Option<String>,
     /// The list arranged for the run shown.
     arranged: list::Arranged,
+    /// The two sides of the check shown, written once.
+    comparison: Option<comparison::Kept>,
 }
 
 /// The step list's width before it is dragged (the owner's default of
@@ -554,6 +557,7 @@ impl Default for ReportPanel {
             focus: None,
             asked: None,
             arranged: Default::default(),
+            comparison: None,
         }
     }
 }
@@ -1167,6 +1171,12 @@ impl ReportPanel {
         {
             self.tab = DetailTab::Outputs;
         }
+        // What the details say of a check: its predicate, what it compared
+        // and the step it is listed under (REP-07b).
+        let check = selected.as_ref().and_then(|selected| {
+            let index = rows.iter().position(|row| row.key == selected.key)?;
+            detail::of(&rows, index, &self.arranged)
+        });
 
         // The outcomes that colour the marks, once per frame (DIAG-12).
         let outcomes = context.checks.map(|_| crate::inspector::Outcomes::of(run));
@@ -1209,6 +1219,7 @@ impl ReportPanel {
                                 ui,
                                 &run.id,
                                 selected.as_ref(),
+                                check.as_ref(),
                                 ends,
                                 requirement,
                                 !context.document_locked,
@@ -1216,6 +1227,7 @@ impl ReportPanel {
                                 context.checks.map(|index| crate::inspector::Marks {
                                     index,
                                     run: outcomes.as_ref(),
+                                    chosen: None,
                                 }),
                                 actions,
                             );
@@ -1510,6 +1522,7 @@ impl ReportPanel {
         ui: &mut Ui,
         run_id: &str,
         selected: Option<&StepRow<'_>>,
+        check: Option<&detail::CheckDetail<'_>>,
         ends: &CauseEnds,
         requirement: Option<Requirement>,
         editable: bool,
@@ -1533,19 +1546,44 @@ impl ReportPanel {
         // component's own graph (KTLO-23 criterion 11); exports appear at the
         // top level only when a component runs on its own.
         let checkable = selected.depth == 0 && step.kind != NodeKind::Export;
+        let word = selected.word(ends);
         ui.horizontal(|ui| {
+            // What is written of the step keeps off its status.
+            let room = ui.available_width() - pill_width(ui, word) - ui.spacing().item_spacing.x;
             ui.vertical(|ui| {
-                ui.label(
-                    RichText::new(step.display_name())
-                        .size(14.0)
-                        .family(theme::bold_family()),
-                );
+                ui.set_max_width(room.max(0.0));
+                match check {
+                    // A check is titled by its predicate, its handle and
+                    // its step under it (REP-07b).
+                    Some(check) => {
+                        comparison::title(ui, check);
+                        let line = check.line(step);
+                        let said = ui.label(
+                            RichText::new(&line)
+                                .size(theme::FONT_LABEL)
+                                .color(theme::MUTED),
+                        );
+                        widgets::named(said, line);
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new(step.display_name())
+                                .size(14.0)
+                                .family(theme::bold_family()),
+                        );
+                    }
+                }
                 if selected.depth > 0 {
                     widgets::hint(ui, format!("Step inside component · {}", step.node_id));
                 }
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                widgets::pill(ui, selected.word(ends), status_color(step.status));
+            // Beside a check's several lines, it stays at the first.
+            let align = match check {
+                Some(_) => egui::Align::Min,
+                None => egui::Align::Center,
+            };
+            ui.with_layout(egui::Layout::right_to_left(align), |ui| {
+                widgets::pill(ui, word, status_color(step.status));
             });
         });
 
@@ -1577,17 +1615,111 @@ impl ReportPanel {
         if !step.expected.is_missing()
             || !step.actual.is_missing()
             || requirement.is_some_and(Requirement::always_compared)
+            || comparison::missing(requirement, step)
         {
-            let expected = match requirement {
-                Some(requirement) => requirement.text(&step.expected),
-                None => expected_text(Predicate::Equals, &step.expected, 0.0),
-            };
-            comparison_box(ui, &expected, &step.actual);
+            let written = comparison::Kept::of(&mut self.comparison, run_id, selected, requirement);
+            written.show(ui, check.and_then(|check| check.expected_from.as_deref()));
+        }
+        // The response that holds what a check compared, marked by DIAG-12's
+        // mark (REP-07b). A check of a component's inner step has no mark:
+        // it is the component's, not its caller's.
+        let marks_here =
+            marks
+                .filter(|_| selected.depth == 0)
+                .map(|marks| crate::inspector::Marks {
+                    chosen: Some(&step.node_id),
+                    ..marks
+                });
+        if let Some(check) = check
+            && let Some(source) = check.source
+            && !source.step.outputs.is_empty()
+        {
+            let document =
+                egui::Id::new(("report-response", run_id, selected.key.as_str(), self.epoch));
+            self.trees.insert(document);
+            let ports: Vec<_> = source
+                .step
+                .outputs
+                .iter()
+                .map(|(port, value)| {
+                    let (opening, large) = match self.folding {
+                        Folding::Default => *self
+                            .openings
+                            .entry(egui::Id::new((
+                                "report-opening",
+                                run_id,
+                                source.key.as_str(),
+                                "response",
+                                port,
+                            )))
+                            .or_insert_with(|| by_default(value)),
+                        folding => (opening(folding, value), false),
+                    };
+                    (port, value, opening, large)
+                })
+                .collect();
+            // The response opens to the field it compared, unless every row
+            // was folded by *Collapse all*.
+            let mut marked = false;
+            for (port, value, path) in
+                check.marked(&step.node_id, marks_here.map(|marks| marks.index))
+            {
+                let opening = ports
+                    .iter()
+                    .find(|(name, ..)| *name == port)
+                    .map_or(Opening::Closed, |(_, _, opening, _)| *opening);
+                let shown = crate::inspector::Shown {
+                    document,
+                    node: &source.step.node_id,
+                    port,
+                    value,
+                    opening,
+                };
+                if self.folding != Folding::CollapseAll {
+                    shown.open_to(ui.ctx(), &path);
+                }
+                marked |= shown.shows(ui.ctx(), &path);
+            }
+            ui.add_space(6.0);
+            if let Some(heading) = check.heading(marked) {
+                let said = ui.label(
+                    RichText::new(&heading)
+                        .size(theme::FONT_LABEL)
+                        .color(theme::MUTED),
+                );
+                widgets::named(said, heading);
+            }
+            let none = |_: &str| false;
+            ui.push_id(("report-response", run_id, &selected.key), |ui| {
+                for (port, value, opening, large) in ports {
+                    large_line(ui, opening, large, port);
+                    // A check chosen in a mark's menu is selected (DIAG-12).
+                    if let Some(crate::inspector::TreeAction::Select { check }) =
+                        crate::inspector::results_tree(
+                            ui,
+                            document,
+                            &source.step.node_id,
+                            port,
+                            value,
+                            crate::inspector::Results {
+                                opening,
+                                fields: true,
+                                offers: false,
+                                checked: &none,
+                                marks: marks_here,
+                            },
+                        )
+                    {
+                        actions.push(Action::SelectNode(check));
+                    }
+                }
+            });
+            ui.add_space(6.0);
         }
 
         let outputs = format!("Outputs  {}", step.outputs.len());
         let inputs = format!("Inputs  {}", step.inputs.len());
-        let hint = checkable && self.tab == DetailTab::Outputs;
+        let hint = checkable && editable && self.tab == DetailTab::Outputs;
         // The controls above the value share the tabs' line where it has
         // room for them, and take a line of their own under it otherwise.
         let gap = ui.spacing().item_spacing.x;
@@ -1896,6 +2028,11 @@ fn request_headers(request: &apiforge_core::run::RequestSnapshot) -> Value {
     )
 }
 
+/// The width of a step's status beside its title.
+fn pill_width(ui: &Ui, text: &str) -> f32 {
+    text_width(ui, text, theme::FONT_META) + 16.0
+}
+
 /// The width `text` takes at `size`.
 fn text_width(ui: &Ui, text: &str, size: f32) -> f32 {
     ui.painter()
@@ -2194,48 +2331,6 @@ fn group_label(ui: &mut Ui, group: not_run::Group, count: usize) {
             .strong()
             .color(color),
     );
-}
-
-fn comparison_box(ui: &mut Ui, expected: &str, actual: &OptionalJson) {
-    egui::Frame::new()
-        .fill(theme::FIELD)
-        .stroke(Stroke::new(1.0, theme::BORDER))
-        .corner_radius(6)
-        .inner_margin(egui::Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let col_width = ((ui.available_width() - 28.0) * 0.5).max(80.0);
-                ui.allocate_ui(egui::vec2(col_width, 36.0), |ui| {
-                    ui.vertical(|ui| {
-                        widgets::subcaption(ui, "EXPECTED");
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(labels::truncate(expected, 120)).monospace(),
-                            )
-                            .truncate(),
-                        )
-                        .on_hover_text(expected);
-                    });
-                });
-                ui.label(RichText::new("→").color(theme::MUTED));
-                ui.allocate_ui(egui::vec2(col_width, 36.0), |ui| {
-                    ui.vertical(|ui| {
-                        widgets::subcaption(ui, "ACTUAL");
-                        let text = match actual {
-                            OptionalJson::Present(value) => compact_json(value),
-                            OptionalJson::Missing => "(missing value)".into(),
-                        };
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(labels::truncate(&text, 120)).monospace(),
-                            )
-                            .truncate(),
-                        )
-                        .on_hover_text(text);
-                    });
-                });
-            });
-        });
 }
 
 fn compact_json(value: &Value) -> String {
