@@ -1611,7 +1611,7 @@ impl ReportPanel {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if one_line {
-                    copy = self.value_bar(ui);
+                    copy = self.value_bar(ui, true);
                     ui.add_space(8.0);
                 }
                 if hint {
@@ -1620,11 +1620,21 @@ impl ReportPanel {
             });
         });
         if !one_line {
+            // Details too narrow for one line of them (REP-07a) have two.
+            let whole = ui.available_width() >= bar_width(ui);
+            let line = egui::vec2(ui.available_width(), theme::CONTROL_HEIGHT);
             ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), theme::CONTROL_HEIGHT),
+                line,
                 egui::Layout::right_to_left(egui::Align::Center),
-                |ui| copy = self.value_bar(ui),
+                |ui| copy = self.value_bar(ui, whole),
             );
+            if !whole {
+                ui.allocate_ui_with_layout(
+                    line,
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| self.view_switch(ui),
+                );
+            }
         }
         ui.separator();
 
@@ -1778,9 +1788,9 @@ impl ReportPanel {
         );
     }
 
-    /// *Tree | JSON*, *Expand all*, *Collapse all* and *Copy*, right to left
-    /// (REP-08). Returns whether *Copy* was clicked.
-    fn value_bar(&mut self, ui: &mut Ui) -> bool {
+    /// *Tree | JSON* when `switch`, *Expand all*, *Collapse all* and *Copy*,
+    /// right to left (REP-08). Returns whether *Copy* was clicked.
+    fn value_bar(&mut self, ui: &mut Ui, switch: bool) -> bool {
         let copy = ui
             .add(
                 widgets::action(Icon::Copy, "Copy")
@@ -1814,7 +1824,15 @@ impl ReportPanel {
                 self.forget_trees(ui.ctx());
             }
         });
-        ui.add_space(8.0);
+        if switch {
+            ui.add_space(8.0);
+            self.view_switch(ui);
+        }
+        copy
+    }
+
+    /// *Tree | JSON*, right to left (REP-08).
+    fn view_switch(&mut self, ui: &mut Ui) {
         if ui
             .add(
                 widgets::action(Icon::Code, "JSON")
@@ -1837,7 +1855,6 @@ impl ReportPanel {
         {
             self.json = false;
         }
-        copy
     }
 
     /// The JSON text of the value the tab shows, written once per value.
