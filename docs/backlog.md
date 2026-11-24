@@ -510,6 +510,15 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   an invented name, one check for several fields (with LANG-02 #129 and
   LANG-04 #132). Their format questions return to the owner with the
   analyses.
+- From LANG-23 [#589](https://github.com/jakubiszon26/apiforge/issues/589) (the reference read by a tester; decided
+  2026-11-24, [ticket](tickets/LANG-23.md)): LANG-24 [#591](https://github.com/jakubiszon26/apiforge/issues/591) the reference's
+  wording, `ready:sonnet`; LANG-25 [#592](https://github.com/jakubiszon26/apiforge/issues/592) a request's argument read as
+  `arg.name` ([ticket](tickets/LANG-25.md), M · `format`, awaits approval and a
+  second read); short-circuit `&&`/`||` goes into LANG-01 #127 with
+  LANG-09 #353, unary minus into LANG-03 #131; `start` stays required in a
+  scenario. Candidates for the owner: LANG-26 [#593](https://github.com/jakubiszon26/apiforge/issues/593) an export always
+  readable by name, LANG-27 [#594](https://github.com/jakubiszon26/apiforge/issues/594) a warning for a check written far
+  from its step.
 
 ## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (closed)
 

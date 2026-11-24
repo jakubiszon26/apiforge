@@ -2,12 +2,10 @@
 
 - Size: analysis S · Owner review: 15 min · Risk: none in this file (documentation);
   the changes it proposes carry `format` and `default` and are the owner's
-- State: **Analysis, decisions needed.** Nothing here is implemented. Each
-  finding is checked against the reference, the code and the decisions on
-  main at `fe74ae73`. Evidence is read from the code; no finding was run
-  through `apiforge check` (the command needs a project folder, and the
-  analysis was time-boxed), so the three marked *to confirm* need one
-  acceptance test each before a ticket is cut.
+- State: **Decided** (2026-11-24). The owner took decisions 1, 2 and 4 and
+  delegated 3 to an independent agent; see [Decisions](#decisions). The
+  findings below are the analysis as written at `fe74ae73`; where a decision
+  or a later check corrects one, the Decisions section says so.
 - LANG sprint, second half (part B) · branch `docs/lang-23-reference-findings`
 
 ## Goal
@@ -179,14 +177,50 @@ what already covers it, and what to do, ranked by what a tester gains.
 - **P3. One language step for F2, F3 and F4** rather than three, so a
   project is updated once (LANG-20's fix carries F3).
 
-## Decisions for the owner
+## Decisions
 
-1. **F4:** short-circuit in `&&`/`||` (recommended), or keep and rely on `??`.
-2. **F3:** A `arg.name` with a fix (recommended), B, or C docs only.
-3. **F2:** `start` optional in a scenario (recommended, needs a mock-up of
-   the board), or keep.
-4. **F1, F5.1, P2:** approve the documentation changes as one `ready:sonnet`
-   ticket now (recommended), or hold them for the language step.
+Taken on #589, 2026-11-24.
+
+1. **F4: short-circuit** in `&&` and `||`, designed in the LANG-01 #127 /
+   LANG-09 #353 analysis; the language version rises there. *Confirmed by a
+   simulation on 0.2.1:* `assert exists cart.body.coupon &&
+   cart.body.coupon.discount > 0` on a response without `coupon` ends in
+   *error*: "and: greater: Operand `left` of Greater expects number, got
+   missing." That scenario is the first acceptance test of the change.
+2. **F3: option A.** A request's argument is read as `arg.name`;
+   `input.name` stays readable and `apiforge fix` rewrites it; `param.` is
+   unchanged. Ticket: [LANG-25](LANG-25.md) (#592).
+3. **F2: `start` stays required in a scenario** (ruled by an independent
+   agent on the owner's delegation; reasons on #589).
+   - The version claim of F2 above is **refuted**: by LANG-00 section 2,
+     rule 1, the number rises only when a valid file means something else
+     or becomes invalid. An optional `start` does neither; 0.2.x refuses
+     such a file at its line, as it does `uuid()`. So the relaxation costs
+     no version and no migration **whenever** it is made, and nothing is
+     gained by making it in the same step as F3 and F4 (P3 does not apply
+     to F2).
+   - It is not free of the owner's decisions: either the scenario has no
+     Start card (the board changes), or the lowering supplies one and the
+     window then writes a line the person did not write, or a mark of
+     "written or not" is stored (format). Each needs a mock-up or a
+     decision; none is settled by the text alone.
+   - The gain is one line per scenario that the fix already writes; the
+     rule is four days old (LANG-13, consequence 1), and the 0.1.0 reading
+     of a pasted file is judged only because the line is missing
+     (`lower.rs`, `fix::run_order`).
+   - Relaxing later stays open and cheap; requiring it again after a
+     relaxation would raise the version. Reopened only with evidence that
+     testers trip on it (an A/B round), and then with a mock-up of the
+     board for the owner. No ticket is cut.
+4. **Documentation now**, as one `ready:sonnet` ticket: LANG-24 (#591).
+   F5.1 is smaller than written above: the example with a check written
+   late is already in *Start and ordering*; one sentence about the
+   formatter is added.
+
+Cut from the rest: F6a rides with LANG-03 (#131, comment); F6b is
+candidate LANG-26 (#593) and the warning of F5.2 candidate LANG-27 (#594),
+both for the owner's decision. No warning for a check written away from
+its step exists in `apiforge-script` today.
 
 ## Not in scope
 
