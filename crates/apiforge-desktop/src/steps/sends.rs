@@ -515,9 +515,31 @@ mod tests {
         for sends in sends.values() {
             assert_eq!(
                 sends.common.as_deref(),
-                Some("The common request\nGET /orders/{{…}}/items")
+                Some("The common request\nGET https://shop.test/orders/{{…}}/items")
             );
         }
+    }
+
+    /// Real-window test of 2026-11-24, 2: hosts are compared, and the path
+    /// line says the host where the group's hosts differ.
+    #[test]
+    fn hosts_tell_requests_apart() {
+        let sends = of("scenario \"S\" {
+  begin = start
+  a = GET \"https://eu.test/orders\"
+  b = GET \"https://eu.test/orders\"
+  c = GET \"https://us.test/orders\"
+}");
+        assert!(sends.values().all(|sends| sends.common.is_none()));
+        let sends = of("scenario \"S\" {
+  begin = start
+  param host = \"eu.test\"
+  a = GET \"https://{{param.host}}/orders\"
+  b = GET \"https://{{param.host}}/orders\"
+  c = GET \"https://us.test/orders\"
+}");
+        assert_eq!(lines(&sends["a"]), ["nothing differs"]);
+        assert_eq!(lines(&sends["c"]), ["path https://us.test/orders"]);
     }
 
     #[test]

@@ -67,6 +67,15 @@ fn rooms_with(
     size: egui::Vec2,
     edit: impl FnOnce(String) -> String,
 ) -> (tempfile::TempDir, FolderHarness, String) {
+    rooms_at(size, ROOMS, edit)
+}
+
+/// As [`rooms_with`], the scenario at `path` open.
+fn rooms_at(
+    size: egui::Vec2,
+    open: &str,
+    edit: impl FnOnce(String) -> String,
+) -> (tempfile::TempDir, FolderHarness, String) {
     fn copy_tree(from: &Path, to: &Path) {
         for entry in fs::read_dir(from).unwrap() {
             let entry = entry.unwrap();
@@ -81,11 +90,11 @@ fn rooms_with(
     }
     let project = tempfile::tempdir().unwrap();
     copy_tree(&fixture("rooms"), project.path());
-    let path = project.path().join(ROOMS);
+    let path = project.path().join(open);
     let text = fs::read_to_string(&path).unwrap();
     fs::write(&path, edit(text)).unwrap();
     let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
-    app(&mut harness).review_open(ROOMS, None);
+    app(&mut harness).review_open(open, None);
     settle(&mut harness);
     let id = folder(&harness).workbench.active().unwrap().to_owned();
     (project, harness, id)
@@ -742,7 +751,9 @@ fn req01a_criterion_4_sends_lists_what_differs() {
             |_| Some(caption),
             |harness| {
                 harness
-                    .query_by_label_contains("POST /parcels/{{param.parcel_id}}/labels")
+                    .query_by_label_contains(
+                        "POST https://parcels.example.test/parcels/{{param.parcel_id}}/labels",
+                    )
                     .is_some_and(|found| {
                         let text = found.accesskit_node().value().unwrap_or_default();
                         [
@@ -1076,6 +1087,20 @@ fn req01a_a_component_keeps_its_board() {
     assert_eq!(rows(&harness).len(), 10, "the choice holds");
 }
 
+/// Every row and check of the list that is marked as selected.
+fn marked(harness: &FolderHarness) -> Vec<String> {
+    let mut names = selected(harness);
+    names.extend(
+        buttons(harness, |name| {
+            name.contains(" of ") && !name.contains("Step ")
+        })
+        .into_iter()
+        .filter(|found| found.selected)
+        .map(|found| found.name),
+    );
+    names
+}
+
 /// Criterion 8: a row selects its step in Canvas, Run results and Code.
 #[test]
 fn req01a_criterion_8_a_row_selects_its_step() {
@@ -1134,7 +1159,11 @@ fn req01a_criterion_8_a_row_selects_its_step() {
     let check = "status == 204 · Passed · gone of cancelled";
     choose(&mut harness, check);
     assert!(folder(&harness).cleanup(&id));
-    assert!(selected(&harness)[0].contains("cancelled"));
+    assert!(
+        selected(&harness).is_empty(),
+        "the check is marked, not its card"
+    );
+    assert_eq!(marked(&harness), [check]);
     // Escape clears it.
     harness.key_press(egui::Key::Escape);
     settle(&mut harness);
@@ -1347,10 +1376,8 @@ fn req01a_criterion_8_a_check_selected_before_the_board_was_drawn() {
     assert_eq!(rows(&harness).len(), 10, "opened on the list");
     choose(&mut harness, "status == 409 · refused of second");
     let second = node(&main, "second").id.clone();
-    assert_eq!(
-        folder(&harness).selections[&id],
-        std::slice::from_ref(&second)
-    );
+    let refused = node(&main, "refused").id.clone();
+    assert_eq!(folder(&harness).selections[&id], [refused]);
     canvas(&mut harness);
     assert!(folder(&harness).canvases[&id].debug_selected(&second));
 }
@@ -1403,6 +1430,265 @@ fn req01a_frame_budget() {
         let frame = start.elapsed() / 100;
         assert!(frame < Duration::from_millis(16), "{size:?}: {frame:?}");
     }
+}
+
+/// Real-window test of 2026-11-24, 1: the row clicked is the row marked, also
+/// for a check the board folds into another step; the board then marks that
+/// step by its own rule, and back in *Steps* the mark is where it was.
+#[test]
+fn req01a_a_clicked_check_is_the_one_marked() {
+    for (path, row_part, handle, folded) in [
+        (
+            "scenarios/booking-day.afs",
+            "not_booked",
+            "not_booked",
+            "first",
+        ),
+        (
+            "scenarios/booking-day.afs",
+            "one_booking",
+            "one_booking",
+            "calendar",
+        ),
+        (
+            "scenarios/booking-day.afs",
+            "· invited",
+            "invited",
+            "invite",
+        ),
+    ] {
+        let (_project, mut harness, id) = rooms_at(WIDE, path, |text| text);
+        let (main, _, _) = graphs(&harness, &id);
+        steps(&mut harness);
+        let name = row(&harness, row_part).name;
+        choose(&mut harness, &name);
+        let check = node(&main, handle).id.clone();
+        assert_eq!(selected(&harness), [name.clone()], "the row clicked");
+        assert_eq!(folder(&harness).selections[&id], [check.clone()]);
+        // Delete in the list deletes nothing: the list is read (REQ-01b).
+        let before = source_of(&harness, &id);
+        harness.key_press(egui::Key::Delete);
+        settle(&mut harness);
+        assert_eq!(source_of(&harness, &id), before);
+        // The board marks the step the check is folded into, and Delete there
+        // aims at what it marks.
+        canvas(&mut harness);
+        let step = node(&main, folded).id.clone();
+        assert_eq!(
+            folder(&harness).selections[&id],
+            std::slice::from_ref(&step)
+        );
+        assert!(folder(&harness).canvases[&id].debug_selected(&step));
+        steps(&mut harness);
+        assert_eq!(selected(&harness), [name.clone()], "the mark did not move");
+        assert_eq!(folder(&harness).selections[&id], [check]);
+        // A step clicked on the board takes the mark.
+        canvas(&mut harness);
+        app(&mut harness).active_board_command(Command::Select(vec![step.clone()]));
+        settle(&mut harness);
+        steps(&mut harness);
+        assert_eq!(folder(&harness).selections[&id], [step]);
+        assert!(selected(&harness)[0].contains(folded));
+    }
+}
+
+/// Real-window test, 2: the URL is shown as it is written, the host included,
+/// cut in its middle and whole on hover; hosts tell requests apart.
+#[test]
+fn req01a_a_url_keeps_its_host() {
+    let tail = "a-path-that-goes-on/and-on/until-the-card-has-no-room-for-it/anywhere/orders";
+    let text = format!(
+        "scenario \"Hosts\" {{
+  begin = start
+  eu = GET \"https://eu.shop.test/orders\"
+  us = GET \"https://us.shop.test/orders\"
+  local = GET \"/orders\"
+  long = GET \"https://eu.shop.test/{tail}\"
+}}
+"
+    );
+    let (_project, mut harness, _) = opened(MINIMUM, "scenarios/hosts.afs", &text);
+    steps(&mut harness);
+    for (handle, url) in [
+        ("eu", "https://eu.shop.test/orders"),
+        ("us", "https://us.shop.test/orders"),
+        ("local", "/orders"),
+    ] {
+        let row = shown(&mut harness, &format!("GET {handle}"));
+        assert!(
+            texts(&harness, &row).iter().any(|(text, _)| text == url),
+            "{url}"
+        );
+        assert_eq!(column(&harness, &row, "SENDS"), ["no body"]);
+    }
+    let row = shown(&mut harness, "GET long");
+    let whole = format!("https://eu.shop.test/{tail}");
+    let place = text_at(&harness, &row, &whole);
+    let drawn: Vec<String> = painted(&harness, list_area(&harness))
+        .into_iter()
+        .map(|(galley, _)| galley.text().to_owned())
+        .filter(|text| text.contains('…'))
+        .collect();
+    assert_eq!(drawn.len(), 1, "{drawn:?}");
+    assert!(
+        drawn[0].starts_with("https://eu.shop.test/") && drawn[0].ends_with("/orders"),
+        "{drawn:?}"
+    );
+    let count = harness.query_all_by_label(&whole).count();
+    assert!(crate::testing::hover_until(
+        &mut harness,
+        |_| Some(place),
+        |harness| harness.query_all_by_label(&whole).count() > count
+    ));
+}
+
+/// Real-window test, 4: an add from the Library in *Steps* goes to Main while
+/// nothing is selected, whichever board was shown last, and to Cleanup while
+/// a Cleanup row is selected; the added step is in the list, and Ctrl+Z takes
+/// it back although a row has the keyboard.
+#[test]
+fn req01a_the_library_adds_where_the_list_is() {
+    let (_project, mut harness, id) = rooms(WIDE);
+    steps(&mut harness);
+    let requests = |harness: &FolderHarness| {
+        let (main, cleanup, _) = graphs(harness, &id);
+        [main, cleanup].map(|graph| {
+            graph
+                .nodes
+                .iter()
+                .filter(|node| node.kind == NodeKind::Request)
+                .count()
+        })
+    };
+    assert_eq!(requests(&harness), [4, 1]);
+    let cancelled = row(&harness, "DELETE cancelled").name;
+    choose(&mut harness, &cancelled);
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    assert!(selected(&harness).is_empty());
+    choose(&mut harness, "HTTP request");
+    assert_eq!(requests(&harness), [5, 1], "nothing selected: Main");
+    assert!(
+        selected(&harness)[0].starts_with("Step "),
+        "{:?}",
+        selected(&harness)
+    );
+
+    choose(&mut harness, &cancelled);
+    choose(&mut harness, "HTTP request");
+    assert_eq!(requests(&harness), [5, 2], "a Cleanup row: Cleanup");
+    let added = selected(&harness);
+    assert!(added[0].starts_with("Cleanup step "), "{added:?}");
+    choose(&mut harness, &cancelled);
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    settle(&mut harness);
+    assert_eq!(requests(&harness), [5, 1], "undone with a row focused");
+
+    // Cleanup shown on the board, then *Steps* with nothing selected.
+    app(&mut harness).selections.remove(&id);
+    canvas(&mut harness);
+    choose(&mut harness, "Cleanup");
+    steps(&mut harness);
+    choose(&mut harness, "HTTP request");
+    assert_eq!(requests(&harness), [6, 1]);
+}
+
+/// Real-window test, 6: a step that did not run names what stopped the run as
+/// the list writes it, not by a handle the list does not show.
+#[test]
+fn req01a_a_reason_names_the_check_as_the_list_does() {
+    let text = "scenario \"Stop\" {
+  begin = start
+  @label(\"Request number 60\")
+  r60 = POST \"https://shop.test/orders/60\" { sample 200 {} }
+  c60 = assert r60.status == 201
+  @label(\"Request number 61\")
+  r61 = GET \"https://shop.test/orders/61\" { sample 200 {} }
+}
+";
+    let (_project, mut harness, _) = opened(WIDE, "scenarios/stop.afs", text);
+    steps(&mut harness);
+    ran(&mut harness);
+    let reason = "Stopped · status == 201 of Request number 60 failed";
+    let row = shown(&mut harness, "Request number 61");
+    assert!(
+        row.name.ends_with(&format!(" · Not run · {reason}")),
+        "{}",
+        row.name
+    );
+    assert!(texts(&harness, &row).iter().any(|(text, _)| text == reason));
+}
+
+/// Real-window test, 7: another tab and back keeps the scroll, with a step
+/// selected far from what is in view.
+#[test]
+fn req01a_tab_and_back_keeps_the_scroll() {
+    let (_project, mut harness, _) = rooms_at(MINIMUM, "scenarios/booking-day.afs", |text| text);
+    steps(&mut harness);
+    let late = row(&harness, "GET calendar").name;
+    choose(&mut harness, &late);
+    let first = rows(&harness)[0].name.clone();
+    harness.get_by_label(&first).scroll_to_me();
+    settle(&mut harness);
+    let place = |harness: &FolderHarness| rows(harness)[0].rect.top();
+    let before = place(&harness);
+    app(&mut harness).review_open(ROOMS, None);
+    settle(&mut harness);
+    app(&mut harness).review_open("scenarios/booking-day.afs", None);
+    settle(&mut harness);
+    assert!(
+        (place(&harness) - before).abs() < 1.0,
+        "{before} {}",
+        place(&harness)
+    );
+    canvas(&mut harness);
+    steps(&mut harness);
+    assert!((place(&harness) - before).abs() < 1.0, "Canvas and back");
+}
+
+/// Real-window test, 8: a click gives its row the keyboard, and the focus of
+/// the keyboard looks like no selection.
+#[test]
+fn req01a_a_click_gives_the_keyboard_to_its_row() {
+    let (_project, mut harness, id) = rooms(WIDE);
+    let (main, _, _) = graphs(&harness, &id);
+    steps(&mut harness);
+    let first = row(&harness, "POST first").name;
+    choose(&mut harness, &first);
+    assert!(harness.get_by_label(&first).is_focused());
+    // The next stop is the row after it, and Enter selects it.
+    let frames = |harness: &FolderHarness| {
+        let area = list_area(harness);
+        harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect)
+                    if rect.stroke.color == theme::ACCENT && area.intersects(rect.rect) =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+            .count()
+    };
+    assert_eq!(frames(&harness), 1, "the selection");
+    harness.key_press(egui::Key::Tab);
+    settle(&mut harness);
+    let next = row(&harness, "if first").name;
+    assert!(harness.get_by_label(&next).is_focused());
+    assert_eq!(
+        frames(&harness),
+        1,
+        "the focus is no frame of the selection's"
+    );
+    harness.key_press(egui::Key::Enter);
+    settle(&mut harness);
+    assert_eq!(
+        folder(&harness).selections[&id],
+        [node(&main, "booked").id.clone()]
+    );
 }
 
 /// Design review: the list at both sizes, before and after a run, its
