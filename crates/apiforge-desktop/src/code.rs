@@ -134,6 +134,21 @@ pub struct Completions {
     shown: Option<Rect>,
 }
 
+/// The keys a one-line field with completion keeps from moving the focus: the
+/// arrows, as a text edit does by itself.
+pub const FIELD_KEYS: egui::EventFilter = egui::EventFilter {
+    tab: false,
+    horizontal_arrows: true,
+    vertical_arrows: true,
+    escape: false,
+};
+
+/// The keys the code editor keeps: the field's and Tab, which indents.
+const CODE_KEYS: egui::EventFilter = egui::EventFilter {
+    tab: true,
+    ..FIELD_KEYS
+};
+
 /// The frames after a least scroll in which it is checked again.
 const LEAST_RECHECKS: u8 = 2;
 
@@ -407,6 +422,21 @@ impl Completions {
         }
     }
 
+    /// Leaves Escape to an open popup: egui takes the focus from a field on
+    /// Escape before anything is drawn, unless the field keeps the key, and
+    /// the board then clears the selection (#577). Called after `update`, so
+    /// that a popup opened this frame has the key in the next one; `keys` are
+    /// the field's own, which its text edit sets again every frame.
+    pub fn keep_escape(&self, ui: &Ui, id: egui::Id, keys: egui::EventFilter) {
+        if self.popup.is_some() {
+            let keys = egui::EventFilter {
+                escape: true,
+                ..keys
+            };
+            ui.memory_mut(|memory| memory.set_focus_lock_filter(id, keys));
+        }
+    }
+
     /// Draws the popup and returns a completion the user clicked.
     fn draw(
         &mut self,
@@ -666,7 +696,7 @@ impl CodeEditor {
                 .font(egui::TextStyle::Monospace)
                 .code_editor()
                 .desired_width(f32::INFINITY)
-                .lock_focus(true)
+                .event_filter(CODE_KEYS)
                 .interactive(context.interactive)
                 .layouter(&mut layouter);
             if gutter.is_some() {
@@ -865,6 +895,7 @@ impl CodeEditor {
             changed |= self
                 .completions
                 .update(ui, id, text, context, output, taken.keys);
+            self.completions.keep_escape(ui, id, CODE_KEYS);
         }
         if let Some(deeper) = taken.indent.wanted()
             && let Some(range) = output.cursor_range

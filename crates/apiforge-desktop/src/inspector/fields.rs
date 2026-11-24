@@ -242,6 +242,7 @@ pub fn template_field(
         .id(id.with("text"))
         .hint_text(hint)
         .interactive(!conflict)
+        .event_filter(crate::code::FIELD_KEYS)
         .font(egui::TextStyle::Monospace)
         .desired_width(f32::INFINITY)
         .show(ui);
@@ -266,6 +267,7 @@ pub fn template_field(
         &output,
         keys,
     );
+    completions.keep_escape(ui, id.with("text"), crate::code::FIELD_KEYS);
     ui.data_mut(|data| data.insert_temp(id.with("completions"), completions));
     if response
         .dnd_hover_payload::<Payload>()
