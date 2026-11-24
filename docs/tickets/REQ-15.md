@@ -1,10 +1,14 @@
 # REQ-15: A request with no sample response leads to where one is set
 
 - Size: S · Owner review: 10 min · Risk: `visible UI`
-- State: **Analysed, waits for the owner's choice on the board** (issue
-  #576, `decision-needed`) · the same on v0.1.0 and v0.2.1-rc.2, not a
-  regression · REQ milestone · after REP-07a (PR #588), whose list it
-  was drawn on
+- State: **Approved, ready for implementation** (issue #576) · decided by
+  the owner on 2026-11-24 on the board, recorded on #576: **A, with both
+  changes it names** (*Output data* shows no *Sample* mark and no status
+  for a request without a sample; the empty sample field is empty, not
+  `null`) · the same on v0.1.0 and v0.2.1-rc.2, not a regression ·
+  **after REP-07a (#588) and REP-07b (#381, the details)**, which
+  rewrite the pane the action stands in · labelled `ready:opus` · REQ
+  milestone
 - Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
@@ -29,9 +33,16 @@ Looked at on `main` (`1923fcd3`) merged with `feat/rep-07a-request-list`.
   about 110 px.
 - The field of a request without a sample reads `null`.
 
+## What the owner will see
+
+- Changed: *Add a sample response* beside the refusal and in the empty
+  *Output data*; the sentence there; the empty sample field.
+- Removed or hidden: the *Sample* mark and *HTTP status 200* that
+  *Output data* shows for a request with no sample (decided, criterion 2).
+
 ## Mock-up
 
-Board: `docs/qa/2026-11-24/REQ-15/sample.png` (Today | A | B: the
+Approved as a whole on 2026-11-24. Board: `docs/qa/2026-11-24/REQ-15/sample.png` (Today | A | B: the
 refusal in REP-07a's Run results, *Output data*, and *Configuration*
 after the action). Whole windows of A: `a-refusal-960.png`,
 `a-opened-960.png`, `a-1600.png`. From `review_req15_sample` on
@@ -44,7 +55,7 @@ which leaves about three lines of the field in view.
 
 | Option | Look | For the person at the window |
 | --- | --- | --- |
-| **A — the action (recommended)** | *Add a sample response* beside the refusal in Run results and under a one-line *Output data*; it opens *Configuration*, unfolds the section and puts the caret in *Sample body* | One click from either place where the tester stands. Nothing moves, nothing is written until the tester types |
+| **A — the action (chosen)** | *Add a sample response* beside the refusal in Run results and under a one-line *Output data*; it opens *Configuration*, unfolds the section and puts the caret in *Sample body* | One click from either place where the tester stands. Nothing moves, nothing is written until the tester types |
 | B — as A, the section under *Body* | The same action; *Contract and sample response* stands above *Execution order* | The section is also found by scrolling; changes the panel's order, which REQ-02a #458 redraws anyway — better decided there |
 | C — a new request is written with `sample 200 {}` | Not drawn: nothing to see but a simulation that passes | Writes a line nobody set (against REQ-13 #540) and passes against a response the API never gives |
 
@@ -74,18 +85,18 @@ Tests in `folder/acceptance_tests/req15.rs`.
    in another document). `component_step_has_no_action`.
 8. Design review at 960 × 540 and 1600 × 1000 against the board.
 
-## Proposals of the planning model
+## Implementer's captures the owner will judge
 
-- **The refusal says which step and what follows**: *calendar has no
-  sample response, so the simulation stopped here.* The engine's
-  sentence is shared with the CLI and MCP, so this is a wording of its
-  own: a candidate, not in the criteria.
-- **A hint before the run**: Problems lists a request without a sample
-  while the mode is Simulation, with the same action as its fix, so the
-  tester meets it before the refusal. Easy to make noisy for a project
-  that only runs live: a candidate with its own question.
-- "Sample responses" in Run results' header does nothing (round 4): it
-  could open the first request without a sample. Left out.
+- The refusal's line in REP-07b's details as they then are: the action
+  stays on the message's line at 960 × 540.
+- The empty *Sample body* field (its hint text, if any, is grey and is
+  not written).
+
+## Not in scope
+
+Moving the section (B: with REQ-02a #458); writing a sample for a new
+request (C); the refusal's wording, which the CLI and MCP share; a hint
+in Problems before the run; "Sample responses" in Run results' header.
 
 ## Files touched
 
@@ -93,6 +104,8 @@ Tests in `folder/acceptance_tests/req15.rs`.
 (`outputs`, `samples`, the `Focus` that LAY-16 uses to scroll to an
 input), `folder/runs.rs` or `folder/diagram.rs` (the action's handling);
 `folder/acceptance_tests/req15.rs`, `testing.rs` (a review view).
+Crate: `apiforge-desktop` only. Branch from `main` once REP-07b is
+merged; if its details no longer hold a message line, stop and escalate.
 
 ## Regression risk
 

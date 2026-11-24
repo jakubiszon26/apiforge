@@ -614,6 +614,9 @@ criteria:
 | [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 A value of a response is used in a later request by choosing it | M · 20 · `visible UI` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
 | [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 A check made from a field offers what to compare with | S–M · 15 · `visible UI`, `default` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
 | [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 The window writes only what was set; [ticket](tickets/REQ-13.md) | S–M · 15 · `default` | in scope 2026-11-21; three questions open |
+| [#574](https://github.com/jakubiszon26/apiforge/issues/574) | WS-05a A scenario's title above its board, edited there; [ticket](tickets/WS-05a.md) | M · 15 · `visible UI` | decided 2026-11-24 (B, editable); `ready:opus` |
+| [#596](https://github.com/jakubiszon26/apiforge/issues/596) | WS-05b Files lists scenarios and components by title; [ticket](tickets/WS-05b.md) | M · 15 · `visible UI` | decided 2026-11-24 (B); `ready:opus` · after WS-05a |
+| [#576](https://github.com/jakubiszon26/apiforge/issues/576) | REQ-15 A request with no sample response leads to where one is set; [ticket](tickets/REQ-15.md) | S · 10 · `visible UI` | decided 2026-11-24 (A); `ready:opus` · after REP-07a and REP-07b |
 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the mandatory scenario and the owner's own run; [ticket](tickets/REQ-06.md) | S · 10 | after the rest |
 
 REQ-07 to REQ-10 are the planning model's proposals
