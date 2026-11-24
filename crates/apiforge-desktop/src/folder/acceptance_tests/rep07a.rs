@@ -697,6 +697,33 @@ fn rep07a_the_list_opens_440_px_wide() {
     }
 }
 
+/// Review of 2026-11-24: beside a list 440 px wide, and beside the widest
+/// one, the controls above a value keep the width of their labels at
+/// 960 × 540 (*Tree* read *T…*).
+#[test]
+fn rep07a_the_controls_above_a_value_are_not_cut() {
+    const CONTROLS: [&str; 5] = [
+        crate::report::SHOW_TREE,
+        crate::report::SHOW_JSON,
+        "Expand all",
+        "Collapse all",
+        crate::report::COPY_JSON,
+    ];
+    let widths = |harness: &FolderHarness| {
+        CONTROLS.map(|label| harness.get_by_label(label).rect().width().round())
+    };
+    let (_project, mut harness, _) = labels_with(WIDE, &failing());
+    ran(&mut harness);
+    let whole = widths(&harness);
+    let (_project, mut harness, _) = labels_with(MINIMUM, &failing());
+    ran(&mut harness);
+    assert_eq!(widths(&harness), whole, "beside the list as it opens");
+    assert_within_window(&harness, &CONTROLS);
+    drag_edge(&mut harness, MINIMUM.x);
+    assert_eq!(widths(&harness), whole, "beside the widest list");
+    assert_within_window(&harness, &CONTROLS);
+}
+
 /// The row of `weight_31`'s first check, `status == 422`.
 fn weight_31_status(harness: &FolderHarness) -> String {
     rows(harness)
