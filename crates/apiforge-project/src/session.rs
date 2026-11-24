@@ -6,7 +6,10 @@ use crate::{
     language,
     layout::{FixedPlacer, Placer},
 };
-use apiforge_core::{ImportError, format::Project};
+use apiforge_core::{
+    ImportError,
+    format::{Graph, Project, ProxySource},
+};
 use apiforge_script::{Diagnostic, Document, Severity};
 use apiforge_storage::project::{
     DiagramFile, DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, Holder,
@@ -1627,39 +1630,117 @@ fn kept_chain(previous: &Document, mut model: Document) -> Document {
 /// The refusal of an edited model (#565): the validation's message, and the
 /// step its path points at. The path itself is never shown.
 fn refused_model(model: &Document, context: &Project, error: ImportError) -> Error {
-    match error {
-        ImportError::InvalidDocument { path, message } => Error::EditRefused {
-            reason: message.to_owned(),
-            step: refused_step(model, context, &path),
-        },
-        error => Error::EditRefused {
+    let ImportError::InvalidDocument { path, message } = error else {
+        return Error::EditRefused {
             reason: error.to_string(),
             step: None,
-        },
+        };
+    };
+    let at = refused_at(model, context, &path);
+    Error::EditRefused {
+        reason: at
+            .and_then(|(board, _)| in_the_windows_words(model, context, board, message))
+            .unwrap_or_else(|| message.to_owned()),
+        step: at
+            .and_then(|(board, rest)| refused_step(board, rest))
+            .map(str::to_owned),
     }
 }
 
-/// The handle of the step a validation path points at, when the path is one
-/// of the edited document's own nodes.
-fn refused_step(model: &Document, context: &Project, path: &str) -> Option<String> {
+/// The graph of the edited document a validation path points at, and what
+/// follows it in the path.
+fn refused_at<'a>(
+    model: &'a Document,
+    context: &Project,
+    path: &'a str,
+) -> Option<(&'a Graph, &'a str)> {
     let path = path.strip_prefix("project.")?;
-    let (graph, path) = match model {
+    match model {
         Document::Scenario(scenario) => {
             let path = path.strip_prefix("scenarios[0].")?;
-            match path.strip_prefix("graph.") {
-                Some(path) => (&scenario.graph, path),
-                None => (&scenario.cleanup, path.strip_prefix("cleanup.")?),
+            match path.strip_prefix("graph") {
+                Some(rest) => Some((&scenario.graph, rest)),
+                None => Some((&scenario.cleanup, path.strip_prefix("cleanup")?)),
             }
         }
         // Validated after every published revision of the project.
         Document::Component(component) => {
-            let own = format!("components[{}].", context.components.len());
-            (&component.graph, path.strip_prefix(&own)?)
+            let own = format!("components[{}]", context.components.len());
+            Some((&component.graph, path.strip_prefix(&own)?))
         }
-    };
-    let (index, _) = path.strip_prefix("nodes[")?.split_once(']')?;
+    }
+}
+
+/// The handle of the step the rest of a validation path points at, when it
+/// points at one of the graph's nodes.
+fn refused_step<'a>(graph: &'a Graph, rest: &str) -> Option<&'a str> {
+    let (index, _) = rest.strip_prefix(".nodes[")?.split_once(']')?;
     let node = graph.nodes.get(index.parse::<usize>().ok()?)?;
-    Some(node.handle.clone())
+    Some(&node.handle)
+}
+
+/// A message of the model check that a gesture of the window can end in and
+/// that speaks of the model, in the words of the window; `None` for the
+/// others, which are said as they are.
+fn in_the_windows_words(
+    model: &Document,
+    context: &Project,
+    board: &Graph,
+    message: &str,
+) -> Option<String> {
+    let (main, cleanup) = match model {
+        Document::Scenario(scenario) => (&scenario.graph, Some(&scenario.cleanup)),
+        Document::Component(component) => (&component.graph, None),
+    };
+    let on_cleanup = cleanup.is_some_and(|cleanup| std::ptr::eq(cleanup, board));
+    Some(match message {
+        "Graph contains a data/control cycle" => {
+            apiforge_core::edit::read_too_early(board, context).unwrap_or_else(|| {
+                "This would create a cycle; the test must have an unambiguous order".to_owned()
+            })
+        }
+        "Start cannot have incoming edges" if on_cleanup => {
+            "The cleanup needs no Start block".to_owned()
+        }
+        "Start cannot have incoming edges" if cleanup.is_none() => {
+            "A component needs no Start block".to_owned()
+        }
+        "Duplicate handle" => {
+            let external = on_cleanup.then_some(main);
+            let mut seen = HashSet::new();
+            let twice = board
+                .nodes
+                .iter()
+                .chain(external.into_iter().flat_map(|main| &main.nodes))
+                .find(|node| !seen.insert(node.handle.as_str()))?;
+            format!("Another block already uses the name `{}`", twice.handle)
+        }
+        "Graph exceeds node, edge or proxy limit" => {
+            "A board holds at most 200 blocks, 1000 order lines and 400 placed values".to_owned()
+        }
+        "Proxy source is not a variable of this graph" => {
+            let shown = board.proxies.iter().find_map(|proxy| {
+                let ProxySource::Variable { node_id } = &proxy.source else {
+                    return None;
+                };
+                board
+                    .nodes
+                    .iter()
+                    .find(|node| &node.id == node_id && !node.is_variable())
+            })?;
+            format!("The board shows `{}` as a variable", shown.handle)
+        }
+        "Invalid or non-canonical field path" | "Invalid or non-canonical argument path" => {
+            "A field path is not valid".to_owned()
+        }
+        "Reference source or output does not exist" => "A value it reads does not exist".to_owned(),
+        "Binding exceeds nesting or item limit" => {
+            "A value is nested too deep or holds too many items".to_owned()
+        }
+        "Text exceeds 100000 UTF-16 units" => "A text is longer than 100000 characters".to_owned(),
+        "Cyclic request arguments" => "The request's arguments read each other".to_owned(),
+        _ => return None,
+    })
 }
 
 /// The refusal of a text that no longer makes a valid definition (#565): its
