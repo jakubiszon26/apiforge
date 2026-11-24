@@ -81,15 +81,18 @@ fn bar(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
     harness.step();
 }
 
+/// Turns *Compact cards* off and tidies the board.
+fn full(harness: &mut FolderHarness) {
+    app(harness).switch_density(crate::canvas::CardDensity::Full);
+    settle(harness);
+    choose(harness, "Tidy up");
+    settle(harness);
+}
+
 /// Opens the menu of *Add a connected step* at the foot of `handle`'s card,
 /// which only the full card has.
 fn foot(harness: &mut FolderHarness, id: &str, handle: &str) {
-    if board(harness, id).debug_compact() {
-        app(harness).switch_density(crate::canvas::CardDensity::Full);
-        settle(harness);
-        choose(harness, "Tidy up");
-        settle(harness);
-    }
+    full(harness);
     show(harness, id, &[handle]);
     let button = centre(harness, &format!("Add a step connected to {handle}"));
     click_at(harness, button, egui::PointerButton::Primary, 1);
@@ -97,23 +100,9 @@ fn foot(harness: &mut FolderHarness, id: &str, handle: &str) {
     headed(harness, handle);
 }
 
-/// No card of the board stands on another.
-fn no_card_on_a_card(harness: &FolderHarness, id: &str) {
-    let cards = board(harness, id).debug_cards();
-    for (index, (one, a)) in cards.iter().enumerate() {
-        for (other, b) in &cards[index + 1..] {
-            assert!(
-                !a.shrink(0.5).intersects(b.shrink(0.5)),
-                "{one} {a:?} stands on {other} {b:?}"
-            );
-        }
-    }
-}
-
 /// `new` runs directly after `step` and `next` directly after `new`, its text
 /// stands between theirs at their indentation, it reads nothing of `step`,
-/// the edit passes the check, no card stands on another, and one Undo gives
-/// `before` back.
+/// the edit passes the check, and one Undo gives `before` back.
 fn put_after(
     harness: &mut FolderHarness,
     id: &str,
@@ -153,7 +142,6 @@ fn put_after(
     );
     undone(harness, id, before);
     redone(harness, id, &text);
-    no_card_on_a_card(harness, id);
     text
 }
 
@@ -180,6 +168,33 @@ fn places(graph: &Graph) -> HashMap<String, (f64, f64)> {
         .collect()
 }
 
+/// The board is what *Add step* with `profile` selected gives for `label` on
+/// a fresh copy at the same density: the same order, the same text and every
+/// card at the same place (criterion 6, as amended on #598).
+fn same_as_add_step(harness: &FolderHarness, id: &str, label: &str) {
+    let (_project, mut reference, other) = booking_day();
+    if !board(harness, id).debug_compact() {
+        full(&mut reference);
+    }
+    bar(&mut reference, &other, &["profile"]);
+    take(&mut reference, &other, label);
+    assert_eq!(
+        board(harness, id).debug_compact(),
+        board(&reference, &other).debug_compact()
+    );
+    assert_eq!(steps(harness, id), steps(&reference, &other), "{label}");
+    assert_eq!(
+        source_of(harness, id),
+        source_of(&reference, &other),
+        "{label}"
+    );
+    assert_eq!(
+        places(&graph(harness, id)),
+        places(&graph(&reference, &other)),
+        "{label}: room is made alike"
+    );
+}
+
 // Criterion 1 ----------------------------------------------------------------
 
 /// The reproduction of AB-02's wrong turn in run 2 (#583).
@@ -201,16 +216,7 @@ fn diag22_criterion_1_a_request_from_a_steps_menu() {
 fn diag22_criterion_1_same_as_add_step_with_the_step_selected() {
     let (_project, mut harness, id) = booking_day();
     from_menu(&mut harness, &id, "profile", "HTTP request");
-    let (_other, mut reference, other) = booking_day();
-    bar(&mut reference, &other, &["profile"]);
-    take(&mut reference, &other, "HTTP request");
-    assert_eq!(steps(&harness, &id), steps(&reference, &other));
-    assert_eq!(source_of(&harness, &id), source_of(&reference, &other));
-    assert_eq!(
-        places(&graph(&harness, &id)),
-        places(&graph(&reference, &other)),
-        "room is made alike"
-    );
+    same_as_add_step(&harness, &id, "HTTP request");
 }
 
 // Criterion 2 ----------------------------------------------------------------
@@ -222,6 +228,7 @@ fn diag22_criterion_2_from_the_cards_button() {
         foot(&mut harness, &id, "profile");
         let before = source_of(&harness, &id);
         let new = take(&mut harness, &id, label);
+        same_as_add_step(&harness, &id, label);
         put_after(&mut harness, &id, ("profile", &new, Some("team")), &before);
     }
 }
@@ -233,6 +240,7 @@ fn diag22_criterion_2_a_component_and_an_if_from_a_steps_menu() {
         let (_project, mut harness, id) = booking_day();
         let before = source_of(&harness, &id);
         let new = from_menu(&mut harness, &id, "profile", label);
+        same_as_add_step(&harness, &id, label);
         put_after(&mut harness, &id, ("profile", &new, Some("team")), &before);
     }
 }
@@ -420,17 +428,27 @@ fn diag22_criterion_5_a_checks_menu_unchanged() {
 // Design review -------------------------------------------------------------
 
 /// The menu of `profile`, and the board after an *HTTP request* is taken
-/// from it, at 960 × 540 and 1600 × 1000.
+/// from it, at 960 × 540 and 1600 × 1000, on the board as it opens.
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_diag22() {
     for (size, suffix) in [(MINIMUM, "960"), (WIDE, "1600")] {
-        let (_project, mut harness, id) = booking_day();
-        harness.set_size(size);
-        settle(&mut harness);
-        choose(&mut harness, "Tidy up");
+        let (project, closed, _) = booking_day();
+        drop(closed);
+        let mut harness = crate::testing::folder_harness_in(project.path(), size, Mode::Diagram);
+        app(&mut harness).review_open(SCENARIO, None);
         settle(&mut harness);
         harness.step();
+        let id = folder(&harness)
+            .session
+            .as_ref()
+            .unwrap()
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == SCENARIO)
+            .unwrap()
+            .id()
+            .to_owned();
         menu_of(&mut harness, &id, "profile");
         crate::testing::capture(&mut harness, &format!("diag22-menu-{suffix}"), None);
         take(&mut harness, &id, "HTTP request");
