@@ -113,6 +113,8 @@ built before or after LANG-13 unchanged.
 | 10 | [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 a value of a response used in a later request by choosing it | M · 20 · `visible UI` · to analyse, with an A/B round | REQ-02a, REQ-02b; DIAG-08 and DIAG-10 to DIAG-14 for the place |
 | 10 | [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 a check from a field offers what to compare with | S–M · 15 · `visible UI`, `default` · to analyse, with an A/B round | DIAG-08 |
 | 10 | [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 the window writes only what was set | S–M · 15 · `default` · three questions open | none |
+| 10 | [#603](https://github.com/jakubiszon26/apiforge/issues/603) | REQ-17 one request tried without making a test of it; [ticket](../tickets/REQ-17.md) | L, to split · 25 · `visible UI`, `default`, a permission control · proposed 2026-11-24, five questions open | REQ-02a, REQ-05 |
+| 10 | [#604](https://github.com/jakubiszon26/apiforge/issues/604) | REQ-18 a request saved as a component in one action; [ticket](../tickets/REQ-18.md) | S–M · 15 · `visible UI`, `default` · proposed 2026-11-24, four questions open | REQ-02a; REQ-17 for a try |
 | 11 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 the owner's own run | S · 10 | the rest |
 
 235 owner review minutes for the twelve tickets decided on 2026-11-19,

@@ -614,6 +614,8 @@ criteria:
 | [#538](https://github.com/jakubiszon26/apiforge/issues/538) | REQ-11 A value of a response is used in a later request by choosing it | M · 20 · `visible UI` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
 | [#539](https://github.com/jakubiszon26/apiforge/issues/539) | REQ-12 A check made from a field offers what to compare with | S–M · 15 · `visible UI`, `default` | in scope 2026-11-21; to analyse, with an A/B round; after DIAG-08 |
 | [#540](https://github.com/jakubiszon26/apiforge/issues/540) | REQ-13 The window writes only what was set; [ticket](tickets/REQ-13.md) | S–M · 15 · `default` | in scope 2026-11-21; three questions open |
+| [#603](https://github.com/jakubiszon26/apiforge/issues/603) | REQ-17 One request tried without making a test of it; [ticket](tickets/REQ-17.md) | L, to split · 25 · `visible UI`, `default` | proposed 2026-11-24 from the owner's wish; `decision-needed`, five questions |
+| [#604](https://github.com/jakubiszon26/apiforge/issues/604) | REQ-18 A request saved as a component in one action; [ticket](tickets/REQ-18.md) | S–M · 15 · `visible UI`, `default` | proposed 2026-11-24 from the owner's wish; `decision-needed`, four questions |
 | [#463](https://github.com/jakubiszon26/apiforge/issues/463) | REQ-06 Acceptance: the mandatory scenario and the owner's own run; [ticket](tickets/REQ-06.md) | S · 10 | after the rest |
 
 REQ-07 to REQ-10 are the planning model's proposals
