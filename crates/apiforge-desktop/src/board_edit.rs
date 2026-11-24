@@ -188,6 +188,11 @@ fn lane_room(
 /// The space kept between pasted cards and the cards they clear.
 const PASTE_GAP: f32 = 40.0;
 
+thread_local! {
+    /// Mock of DIAG-23 (#612): 0 as today, 1 option A, 2 option B.
+    pub(crate) static MOCK_DIAG23: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
 impl From<Graph> for Edit {
     fn from(graph: Graph) -> Self {
         Self {
@@ -687,12 +692,60 @@ impl Board<'_> {
             }
         }
         let mut next = next;
+        let option = MOCK_DIAG23.with(std::cell::Cell::get);
+        // Mock B: the whole board is tidied (the mock's two cases are the
+        // ones where the edit puts a card on a card).
+        if option == 2 {
+            for node in &mut next.nodes {
+                if let Some(tidy) = tidied.nodes.iter().find(|tidy| tidy.id == node.id) {
+                    node.position = tidy.position.clone();
+                    node.auto_placed = true;
+                }
+            }
+            for proxy in &mut next.proxies {
+                if let Some(tidy) = tidied.proxies.iter().find(|tidy| tidy.id == proxy.id) {
+                    proxy.position = tidy.position.clone();
+                }
+            }
+            return next;
+        }
+        // Mock A: the tidy's arrangement, measured from the step the first
+        // moved step follows. The push past a kept card in the way is not
+        // in the mock.
+        let mut shift = (0.0, 0.0);
+        if option == 1 {
+            let mut anchors: Vec<(bool, String)> = Vec::new();
+            for (key, steps) in &new {
+                if let Some(first) = steps.iter().position(|step| affected.contains(step)) {
+                    if first > 0 {
+                        anchors.push((key.is_some(), steps[first - 1].clone()));
+                    } else if let Some((parent, _)) = key {
+                        if !affected.contains(parent) {
+                            anchors.push((true, parent.clone()));
+                        }
+                    }
+                }
+            }
+            anchors.sort();
+            if let Some((_, anchor)) = anchors.first() {
+                let stands = next.nodes.iter().find(|node| &node.id == anchor);
+                let tidy = tidied.nodes.iter().find(|node| &node.id == anchor);
+                if let (Some(stands), Some(tidy)) = (stands, tidy) {
+                    shift = (
+                        stands.position.x - tidy.position.x,
+                        stands.position.y - tidy.position.y,
+                    );
+                }
+            }
+        }
         for node in &mut next.nodes {
             if !affected.contains(&node.id) {
                 continue;
             }
             if let Some(tidy) = tidied.nodes.iter().find(|tidy| tidy.id == node.id) {
                 node.position = tidy.position.clone();
+                node.position.x += shift.0;
+                node.position.y += shift.1;
                 node.auto_placed = true;
             }
         }

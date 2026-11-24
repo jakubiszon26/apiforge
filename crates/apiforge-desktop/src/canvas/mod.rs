@@ -1126,6 +1126,16 @@ impl Canvas {
         (self.camera.pan, self.camera.zoom)
     }
 
+    /// Mock of DIAG-23: the camera as it was, so every panel shows the same
+    /// part of the board.
+    #[cfg(test)]
+    pub(crate) fn debug_set_camera(&mut self, (pan, zoom): (Vec2, f32)) {
+        self.camera.pan = pan;
+        self.camera.zoom = zoom;
+        self.camera_moved_by_user = true;
+        self.fit_pending = false;
+    }
+
     #[cfg(test)]
     pub(crate) fn debug_compact(&self) -> bool {
         self.density == CardDensity::Compact
