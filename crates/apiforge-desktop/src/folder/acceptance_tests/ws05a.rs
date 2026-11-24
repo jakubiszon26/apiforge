@@ -522,6 +522,185 @@ fn title_edit_is_abandoned() {
     assert_nothing_written(&mut harness, &id, &before, "another tab");
 }
 
+/// Presses and releases the pointer on `label` in frames of their own, as a
+/// person does.
+fn click_on(harness: &mut FolderHarness, label: &str) {
+    let at = harness.get_by_label(label).rect().center();
+    click_at(harness, at, egui::PointerButton::Primary, 1);
+    harness.step();
+}
+
+/// The coordinator's finding 6 on #624: a save and a run write the title
+/// typed in an open field first, and close the field.
+#[test]
+fn title_edit_is_committed_by_a_save_and_a_run() {
+    const TYPED: &str = "A second booking is refused";
+    type Act = fn(&mut FolderHarness);
+    let saves: [(&str, Act); 4] = [
+        ("Ctrl+S", |harness| {
+            press(harness, egui::Modifiers::COMMAND, egui::Key::S);
+        }),
+        ("Ctrl+Shift+S", |harness| {
+            let modifiers = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+            press(harness, modifiers, egui::Key::S);
+        }),
+        ("Save", |harness| click_on(harness, "Save")),
+        ("Save all", |harness| click_on(harness, "Save all")),
+    ];
+    for earlier_work in [false, true] {
+        for (name, save) in saves {
+            let (project, mut harness, id) = open(REFUSED, WIDE);
+            if earlier_work {
+                let text = source_of(&harness, &id).replace("floor: 2", "floor: 3");
+                write_code(&mut harness, &id, &text);
+            }
+            let before = source_of(&harness, &id);
+            type_title(&mut harness, REFUSED_TITLE, TYPED);
+            save(&mut harness);
+            let after = before.replacen(REFUSED_TITLE, TYPED, 1);
+            assert!(!editing(&harness), "{name}: the field is closed");
+            assert_eq!(source_of(&harness, &id), after, "{name}: the text");
+            assert_eq!(
+                fs::read_to_string(project.path().join(REFUSED)).unwrap(),
+                after,
+                "{name}: the file"
+            );
+            assert!(!dirty(&harness, &id), "{name}: saved");
+            assert!(on_header(&harness, TYPED).is_some(), "{name}: the header");
+            undo(&mut harness);
+            assert_eq!(source_of(&harness, &id), before, "{name}: one undo step");
+        }
+    }
+
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    let before = source_of(&harness, &id);
+    type_title(&mut harness, REFUSED_TITLE, TYPED);
+    click_on(&mut harness, "Run simulation");
+    finish_run(&mut harness);
+    assert!(!editing(&harness));
+    assert!(
+        folder(&harness).fresh_run(&id).is_some(),
+        "the run is of the text with the title typed"
+    );
+    assert_eq!(
+        source_of(&harness, &id),
+        before.replacen(REFUSED_TITLE, TYPED, 1)
+    );
+    assert!(dirty(&harness, &id), "a run saves nothing");
+
+    // Nothing to write: the save and the run go on.
+    for text in [REFUSED_TITLE, "  "] {
+        let (_project, mut harness, id) = open(REFUSED, WIDE);
+        let before = source_of(&harness, &id);
+        type_title(&mut harness, REFUSED_TITLE, text);
+        press(&mut harness, egui::Modifiers::COMMAND, egui::Key::S);
+        assert_nothing_written(&mut harness, &id, &before, "nothing to write");
+        type_title(&mut harness, REFUSED_TITLE, text);
+        click_on(&mut harness, "Run simulation");
+        finish_run(&mut harness);
+        assert_eq!(source_of(&harness, &id), before);
+    }
+}
+
+/// Finding 6: a title that cannot be written holds the save and the run
+/// back, so that neither takes the old one.
+#[test]
+fn title_that_is_refused_holds_the_save_back() {
+    let (project, mut harness, id) = open(REFUSED, WIDE);
+    let on_disk = fs::read_to_string(project.path().join(REFUSED)).unwrap();
+    let text = source_of(&harness, &id).replace("floor: 2", "floor: 3");
+    write_code(&mut harness, &id, &text);
+    type_title(&mut harness, REFUSED_TITLE, "{{{");
+    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::S);
+    assert_eq!(source_of(&harness, &id), text);
+    assert!(dirty(&harness, &id), "not saved with the old title");
+    assert_eq!(
+        fs::read_to_string(project.path().join(REFUSED)).unwrap(),
+        on_disk
+    );
+}
+
+/// Finding 6, with criterion 7: what was left is not written by a later save.
+#[test]
+fn an_abandoned_title_is_not_committed_later() {
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    let before = source_of(&harness, &id);
+    type_title(&mut harness, REFUSED_TITLE, "Left with Ctrl+E");
+    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::E);
+    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::S);
+    assert_eq!(source_of(&harness, &id), before, "another view");
+    press(&mut harness, egui::Modifiers::COMMAND, egui::Key::E);
+    assert!(!editing(&harness));
+
+    for elsewhere in ["Code", "Diagram", "Library", "Cleanup"] {
+        app(&mut harness).workbench.mode = Mode::Diagram;
+        settle(&mut harness);
+        choose(&mut harness, "Main");
+        type_title(&mut harness, REFUSED_TITLE, "Left with a click");
+        click_on(&mut harness, elsewhere);
+        click_on(&mut harness, "Run simulation");
+        finish_run(&mut harness);
+        assert_eq!(source_of(&harness, &id), before, "{elsewhere}, a run");
+        press(&mut harness, egui::Modifiers::COMMAND, egui::Key::S);
+        assert_eq!(source_of(&harness, &id), before, "{elsewhere}");
+    }
+}
+
+/// Finding 8: the field grows with what is typed, over the kind and the file
+/// name of a scenario, whose Main and Cleanup stay where the opened field put
+/// them; a component's grows to the room of its row.
+#[test]
+fn title_field_grows_with_the_text() {
+    let long = "Every booking of one room at one hour is refused, the first one aside, always";
+    let (_project, mut harness, _) = open(REFUSED, WIDE);
+    let closed = harness.get_by_label("Main").rect();
+    open_field(&mut harness, REFUSED_TITLE);
+    let opened = harness.get_by_label("Main").rect();
+    assert!(opened.left() - closed.left() <= 12.0);
+    let mut width = harness.get_by_label(FIELD).rect().width();
+    for text in ["Every booking of one room at", &long[..48], long] {
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.get_by_label(FIELD).type_text(text);
+        settle(&mut harness);
+        harness.step();
+        let field = harness.get_by_label(FIELD).rect();
+        assert!(field.width() > width, "{text:?}: {field:?} over {width}");
+        width = field.width();
+        assert_eq!(harness.get_by_label("Main").rect(), opened, "{text:?}");
+        assert_disjoint(&harness, &[FIELD, "Main", "Cleanup"]);
+    }
+    assert!(on_header(&harness, "double-booking.afs").is_none());
+    assert!(on_header(&harness, "Scenario").is_none());
+    let field = harness.get_by_label(FIELD).rect();
+    assert!(
+        opened.left() - field.right() < 40.0,
+        "all the room there is: {field:?}, {opened:?}"
+    );
+    // What is taken back gives the file name and the kind back.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    harness.get_by_label(FIELD).type_text("Short");
+    settle(&mut harness);
+    harness.step();
+    assert!(on_header(&harness, "Scenario").is_some());
+    assert_eq!(harness.get_by_label("Main").rect(), opened);
+
+    for size in [WIDE, MINIMUM] {
+        let project = crate::testing::shop_project();
+        let (mut harness, id) = open_at(project.path(), "components/product.afs", size);
+        let name = title_of(&harness, &id);
+        open_field(&mut harness, &name);
+        let opened = harness.get_by_label(FIELD).rect();
+        let zoom = folder(&harness).canvases[&id].debug_zoom();
+        harness.get_by_label(FIELD).type_text(long);
+        settle(&mut harness);
+        harness.step();
+        let field = harness.get_by_label(FIELD).rect();
+        assert!(field.width() > opened.width() + 80.0, "{field:?}");
+        assert_disjoint(&harness, &[FIELD, "Component settings", "Add step"]);
+        assert_eq!(folder(&harness).canvases[&id].debug_zoom(), zoom);
+    }
+}
+
 /// Criterion 8: what is typed is read back by the analysis as it is.
 #[test]
 fn title_edit_escapes() {
@@ -682,6 +861,11 @@ fn review_ws05_header() {
             crate::testing::capture(&mut harness, &format!("ws05a-{which}-{suffix}"), None);
             open_field(&mut harness, title);
             crate::testing::capture(&mut harness, &format!("ws05a-{which}-edit-{suffix}"), None);
+            harness
+                .get_by_label(FIELD)
+                .type_text("A second booking of one room is refused, always and at once");
+            settle(&mut harness);
+            crate::testing::capture(&mut harness, &format!("ws05a-{which}-grown-{suffix}"), None);
         }
         let project = crate::testing::shop_project();
         let (mut harness, id) = open_at(project.path(), "components/product.afs", size);
