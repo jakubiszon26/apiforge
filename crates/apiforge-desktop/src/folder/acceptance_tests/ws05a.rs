@@ -803,7 +803,8 @@ fn publish_takes_the_title_typed() {
         type_title(&mut harness, &name, "One product");
         if waiting {
             let session = app(&mut harness).session.as_mut().unwrap();
-            let text = format!("{text}// Outside.\n");
+            // No comment, which publishing would ask about.
+            let text = text.replacen("New. ", "Newer. ", 1);
             session.edit_source(&id, &text, CODE).unwrap();
             app(&mut harness).publish_component(&id);
             assert!(!app(&mut harness).storage.is_busy(), "not published yet");

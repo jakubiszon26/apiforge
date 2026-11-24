@@ -16,9 +16,6 @@ impl FolderApp {
     }
 
     pub(super) fn diagram_area(&mut self, ui: &mut egui::Ui, active: Option<&str>) {
-        let mut title_edit = self
-            .title_edit
-            .take_if(|edit| active == Some(edit.document.as_str()));
         let Some(document_id) = active else {
             // The sleeping dog keeps the empty board company (KTLO-20); the
             // board's other hints announce a problem or a wait and stay plain.
@@ -93,11 +90,15 @@ impl FolderApp {
         // analysis a publication starts checks code that did not change:
         // neither puts a notice above the board (UX-25).
         let held_briefly = held_briefly(&snapshot);
-        // The field stays open while the board is held for a moment only, and
-        // while the title is still the one it opened on.
-        title_edit = title_edit.filter(|edit| {
-            (snapshot.editable || held_briefly) && header.title == Some(edit.title.as_str())
-        });
+        // Taken for the frame; another document's waits, and keeps the field
+        // of this one from opening over it.
+        let mut title_edit = self.title_edit.take_if(|edit| edit.document == document_id);
+        if header.title.is_none()
+            && let Some(edit) = title_edit.as_mut()
+        {
+            edit.left = true;
+        }
+        let title_editable = snapshot.editable && self.title_edit.is_none();
         if !snapshot.editable && !snapshot.paused && !held_briefly {
             let text = read_only_reason(&snapshot);
             egui::Frame::new()
@@ -221,7 +222,6 @@ impl FolderApp {
             self.notice_models.remove(document_id);
         }
         let mut chosen = cleanup;
-        let mut renamed = None;
         let commands = ui
             .scope(|ui| {
                 if !snapshot.editable && !snapshot.paused {
@@ -271,7 +271,7 @@ impl FolderApp {
                 let row = canvas.leading_rect(ui, &input);
                 // Drawn before the board, so the keyboard reaches the header
                 // first and then the board's toolbar on the same row.
-                renamed = header.show(
+                header.show(
                     ui.ctx(),
                     ui.id(),
                     row,
@@ -279,7 +279,7 @@ impl FolderApp {
                     &mut chosen,
                     &mut TitleField {
                         document: document_id,
-                        editable: snapshot.editable,
+                        editable: title_editable,
                         edit: &mut title_edit,
                     },
                 );
@@ -300,8 +300,9 @@ impl FolderApp {
             self.board_command(document_id, &model, cleanup, snapshot.editable, command);
         }
         // After the commands, which edit the model this frame drew.
-        if let Some(title) = renamed {
-            self.rename_document(document_id, title);
+        if self.title_edit.as_ref().is_some_and(|edit| edit.left) {
+            // Told, or waiting: nothing here depends on it.
+            let _ = self.commit_title();
         }
         // What Back restores beside the board lasts as long as Back.
         if !self
@@ -313,59 +314,104 @@ impl FolderApp {
         }
     }
 
-    /// Whether a title typed in the header's field waits to be written.
-    pub(super) fn title_typed(&self, _document: Option<&str>) -> bool {
-        self.title_edit
-            .as_ref()
-            .is_some_and(|edit| edit.written().is_some())
+    /// Whether a title typed in the header's field is still to be written, in
+    /// `document` or in any.
+    pub(super) fn title_typed(&self, document: Option<&str>) -> bool {
+        self.title_edit.as_ref().is_some_and(|edit| {
+            edit.written().is_some() && document.is_none_or(|id| id == edit.document)
+        })
     }
 
-    /// Closes the header's field and writes the title typed in it, when the
-    /// field is left and before a save or a run. `false` when there was one
-    /// and it was not written, of which the person is told: the title is the
-    /// one before, and the save or the run would take it.
-    pub(super) fn commit_title(&mut self) -> bool {
+    /// Closes the header's field and writes the title typed in it: when the
+    /// field is left, and before anything that takes the title or gives up
+    /// the project.
+    pub(super) fn commit_title(&mut self) -> TitleCommit {
+        let commit = self.write_title();
+        if commit == TitleCommit::Refused {
+            self.after_title.clear();
+        }
+        if commit == TitleCommit::Wait || !self.after_title.is_empty() {
+            self.ui_context
+                .request_repaint_after(Duration::from_millis(16));
+        }
+        commit
+    }
+
+    fn write_title(&mut self) -> TitleCommit {
         let Some(mut edit) = self.title_edit.take() else {
-            return true;
+            return TitleCommit::Done;
         };
         let Some(written) = edit.written() else {
-            return true;
+            return TitleCommit::Done;
         };
+        let refused = |reason: &str| format!("The title “{written}” was not written. {reason}");
         let Some(snapshot) = self.snapshot(&edit.document) else {
-            return true;
+            self.notify(refused("Its file is no longer in the project."), true);
+            return TitleCommit::Refused;
         };
-        if snapshot
-            .model
-            .as_deref()
-            .and_then(shown_title)
-            .as_ref()
-            .is_none_or(|title| *title != edit.title)
-        {
-            return true;
-        }
         if !snapshot.editable {
-            if held_briefly(&snapshot) {
+            if takes_edits_soon(&snapshot) {
                 edit.left = true;
                 self.title_edit = Some(edit);
+                return TitleCommit::Wait;
             }
-            return true;
+            self.notify(refused(read_only_reason(&snapshot)), true);
+            return TitleCommit::Refused;
         }
         self.rename_document(&edit.document, written.clone());
-        self.shared_model(&edit.document)
-            .is_some_and(|model| shown_title(&model) == Some(written))
+        let done = self
+            .shared_model(&edit.document)
+            .is_some_and(|model| shown_title(&model) == Some(written));
+        // A refused edit says why itself, or asks.
+        if done {
+            TitleCommit::Done
+        } else {
+            TitleCommit::Refused
+        }
+    }
+
+    /// Whether `then` may go on now, the title typed written first. While the
+    /// board takes no edit for a moment `then` is kept, and done once the
+    /// title is written; a refused title ends it.
+    pub(super) fn after_title(&mut self, then: AfterTitle) -> bool {
+        match self.commit_title() {
+            TitleCommit::Done => true,
+            TitleCommit::Refused => false,
+            TitleCommit::Wait => {
+                if !self.after_title.contains(&then) {
+                    self.after_title.push(then);
+                }
+                false
+            }
+        }
     }
 
     /// Writes the title of a field that was left: the keyboard went elsewhere
-    /// while the board was held, or the field is not drawn, in another view,
-    /// for another document or under maximised run results.
+    /// while the board took no edit, or the field is not drawn, in another
+    /// view, for another document or under maximised run results. Then does
+    /// what waited for the title.
     pub(super) fn tend_title_edit(&mut self, active: Option<&str>) {
         let drawn = self.workbench.mode == Mode::Diagram && !self.report_maximised(active);
-        if self
-            .title_edit
-            .as_ref()
-            .is_some_and(|edit| edit.left || !drawn || active != Some(edit.document.as_str()))
-        {
-            self.commit_title();
+        let leave = self.title_edit.as_ref().is_some_and(|edit| {
+            edit.left
+                || !drawn
+                || active != Some(edit.document.as_str())
+                || self
+                    .snapshot(&edit.document)
+                    .is_none_or(|board| !board.editable && !takes_edits_soon(&board))
+        });
+        if leave && self.commit_title() == TitleCommit::Wait {
+            return;
+        }
+        let waited = std::mem::take(&mut self.after_title);
+        for then in waited {
+            match then {
+                AfterTitle::Save(id) => self.save_or_notify(&id),
+                AfterTitle::SaveAll => self.save_all(),
+                AfterTitle::Run { id, live } => self.request_run(&id, live),
+                AfterTitle::Publish(id) => self.publish_component(&id),
+                AfterTitle::CloseTab(id) => self.request_close_tab(&id),
+            }
         }
     }
 
@@ -1529,6 +1575,39 @@ fn held_briefly(snapshot: &Snapshot) -> bool {
     !snapshot.paused && (snapshot.busy || rechecking)
 }
 
+/// Whether the board takes edits again by itself: a storage job ends, or the
+/// code is analysed. A title typed waits for it.
+fn takes_edits_soon(snapshot: &Snapshot) -> bool {
+    !snapshot.paused
+        && !snapshot.held
+        && snapshot.conflict.is_none()
+        && snapshot.unavailable.is_none()
+        && (snapshot.busy || snapshot.analysis == AnalysisState::Pending)
+}
+
+/// What became of the title typed in the header's field (WS-05a).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub(super) enum TitleCommit {
+    /// It is written, or there was none.
+    Done,
+    /// It cannot be written, of which the person is told: the title is the
+    /// one before.
+    Refused,
+    /// The board takes no edit for a moment. What needs the title waits.
+    Wait,
+}
+
+/// What waits for a title to be written (WS-05a).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum AfterTitle {
+    Save(String),
+    SaveAll,
+    Run { id: String, live: bool },
+    Publish(String),
+    CloseTab(String),
+}
+
 /// The title being edited in the header (WS-05a). It is written when the
 /// field is left, before a save and before a run; Escape drops it.
 pub(super) struct TitleEdit {
@@ -1546,7 +1625,7 @@ pub(super) struct TitleEdit {
 
 impl TitleEdit {
     /// What the field writes; never the title it opened on, nor an empty one.
-    fn written(&self) -> Option<String> {
+    pub(super) fn written(&self) -> Option<String> {
         let written = one_line(&self.draft);
         (written != self.title && !written.trim().is_empty()).then_some(written)
     }
@@ -1707,7 +1786,6 @@ impl Header<'_> {
     }
 
     /// Draws the header into `row`, the left of the board's header row.
-    /// Returns the title its field wrote when it was left.
     fn show(
         &self,
         ctx: &egui::Context,
@@ -1716,8 +1794,7 @@ impl Header<'_> {
         fit: &HeaderFit,
         cleanup: &mut bool,
         field: &mut TitleField<'_>,
-    ) -> Option<String> {
-        let mut renamed = None;
+    ) {
         egui::Area::new(id.with("board-document-header"))
             .fixed_pos(row.left_center())
             .pivot(egui::Align2::LEFT_CENTER)
@@ -1728,7 +1805,7 @@ impl Header<'_> {
                         ui.scope(|ui| {
                             ui.set_max_width(fit.name_width);
                             if let Some(title) = self.title {
-                                renamed = self.title(ui, title, fit.name_width, field);
+                                self.title(ui, title, fit.name_width, field);
                             } else {
                                 ui.add(Self::bold_label(name));
                             }
@@ -1749,7 +1826,6 @@ impl Header<'_> {
                     }
                 });
             });
-        renamed
     }
 
     fn bold_label(text: &str) -> egui::Label {
@@ -1762,14 +1838,7 @@ impl Header<'_> {
     }
 
     /// The title, which a double click makes a field on an editable board.
-    /// Returns what it wrote when it was left.
-    fn title(
-        &self,
-        ui: &mut egui::Ui,
-        title: &str,
-        width: f32,
-        field: &mut TitleField<'_>,
-    ) -> Option<String> {
+    fn title(&self, ui: &mut egui::Ui, title: &str, width: f32, field: &mut TitleField<'_>) {
         let id = egui::Id::new(("document-title", field.document));
         if let Some(edit) = field.edit.as_mut().filter(|edit| !edit.left) {
             if edit.opening {
@@ -1787,7 +1856,6 @@ impl Header<'_> {
             } else if !ui.memory(|memory| memory.has_focus(id)) {
                 // Another field took the keyboard before this one was drawn.
                 edit.left = true;
-                ui.ctx().request_repaint();
             }
         }
         if let Some(edit) = field.edit.as_mut().filter(|edit| !edit.left) {
@@ -1817,19 +1885,12 @@ impl Header<'_> {
             if escape {
                 response.surrender_focus();
                 *field.edit = None;
-                return None;
+            } else if !response.has_focus() {
+                // Left, by Return too: written at the end of the frame, or
+                // once the board takes an edit.
+                edit.left = true;
             }
-            if !response.has_focus() {
-                // Left, by Return too.
-                let written = edit.written();
-                if written.is_some() && !field.editable {
-                    edit.left = true;
-                    return None;
-                }
-                *field.edit = None;
-                return written;
-            }
-            return None;
+            return;
         }
         let label = Self::bold_label(title)
             .selectable(false)
@@ -1857,7 +1918,6 @@ impl Header<'_> {
             });
             ui.ctx().request_repaint();
         }
-        None
     }
 }
 

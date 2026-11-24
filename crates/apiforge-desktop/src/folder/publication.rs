@@ -58,7 +58,7 @@ impl FolderApp {
     }
 
     pub(super) fn publish_component(&mut self, id: &str) {
-        if self.commit_title() {
+        if self.after_title(diagram::AfterTitle::Publish(id.to_owned())) {
             self.component_action(id, Action::Publish);
         }
     }

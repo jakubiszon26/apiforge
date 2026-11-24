@@ -369,6 +369,8 @@ pub struct FolderApp {
     unchanged: Option<(publication::UnchangedKey, Option<u32>)>,
     /// The title being edited in the board's header (WS-05a).
     title_edit: Option<diagram::TitleEdit>,
+    /// What waits for that title to be written.
+    after_title: Vec<diagram::AfterTitle>,
     /// The *New input* form open on a component's board, by document
     /// (UX-32). While it is open the Inspector shows it.
     new_inputs: HashMap<String, inputs::NewInput>,
@@ -606,6 +608,7 @@ impl FolderApp {
             selected_inputs: HashMap::new(),
             unchanged: None,
             title_edit: None,
+            after_title: Vec::new(),
             new_inputs: HashMap::new(),
             component_settings: HashSet::new(),
             agreed_fields: HashMap::new(),
@@ -1991,7 +1994,7 @@ impl FolderApp {
     }
 
     fn request_close_tab(&mut self, document_id: &str) {
-        if !self.commit_title() {
+        if !self.after_title(diagram::AfterTitle::CloseTab(document_id.to_owned())) {
             return;
         }
         // Closing the tab following brought the person to lets it go
