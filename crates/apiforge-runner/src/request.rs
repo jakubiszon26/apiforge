@@ -87,6 +87,23 @@ impl RunRequest {
             ..Self::new(project, component_id, mode)
         }
     }
+
+    /// Whether the run executes a part only, so it never passes the full test.
+    pub(crate) fn is_diagnostic(&self) -> bool {
+        self.target_node_id.is_some() || self.single_node_id.is_some() || self.partial.is_some()
+    }
+
+    /// The node a run of one step executes and the earlier report it reads,
+    /// when it has one.
+    pub(crate) fn single(&self) -> Option<(&str, Option<&RunResult>)> {
+        match &self.partial {
+            Some(Partial::Alone { node_id, previous }) => Some((node_id, previous.as_deref())),
+            _ => self
+                .single_node_id
+                .as_deref()
+                .map(|node_id| (node_id, self.previous_run.as_ref())),
+        }
+    }
 }
 
 /// Execution limits. The defaults match the recorded run corpus.
@@ -177,7 +194,7 @@ pub enum RunError {
     InputNotFound(String),
     #[error("Node `{0}` does not exist in the scenario")]
     NodeNotFound(String),
-    #[error("Choose either a target node or a single node, not both")]
+    #[error("Choose one of a target node, a single node and a partial run")]
     ConflictingModes,
     #[error("Historical inputs are only available for a single step")]
     PreviousRunWithoutSingleNode,
@@ -233,21 +250,26 @@ pub fn validate(request: &RunRequest) -> Result<(), RunError> {
             &component.graph
         }
     };
-    if request.target_node_id.is_some() && request.single_node_id.is_some() {
+    let parts: Vec<&str> = [
+        request.target_node_id.as_deref(),
+        request.single_node_id.as_deref(),
+        request.partial.as_ref().map(Partial::node_id),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if parts.len() > 1 {
         return Err(RunError::ConflictingModes);
     }
-    for id in [&request.target_node_id, &request.single_node_id]
-        .into_iter()
-        .flatten()
-    {
-        if !graph.nodes.iter().any(|node| &node.id == id) {
-            return Err(RunError::NodeNotFound(id.clone()));
+    for id in parts {
+        if !graph.nodes.iter().any(|node| node.id == id) {
+            return Err(RunError::NodeNotFound(id.to_owned()));
         }
     }
-    if let Some(previous) = &request.previous_run {
-        if request.single_node_id.is_none() {
-            return Err(RunError::PreviousRunWithoutSingleNode);
-        }
+    if request.previous_run.is_some() && request.single_node_id.is_none() {
+        return Err(RunError::PreviousRunWithoutSingleNode);
+    }
+    if let Some((_, Some(previous))) = request.single() {
         validate_previous(request, previous)?;
     }
     Ok(())

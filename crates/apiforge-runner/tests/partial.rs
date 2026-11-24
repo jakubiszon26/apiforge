@@ -549,6 +549,74 @@ async fn req04a_criterion_3_conditions() {
     );
 }
 
+const COMPONENT: &str = r#"component partial_maker "Maker" {
+  made = POST "/made" {
+    sample 201 { id: "m-1" }
+  }
+  again = POST "/again" {
+    sample 201 { id: "m-2" }
+  }
+  wrong = assert again.status == 200
+  last = POST "/last" {
+    sample 201 { id: "m-3" }
+  }
+  export id: string = made.body.id
+}
+"#;
+
+const CALLS: &str = r#"scenario "REQ-04a calls" {
+  on_error stop
+  begin = start
+  maker = partial_maker@1()
+  read = GET "/read/{{maker}}" {
+    sample 200 { ok: true }
+  }
+  read_ok = assert read.body.ok == true
+}
+"#;
+
+/// A component call inside a part keeps the rules of every run, *Stop*
+/// included; a value it made is read from the earlier run by its existence.
+#[tokio::test]
+async fn req04a_criterion_3_component_calls() {
+    let mut project = empty_project();
+    project.scenarios.clear();
+    project.environment.base_url = "http://127.0.0.1:9".into();
+    let lowered = |project: &Project, text: &str| {
+        let result = lower(&parse(text), &LowerContext::folder(project));
+        assert!(!result.has_errors(), "{:#?}", result.diagnostics);
+        result.document.expect("a document")
+    };
+    let Document::Component(mut component) = lowered(&project, COMPONENT) else {
+        panic!("not a component");
+    };
+    component.revision = 1;
+    project.components.push(component);
+    let Document::Scenario(scenario) = lowered(&project, CALLS) else {
+        panic!("not a scenario");
+    };
+    project.scenarios.push(scenario.clone());
+    let mode = RunMode::Simulation;
+
+    let whole = report(full(&project, &scenario, mode)).await;
+    let inner = |run: &RunResult| -> Vec<StepStatus> {
+        let children = step(run, "maker").children.clone().expect("inner steps");
+        children.iter().map(|step| step.status).collect()
+    };
+    for part in [
+        through(&project, &scenario, mode, "maker"),
+        alone(&project, &scenario, mode, "maker", None),
+    ] {
+        let part = report(part).await;
+        assert_eq!(inner(&part), inner(&whole));
+        assert!(inner(&part).contains(&StepStatus::Skipped));
+    }
+    let run = report(alone(&project, &scenario, mode, "read", Some(&whole))).await;
+    assert_eq!(handles(&run), ["read", "read_ok"]);
+    let url = &step(&run, "read").request.as_ref().expect("sent").url;
+    assert!(url.ends_with("/read/m-1"), "{url}");
+}
+
 // Criterion 4 --------------------------------------------------------------------
 
 /// The check's other subject is missing from the earlier run: the request is
