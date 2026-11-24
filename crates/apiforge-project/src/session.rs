@@ -1617,3 +1617,166 @@ fn kept_chain(previous: &Document, mut model: Document) -> Document {
     }
     model
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Origin;
+    use apiforge_script::{Diagnostic, FAR_READ, SyntaxTree};
+
+    /// Places as [`FixedPlacer`] and warns of far reads as the window does,
+    /// after `.0` copies of the first, which fill the list.
+    struct FarReads(usize);
+
+    impl Placer for FarReads {
+        fn place(&self, document: &mut Document, fresh: &[String], context: &Project) {
+            FixedPlacer.place(document, fresh, context);
+        }
+        fn advise(
+            &self,
+            tree: &SyntaxTree,
+            document: &Document,
+            context: &Project,
+        ) -> Vec<Diagnostic> {
+            let far = apiforge_script::far_read_warnings(tree, document, context);
+            let filler = far.iter().cycle().take(self.0).cloned();
+            filler.chain(far.iter().cloned()).collect()
+        }
+    }
+
+    const TYPE: &str = "The value's type does not match this input";
+    /// One warning of the language, on `"b"`, and two far reads of `a`.
+    const SOURCE: &str = "scenario \"S\" {\n  begin = start\n  a = GET \"/a\"\n  b = GET \"/b\"\n  c = GET \"/c/{{a.body.id}}\" {\n    body { again: a.body.id }\n  }\n  sum = c.status + \"b\"\n}\n";
+
+    fn opened(filler: usize) -> (tempfile::TempDir, ProjectSession, String) {
+        let directory = tempfile::tempdir().unwrap();
+        let placer = Arc::new(FarReads(filler));
+        let mut session = ProjectSession::create_with(directory.path(), "S", placer).unwrap();
+        let id = session
+            .create_document(DocumentKind::Scenario, "scenarios/s.afs", SOURCE)
+            .unwrap();
+        session.settle(&id).unwrap();
+        (directory, session, id)
+    }
+
+    /// The document with the method of `handle` set to `method`.
+    fn with_method(session: &ProjectSession, id: &str, handle: &str, method: &str) -> Document {
+        let mut model = session.document(id).unwrap().model().unwrap().clone();
+        let Document::Scenario(scenario) = &mut model else {
+            panic!("a scenario")
+        };
+        let node = scenario
+            .graph
+            .nodes
+            .iter_mut()
+            .find(|node| node.handle == handle)
+            .unwrap();
+        node.config.method = Some(serde_json::from_value(method.into()).unwrap());
+        model
+    }
+
+    /// The warnings as their message and the text each covers.
+    fn covered(session: &ProjectSession, id: &str) -> Vec<(String, String)> {
+        let document = session.document(id).unwrap();
+        document
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.message.clone(),
+                    document.text()[diagnostic.range.clone()].to_owned(),
+                )
+            })
+            .collect()
+    }
+
+    /// What an analysis of the text the session holds reports.
+    fn fresh(session: &ProjectSession, id: &str) -> (Vec<Diagnostic>, usize) {
+        let analysis = session.analysis_for(id).unwrap().run();
+        assert!(analysis.is_valid());
+        (analysis.diagnostics, analysis.omitted_diagnostics)
+    }
+
+    fn reported(session: &ProjectSession, id: &str) -> (Vec<Diagnostic>, usize) {
+        let document = session.document(id).unwrap();
+        (
+            document.diagnostics().to_vec(),
+            document.omitted_diagnostics(),
+        )
+    }
+
+    /// #578: a board edit keeps the warnings of the text it writes, with
+    /// their ranges in that text; so do its Undo and Redo.
+    #[test]
+    fn a_model_edit_keeps_the_warnings_of_its_text() {
+        let (_directory, mut session, id) = opened(0);
+        let expected = [
+            (TYPE.to_owned(), "\"b\"".to_owned()),
+            (FAR_READ.to_owned(), "a.body.id".to_owned()),
+            (FAR_READ.to_owned(), "a.body.id".to_owned()),
+        ];
+        assert_eq!(covered(&session, &id), expected);
+        let before = reported(&session, &id);
+
+        // Above every warning, and longer: every range moves.
+        let model = with_method(&session, &id, "b", "DELETE");
+        session
+            .apply_model_edit(&id, model, Origin::SESSION)
+            .unwrap();
+        let edited = session.document(&id).unwrap().text().to_owned();
+        assert_eq!(edited, SOURCE.replace("GET \"/b\"", "DELETE \"/b\""));
+        assert_eq!(covered(&session, &id), expected);
+        assert_ne!(reported(&session, &id), before, "the ranges moved");
+        assert_eq!(reported(&session, &id), fresh(&session, &id));
+        let after = reported(&session, &id);
+
+        assert!(session.undo(&id, Origin::SESSION).unwrap());
+        assert_eq!(reported(&session, &id), before, "Undo");
+        assert!(session.redo(&id, Origin::SESSION).unwrap());
+        assert_eq!(reported(&session, &id), after, "Redo");
+
+        // A change of layout alone leaves the text, and so its warnings.
+        let mut model = session.document(&id).unwrap().model().unwrap().clone();
+        let Document::Scenario(scenario) = &mut model else {
+            panic!("a scenario")
+        };
+        scenario.graph.nodes[0].position.x += 40.0;
+        session
+            .apply_model_edit(&id, model, Origin::SESSION)
+            .unwrap();
+        assert_eq!(session.document(&id).unwrap().text(), edited);
+        assert_eq!(reported(&session, &id), after);
+    }
+
+    /// #578: what the edit does not touch stays, what it removes goes.
+    #[test]
+    fn a_model_edit_drops_a_warning_whose_text_it_removes() {
+        let (_directory, mut session, id) = opened(0);
+        let mut model = session.document(&id).unwrap().model().unwrap().clone();
+        let Document::Scenario(scenario) = &mut model else {
+            panic!("a scenario")
+        };
+        scenario.graph.nodes.retain(|node| node.handle != "sum");
+        session
+            .apply_model_edit(&id, model, Origin::SESSION)
+            .unwrap();
+        let far = (FAR_READ.to_owned(), "a.body.id".to_owned());
+        assert_eq!(covered(&session, &id), [far.clone(), far]);
+        assert_eq!(reported(&session, &id), fresh(&session, &id));
+    }
+
+    /// #578: the number of warnings beyond the limit is the new text's too.
+    #[test]
+    fn a_model_edit_keeps_the_count_of_omitted_warnings() {
+        let (_directory, mut session, id) = opened(apiforge_script::MAX_DIAGNOSTICS);
+        let before = reported(&session, &id);
+        assert_eq!(before.0.len(), apiforge_script::MAX_DIAGNOSTICS);
+        assert_eq!(before.1, 3, "one of the language and two far reads more");
+        let model = with_method(&session, &id, "b", "DELETE");
+        session
+            .apply_model_edit(&id, model, Origin::SESSION)
+            .unwrap();
+        assert_eq!(session.document(&id).unwrap().omitted_diagnostics(), 3);
+        assert_eq!(reported(&session, &id), fresh(&session, &id));
+    }
+}
