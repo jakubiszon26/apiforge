@@ -1463,8 +1463,15 @@ fn req01a_a_clicked_check_is_the_one_marked() {
         let name = row(&harness, row_part).name;
         choose(&mut harness, &name);
         let check = node(&main, handle).id.clone();
-        assert_eq!(selected(&harness), [name.clone()], "the row clicked");
-        assert_eq!(folder(&harness).selections[&id], [check.clone()]);
+        assert_eq!(
+            selected(&harness),
+            std::slice::from_ref(&name),
+            "the row clicked"
+        );
+        assert_eq!(
+            folder(&harness).selections[&id],
+            std::slice::from_ref(&check)
+        );
         // Delete in the list deletes nothing: the list is read (REQ-01b).
         let before = source_of(&harness, &id);
         harness.key_press(egui::Key::Delete);
@@ -1480,7 +1487,11 @@ fn req01a_a_clicked_check_is_the_one_marked() {
         );
         assert!(folder(&harness).canvases[&id].debug_selected(&step));
         steps(&mut harness);
-        assert_eq!(selected(&harness), [name.clone()], "the mark did not move");
+        assert_eq!(
+            selected(&harness),
+            std::slice::from_ref(&name),
+            "the mark did not move"
+        );
         assert_eq!(folder(&harness).selections[&id], [check]);
         // A step clicked on the board takes the mark.
         canvas(&mut harness);
