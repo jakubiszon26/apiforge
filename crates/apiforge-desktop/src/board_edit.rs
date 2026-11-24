@@ -13,7 +13,7 @@ use apiforge_core::{
     graph::{FALSE_PORT, ORDER_PORT, TRUE_PORT, delete_nodes},
 };
 use eframe::egui;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// The graph on the board and everything its cards are drawn from.
 pub struct Board<'a> {
@@ -330,16 +330,7 @@ impl Board<'_> {
             tidied
         };
         // Folded checks keep their places and are in no line's way.
-        let hidden: std::collections::BTreeSet<usize> = if self.lines.folded {
-            let index = |id: &str| self.graph.nodes.iter().position(|node| node.id == id);
-            canvas::collapsible(self.graph, self.sibling)
-                .iter()
-                .filter(|candidate| index(&candidate.anchor).is_some())
-                .filter_map(|candidate| index(&candidate.check))
-                .collect()
-        } else {
-            Default::default()
-        };
+        let hidden = self.folded_checks(self.graph);
         // What the router is given for the board laid out with `room`.
         let drawn = |placed: &[apiforge_layout::Point]| {
             let mut tidied = laid(placed);
@@ -424,6 +415,20 @@ impl Board<'_> {
         }
         let (placed, _) = apiforge_layout::hang_with(&hanging, &room);
         Some(laid(&placed))
+    }
+
+    /// The checks of `graph`, by index, that the board folds into their
+    /// subjects, as [`canvas::resting`] leaves them out.
+    fn folded_checks(&self, graph: &Graph) -> BTreeSet<usize> {
+        if !self.lines.folded {
+            return BTreeSet::new();
+        }
+        let index = |id: &str| graph.nodes.iter().position(|node| node.id == id);
+        canvas::collapsible(graph, self.sibling)
+            .iter()
+            .filter(|candidate| index(&candidate.anchor).is_some())
+            .filter_map(|candidate| index(&candidate.check))
+            .collect()
     }
 
     /// The whole board laid out with its foldable checks as satellites
@@ -608,9 +613,11 @@ impl Board<'_> {
     /// (DIAG-06c, question 5 = A): in every braces whose steps changed, the
     /// steps from the first place that changed to the end of that chain,
     /// everything in the braces of an `if` among them and the cards hung
-    /// under them in shape D stand where a whole *Tidy up* of the board
-    /// puts them, placed by hand or not. Every other card keeps its
-    /// position.
+    /// under them in shape D stand as a whole *Tidy up* of the board
+    /// arranges them, placed by hand or not, measured from the step they
+    /// follow (DIAG-23): the step before that place in its braces, or the
+    /// `if` whose braces they are. Every other card keeps its position, and
+    /// one still in the way is passed ([`Board::pass_kept_cards`]).
     pub fn make_room(&self, next: Graph) -> Graph {
         use apiforge_core::chain::{braces, is_step};
         type Key = Option<(String, apiforge_core::model::Branch)>;
@@ -628,7 +635,8 @@ impl Board<'_> {
             chains
         };
         let (old, new) = (steps_of(self.graph), steps_of(&next));
-        let mut affected: HashSet<String> = HashSet::new();
+        // Each step that moves, with the step its chain follows.
+        let mut follows: HashMap<&str, Option<&str>> = HashMap::new();
         for (key, steps) in &new {
             let before = old.get(key).map(Vec::as_slice).unwrap_or_default();
             let first = steps
@@ -636,10 +644,16 @@ impl Board<'_> {
                 .zip(before.iter().map(Some).chain(std::iter::repeat(None)))
                 .position(|(now, was)| was != Some(now));
             if let Some(first) = first {
-                affected.extend(steps[first..].iter().cloned());
+                let anchor = match first.checked_sub(1) {
+                    Some(before) => Some(&steps[before]),
+                    None => key.as_ref().map(|(x, _)| x),
+                };
+                for step in &steps[first..] {
+                    follows.insert(step, anchor.map(String::as_str));
+                }
             }
         }
-        if affected.is_empty() {
+        if follows.is_empty() {
             return next;
         }
         // Laid out as the document will be once its chain is written: an
@@ -659,44 +673,122 @@ impl Board<'_> {
         .tidy_up(&[]) else {
             return next;
         };
-        // Everything in the braces of an `if` among them.
+        let place = |graph: &Graph, id: &str| {
+            let node = graph.nodes.iter().find(|node| node.id == id)?;
+            Some((node.position.x, node.position.y))
+        };
+        // How far the chain of `step` stands off the tidy: as far as the
+        // step it follows.
+        let offset = |step: &str| {
+            let anchor = follows.get(step).copied().flatten();
+            anchor
+                .and_then(|id| Some((place(&next, id)?, place(&tidied, id)?)))
+                .map_or((0.0, 0.0), |(stands, tidy)| {
+                    (stands.0 - tidy.0, stands.1 - tidy.1)
+                })
+        };
+        // Everything in the braces of an `if` among them goes with it, the
+        // outermost one.
         let written = braces(&next);
-        let inside = |id: &str| {
-            let mut current = id;
+        let mut moved: HashMap<String, (f64, f64)> = HashMap::new();
+        for node in &next.nodes {
+            let mut current = node.id.as_str();
+            let mut with = follows.contains_key(current).then_some(current);
             while let Some(&(parent, _)) = written.get(current) {
-                if affected.contains(parent) {
-                    return true;
+                if follows.contains_key(parent) {
+                    with = Some(parent);
                 }
                 current = parent;
             }
-            false
-        };
-        let within: Vec<String> = next
-            .nodes
-            .iter()
-            .filter(|node| inside(&node.id))
-            .map(|node| node.id.clone())
-            .collect();
-        affected.extend(within);
-        // The cards hung under them.
-        if let Some(plan) = canvas::shape::plan(&chained, self.sibling) {
-            for (satellite, under) in plan.satellites {
-                if affected.contains(&chained.nodes[plan.spine[under]].id) {
-                    affected.insert(chained.nodes[satellite].id.clone());
-                }
+            if let Some(step) = with {
+                moved.insert(node.id.clone(), offset(step));
             }
         }
+        // The cards hung under them go with the step they hang under.
+        let plan = canvas::shape::plan(&chained, self.sibling).unwrap_or_default();
+        for &(satellite, under) in &plan.satellites {
+            if let Some(&by) = moved.get(&chained.nodes[plan.spine[under]].id) {
+                moved.insert(chained.nodes[satellite].id.clone(), by);
+            }
+        }
+        // The row and the column of the tidy of each card that moves.
+        let per = apiforge_layout::Rows::default().columns();
+        let places: HashMap<&str, (usize, usize)> = plan
+            .spine
+            .iter()
+            .copied()
+            .zip(0..)
+            .chain(plan.satellites.iter().copied())
+            .map(|(node, at)| (chained.nodes[node].id.as_str(), (at / per, at % per)))
+            .filter(|(id, _)| moved.contains_key(*id))
+            .collect();
         let mut next = next;
         for node in &mut next.nodes {
-            if !affected.contains(&node.id) {
-                continue;
-            }
-            if let Some(tidy) = tidied.nodes.iter().find(|tidy| tidy.id == node.id) {
-                node.position = tidy.position.clone();
+            if let Some((x, y)) = moved.get(&node.id)
+                && let Some(tidy) = tidied.nodes.iter().find(|tidy| tidy.id == node.id)
+            {
+                node.position = Position {
+                    x: tidy.position.x + x,
+                    y: tidy.position.y + y,
+                };
                 node.auto_placed = true;
             }
         }
+        self.pass_kept_cards(&mut next, &places);
         next
+    }
+
+    /// Where a card that moved to make room stands on one that stays, it goes
+    /// right past it, one gap clear of its right edge, with the moved cards
+    /// of its column and after it in its row of the tidy (DIAG-23). `moved`
+    /// holds the row and the column of each card that moved. A check folded
+    /// into its subject has no box on the board and is in no card's way. A
+    /// card only goes right and the cards that stay are finitely many, so
+    /// this ends.
+    fn pass_kept_cards(&self, next: &mut Graph, moved: &HashMap<&str, (usize, usize)>) {
+        let folded = self.folded_checks(next);
+        let sizes: Vec<Option<egui::Vec2>> = next
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let size = self.card_block(node).size;
+                (!folded.contains(&index)).then(|| egui::vec2(size.width, size.height))
+            })
+            .collect();
+        let rect = |graph: &Graph, index: usize| {
+            let at = &graph.nodes[index].position;
+            let at = egui::pos2(at.x as f32, at.y as f32);
+            sizes[index].map(|size| egui::Rect::from_min_size(at, size))
+        };
+        let mut moving = Vec::new();
+        let mut kept = Vec::new();
+        for (index, node) in next.nodes.iter().enumerate() {
+            match moved.get(node.id.as_str()) {
+                Some(&(row, column)) => moving.push((row, column, index)),
+                None => kept.extend(rect(next, index)),
+            }
+        }
+        moving.sort_unstable();
+        loop {
+            let in_the_way = moving.iter().find_map(|&(row, column, index)| {
+                let card = rect(next, index)?;
+                let right = kept
+                    .iter()
+                    .filter(|kept| kept.intersects(card))
+                    .map(egui::Rect::right)
+                    .max_by(f32::total_cmp)?;
+                Some((row, column, right + apiforge_layout::GAP - card.left()))
+            });
+            let Some((row, column, by)) = in_the_way else {
+                break;
+            };
+            for &(r, c, index) in &moving {
+                if r == row && c >= column {
+                    next.nodes[index].position.x += f64::from(by);
+                }
+            }
+        }
     }
 
     /// The edit with room made for what it adds or moves ([`Board::make_room`]).
