@@ -2,8 +2,7 @@
 
 - Size: M · Owner review: 15 min · Risk: `visible UI`
 - State: **Decided** ([REQ-17](REQ-17.md): 4 A). Mock-up approved
-  (*Keep*, opened). After REQ-17b and REQ-01b; its third entry after
-  REQ-18. Issue [#609](https://github.com/jakubiszon26/apiforge/issues/609).
+  (*Keep*, opened). After REQ-17b, REQ-01b and REQ-18. Issue [#609](https://github.com/jakubiszon26/apiforge/issues/609).
 - Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
@@ -26,7 +25,8 @@ Tests in `folder/acceptance_tests/req17d.rs`.
    last in Main, by DIAG-22's operation; the scenario's tab opens with
    the step selected. `req17d_criterion_1_*`
 2. *Save as a new scenario…* asks a name as *New scenario* does and
-   registers it (`attach`, REQ-17a); the tab becomes the scenario's.
+   registers the try's text with `create_document` (`into_source`,
+   REQ-17a); the tab becomes the scenario's.
    `req17d_criterion_2_*`
 3. What is written is what building that request in the window writes
    (REQ-13): no line the person did not set. `req17d_criterion_3_*`
@@ -34,8 +34,10 @@ Tests in `folder/acceptance_tests/req17d.rs`.
    `req17d_criterion_4_*`
 5. After *Add to a scenario…* the try stays; after *Save as a new
    scenario…* it is no longer a try. `req17d_criterion_5_*`
-6. *Save as component…* opens REQ-18's dialog for the try; shown only
-   when REQ-18 is merged. `req17d_criterion_6_*`
+6. *Save as component…* opens REQ-18's dialog for the try, with the
+   values changed between the try's sends ticked; the try stays open
+   and the component is in *Project components*.
+   `req17d_criterion_6_*`
 7. At 960 × 540 the menu stays inside the window. `assert_within_window`
 
 ## Technical appendix

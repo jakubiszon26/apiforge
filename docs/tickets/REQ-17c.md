@@ -1,9 +1,9 @@
-# REQ-17c: A try is kept with the person across a restart
+# REQ-17c: Tries are listed in Files and kept with the person across a restart
 
-- Size: S–M · Owner review: 10 min · Risk: `permission` (what of a
-  secret is written to disk); no `format` of the project
-- State: **Decided** ([REQ-17](REQ-17.md): 2 A) **except one
-  question**. After REQ-17b. Issue [#608](https://github.com/jakubiszon26/apiforge/issues/608).
+- Size: M · Owner review: 15 min · Risk: `visible UI`, `permission`
+  (what of a secret is written to disk); no `format` of the project
+- State: **Decided** ([REQ-17](REQ-17.md): 2 A, 5 A; the secret: A, by
+  the owner on 2026-11-24, #608). After REQ-17b. Issue [#608](https://github.com/jakubiszon26/apiforge/issues/608).
 - Analysis model: Fable 5.2 · Implementation model: Opus
 
 ## Goal
@@ -20,37 +20,47 @@ the text of the request and nothing else — **no response, no run, no
 header received**. Written atomically, owner-only on Unix, at most 50
 tries and 1 MiB; an unknown version is neither read nor rewritten.
 
-## The open question
+## Decided: a typed secret is not written
 
-A try can hold a secret typed as a value (an `Authorization` header,
-a password in the body). A scenario file stores such a value as typed
-today and the Auth tab warns. For the store:
-**A — a value under a sensitive name (`redact.rs`,
-`is_sensitive_key`) is not written: after a restart the field is
-empty and says "not kept"; `{{env.NAME}}` is kept** · B — written as
-typed, as a scenario file does, in the owner-only file · C — a try
-holding such a value is not kept at all.
+A — what a run would redact in the request is left out of the file;
+after a restart the field is empty and says *not kept*;
+`{{env.NAME}}` is kept. Not chosen: written as typed; such a try not
+kept at all.
 
 ## Acceptance criteria
 
 Tests in `folder/acceptance_tests/req17c.rs`; unit tests of the store.
 
-1. A try is written within a second of its last edit and on close; a
-   restart shows the same tries, names and order. `req17c_criterion_1_*`
-2. Nothing is written under the project folder. `req17c_criterion_2_*`
-3. The file holds no response and no value the run redacts.
-   `req17c_criterion_3_*`
-4. By the owner's answer: what is stored of a value under a sensitive
-   name. `req17c_criterion_4_*`
-5. An unreadable or newer file: the window starts with no tries, says
-   so once and does not rewrite it. `req17c_criterion_5_*`
-6. Two windows on one project do not lose each other's tries: a write
+1. *Files* lists the tries under *Requests, not saved*: one is opened,
+   renamed and deleted there (a delete asks); closing a try's tab no
+   longer asks, REQ-17b's question is gone. `req17c_criterion_1_*`
+2. A try is written within a second of its last edit and on close; a
+   restart shows the same tries, names and order. `req17c_criterion_2_*`
+3. Nothing is written under the project folder. `req17c_criterion_3_*`
+4. The file holds no response, no run and no header received.
+   `req17c_criterion_4_*`
+5. Left out of the written text, by one function of
+   `apiforge-runner/src/redact.rs` that the store calls and a run's
+   redaction shares: a literal value under a sensitive name in the
+   headers, the body or the query (`is_sensitive_key`), a `Bearer`
+   token, and a password in the address. A placeholder is kept as
+   written. A test stores a try holding each and searches the file.
+   `req17c_criterion_5_*`
+6. After a restart such a field is empty, marked *not kept*, and the
+   try says which fields; in the running window the value stays until
+   the window closes. `req17c_criterion_6_*`
+7. An unreadable or newer file: the window starts with no tries, says
+   so once and does not rewrite it. `req17c_criterion_7_*`
+8. Two windows on one project do not lose each other's tries: a write
    reads the file again and replaces its own entries.
-   `req17c_criterion_6_*`
-7. REQ-17b's line "until the window closes" is gone. `req17c_criterion_7_*`
+   `req17c_criterion_8_*`
+9. At 960 × 540 the section and its rows stay inside the panel.
+   `assert_within_window`
 
 ## Technical appendix
 
 - Files: new `tries_store.rs` beside `run_mode.rs` (its model);
-  `folder/tries.rs`; the test file. Not offered to an agent: the
+  `folder/tries.rs`, `folder/explorer.rs` (the section);
+  `apiforge-runner/src/redact.rs` (the function of criterion 4, made
+  callable); the test file. Not offered to an agent: the
   store is never read by `apiforge-mcp` or `apiforge-cli`.

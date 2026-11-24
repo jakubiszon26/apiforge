@@ -124,7 +124,7 @@ scenario after the call replaced the step.
 Several requests at once from *Steps* (the board's selection does it);
 updating a call to a newer revision (COMP-01); a component made from a
 cURL command (REQ-07 then this); the entry in a try's *Keep ▾*
-(REQ-17d, criterion 6).
+(REQ-17d, criterion 6, built after this ticket).
 
 ## Technical appendix
 
