@@ -550,6 +550,155 @@ fn rep07b_a_long_value_is_wrapped_to_six_lines() {
     }
 }
 
+/// `labels` with a second check of `weight_31`'s message, of two steps,
+/// which fails, and a check of a field the response has not.
+fn crossed() -> String {
+    let text = failing();
+    let at = text.find("  @label(\"Unknown parcel\")").unwrap();
+    format!(
+        "{}  same_text = assert weight_0.body.error.message == weight_31.body.error.message\n  \
+         hint = assert weight_0.body.error.hint == \"Ask the sender.\"\n{}",
+        &text[..at],
+        &text[at..]
+    )
+}
+
+/// The results' marks drawn on the field `error.<name>` in the last frame.
+fn mark_of(harness: &mut FolderHarness, name: &str) -> (crate::inspector::MarkTone, String) {
+    crate::inspector::debug_forget_marks();
+    harness.step();
+    let path = format!("error.{name}");
+    crate::inspector::debug_marks()
+        .into_iter()
+        .find(|mark| mark.results && mark.port == "body" && mark.path == path)
+        .map(|mark| (mark.tone, mark.words))
+        .unwrap_or_else(|| panic!("a mark on {path}"))
+}
+
+/// Test in the real window, 2026-11-24, finding 1: in a check's details the
+/// mark of its own field says this check's result, whatever the other
+/// checks of the field say; they are still listed by a click. The request's
+/// own details keep DIAG-12's mark.
+#[test]
+fn rep07b_the_mark_of_the_checked_field_is_the_checks_own() {
+    use crate::inspector::MarkTone;
+    let (_project, mut harness) = labels_with(WIDE, &crossed());
+    ran(&mut harness);
+    choose_check(&mut harness, "weight_31_text");
+    assert_eq!(
+        mark_of(&mut harness, "message"),
+        (MarkTone::Passed, "This check · 1 more".into()),
+        "this check passed, the other one failed"
+    );
+    assert_eq!(
+        mark_of(&mut harness, "field"),
+        (MarkTone::Failed, "1 failed".into()),
+        "another field's mark is DIAG-12's"
+    );
+    let message = details_rect(&harness, "message");
+    harness
+        .query_all_by_label("Checks of this field")
+        .find(|node| (node.rect().center().y - message.center().y).abs() < 6.0)
+        .expect("the field's mark")
+        .click();
+    settle(&mut harness);
+    for check in [
+        "error.message == \"Weight must be at most 30 kg.\"",
+        "weight_0.body.error.message == weight_31.body.error.message",
+    ] {
+        assert!(
+            harness
+                .query_all_by_label(check)
+                .any(|node| node.accesskit_node().role() == egui::accesskit::Role::Button),
+            "the menu lists {check}"
+        );
+    }
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+
+    choose_check(&mut harness, "same_text");
+    assert_eq!(
+        mark_of(&mut harness, "message"),
+        (MarkTone::Failed, "This check · 1 more".into())
+    );
+    choose_check(&mut harness, FAILED_CHECK);
+    assert_eq!(
+        mark_of(&mut harness, "field"),
+        (MarkTone::Failed, "This check".into())
+    );
+
+    let label = harness
+        .query_all_by_role(egui::accesskit::Role::Button)
+        .filter_map(|node| node.accesskit_node().label().map(|label| label.to_string()))
+        .find(|label| label.starts_with(&format!("{WEIGHT_31} · ")))
+        .unwrap();
+    harness.get_by_label(&label).click();
+    settle(&mut harness);
+    assert_eq!(
+        mark_of(&mut harness, "message"),
+        (MarkTone::Failed, "1 failed".into()),
+        "the request's own outputs"
+    );
+}
+
+/// Finding 2: a check of two steps says where its expected value came from;
+/// a check of one step, whose title is enough, does not.
+#[test]
+fn rep07b_a_check_of_two_steps_says_where_expected_came_from() {
+    for size in [MINIMUM, WIDE] {
+        let (_project, mut harness) = labels_with(size, &crossed());
+        ran(&mut harness);
+        choose_check(&mut harness, "same_text");
+        let origin = details_rect(&harness, "from weight_31.body.error.message");
+        assert_inside(&harness, "from …", origin);
+        let expected = details_rect(&harness, "\"Weight must be at most 30 kg.\"");
+        let actual = details_rect(&harness, "\"Weight must be more than 0 kg.\"");
+        assert!(
+            origin.top() >= expected.top() - 2.0 && origin.bottom() <= actual.top() + 2.0,
+            "{size:?}: beside or under EXPECTED: {origin:?}, {expected:?}, {actual:?}"
+        );
+        choose_check(&mut harness, FAILED_CHECK);
+        assert!(!details_mention(&harness, "from weight_31"));
+    }
+}
+
+/// Finding 3: a check whose field the response has not shows what it
+/// expected and that the value is missing, nothing marked.
+#[test]
+fn rep07b_a_missing_field_has_its_two_rows() {
+    let (_project, mut harness) = labels_with(WIDE, &crossed());
+    ran(&mut harness);
+    choose_check(&mut harness, "hint");
+    for text in ["\"Ask the sender.\"", "(missing value)"] {
+        assert!(marked(&side(&harness, text)).is_empty(), "{text}");
+    }
+}
+
+/// Finding 4: results of an earlier version, which offer no check, do not
+/// ask for a field to be chosen.
+#[test]
+fn rep07b_stale_results_do_not_offer_to_add_a_check() {
+    const OFFER: &str = "Choose a field → add a check";
+    let (_project, mut harness, id) = opened(WIDE, None, &failing());
+    ran(&mut harness);
+    choose_check(&mut harness, FAILED_CHECK);
+    assert!(details_mention(&harness, OFFER));
+    let edited = failing().replacen("\"Weight 31 kg\"", "\"Weight 32 kg\"", 1);
+    app(&mut harness)
+        .session
+        .as_mut()
+        .unwrap()
+        .edit_source(&id, &edited, apiforge_project::Origin::SESSION)
+        .unwrap();
+    settle(&mut harness);
+    choose_check(&mut harness, FAILED_CHECK);
+    assert!(
+        folder(&harness).fresh_run(&id).is_none(),
+        "the edit makes the results stale"
+    );
+    assert!(!details_mention(&harness, OFFER));
+}
+
 /// A check in each of the places a check can be in.
 const PLACES: &str = r#"scenario "Places" {
   on_error continue
@@ -733,6 +882,9 @@ fn review_rep07b_check_details() {
             ("kinds", kinds(), "kind"),
             ("cut", kinds(), "long"),
             ("spaces", kinds(), "spaced"),
+            ("passed", crossed(), "weight_31_text"),
+            ("two-steps", crossed(), "same_text"),
+            ("missing", crossed(), "hint"),
         ] {
             let (_project, mut harness) = labels_with(size, &text);
             ran(&mut harness);
