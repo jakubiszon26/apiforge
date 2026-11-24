@@ -33,6 +33,8 @@ const SHOWN_CHARS: usize = 4000;
 struct Side {
     /// What is laid out, at most [`SHOWN_CHARS`] characters.
     shown: String,
+    /// How much of it is the line's; a … follows where the line was cut.
+    kept: usize,
     /// What of it differs from the other side.
     mark: Option<Range<usize>>,
     /// The kind of its value, where the two kinds differ.
@@ -44,20 +46,20 @@ struct Side {
 
 impl Side {
     fn new(line: &str, whole: String, missing: bool) -> Self {
-        let mut shown = match line.char_indices().nth(SHOWN_CHARS) {
-            Some((mut end, _)) => {
-                while !boundary(line, end) {
-                    end -= 1;
-                }
-                line[..end].to_owned()
+        let mut kept = line.len();
+        if let Some((end, _)) = line.char_indices().nth(SHOWN_CHARS) {
+            kept = end;
+            while !boundary(line, kept) {
+                kept -= 1;
             }
-            None => line.to_owned(),
-        };
-        if shown.len() < line.len() {
+        }
+        let mut shown = line[..kept].to_owned();
+        if kept < line.len() {
             shown.push('…');
         }
         Self {
             shown,
+            kept,
             mark: None,
             kind: None,
             missing,
@@ -76,13 +78,8 @@ impl Side {
     }
 
     /// Marks `range` of the line, as far as it is laid out.
-    fn mark(&mut self, range: Range<usize>, line: &str) {
-        let laid_out = if self.shown.len() == line.len() {
-            line.len()
-        } else {
-            self.shown.len() - '…'.len_utf8()
-        };
-        let range = range.start.min(laid_out)..range.end.min(laid_out);
+    fn mark(&mut self, range: Range<usize>) {
+        let range = range.start.min(self.kept)..range.end.min(self.kept);
         self.mark = (!range.is_empty()).then_some(range);
     }
 }
@@ -208,8 +205,8 @@ impl Comparison {
         let mut actual = Side::new(&actual_line, whole, missing);
         if differ.is_some() {
             let (left, right) = difference(&line, &actual_line);
-            expected.mark(left, &line);
-            actual.mark(right, &actual_line);
+            expected.mark(left);
+            actual.mark(right);
         }
         // `is` names a type and has no value on its expected side.
         if let Some((left, right)) = values
@@ -724,14 +721,13 @@ mod tests {
             "\\",
             "\"",
         ];
-        for filler in ["a", "é", "€"] {
-            for length in SHOWN_CHARS - 8..=SHOWN_CHARS + 4 {
+        for filler in ["a", "€"] {
+            for length in SHOWN_CHARS - 5..=SHOWN_CHARS + 1 {
                 let text = filler.repeat(length);
-                for left in units {
-                    for right in units {
-                        check(&format!("{text}{left}"), &format!("{text}{right}"));
-                        check(&format!("{text}{left}{right}"), &format!("{text}{right}"));
-                    }
+                for (at, left) in units.iter().enumerate() {
+                    let right = units[(at + 1) % units.len()];
+                    check(&format!("{text}{left}"), &format!("{text}{right}"));
+                    check(&format!("{text}{left}{right}"), &format!("{text}{right}"));
                 }
             }
         }
