@@ -80,10 +80,10 @@ without a look between them. By the letter of the
 [process](../../../process/ab-testing.md#how-the-agent-drives-the-window)
 blind input is a driver error, counted apart, and only a broken
 prohibition voids a run; the brief of round 4 is stricter and the
-coordinator followed the brief. That is the right way round here: with
-twelve of some twenty actions sent unseen, no count of that run's wrong
-turns can be trusted, and leaving the blind lines out would leave half a
-run. The ruling was made on the driver's own report, not on its result
+coordinator followed the brief. That is the right way round here: six
+actions spread over the whole run were sent before the result of the one
+before was seen, so what the driver expected at each cannot be told from
+what it met, and that is what a wrong turn is counted by. The ruling was made on the driver's own report, not on its result
 (it passed), and the repeat was a fresh driver on a fresh copy.
 
 It also changes nothing: the void attempt's figures (16 pointer actions,
@@ -99,7 +99,8 @@ with input sent unseen is void (one line, with KTLO-48 #581).
 - A request is inserted in place: *Add step* with a step selected
   (DIAG-06a) or the `+` on the line (DIAG-06b); the first-time runs used
   each.
-- The file gets the lines asked for; two runs left byte-identical files.
+- The file gets the lines asked for; the shortest path and run 3 left
+  byte-identical files.
 - A fix of W1 must keep all three.
 
 ## What this does not tell
