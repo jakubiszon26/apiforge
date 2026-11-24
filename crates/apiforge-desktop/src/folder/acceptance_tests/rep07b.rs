@@ -151,9 +151,22 @@ fn rep07b_criterion_5_a_failed_check_says_what_it_checked() {
             "{size:?}: the request's name, method, path and status"
         );
         assert!(
-            details_show(&harness, "weight_31.body.error.field"),
-            "{size:?}: what was checked"
+            !details_show(&harness, "CHECKED"),
+            "{size:?}: the title already says what was checked"
         );
+        let title = details_rect(&harness, "error.field == \"weight\"");
+        assert!(
+            crate::testing::hover_until(
+                &mut harness,
+                |_| Some(title),
+                |harness| harness
+                    .query_by_label("weight_31.body.error.field")
+                    .is_some(),
+            ),
+            "{size:?}: the title's hover says what was checked with every name"
+        );
+        harness.hover_at(egui::pos2(480.0, 3.0));
+        settle(&mut harness);
         assert!(
             details_show(&harness, "\"weight\""),
             "{size:?}: the expected value"
@@ -264,12 +277,7 @@ fn rep07b_the_texts_of_a_check_are_not_cut() {
                 .expect("the details say the status")
                 .expand2(egui::vec2(8.0, 0.0));
             assert_inside(&harness, "Failed", status);
-            for text in [
-                "first_reason_given == ",
-                " · of step 2 ",
-                "refused_label_of_a_heavy_parcel.body.error.",
-                "Response of ",
-            ] {
+            for text in ["first_reason_given == ", " · of step 2 ", "Response of "] {
                 let rect = details_rect(&harness, text);
                 assert_inside(&harness, text, rect);
                 assert!(
@@ -279,18 +287,267 @@ fn rep07b_the_texts_of_a_check_are_not_cut() {
             }
             let title = details_rect(&harness, "first_reason_given == ");
             let line = details_rect(&harness, " · of step 2 ");
-            let checked = details_rect(&harness, "refused_label_of_a_heavy_parcel.body.error.");
             assert!(
                 title.bottom() <= line.top() + 0.5,
                 "the line under the title"
             );
-            assert!(line.bottom() <= checked.top(), "CHECKED under the line");
-            for text in ["EXPECTED", "ACTUAL"] {
-                let rect = details_rect(&harness, text);
-                assert_inside(&harness, text, rect);
-                assert!(checked.bottom() <= rect.top(), "{text} under CHECKED");
+            // EXPECTED over ACTUAL, each wrapped whole, in one column.
+            let expected = side(&harness, LONG_EXPECTED);
+            let actual = side(&harness, LONG_ACTUAL);
+            for (text, side) in [(LONG_EXPECTED, &expected), (LONG_ACTUAL, &actual)] {
+                assert_inside(&harness, text, side.rect);
+                assert!(!side.elided, "{size:?}: {text:?} is shown whole");
+            }
+            assert_eq!(expected.rect.left(), actual.rect.left(), "one column");
+            assert!(line.bottom() <= expected.rect.top());
+            assert!(expected.rect.bottom() <= actual.rect.top());
+            assert_eq!(marked(&expected), ["25"], "{size:?}");
+            assert_eq!(marked(&actual), ["30"], "{size:?}");
+            for (caption, side) in [("EXPECTED", &expected), ("ACTUAL", &actual)] {
+                let caption = details_rect(&harness, caption);
+                assert!(caption.right() < side.rect.left(), "beside its caption");
+                assert!(
+                    caption.top() >= side.rect.top() - 2.0
+                        && caption.bottom() <= side.rect.top() + 18.0,
+                    "{size:?}: its caption stands at its first line"
+                );
             }
         }
+    }
+}
+
+const LONG_EXPECTED: &str = r#""The parcel weighs more than 25 kg and the van has no lift.""#;
+const LONG_ACTUAL: &str = r#""The parcel weighs more than 30 kg and the van has no lift.""#;
+
+/// One side of the comparison box as it is painted.
+struct Side {
+    rect: egui::Rect,
+    rows: usize,
+    elided: bool,
+    /// The pieces of its text, and whether each is marked: bold, underlined
+    /// and tinted.
+    pieces: Vec<(String, bool)>,
+}
+
+/// The pieces of `side` that are marked.
+fn marked(side: &Side) -> Vec<&str> {
+    side.pieces
+        .iter()
+        .filter(|(_, marked)| *marked)
+        .map(|(text, _)| text.as_str())
+        .collect()
+}
+
+/// Every text painted beside EXPECTED or ACTUAL.
+fn sides(harness: &FolderHarness) -> Vec<(String, Side)> {
+    fn walk(shape: &egui::Shape, found: &mut Vec<(String, Side)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, found)),
+            egui::Shape::Text(text) => {
+                let job = &text.galley.job;
+                let pieces = job
+                    .sections
+                    .iter()
+                    .map(|section| {
+                        let format = &section.format;
+                        let signs = [
+                            format.underline.width > 0.0,
+                            format.background != egui::Color32::TRANSPARENT,
+                            format.font_id.family == crate::theme::bold_mono_family(),
+                        ];
+                        let range = section.byte_range.start.0..section.byte_range.end.0;
+                        (job.text[range].to_owned(), signs == [true; 3])
+                    })
+                    .collect();
+                found.push((
+                    job.text.clone(),
+                    Side {
+                        rect: text.galley.rect.translate(text.pos.to_vec2()),
+                        rows: text.galley.rows.len(),
+                        elided: text.galley.elided,
+                        pieces,
+                    },
+                ));
+            }
+            _ => {}
+        }
+    }
+    let captions: Vec<egui::Rect> = ["EXPECTED", "ACTUAL"]
+        .into_iter()
+        .map(|caption| details_rect(harness, caption))
+        .collect();
+    let mut found = Vec::new();
+    for clipped in &harness.output().shapes {
+        walk(&clipped.shape, &mut found);
+    }
+    found.retain(|(_, side)| {
+        captions.iter().any(|caption| {
+            side.rect.left() > caption.right()
+                && side.rect.top() <= caption.center().y
+                && side.rect.bottom() >= caption.center().y
+        })
+    });
+    found
+}
+
+/// The side of the comparison box whose text is `text`.
+fn side(harness: &FolderHarness, text: &str) -> Side {
+    let sides = sides(harness);
+    let written: Vec<String> = sides.iter().map(|(text, _)| text.clone()).collect();
+    sides
+        .into_iter()
+        .find(|(written, _)| written == text)
+        .unwrap_or_else(|| panic!("the box writes {text:?}: {written:?}"))
+        .1
+}
+
+/// Failed and passed checks of every predicate, over values that are hard
+/// to compare by eye.
+fn kinds() -> String {
+    let long = "0123456789 ".repeat(200);
+    r#"scenario "Kinds" {
+  on_error continue
+  begin = start
+  r = GET "https://shop.example.test/kinds" {
+    sample 200 { limit: { unit: "kg", max: 25, per: "parcel" }, weight: "31", count: 250, accent: "café 👩‍💻", spaced: "two  spaces", lines: "one\ntwo", long: "LONGb", code: null, tags: ["a", "c"], price: 9.5 }
+  }
+  object = assert r.body.limit == { max: 30, unit: "kg", per: "parcel" }
+  kind = assert r.body.weight == 31
+  grown = assert r.body.count == 25
+  accent = assert r.body.accent == "cafè 👨‍💻"
+  spaced = assert r.body.spaced == "two spaces"
+  lines = assert r.body.lines == "one\ttwo"
+  long = assert r.body.long == "LONGa"
+  nothing = assert r.body.code == "too_heavy"
+  tags = assert r.body.tags == ["a", "b"]
+  same = assert r.body.count == 250
+  other = assert r.body.count != 250
+  less = assert r.body.count < 100
+  about = assert r.body.price ~= 9 within 0.1
+  holds = assert r.body.spaced contains "three"
+  typed = assert r.body.weight is "number"
+  full = assert nonempty r.body.code
+}
+"#
+    .replace("LONG", &long)
+}
+
+/// Owner's decision of 2026-11-24 (form A), rules 2 and 3: a failed
+/// equality marks from the first character that differs to the last, and
+/// names the kinds only where they differ; a member's place in an object,
+/// half an escape or half a character is no difference. Every other
+/// predicate, and a check that passed, marks nothing.
+#[test]
+fn rep07b_a_failed_equality_marks_what_differs() {
+    let (_project, mut harness) = labels_with(WIDE, &kinds());
+    ran(&mut harness);
+    // The check; its expected side and what is marked of it; its actual one.
+    type Case<'a> = (&'a str, &'a str, &'a [&'a str], &'a str, &'a [&'a str]);
+    let cases: [Case<'_>; 8] = [
+        // Members in the order the response has them.
+        (
+            "object",
+            r#"{"unit":"kg","max":30,"per":"parcel"}"#,
+            &["30"],
+            r#"{"unit":"kg","max":25,"per":"parcel"}"#,
+            &["25"],
+        ),
+        ("kind", "31", &["31"], r#""31""#, &[r#""31""#]),
+        ("grown", "25", &[], "250", &["0"]),
+        (
+            "accent",
+            r#""cafè 👨‍💻""#,
+            &["è 👨‍💻"],
+            r#""café 👩‍💻""#,
+            &["é 👩‍💻"],
+        ),
+        ("spaced", r#""two spaces""#, &[], r#""two  spaces""#, &[" "]),
+        (
+            "lines",
+            r#""one\ttwo""#,
+            &[r"\t"],
+            r#""one\ntwo""#,
+            &[r"\n"],
+        ),
+        (
+            "nothing",
+            r#""too_heavy""#,
+            &[r#""too_heavy""#],
+            "null",
+            &["null"],
+        ),
+        ("tags", r#"["a","b"]"#, &["b"], r#"["a","c"]"#, &["c"]),
+    ];
+    for (check, expected, left, actual, right) in cases {
+        choose_check(&mut harness, check);
+        assert_eq!(marked(&side(&harness, expected)), left, "{check}: expected");
+        assert_eq!(marked(&side(&harness, actual)), right, "{check}: actual");
+        let kinds: &[&str] = match check {
+            "kind" => &["number", "text"],
+            "nothing" => &["text"],
+            _ => &[],
+        };
+        for word in ["number", "text", "list", "object", "true or false"] {
+            assert_eq!(
+                details_show(&harness, word),
+                kinds.contains(&word),
+                "{check}: {word}"
+            );
+        }
+    }
+    for (check, expected, actual) in [
+        ("same", "250", "250"),
+        ("other", "≠ 250", "250"),
+        ("less", "< 100", "250"),
+        ("about", "≈ 9 ± 0.1", "9.5"),
+        ("holds", r#"contains "three""#, r#""two  spaces""#),
+        ("typed", "is number", r#""31""#),
+        ("full", "nonempty", "null"),
+    ] {
+        choose_check(&mut harness, check);
+        for text in [expected, actual] {
+            assert!(
+                marked(&side(&harness, text)).is_empty(),
+                "{check}: {text:?} is not marked"
+            );
+        }
+    }
+}
+
+/// Rule 1: a value is one line of JSON, wrapped to at most six lines; past
+/// that it ends with …, and the hover and the accessible name hold it
+/// whole.
+#[test]
+fn rep07b_a_long_value_is_wrapped_to_six_lines() {
+    for size in [MINIMUM, WIDE] {
+        let (_project, mut harness) = labels_with(size, &kinds());
+        ran(&mut harness);
+        choose_check(&mut harness, "long");
+        let whole = ["a", "b"].map(|end| format!("\"{}{end}\"", "0123456789 ".repeat(200)));
+        let shown: Vec<(String, Side)> = sides(&harness)
+            .into_iter()
+            .filter(|(text, _)| text.starts_with("\"0123456789 "))
+            .collect();
+        assert_eq!(shown.len(), 2);
+        for (text, side) in &shown {
+            assert_eq!(side.rows, 6, "{size:?}");
+            assert!(side.elided, "{size:?}: it ends with …");
+            assert_inside(&harness, text, side.rect);
+            assert!(marked(side).is_empty(), "{size:?}: past what is shown");
+        }
+        for whole in &whole {
+            assert!(details_show(&harness, whole), "{size:?}: the name is whole");
+        }
+        let value = shown[0].1.rect;
+        let before = harness.query_all_by_label(&whole[0]).count();
+        assert!(
+            crate::testing::hover_until(
+                &mut harness,
+                |_| Some(value),
+                |harness| harness.query_all_by_label(&whole[0]).count() > before,
+            ),
+            "{size:?}: the hover holds the whole value"
+        );
     }
 }
 
@@ -336,7 +593,6 @@ fn rep07b_the_details_of_a_check_wherever_it_is() {
         &harness,
         "Check across · of step 4 second · GET /second → 200"
     ));
-    assert!(details_show(&harness, "first.body.size"), "what it checked");
     assert!(
         details_show(&harness, "Response of first · the checked field is marked"),
         "the response that holds what it checked"
@@ -411,7 +667,6 @@ fn rep07b_a_check_inside_a_component_call_names_its_request() {
         &harness,
         "Check sized · of step 1 fetch · GET /lookup → 200"
     ));
-    assert!(details_show(&harness, "fetch.body.size"));
     assert!(details_show(&harness, "Response of fetch"));
 }
 
@@ -475,7 +730,10 @@ fn review_rep07b_check_details() {
         for (name, text, check) in [
             ("details", failing(), FAILED_CHECK),
             ("long", long(), LONG_CHECK),
-            ("cleanup", PLACES.into(), "gone"),
+            ("object", kinds(), "object"),
+            ("kinds", kinds(), "kind"),
+            ("cut", kinds(), "long"),
+            ("spaces", kinds(), "spaced"),
         ] {
             let (_project, mut harness) = labels_with(size, &text);
             ran(&mut harness);
