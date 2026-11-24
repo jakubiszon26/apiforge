@@ -579,6 +579,16 @@ impl FolderApp {
                     .add_node(block, component, position, source)
                     .map(|edit| board.made_room(edit)),
             ),
+            // Written right after the step it reads (DIAG-24).
+            Command::AddReading {
+                block,
+                position,
+                source,
+            } => Some(
+                board
+                    .add_reading(block, position, source)
+                    .map(|edit| board.made_room(edit)),
+            ),
             // A step dropped on a line of a chain lands there (DIAG-06c).
             Command::AddOnLine {
                 block,

@@ -2497,6 +2497,16 @@ impl App {
                     self.with_board(|board| board.add_node(block, component, position, source));
                 self.apply_edit(result);
             }
+            // The legacy window's menu does not send it; it adds as any other.
+            Command::AddReading {
+                block,
+                position,
+                source,
+            } => {
+                let result =
+                    self.with_board(|board| board.add_node(block, None, position, Some(source)));
+                self.apply_edit(result);
+            }
             // The legacy window marks no line; it adds as the Library does.
             Command::AddOnLine {
                 block,

@@ -46,7 +46,7 @@ pub use inspect::{
 };
 pub use nodes::{
     AddedNode, AssignedVariable, FieldCheck, OutputRef, add_check, add_node,
-    assign_response_variable, field_assertion, field_check,
+    assign_response_variable, field_assertion, field_check, write_after,
 };
 pub use place::{Place, add_step_after, move_by_one, place};
 pub use proxies::{

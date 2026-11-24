@@ -184,7 +184,7 @@ fn diag24_criterion_2_a_step_goes_right_after_the_place() {
             }
             None => {
                 assert_eq!(position(&order, &new), order.len() - 1, "{order:?}");
-                let close = line_of(&text, "    not_booked = ") + 1;
+                let close = line_of(&text, "not_booked = ") + 1;
                 assert_eq!(
                     line_of(&text, &format!("{new} = ")),
                     close + 1,
@@ -281,6 +281,29 @@ fn diag24_criterion_4_two_groups() {
             assert!(in_menu(&harness, &next).is_some());
             assert!(in_menu(&harness, &read).is_none(), "{handle}");
             assert!(in_menu(&harness, "Data from").is_none(), "{handle}");
+        }
+    }
+}
+
+/// The second group's *Data from* and first entry are in view as the menu
+/// opens, with *Move earlier* and *Move later* above the search too.
+#[test]
+fn diag24_criterion_4_the_second_group_is_in_view() {
+    for size in [MINIMUM, WIDE] {
+        for handle in ["profile", "slot", "booked"] {
+            let (_project, mut harness, id) = booking_day();
+            harness.set_size(size);
+            settle(&mut harness);
+            menu_of(&mut harness, &id, handle);
+            harness.step();
+            let menu = popup(&harness);
+            let window = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            assert!(window.contains_rect(menu), "{handle}: {menu:?}");
+            let entry = harness
+                .query_all_by_label("Value")
+                .map(|node| node.rect())
+                .find(|rect| menu.contains_rect(*rect));
+            assert!(entry.is_some(), "{handle}: *Value* is in view at {size:?}");
         }
     }
 }
@@ -385,6 +408,13 @@ fn diag24_criterion_5_the_chosen_output_is_read() {
 
 /// Opens the *Data from* box and chooses the output listed as `label`.
 fn choose_output(harness: &mut FolderHarness, label: &str) {
+    open_list(harness);
+    let at = centre(harness, label);
+    click_at(harness, at, egui::PointerButton::Primary, 1);
+    harness.step();
+}
+
+fn open_list(harness: &mut FolderHarness) {
     let menu = popup(harness);
     let at = harness
         .query_all_by_role(egui::accesskit::Role::ComboBox)
@@ -394,9 +424,36 @@ fn choose_output(harness: &mut FolderHarness, label: &str) {
         .center();
     click_at(harness, at, egui::PointerButton::Primary, 1);
     harness.step();
-    let at = centre(harness, label);
-    click_at(harness, at, egui::PointerButton::Primary, 1);
+}
+
+/// A menu opens at the top of its list, however far the one before it was
+/// scrolled.
+#[test]
+fn diag24_a_menu_opens_at_the_top() {
+    let (_project, mut harness, id) = booking_day();
+    menu_of(&mut harness, &id, "profile");
+    let caption = next_caption("profile");
+    let top = top_of(&harness, &caption);
+    let over = popup(&harness).center();
+    harness.hover_at(over);
     harness.step();
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -200.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    for _ in 0..30 {
+        harness.step();
+    }
+    assert!(
+        harness.get_by_label(&caption).rect().top() < top - 50.0,
+        "scrolled"
+    );
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    menu_of(&mut harness, &id, "profile");
+    assert_eq!(top_of(&harness, &caption), top);
 }
 
 // Criterion 6 ----------------------------------------------------------------
@@ -439,6 +496,25 @@ fn diag24_criterion_6_other_menus_unchanged() {
     let line = "  token = sign_in@1(user: \"tester\")\n";
     let text = written_before(&before, line, REQUEST);
     wrote(&mut harness, &id, &before, &text, "from Start");
+}
+
+/// A data card with no step before it has no place: its menu stays.
+#[test]
+fn diag24_criterion_6_a_card_with_no_place() {
+    let (_project, mut harness, id) = super::diag06a::rooms(SCENARIO, |root| {
+        let path = root.join(SCENARIO);
+        let text = fs::read_to_string(&path).unwrap();
+        let text = written_before(&text, "    released = DELETE", "    reason = \"over\"\n");
+        fs::write(path, text).unwrap();
+    });
+    harness.get_by_label("Cleanup").click();
+    settle(&mut harness);
+    menu_of(&mut harness, &id, "reason");
+    headed(&harness, "reason");
+    no_captions(&harness);
+    assert!(top_of(&harness, "Data from") < top_of(&harness, "Find an action"));
+    take(&mut harness, &id, "HTTP request");
+    assert!(passes(&harness, &id).contains("body reason"), "bound to it");
 }
 
 #[test]
