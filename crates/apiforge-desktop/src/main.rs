@@ -54,6 +54,7 @@ mod preferences;
 mod report;
 mod run_mode;
 mod shapes;
+mod steps;
 mod stop;
 #[cfg(test)]
 mod testing;
