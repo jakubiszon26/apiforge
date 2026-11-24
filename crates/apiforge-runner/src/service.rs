@@ -114,7 +114,7 @@ impl RunnerService {
             finished_at: None,
             status: RunStatus::Failed,
             steps: Vec::new(),
-            diagnostic: request.target_node_id.is_some() || request.single_node_id.is_some(),
+            diagnostic: request.is_diagnostic(),
             snapshot: None,
             error: Some(
                 "Internal runner error: the worker terminated before finishing the run.".to_owned(),

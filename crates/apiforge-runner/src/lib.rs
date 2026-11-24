@@ -2,7 +2,8 @@
 //! project and reports each step.
 //!
 //! Semantics: serial execution in dependency order, Start reachability, IF branches, components, an independent cleanup phase,
-//! diagnostics (up to a node, a single step) and redaction of everything published.
+//! diagnostics (up to a node, a single step, through a step with its checks, one
+//! request alone with its checks) and redaction of everything published.
 //! Requests are sent with [`HttpTransport`] in live mode; simulation mode uses the
 //! saved sample responses and sends nothing.
 //!
@@ -10,6 +11,7 @@
 //! owns its own runtime and exposes the newest snapshot of each run.
 mod engine;
 mod http;
+mod partial;
 pub mod plan;
 pub mod redact;
 mod request;
@@ -18,6 +20,7 @@ mod support;
 
 pub use engine::run_scenario;
 pub use http::{HttpTransport, TransportError};
+pub use partial::Partial;
 pub use request::{RunError, RunLimits, RunOptions, RunRequest, RunTarget, validate};
 pub use service::{MAX_ACTIVE_RUNS, Notify, RunHandle, RunnerService};
 pub use support::{SeededRandom, rfc3339_millis};

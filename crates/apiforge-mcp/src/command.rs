@@ -96,6 +96,7 @@ pub fn run_live(
         mode: apiforge_core::run::RunMode::Live,
         target_node_id: None,
         single_node_id: None,
+        partial: None,
         previous_run: None,
         secrets,
     };

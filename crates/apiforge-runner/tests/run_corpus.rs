@@ -255,6 +255,7 @@ async fn simulation_runs_match_the_reference() {
             mode: request.mode,
             target_node_id: request.target_node_id,
             single_node_id: request.single_node_id,
+            partial: None,
             previous_run: request.previous_run,
             secrets: request.secrets,
         };
