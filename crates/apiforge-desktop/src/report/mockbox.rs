@@ -19,8 +19,15 @@ thread_local! {
 /// Height of the response's lines to keep in view, in points.
 pub static LINES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(110);
 
+/// 0 today, 1 P1, 2 P2 (P1 and a taller default), 3 P3 (P1 without the
+/// message that only says the comparison failed).
+pub static MODE: AtomicU8 = AtomicU8::new(0);
+/// The default heights of Run results, 0 for the application's own.
+pub static HEIGHT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub static COMPACT_HEIGHT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 pub fn fold() -> bool {
-    FOLD.load(Ordering::Relaxed)
+    MODE.load(Ordering::Relaxed) != 0
 }
 
 pub fn variant() -> u8 {

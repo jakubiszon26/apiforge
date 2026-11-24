@@ -597,20 +597,29 @@ fn review_rep07b_box_mock() {
 }
 
 /// Mock-up (branch `mock/rep-07c`): the details of a failed check at the
-/// default height of Run results, today and proposed, with the box in form A.
+/// default height of Run results, today and in three proposals, with the box
+/// in form A.
 #[test]
 #[ignore = "design review capture; run with tools/gui/review.sh"]
 fn review_rep07c_default_height() {
     use crate::report::mockbox;
     use std::sync::atomic::Ordering;
-    mockbox::VARIANT.store(std::env::var("BOXV").map_or(1, |v| v.parse().unwrap()), Ordering::Relaxed);
+    let tall: Vec<u32> = std::env::var("REP07C_HEIGHTS")
+        .unwrap_or_else(|_| "360,200".into())
+        .split(',')
+        .map(|height| height.parse().unwrap())
+        .collect();
+    mockbox::VARIANT.store(1, Ordering::Relaxed);
     for (size, suffix) in [
         (MINIMUM, "960"),
         (egui::vec2(1280.0, 800.0), "1280"),
         (WIDE, "1600"),
     ] {
-        for (fold, name) in [(false, "today"), (true, "proposed")] {
-            mockbox::FOLD.store(fold, Ordering::Relaxed);
+        for (mode, name) in [(0u8, "today"), (1, "p1"), (2, "p2"), (3, "p3")] {
+            mockbox::MODE.store(mode, Ordering::Relaxed);
+            let (height, compact) = if mode == 2 { (tall[0], tall[1]) } else { (0, 0) };
+            mockbox::HEIGHT.store(height, Ordering::Relaxed);
+            mockbox::COMPACT_HEIGHT.store(compact, Ordering::Relaxed);
             let (_project, mut harness) = labels_with(size, &failing());
             choose(&mut harness, "Run simulation");
             finish_run(&mut harness);
@@ -628,13 +637,15 @@ fn review_rep07c_default_height() {
             );
             std::fs::write(
                 crate::testing::capture_dir().join(format!("rep07c-{suffix}-{name}.txt")),
-                format!("panel {} high, details from x {}, settled {settled}\n", panel.height(), details(&harness)),
+                format!("panel {} high, settled {settled}\n", panel.height()),
             )
             .unwrap();
             crate::testing::capture(&mut harness, &format!("rep07c-panel-{suffix}-{name}"), Some(panel));
             crate::testing::capture(&mut harness, &format!("rep07c-window-{suffix}-{name}"), None);
         }
     }
-    mockbox::FOLD.store(false, Ordering::Relaxed);
+    mockbox::MODE.store(0, Ordering::Relaxed);
+    mockbox::HEIGHT.store(0, Ordering::Relaxed);
+    mockbox::COMPACT_HEIGHT.store(0, Ordering::Relaxed);
     mockbox::VARIANT.store(0, Ordering::Relaxed);
 }

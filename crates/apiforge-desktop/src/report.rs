@@ -528,8 +528,14 @@ impl Default for ReportPanel {
     fn default() -> Self {
         Self {
             open: false,
-            height: 320.0,
-            compact_height: 180.0,
+            height: match mockbox::HEIGHT.load(std::sync::atomic::Ordering::Relaxed) {
+                0 => 320.0,
+                height => height as f32,
+            },
+            compact_height: match mockbox::COMPACT_HEIGHT.load(std::sync::atomic::Ordering::Relaxed) {
+                0 => 180.0,
+                height => height as f32,
+            },
             maximised: false,
             drag: None,
             grab: None,
@@ -1491,6 +1497,16 @@ impl ReportPanel {
                         first: index == 0,
                     };
                     let drawn = list::draw(ui, &view);
+                    // Mock of REP-07c: the selected row is brought into view
+                    // once when it is selected.
+                    let shown = egui::Id::new(("rep07c-row-shown", row.key.as_str(), self.epoch));
+                    if mockbox::fold()
+                        && view.active
+                        && !ui.data(|data| data.get_temp::<bool>(shown).unwrap_or(false))
+                    {
+                        ui.data_mut(|data| data.insert_temp(shown, true));
+                        drawn.row.scroll_to_me(Some(egui::Align::Center));
+                    }
                     if self.focus.as_deref() == Some(row.key.as_str()) {
                         self.focus = None;
                         drawn.row.request_focus();
@@ -1605,7 +1621,12 @@ impl ReportPanel {
         if folded {
             let color = status_color(step.status);
             mockbox::MESSAGE.with(|slot| {
-                *slot.borrow_mut() = message.as_ref().map(|m| (m.to_string(), color));
+                let plain = mockbox::MODE.load(std::sync::atomic::Ordering::Relaxed) == 3
+                    && message.as_deref() == Some("The comparison failed.");
+                *slot.borrow_mut() = message
+                    .as_ref()
+                    .filter(|_| !plain)
+                    .map(|m| (m.to_string(), color));
             });
         }
         mockbox::BOX.with(|rect| rect.set(None));
@@ -1704,7 +1725,7 @@ impl ReportPanel {
             // Mock of REP-07c: once per selected row, the pane opens on the
             // box and the response's first lines under it.
             let opened = egui::Id::new(("rep07c-opened", run_id, selected.key.as_str()));
-            if mockbox::fold()
+            if false
                 && !ui.data(|data| data.get_temp::<bool>(opened).unwrap_or(false))
                 && let Some(frame) = mockbox::BOX.with(std::cell::Cell::get)
             {

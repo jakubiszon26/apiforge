@@ -1,48 +1,33 @@
 #!/usr/bin/env python3
-"""Composes the REP-07c board from the review captures. Throwaway.
-   tools/gui/rep07c_board.py <captures dir> <out.png>"""
-import sys, glob
+"""Composes the REP-07c boards (one per window size) from the review captures.
+   Throwaway.  tools/gui/rep07c_board.py <captures dir> <out dir> <notes.json>"""
+import sys, glob, json
 from PIL import Image, ImageDraw, ImageFont
-src, out = sys.argv[1], sys.argv[2]
+src, out, notes = sys.argv[1], sys.argv[2], json.load(open(sys.argv[3]))
 def font(size, bold=False):
     for path in glob.glob("/usr/share/fonts/**/*.ttf", recursive=True):
         if path.endswith("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"):
             return ImageFont.truetype(path, size)
     return ImageFont.load_default()
-F, H = font(14), font(17, True)
-rows = [("960", "960 × 540 · Run results at its default height there (180)"),
-        ("1280", "1280 × 800 · default height 320"),
-        ("1600", "1600 × 1000 · default height 320")]
-cols = [("today", "Today (#613, box in form A)"), ("proposed", "Proposed · message in the box, the pane opens on the box")]
+F, B, H = font(14), font(15, True), font(18, True)
+cols = [("today", "Today (#613)"), ("p1", "P1 · message is the box's first line"),
+        ("p2", "P2 · P1 and a taller default"), ("p3", "P3 · P1 without \"The comparison failed.\"")]
 PAD = 24
-def cell_of(s, o):
-    image = Image.open(f"{src}/rep07c-panel-{s}-{o}.png").convert("RGB")
-    # The capture's margin outside the window is black: cut it.
-    box = image.point(lambda v: 255 if v > 8 else 0).getbbox()
-    return image.crop(box)
-cells = {(s, o): cell_of(s, o) for s, _ in rows for o, _ in cols}
-notes = {
-    ("960", "today"): "Shows the check's title and the top edge of the message. Box and response are below.",
-    ("960", "proposed"): "Shows the whole box. The response and its mark are one scroll down; the title one scroll up.",
-    ("1280", "today"): "Shows title, message, box and two lines of the response. The marked field is below the fold.",
-    ("1280", "proposed"): "Shows the box and the response down to the marked field, whose line is cut at half. Title one scroll up.",
-    ("1600", "today"): "As at 1280.",
-    ("1600", "proposed"): "As at 1280.",
-}
-width = PAD + sum(cells[("1600", o)].width + PAD for o, _ in cols)
-height = PAD + sum(cells[(s, "today")].height + 86 + PAD for s, _ in rows)
-board = Image.new("RGB", (width, height), "#f4f4f5")
-d = ImageDraw.Draw(board)
-y = PAD
-for s, title in rows:
-    d.text((PAD, y), title, fill="#18181b", font=H)
-    x = PAD
-    for o, caption in cols:
-        cell = cells[(s, o)]
-        d.text((x, y + 30), caption, fill="#18181b", font=F)
-        d.text((x, y + 60 + cell.height), notes[(s, o)], fill="#3f3f46", font=F)
-        board.paste(cell, (x, y + 54))
-        d.rectangle((x - 1, y + 53, x + cell.width, y + 54 + cell.height), outline="#a1a1aa")
-        x += cells[("1600", o)].width + PAD
-    y += cells[(s, "today")].height + 86 + PAD
-board.save(out)
+def cell_of(size, option):
+    image = Image.open(f"{src}/rep07c-panel-{size}-{option}.png").convert("RGB")
+    return image.crop(image.point(lambda v: 255 if v > 8 else 0).getbbox())
+for size, title in [("960", "960 × 540"), ("1280", "1280 × 800"), ("1600", "1600 × 1000")]:
+    cells = [cell_of(size, option) for option, _ in cols]
+    width = PAD * 2 + max(cell.width for cell in cells)
+    height = 60 + sum(cell.height + 78 + PAD for cell in cells)
+    board = Image.new("RGB", (width, height), "#f4f4f5")
+    d = ImageDraw.Draw(board)
+    d.text((PAD, 18), f"{title} · Run results as it opens on a failed check · the box is form A in every panel", fill="#18181b", font=H)
+    y = 60
+    for (option, caption), cell in zip(cols, cells):
+        d.text((PAD, y), caption + notes["height"][size][option], fill="#18181b", font=B)
+        board.paste(cell, (PAD, y + 26))
+        d.rectangle((PAD - 1, y + 25, PAD + cell.width, y + 26 + cell.height), outline="#a1a1aa")
+        d.text((PAD, y + 32 + cell.height), notes["shows"][size][option], fill="#3f3f46", font=F)
+        y += cell.height + 78 + PAD
+    board.save(f"{out}/board-{size}.png")

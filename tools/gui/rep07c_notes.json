@@ -1,0 +1,17 @@
+{"height": {
+ "960": {"today": " · default 180", "p1": " · default 180", "p2": " · default 236", "p3": " · default 180"},
+ "1280": {"today": " · default 320", "p1": " · default 320", "p2": " · default 376", "p3": " · default 320"},
+ "1600": {"today": " · default 320", "p1": " · default 320", "p2": " · default 376", "p3": " · default 320"}},
+ "shows": {
+ "960": {
+  "today": "Shows: title, request. Cut: the message at its top edge. Below the fold: expected / actual, the marked line.\nThe list does not show the selected row.",
+  "p1": "Shows: title, request, the selected row in the list. Cut: the box at its first line.\nBelow the fold: expected / actual, the marked line.",
+  "p2": "Shows: title, request, expected / actual (the box whole, its edge at the fold), the selected row.\nBelow the fold: the response and the marked line, one scroll down.",
+  "p3": "Shows: title, request, the selected row. Cut: EXPECTED at half.\nBelow the fold: actual, the marked line."},
+ "1280": {
+  "today": "Shows: title, request, message, expected / actual, two lines of the response. Below the fold: the marked line.\nThe list does not show the selected row.",
+  "p1": "Shows: title, request, expected / actual, the selected row, two lines of the response.\nCut: the marked line, only its top edge shows.",
+  "p2": "Shows: title, request, expected / actual, the selected row, the response down to the marked line, whole.\nNothing of the four is cut.",
+  "p3": "Shows: title, request, expected / actual, the selected row, three lines of the response.\nBelow the fold: the marked line, the next one down."},
+ "1600": {
+  "today": "As at 1280 × 800.", "p1": "As at 1280 × 800.", "p2": "As at 1280 × 800.", "p3": "As at 1280 × 800."}}}
