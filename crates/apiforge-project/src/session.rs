@@ -1895,8 +1895,8 @@ mod tests {
                 main(model).nodes[2].handle = "order".into();
             }),
             (
-                "This edit was not applied: duplicate handle. Nothing was changed.".to_owned(),
-                "EditRefused { reason: \"Duplicate handle\", step: None }".to_owned()
+                "This edit was not applied: another block already uses the name `order`. Nothing was changed.".to_owned(),
+                "EditRefused { reason: \"Another block already uses the name `order`\", step: None }".to_owned()
             ),
             "no step"
         );
@@ -1955,6 +1955,169 @@ mod tests {
             .0,
             "This edit was not applied: a request needs a URL (step \"second\"). Nothing was changed.",
             "a step of a component"
+        );
+    }
+
+    /// #565: the sentences of the model check a gesture of the window can
+    /// end in are said in the window's words.
+    #[test]
+    fn a_refused_model_edit_says_its_reason_in_the_windows_words() {
+        use apiforge_core::format::{Binding, Proxy, ProxySource};
+        use apiforge_core::model::NodeKind;
+        type Edit = fn(&mut Document);
+        let start = |id: &str| {
+            let mut node = apiforge_core::graph::create_node(
+                NodeKind::Start,
+                apiforge_core::format::Position { x: 0.0, y: 0.0 },
+                None,
+            );
+            node.id = id.to_owned();
+            node.handle = "first_of_all".to_owned();
+            node
+        };
+        fn read(node: &str, path: &str) -> Binding {
+            Binding::reference(node, "body", path)
+        }
+        fn id(model: &mut Document, handle: &str) -> String {
+            let nodes = &main(model).nodes;
+            nodes
+                .iter()
+                .find(|n| n.handle == handle)
+                .unwrap()
+                .id
+                .clone()
+        }
+        fn set(model: &mut Document, handle: &str, input: &str, binding: Binding) {
+            let nodes = &mut main(model).nodes;
+            let node = nodes.iter_mut().find(|n| n.handle == handle).unwrap();
+            node.inputs.insert(input.to_owned(), binding);
+        }
+        fn cleanup(model: &mut Document) -> &mut apiforge_core::format::Graph {
+            let Document::Scenario(scenario) = model else {
+                panic!("a scenario")
+            };
+            &mut scenario.cleanup
+        }
+        let scenario: [(&str, Edit); 10] = [
+            (
+                "`order` reads `pay.body.id`, which runs after it",
+                |model| {
+                    let pay = id(model, "pay");
+                    set(model, "order", "url", read(&pay, "id"));
+                },
+            ),
+            (
+                "`pay` reads `pay.body.id`, which comes from its own result",
+                |model| {
+                    let pay = id(model, "pay");
+                    set(model, "pay", "url", read(&pay, "id"));
+                },
+            ),
+            ("a field path is not valid (step \"pay\")", |model| {
+                let order = id(model, "order");
+                set(model, "pay", "url", read(&order, "id."));
+            }),
+            ("a value it reads does not exist (step \"pay\")", |model| {
+                set(model, "pay", "url", read("gone", ""));
+            }),
+            (
+                "a value is nested too deep or holds too many items (step \"pay\")",
+                |model| {
+                    let mut deep = Binding::literal(1.into());
+                    for _ in 0..40 {
+                        deep = Binding::Array { items: vec![deep] };
+                    }
+                    set(model, "pay", "body", deep);
+                },
+            ),
+            (
+                "a text is longer than 100000 characters (step \"pay\")",
+                |model| {
+                    set(
+                        model,
+                        "pay",
+                        "url",
+                        Binding::literal("x".repeat(100_001).into()),
+                    );
+                },
+            ),
+            (
+                "the request's arguments read each other (step \"pay\")",
+                |model| {
+                    for (name, other) in [("a", "b"), ("b", "a")] {
+                        let argument = Binding::Argument {
+                            name: other.to_owned(),
+                            path: String::new(),
+                        };
+                        set(model, "pay", name, argument);
+                    }
+                },
+            ),
+            ("the board shows `order` as a variable", |model| {
+                let node_id = id(model, "order");
+                main(model).proxies.push(Proxy {
+                    id: "proxy".to_owned(),
+                    source: ProxySource::Variable { node_id },
+                    position: apiforge_core::format::Position { x: 0.0, y: 0.0 },
+                });
+            }),
+            (
+                "a board holds at most 200 blocks, 1000 order lines and 400 placed values",
+                |model| {
+                    let mut node = main(model).nodes[1].clone();
+                    for number in 0..200 {
+                        node.id = format!("more-{number}");
+                        node.handle = format!("more_{number}");
+                        main(model).nodes.push(node.clone());
+                    }
+                },
+            ),
+            ("another block already uses the name `pay`", |model| {
+                cleanup(model).nodes[0].handle = "pay".to_owned();
+            }),
+        ];
+        let sentence =
+            |reason: &str| format!("This edit was not applied: {reason}. Nothing was changed.");
+        let (said, expected): (Vec<_>, Vec<_>) = scenario
+            .into_iter()
+            .map(|(reason, edit)| {
+                let said = refused(DocumentKind::Scenario, PAY, edit).0;
+                (said, sentence(reason))
+            })
+            .unzip();
+        assert_eq!(said, expected);
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                cleanup(model).nodes.push(start("new"));
+            })
+            .0,
+            sentence("the cleanup needs no Start block")
+        );
+        assert_eq!(
+            refused(
+                DocumentKind::Component,
+                "component fetch \"Fetch\" {\n  first = GET \"/a\"\n}\n",
+                |model| main(model).nodes.push(start("new"))
+            )
+            .0,
+            sentence("a component needs no Start block")
+        );
+        // Values alone, with no step to name.
+        assert_eq!(
+            refused(
+                DocumentKind::Scenario,
+                "scenario \"S\" {\n  begin = start\n  x = 1 + 1\n  y = x + 1\n}\n",
+                |model| {
+                    let nodes = &mut main(model).nodes;
+                    let y = nodes.iter().find(|n| n.handle == "y").unwrap().id.clone();
+                    let x = nodes.iter_mut().find(|n| n.handle == "x").unwrap();
+                    for binding in x.inputs.values_mut() {
+                        *binding = Binding::reference(&y, "value", "");
+                    }
+                }
+            )
+            .0,
+            sentence("this would create a cycle; the test must have an unambiguous order")
         );
     }
 

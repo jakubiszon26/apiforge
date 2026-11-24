@@ -50,14 +50,11 @@ fn added(harness: &mut FolderHarness, id: &str, command: Command) -> Result<Stri
         .find(|node| !before.nodes.iter().any(|old| old.id == node.id))
         .map(|node| node.handle.clone())
         .ok_or_else(|| {
-            [
-                "This edit was not applied: duplicate handle. Nothing was changed.",
-                "Duplicate handle",
-            ]
-            .into_iter()
-            .find(|message| has_label(harness, message))
-            .unwrap_or("no step added, no banner")
-            .to_owned()
+            folder(harness)
+                .notice()
+                .map_or("no step added, no banner".to_owned(), |notice| {
+                    notice.text.clone()
+                })
         })
 }
 
@@ -164,7 +161,7 @@ fn diag17_a_click_in_the_library_on_cleanup_is_not_refused() {
     assert!(
         !has_label(
             &harness,
-            "This edit was not applied: duplicate handle. Nothing was changed."
+            "This edit was not applied: another block already uses the name `request`. Nothing was changed."
         ),
         "the add is refused"
     );
