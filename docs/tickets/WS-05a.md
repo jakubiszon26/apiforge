@@ -64,8 +64,16 @@ test (WS-05b uses it).
    `scenario "…"` (or `component "…"`) line changes and nothing else in
    the text, the document is dirty, one undo step brings the old title
    back. `title_is_edited_in_the_header`.
-7. Escape, a click elsewhere and Return on an unchanged or empty text
+7. Escape, and an unchanged or empty text however the field is left,
    write nothing: not dirty, no undo step. `title_edit_is_abandoned`.
+   Anything else that leaves the field — a click elsewhere, another tab or
+   view, closing the tab or the window — writes the title typed, as other
+   fields do, and a save or a run writes it first; a refused title goes
+   back to the one before and holds the save or the run back
+   (the owner, 2026-11-24, on #574; amended in #624).
+   `title_is_committed_when_the_field_is_left`,
+   `title_edit_is_committed_by_a_save_and_a_run`,
+   `title_that_is_refused_goes_back`.
 8. A title with a quote, a backslash or a non-ASCII letter is written so
    that the analysis reads the same title back. `title_edit_escapes`.
 9. On a read-only or observed board, and while the document's code has
@@ -83,8 +91,9 @@ Not on the approved board; chosen as the least surprising, shown in the
 pull request's QA section:
 
 - The field's width: the title's width, at least the header's least
-  name width, at most the room the title has; a longer text scrolls in
-  the field.
+  name width, at most the room the title has. It grows with its text over
+  the kind and the file name, Main and Cleanup staying in place, or to the
+  room of a component's row (#624); a longer text scrolls in the field.
 - The header of a component (its name, file name, *Component*).
 - The pointer over the title is the text cursor, the only sign that it
   can be edited; no pencil.

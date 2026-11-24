@@ -10916,7 +10916,11 @@ mod ux33 {
             "{}",
             source_of(&harness, &id)
         );
-        assert!(has_label(&harness, "Add item"), "the panel's title follows");
+        // The board's header shows the name too (WS-05a).
+        assert!(
+            inspector_tab(&harness, "Add item").is_some(),
+            "the panel's title follows"
+        );
         replace_text(&mut harness, NAME, "");
         assert_eq!(field_value(&harness, NAME), "", "the text stays");
         assert!(contains(&harness, "A component needs a name"));

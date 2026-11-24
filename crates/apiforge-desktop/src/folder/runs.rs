@@ -369,6 +369,12 @@ impl FolderApp {
         if self.runs.handle.is_some() {
             return;
         }
+        if !self.after_title(diagram::AfterTitle::Run {
+            id: id.to_owned(),
+            live,
+        }) {
+            return;
+        }
         let Some(session) = self.session.as_mut() else {
             return;
         };
