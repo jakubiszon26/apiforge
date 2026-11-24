@@ -19,6 +19,228 @@ use eframe::egui::{
     self, Align2, Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
+
+/// MOCK (REQ-01c): 0 today, 1 A (SENDS always, SETS beside), 2 B (a
+/// foldable body), 3 C (both).
+pub static MOCK: AtomicU8 = AtomicU8::new(0);
+/// MOCK: which bodies are open: 0 none, 1 the request read later, 2 all.
+pub static OPEN: AtomicU8 = AtomicU8::new(0);
+
+fn both() -> bool {
+    matches!(MOCK.load(Relaxed), 1 | 3 | 4)
+}
+
+/// MOCK D: `+ N more` unfolds the column in place.
+fn unfolded(request: &Request) -> bool {
+    MOCK.load(Relaxed) == 4 && open(request)
+}
+
+fn cut(count: usize, whole: bool) -> (usize, usize) {
+    if whole { (count, 0) } else { sends::cut(count) }
+}
+
+fn folds() -> bool {
+    matches!(MOCK.load(Relaxed), 2 | 3)
+}
+
+fn open(request: &Request) -> bool {
+    match OPEN.load(Relaxed) {
+        0 => false,
+        1 => !request.sets.is_empty(),
+        _ => true,
+    }
+}
+
+/// The height of the body's fold under the columns.
+fn body_height(request: &Request) -> f32 {
+    if !folds() || request.body.is_empty() {
+        return 0.0;
+    }
+    let lines = if open(request) {
+        request.body.len() as f32 * TEXT_HEIGHT + 8.0
+    } else {
+        0.0
+    };
+    GAP + TEXT_HEIGHT + lines
+}
+
+fn lines_height(count: usize, whole: bool) -> f32 {
+    let (listed, more) = cut(count, whole);
+    let less = usize::from(whole && count > sends::cut(count).0);
+    CAPTION_HEIGHT + (listed + usize::from(more > 0) + less) as f32 * TEXT_HEIGHT
+}
+
+/// SETS has a column of its own.
+fn fourth(columns: &Columns) -> bool {
+    both() && !columns.stacked && columns.widths.iter().sum::<f32>() >= WIDE
+}
+
+fn body(ui: &Ui, id: egui::Id, request: &Request, rect: Rect) {
+    let open = open(request);
+    let line = Rect::from_min_size(
+        pos2(rect.left(), rect.top() + GAP),
+        vec2(rect.width(), TEXT_HEIGHT),
+    );
+    let centre = pos2(line.left() + 5.0, line.center().y);
+    let points = if open {
+        vec![
+            centre + vec2(-4.0, -2.5),
+            centre + vec2(4.0, -2.5),
+            centre + vec2(0.0, 3.5),
+        ]
+    } else {
+        vec![
+            centre + vec2(-2.5, -4.0),
+            centre + vec2(3.5, 0.0),
+            centre + vec2(-2.5, 4.0),
+        ]
+    };
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        theme::MUTED,
+        Stroke::NONE,
+    ));
+    let words = if open {
+        "BODY".to_owned()
+    } else if request.body.len() == 1 {
+        "BODY · text".to_owned()
+    } else {
+        format!("BODY · {} fields", request.body.iter().filter(|(line, _)| line.contains(": ") && !line.ends_with('{')).count())
+    };
+    text(
+        ui,
+        id.with("body-fold"),
+        Rect::from_min_max(pos2(line.left() + 14.0, line.top()), line.max),
+        &words,
+        caption_font(),
+        theme::MUTED,
+        None,
+    );
+    if !open {
+        return;
+    }
+    let frame = Rect::from_min_max(pos2(rect.left(), line.bottom()), rect.max);
+    ui.painter()
+        .rect_filled(frame, 4.0, theme::MUTED.gamma_multiply(0.07));
+    let compared = request.sends.common.is_some();
+    for (index, (words, marked)) in request.body.iter().enumerate() {
+        let at = Rect::from_min_size(
+            pos2(frame.left() + 10.0, frame.top() + 4.0 + index as f32 * TEXT_HEIGHT),
+            vec2(frame.width() - 20.0, TEXT_HEIGHT),
+        );
+        if *marked {
+            ui.painter().rect_filled(
+                Rect::from_min_size(
+                    pos2(frame.left() + 2.0, at.top() + 2.0),
+                    vec2(3.0, TEXT_HEIGHT - 4.0),
+                ),
+                1.0,
+                theme::ACCENT,
+            );
+        }
+        let colour = if compared && !*marked {
+            theme::MUTED
+        } else {
+            theme::TEXT
+        };
+        text(ui, id.with(("body", index)), at, words, mono(), colour, None);
+    }
+}
+
+fn lines_block(
+    ui: &Ui,
+    id: egui::Id,
+    column: Rect,
+    words: &str,
+    hover: Option<&str>,
+    lines: &[(&str, bool)],
+    whole: bool,
+) {
+    caption(ui, id, column, words, hover);
+    let (listed, more) = cut(lines.len(), whole);
+    if whole && lines.len() > sends::cut(lines.len()).0 {
+        text(
+            ui,
+            id.with("less"),
+            line_rect(column, listed),
+            "show less",
+            mono(),
+            theme::LINK,
+            None,
+        );
+    }
+    for (index, (line, quiet)) in lines[..listed].iter().enumerate() {
+        let colour = if *quiet { theme::MUTED } else { theme::TEXT };
+        text(
+            ui,
+            id.with(("line", index)),
+            line_rect(column, index),
+            line,
+            mono(),
+            colour,
+            None,
+        );
+    }
+    if more > 0 {
+        let rest: Vec<&str> = lines[listed..].iter().map(|(line, _)| *line).collect();
+        text(
+            ui,
+            id.with("more"),
+            line_rect(column, listed),
+            &format!("+ {more} more"),
+            mono(),
+            if MOCK.load(Relaxed) == 4 { theme::LINK } else { theme::MUTED },
+            Some(&rest.join("\n")),
+        );
+    }
+}
+
+/// MOCK A: SENDS always, and SETS under it unless it has its own column.
+fn sends_and_sets(ui: &Ui, id: egui::Id, request: &Request, column: Rect, under: bool) {
+    let words = match request.sends.common {
+        Some(_) if width_of(ui, DIFFERS, caption_font()) <= column.width() => DIFFERS,
+        Some(_) => DIFFERS_SHORT,
+        None => SENDS,
+    };
+    let lines: Vec<(&str, bool)> = request
+        .sends
+        .lines
+        .iter()
+        .map(|line| (line.text.as_str(), line.quiet))
+        .collect();
+    lines_block(
+        ui,
+        id.with("a-sends"),
+        column,
+        words,
+        request.sends.common.as_deref(),
+        &lines,
+        unfolded(request),
+    );
+    if under && !request.sets.is_empty() {
+        let top = column.top() + lines_height(lines.len(), unfolded(request)) + GAP;
+        sets(
+            ui,
+            id,
+            request,
+            Rect::from_min_max(pos2(column.left(), top), column.max),
+        );
+    }
+}
+
+fn sets(ui: &Ui, id: egui::Id, request: &Request, column: Rect) {
+    if request.sets.is_empty() {
+        return;
+    }
+    let words = if width_of(ui, SETS, caption_font()) <= column.width() {
+        SETS
+    } else {
+        SETS_SHORT
+    };
+    let lines: Vec<(&str, bool)> = request.sets.iter().map(|line| (line.as_str(), false)).collect();
+    lines_block(ui, id.with("a-sets"), column, words, None, &lines, false);
+}
 
 /// The results of the run the rows are marked with.
 pub struct Results<'a> {
@@ -351,7 +573,12 @@ impl Drawing<'_> {
         let inside = width - 2.0 * PAD.x;
         let columns = Columns::of(inside, self.caption);
         let height = match &row.kind {
-            Kind::Request(request) => 2.0 * PAD.y + HEAD_HEIGHT + columns.height(heights(request)),
+            Kind::Request(request) => {
+                2.0 * PAD.y
+                    + HEAD_HEIGHT
+                    + columns.height(heights(request, &columns))
+                    + body_height(request)
+            }
             _ => LINE_HEIGHT,
         };
         let (line, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
@@ -406,10 +633,22 @@ impl Drawing<'_> {
         self.head(ui, id, row, head, result, outcome.as_ref());
         if let Kind::Request(request) = &row.kind {
             let top = head.bottom();
-            let contents = Rect::from_min_max(pos2(inner.left(), top), inner.max);
+            let fold = body_height(request);
+            let contents = Rect::from_min_max(
+                pos2(inner.left(), top),
+                pos2(inner.right(), inner.bottom() - fold),
+            );
             chosen = self
                 .columns(ui, id, row, request, contents, columns)
                 .or(chosen);
+            if fold > 0.0 {
+                body(
+                    ui,
+                    id,
+                    request,
+                    Rect::from_min_max(pos2(inner.left(), contents.bottom()), inner.max),
+                );
+            }
         }
         (line, chosen)
     }
@@ -611,7 +850,8 @@ impl Drawing<'_> {
         rect: Rect,
         columns: Columns,
     ) -> Option<String> {
-        let heights = heights(request);
+        let heights = heights(request, &columns);
+        let fourth = fourth(&columns);
         let mut at = rect.min;
         let mut chosen = None;
         for (index, (width, height)) in columns.widths.into_iter().zip(heights).enumerate() {
@@ -623,7 +863,19 @@ impl Drawing<'_> {
             let column = Rect::from_min_size(at, vec2(room, height));
             match index {
                 0 => reads(ui, id, request, column),
+                1 if both() => sends_and_sets(ui, id, request, column, !fourth),
                 1 => middle(ui, id, request, column),
+                _ if fourth => {
+                    let split = (column.width() * 0.42).round();
+                    sets(
+                        ui,
+                        id,
+                        request,
+                        Rect::from_min_size(column.min, vec2(split - COLUMN_GAP, column.height())),
+                    );
+                    let rest = Rect::from_min_max(pos2(column.left() + split, column.top()), column.max);
+                    chosen = self.checks(ui, id, row, request, rest);
+                }
                 _ => chosen = self.checks(ui, id, row, request, column),
             }
             if columns.stacked {
@@ -812,7 +1064,26 @@ fn name(row: &Row, outcome: Option<&Outcome>) -> String {
 }
 
 /// The heights of a request's three columns.
-fn heights(request: &Request) -> [f32; 3] {
+fn heights(request: &Request, columns: &Columns) -> [f32; 3] {
+    if both() {
+        let checks = if request.checks.is_empty() {
+            TEXT_HEIGHT
+        } else {
+            request.checks.len() as f32 * CHECK_HEIGHT
+        };
+        let sends = lines_height(request.sends.lines.len(), unfolded(request));
+        let sets = if request.sets.is_empty() {
+            0.0
+        } else {
+            lines_height(request.sets.len(), false)
+        };
+        let beside = fourth(columns);
+        return [
+            CAPTION_HEIGHT + request.reads.len().max(1) as f32 * TEXT_HEIGHT,
+            if beside || sets == 0.0 { sends } else { sends + GAP + sets },
+            (CAPTION_HEIGHT + checks).max(if beside { sets } else { 0.0 }),
+        ];
+    }
     let lines = match &request.column {
         Column::Sends(sends) => sends.lines.len(),
         Column::Sets(lines) => lines.len(),

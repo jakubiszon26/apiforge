@@ -1269,3 +1269,65 @@ fn review_req01a() {
         shot(&mut harness, &format!("req01a-long-title-steps-{at}"));
     }
 }
+
+/// MOCK (REQ-01c): one request of each kind.
+const KINDS: &str = "scenario \"Kinds\" {
+  begin = start
+  first = POST \"https://rooms.example.test/bookings\" {
+    headers { \"Content-Type\": \"application/json\", Authorization: \"Bearer sample-token\" }
+    body { roomId: \"room-a\", start: \"2026-12-01T10:00:00Z\", end: \"2026-12-01T11:00:00Z\", guests: 4, note: \"Projector needed\", contact: { name: \"Ada\", phone: \"555-0100\" } }
+    sample 201 { id: \"bk-1\" }
+  }
+  created = assert first.status == 201
+  search = GET \"https://rooms.example.test/rooms\" {
+    query { floor: 2, from: \"2026-12-01\", seats: 6 }
+    sample 200 { items: [] }
+  }
+  found = assert search.status == 200
+  note = PUT \"https://rooms.example.test/bookings/{{first.body.id}}/note\" {
+    headers { \"Content-Type\": \"text/plain\" }
+    body text \"Projector needed, and water for eight.\"
+    sample 200 {}
+  }
+  list = GET \"https://rooms.example.test/bookings\" { sample 200 { items: [] } }
+}
+";
+
+/// MOCK (REQ-01c): the body on a card, Today and options A, B and C.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_req01c() {
+    use crate::steps::list::{MOCK, OPEN};
+    use std::sync::atomic::Ordering::Relaxed;
+    let text = KINDS.to_owned();
+    let tall = egui::vec2(960.0, 1000.0);
+    let shot = |harness: &mut FolderHarness, name: &str| {
+        harness.run_steps(4);
+        capture(harness, name, None);
+    };
+    for (mode, open, at) in [
+        (0, 0, "today"),
+        (1, 0, "a"),
+        (2, 1, "b"),
+        (2, 2, "b-all"),
+        (3, 1, "c"),
+        (3, 2, "c-all"),
+        (4, 0, "d"),
+        (4, 1, "d-open"),
+    ] {
+        MOCK.store(mode, Relaxed);
+        OPEN.store(open, Relaxed);
+        for (size, width) in [(tall, "960tall"), (MINIMUM, "960"), (WIDE, "1600")] {
+            let (_project, mut harness, _) = opened(size, "scenarios/kinds.afs", &text);
+            steps(&mut harness);
+            ran(&mut harness);
+            shot(&mut harness, &format!("req01c-kinds-{at}-{width}"));
+            let (_project, mut harness, _) = labels(size, &labels_text());
+            steps(&mut harness);
+            ran(&mut harness);
+            shot(&mut harness, &format!("req01c-labels-{at}-{width}"));
+        }
+    }
+    MOCK.store(0, Relaxed);
+    OPEN.store(0, Relaxed);
+}

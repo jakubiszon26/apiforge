@@ -73,6 +73,66 @@ pub struct Sends {
     pub lines: Vec<Line>,
 }
 
+/// MOCK (REQ-01c): the body as it is written, a field a line; a line is
+/// marked when the card's SENDS lists it as differing.
+pub fn body_lines(node: &Node, texts: &Texts<'_>, sends: Option<&Sends>) -> Vec<(String, bool)> {
+    let Some(binding) = node.inputs.get("body") else {
+        return Vec::new();
+    };
+    let mut found: Vec<(String, String)> = Vec::new();
+    leaves(binding, "", true, texts, &mut |path, text| {
+        found.push((path.to_owned(), text));
+    });
+    if let [(path, text)] = found.as_slice()
+        && path.is_empty()
+    {
+        if text.is_empty() || text == "null" {
+            return Vec::new();
+        }
+        return vec![(text.clone(), false)];
+    }
+    let marks = |path: &str, text: &str| {
+        sends.is_some_and(|sends| {
+            sends.common.is_some()
+                && sends
+                    .lines
+                    .iter()
+                    .any(|line| line.text == format!("{path}: {text}"))
+        })
+    };
+    let mut out = vec![("{".to_owned(), false)];
+    let mut stack: Vec<String> = Vec::new();
+    for (path, text) in &found {
+        let parts: Vec<&str> = path.split('.').collect();
+        let (key, parents) = parts.split_last().expect("a path has a part");
+        let keep = stack
+            .iter()
+            .zip(parents.iter())
+            .take_while(|(a, b)| a.as_str() == **b)
+            .count();
+        while stack.len() > keep {
+            stack.pop();
+            out.push((format!("{}}}", "  ".repeat(stack.len() + 1)), false));
+        }
+        for parent in &parents[keep..] {
+            out.push((
+                format!("{}{parent}: {{", "  ".repeat(stack.len() + 1)),
+                false,
+            ));
+            stack.push((*parent).to_owned());
+        }
+        out.push((
+            format!("{}{key}: {text}", "  ".repeat(stack.len() + 1)),
+            marks(path, text),
+        ));
+    }
+    while stack.pop().is_some() {
+        out.push((format!("{}}}", "  ".repeat(stack.len() + 1)), false));
+    }
+    out.push(("}".to_owned(), false));
+    out
+}
+
 /// How many of `count` lines a card lists, and how many `+ N more` counts.
 pub fn cut(count: usize) -> (usize, usize) {
     if count <= LINES {

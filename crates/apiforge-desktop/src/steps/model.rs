@@ -69,6 +69,10 @@ pub struct Request {
     pub reads: Vec<String>,
     pub column: Column,
     pub checks: Vec<Check>,
+    /// MOCK (REQ-01c): both columns and the body, whatever `column` shows.
+    pub sets: Vec<String>,
+    pub sends: Sends,
+    pub body: Vec<(String, bool)>,
 }
 
 /// The middle column of a request.
@@ -473,6 +477,17 @@ impl<'a> Section<'a> {
                 .unwrap_or_default()
                 .to_owned(),
             reads: self.reads(node),
+            sets: self
+                .readers
+                .lines
+                .get(id)
+                .map(|lines| lines.iter().cloned().collect())
+                .unwrap_or_default(),
+            sends: self.sends.get(id).cloned().unwrap_or(Sends {
+                common: None,
+                lines: Vec::new(),
+            }),
+            body: sends::body_lines(node, self.texts, self.sends.get(id)),
             column: match self.readers.lines.get(id) {
                 Some(lines) => Column::Sets(lines.iter().cloned().collect()),
                 None => Column::Sends(self.sends.get(id).cloned().unwrap_or(Sends {
