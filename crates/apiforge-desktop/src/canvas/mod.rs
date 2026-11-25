@@ -144,6 +144,14 @@ pub enum Command {
         position: Position,
         source: Option<(String, String)>,
     },
+    /// A check or a value from the menu of a step in the folder window
+    /// (DIAG-24): it reads `source`, an output of the step, and is written
+    /// right after the step.
+    AddReading {
+        block: Block,
+        position: Position,
+        source: (String, String),
+    },
     /// A step from the Library dropped on a line of a chain (DIAG-06c): it
     /// goes after the line's source, by its port (*Next*, *Yes* or *No*).
     AddOnLine {
@@ -2540,6 +2548,9 @@ impl Canvas {
                     source,
                 );
                 menu.after_step = input.moves && menu::steps_go_after(card.kind);
+                if input.moves {
+                    menu.place = menu::place(input.graph, input.project, &card.id);
+                }
                 if input.moves && menu::in_a_branch(input.graph, &card.id) {
                     menu.out_of_branch = Some(card.id.clone());
                 }
@@ -3740,6 +3751,9 @@ impl Canvas {
                 source,
             );
             menu.after_step = input.moves && menu::steps_go_after(card.kind);
+            if input.moves {
+                menu.place = menu::place(input.graph, input.project, &card.id);
+            }
             self.menu = Some(menu);
         }
         for (index, (port, label)) in card.controls.iter().enumerate() {
