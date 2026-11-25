@@ -258,6 +258,13 @@ impl FolderApp {
         (self.freshness(report) != Freshness::Stale).then(|| report.result.clone())
     }
 
+    /// As [`Self::fresh_run`], with its cause ends and without copying it, for
+    /// *Steps*.
+    pub(super) fn fresh_report(&self, id: &str) -> Option<(&RunResult, &CauseEnds)> {
+        let report = self.runs.reports.get(id)?;
+        (self.freshness(report) != Freshness::Stale).then(|| (&report.result, &*report.ends))
+    }
+
     /// The run before the document's run that is on, while it is on: the
     /// board shows its results for the steps not reached yet (LAY-07).
     pub(super) fn previous_run(&self, id: &str) -> Option<&RunResult> {

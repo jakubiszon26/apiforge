@@ -1252,3 +1252,55 @@ fn review_ws05_header() {
         crate::testing::capture(&mut harness, &format!("ws05a-errors-{suffix}"), None);
     }
 }
+
+/// The header of *Steps* (REQ-01a) reads the title and edits it as the board's
+/// does: a double click opens the field, Enter writes it as one undo step.
+#[test]
+fn the_title_is_edited_above_steps() {
+    const NEW: &str = "A room is booked once";
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    harness.get_by_label("Steps").click();
+    settle(&mut harness);
+    let at = |harness: &FolderHarness, text: &str| {
+        harness
+            .query_by_role_and_label(Role::Label, text)
+            .map(|node| node.rect().left_center() + vec2(8.0, 0.0))
+    };
+    harness.run_steps(12);
+    let place = at(&harness, REFUSED_TITLE).expect("Steps reads the title");
+    click_at(&mut harness, place, egui::PointerButton::Primary, 2);
+    assert!(editing(&harness), "a double click opens the field");
+    assert!(harness.get_by_label(FIELD).is_focused());
+    harness.get_by_label(FIELD).type_text(NEW);
+    settle(&mut harness);
+    enter(&mut harness);
+    assert!(!editing(&harness));
+    assert_eq!(title_of(&harness, &id), NEW);
+    assert!(at(&harness, NEW).is_some(), "Steps reads the new title");
+    undo(&mut harness);
+    assert_eq!(title_of(&harness, &id), REFUSED_TITLE);
+}
+
+/// A title typed above *Steps* is written when *Canvas* takes its place.
+#[test]
+fn a_title_typed_above_steps_is_written_by_the_switch() {
+    const NEW: &str = "A room is booked once";
+    let (_project, mut harness, id) = open(REFUSED, WIDE);
+    harness.get_by_label("Steps").click();
+    settle(&mut harness);
+    harness.run_steps(12);
+    let place = harness
+        .get_by_role_and_label(Role::Label, REFUSED_TITLE)
+        .rect()
+        .left_center()
+        + vec2(8.0, 0.0);
+    click_at(&mut harness, place, egui::PointerButton::Primary, 2);
+    harness.get_by_label(FIELD).type_text(NEW);
+    settle(&mut harness);
+    harness.get_by_label("Canvas").click();
+    settle(&mut harness);
+    harness.step();
+    assert!(!editing(&harness));
+    assert_eq!(title_of(&harness, &id), NEW);
+    assert!(on_header(&harness, NEW).is_some());
+}

@@ -34,6 +34,7 @@ mod runs;
 mod save_component;
 mod saving;
 mod settings;
+mod steps_view;
 mod storage;
 mod text_view;
 mod transaction_view;
@@ -339,6 +340,8 @@ pub struct FolderApp {
     /// context are the same: deriving it reads every block and sample.
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
+    /// The list of *Steps* (REQ-01a).
+    steps: steps_view::StepsView,
     /// The height this frame's storage indicator adds above the board, whose
     /// camera it leaves as it is; 0 while the indicator is not shown.
     storage_band: f32,
@@ -605,6 +608,7 @@ impl FolderApp {
             caret_statement: None,
             completion_names: None,
             canvases: HashMap::new(),
+            steps: steps_view::StepsView::default(),
             storage_band: 0.0,
             notice_models: HashMap::new(),
             checks_here: checks_here::ChecksHere::default(),
@@ -919,6 +923,7 @@ impl FolderApp {
     /// Selects `node` alone, as a click on its card does; the board brings
     /// a newly selected card into view (UX-18).
     fn select_step(&mut self, document_id: &str, node: String) {
+        self.forget_mark(document_id);
         self.new_inputs.remove(document_id);
         self.component_settings.remove(document_id);
         self.selections.insert(document_id.to_owned(), vec![node]);
@@ -1320,7 +1325,10 @@ impl FolderApp {
             }
             Mode::Diagram => {
                 self.library_panel(ui, active.as_deref());
-                self.inspector_panel(ui, active.as_deref());
+                // *Steps* has no Inspector (REQ-00, decision 2).
+                if !self.steps_shown(active.as_deref()) {
+                    self.inspector_panel(ui, active.as_deref());
+                }
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE.fill(theme::BG))
                     .show(ui, |ui| self.diagram_area(ui, active.as_deref()));
@@ -1716,7 +1724,7 @@ impl FolderApp {
         }
         // A text field with the keyboard (the code or an inspector field) walks
         // its own history; otherwise Ctrl+Z and Ctrl+Y walk the model's.
-        if context.egui_wants_keyboard_input() {
+        if context.egui_wants_keyboard_input() && !self.steps_keyboard(context) {
             return;
         }
         let Some(active) = self.workbench.active().map(str::to_owned) else {
@@ -1767,8 +1775,7 @@ impl FolderApp {
         let Some(model) = snapshot.model else {
             return;
         };
-        let cleanup = self.cleanup(&document_id);
-        self.board_command(&document_id, &model, cleanup, snapshot.editable, command);
+        self.shown_command(&document_id, &model, snapshot.editable, command);
     }
 
     /// The panel left of the board. In Split it is the block library (KTLO-05b),
@@ -1822,9 +1829,8 @@ impl FolderApp {
         };
         let project = self.context_project();
         let library = board.as_ref().map(|(document_id, snapshot, model)| {
-            let cleanup = self.cleanup(document_id);
-            let context = library_context(&project, document_id, model, cleanup, snapshot.editable);
-            (context, cleanup)
+            let cleanup = self.add_section(document_id, model);
+            library_context(&project, document_id, model, cleanup, snapshot.editable)
         });
         let editable = board
             .as_ref()
@@ -1853,7 +1859,7 @@ impl FolderApp {
                         .clicked();
                 };
                 if !tabs {
-                    let (context, _) = library.as_ref().expect("Split draws a board's library");
+                    let context = library.as_ref().expect("Split draws a board's library");
                     return self
                         .library
                         .show_blocks_with(ui, context, chevron, editable);
@@ -1871,7 +1877,7 @@ impl FolderApp {
                     return Vec::new();
                 }
                 match &library {
-                    Some((context, _)) => self.library.show_sections(ui, context, editable),
+                    Some(context) => self.library.show_sections(ui, context, editable),
                     None => {
                         widgets::hint(ui, "Open a scenario or component to add its blocks.");
                         Vec::new()
@@ -1912,10 +1918,10 @@ impl FolderApp {
         }
         let actions = panel.inner;
         // The library's context borrows the board's model.
-        let cleanup = library.map(|(_, cleanup)| cleanup);
-        if let Some(((document_id, snapshot, model), cleanup)) = board.zip(cleanup) {
+        drop(library);
+        if let Some((document_id, snapshot, model)) = board {
             for action in actions {
-                self.library_action(document_id, &model, cleanup, snapshot.editable, action);
+                self.library_action(document_id, &model, snapshot.editable, action);
             }
         }
     }
@@ -1960,8 +1966,7 @@ impl FolderApp {
     fn library_action(
         &mut self,
         document_id: &str,
-        model: &Document,
-        cleanup: bool,
+        model: &Arc<Document>,
         editable: bool,
         action: library::Action,
     ) {
@@ -1976,7 +1981,7 @@ impl FolderApp {
         // The folder panel shows only block sections, never workspace
         // navigation, so every action it sends has a board command.
         if let Some(command) = canvas::library_command(action, centre) {
-            self.board_command(document_id, model, cleanup, editable, command);
+            self.shown_command(document_id, model, editable, command);
         }
     }
 

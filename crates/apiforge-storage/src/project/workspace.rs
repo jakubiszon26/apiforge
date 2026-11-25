@@ -79,6 +79,10 @@ pub struct PanelSizes {
     /// (REP-08). Written only when set.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub results_json: bool,
+    /// Whether Diagram shows a scenario as the list of *Steps* instead of its
+    /// board (REQ-01a). Written only when set.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub steps: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -236,6 +240,7 @@ mod tests {
                 library_collapsed: true,
                 library_files: true,
                 results_json: true,
+                steps: true,
             }),
             expanded: vec!["flows".into(), "flows/nested".into()],
             ..WorkspaceState::new("project")
@@ -387,6 +392,38 @@ mod tests {
                 "unknown fields outside the panel sizes are still rejected"
             );
         }
+    }
+
+    /// REQ-01a criterion 1: *Steps* round-trips with the panel sizes, a view
+    /// on the board adds nothing to the file, and a build without the field
+    /// drops it and keeps the rest, as any size it does not know (KTLO-05c).
+    #[test]
+    fn req01a_criterion_1_steps_is_written_only_when_chosen() {
+        let sizes = serde_json::json!({
+            "documents": 220.0,
+            "splitCode": 480.0,
+            "diagnostics": 140.0,
+            "library": 300.0,
+        });
+        let mut steps = sizes.clone();
+        steps["steps"] = true.into();
+        assert_eq!(panels_through_load_and_save(steps.clone()), steps);
+        assert_eq!(panels_through_load_and_save(sizes.clone()), sizes);
+        let mut canvas = sizes.clone();
+        canvas["steps"] = false.into();
+        assert_eq!(panels_through_load_and_save(canvas), sizes);
+
+        // The panel sizes of a build without the field.
+        #[derive(Deserialize, Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Before {
+            documents: f32,
+            split_code: f32,
+            diagnostics: f32,
+            library: f32,
+        }
+        let before: Before = serde_json::from_value(steps).unwrap();
+        assert_eq!(serde_json::to_value(before).unwrap(), sizes);
     }
 
     /// KTLO-17 criterion 6: a collapsed block library round-trips with the

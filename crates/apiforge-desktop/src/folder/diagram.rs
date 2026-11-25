@@ -116,6 +116,23 @@ impl FolderApp {
                     });
                 });
         }
+        if self.steps_shown(active) {
+            let header = Header {
+                tabs: false,
+                ..header
+            };
+            let mut field = TitleField {
+                document: document_id,
+                editable: title_editable,
+                edit: &mut title_edit,
+            };
+            self.steps_area(ui, &header, &mut field, &model);
+            if title_edit.is_some() {
+                self.title_edit = title_edit;
+            }
+            self.commit_left_title();
+            return;
+        }
         let project = self.context_project();
         let run = self.fresh_run(document_id);
         // Resolved with the report, once per run (LAY-19).
@@ -147,6 +164,8 @@ impl FolderApp {
                 .cloned()
                 .collect::<Vec<_>>()
         });
+        self.ensure_canvas(document_id);
+        self.mark_on_board(document_id, &model, cleanup);
         let graph = graph_of(&model, cleanup);
         // Built once per model, not every frame (UX-16).
         let combined = cleanup.then(|| self.cleanup_reference(&model));
@@ -203,11 +222,6 @@ impl FolderApp {
         // also while it is folded to its rail (KTLO-17).
         let library = (!library_in_view)
             .then(|| library_context(&project, document_id, &model, cleanup, snapshot.editable));
-        if !self.canvases.contains_key(document_id) {
-            let canvas = self.new_canvas();
-            self.canvases.insert(document_id.to_owned(), canvas);
-            self.show_checks_here(document_id);
-        }
         let mode = self.workbench.mode;
         let storage_band = self.storage_band;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
@@ -264,27 +278,17 @@ impl FolderApp {
                     moves: true,
                     storage_band,
                 };
-                let draft = title_edit
-                    .as_ref()
-                    .filter(|edit| !edit.left)
-                    .map(|edit| edit.draft.as_str());
-                let fit = header.fit(ui, canvas.header_room(ui, &input), draft);
+                let mut field = TitleField {
+                    document: document_id,
+                    editable: title_editable,
+                    edit: &mut title_edit,
+                };
+                let fit = header.fit(ui, canvas.header_room(ui, &input), field.draft());
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
                 let row = canvas.leading_rect(ui, &input);
                 // Drawn before the board, so the keyboard reaches the header
                 // first and then the board's toolbar on the same row.
-                header.show(
-                    ui.ctx(),
-                    ui.id(),
-                    row,
-                    &fit,
-                    &mut chosen,
-                    &mut TitleField {
-                        document: document_id,
-                        editable: title_editable,
-                        edit: &mut title_edit,
-                    },
-                );
+                header.show(ui.ctx(), ui.id(), row, &fit, &mut chosen, &mut field);
                 canvas.show(ui, &input)
             })
             .inner;
@@ -302,10 +306,7 @@ impl FolderApp {
             self.board_command(document_id, &model, cleanup, snapshot.editable, command);
         }
         // After the commands, which edit the model this frame drew.
-        if self.title_edit.as_ref().is_some_and(|edit| edit.left) {
-            // Told, or waiting: nothing here depends on it.
-            let _ = self.commit_title();
-        }
+        self.commit_left_title();
         // What Back restores beside the board lasts as long as Back.
         if !self
             .canvases
@@ -313,6 +314,15 @@ impl FolderApp {
             .is_some_and(canvas::Canvas::has_back)
         {
             self.jump_views.remove(document_id);
+        }
+    }
+
+    /// The board of `document_id`, made when it has none yet.
+    pub(super) fn ensure_canvas(&mut self, document_id: &str) {
+        if !self.canvases.contains_key(document_id) {
+            let canvas = self.new_canvas();
+            self.canvases.insert(document_id.to_owned(), canvas);
+            self.show_checks_here(document_id);
         }
     }
 
@@ -337,6 +347,14 @@ impl FolderApp {
                 .request_repaint_after(Duration::from_millis(16));
         }
         commit
+    }
+
+    /// Writes the title of a field left in this frame.
+    fn commit_left_title(&mut self) {
+        if self.title_edit.as_ref().is_some_and(|edit| edit.left) {
+            // Told, or waiting: nothing here depends on it.
+            let _ = self.commit_title();
+        }
     }
 
     fn write_title(&mut self) -> TitleCommit {
@@ -587,6 +605,7 @@ impl FolderApp {
                     self.new_inputs.remove(document_id);
                     self.component_settings.remove(document_id);
                 }
+                self.forget_mark(document_id);
                 self.selections.insert(document_id.to_owned(), ids);
                 self.selected_inputs.remove(document_id);
                 None
@@ -1649,17 +1668,27 @@ impl TitleEdit {
 
 /// The document whose title the header shows and the edit of it, if one is
 /// open.
-struct TitleField<'a> {
-    document: &'a str,
-    editable: bool,
-    edit: &'a mut Option<TitleEdit>,
+pub(super) struct TitleField<'a> {
+    pub(super) document: &'a str,
+    pub(super) editable: bool,
+    pub(super) edit: &'a mut Option<TitleEdit>,
+}
+
+impl TitleField<'_> {
+    /// The text in the field while it is open.
+    pub(super) fn draft(&self) -> Option<&str> {
+        self.edit
+            .as_ref()
+            .filter(|edit| !edit.left)
+            .map(|edit| edit.draft.as_str())
+    }
 }
 
 /// The document's part of the board's header row (KTLO-12): in Diagram the
 /// title (WS-05a), the file name and the kind, then Main / Cleanup for a
 /// scenario; in Split only Main / Cleanup, since the tab strip beside the
 /// code names the file.
-struct Header<'a> {
+pub(super) struct Header<'a> {
     title: Option<&'a str>,
     /// The document's path in the project, on the title's hover.
     path: &'a str,
@@ -1668,7 +1697,7 @@ struct Header<'a> {
 }
 
 /// What of the header fits, and its width.
-struct HeaderFit {
+pub(super) struct HeaderFit {
     /// The width of the title, or of the file name where there is no title.
     name_width: f32,
     /// The file name after the title, whole.
@@ -1677,7 +1706,7 @@ struct HeaderFit {
     /// Left free before Main and Cleanup, which stay in place while the
     /// title is edited.
     free: f32,
-    width: f32,
+    pub(super) width: f32,
 }
 
 impl Header<'_> {
@@ -1716,7 +1745,12 @@ impl Header<'_> {
     /// of the file name (its full text stays on hover), then the steps
     /// summary, which the board leaves out once the header takes its room.
     /// While the title is edited, `draft` is the text in its field.
-    fn fit(&self, ui: &egui::Ui, room: canvas::HeaderRoom, draft: Option<&str>) -> HeaderFit {
+    pub(super) fn fit(
+        &self,
+        ui: &egui::Ui,
+        room: canvas::HeaderRoom,
+        draft: Option<&str>,
+    ) -> HeaderFit {
         let gap = ui.spacing().item_spacing.x;
         let tabs = if self.tabs {
             widgets::tab_value_width(ui, "Main") + gap + widgets::tab_value_width(ui, "Cleanup")
@@ -1802,7 +1836,7 @@ impl Header<'_> {
     }
 
     /// Draws the header into `row`, the left of the board's header row.
-    fn show(
+    pub(super) fn show(
         &self,
         ctx: &egui::Context,
         id: egui::Id,
