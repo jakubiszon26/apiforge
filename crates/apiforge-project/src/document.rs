@@ -1,8 +1,13 @@
 //! One registered document: exact source, its analysis, its model and the model
 //! history. The text-edit history belongs to the view adapter (ADR 0012).
+//! What of it is about the text alone is [`EditedText`], which a try has too
+//! (REQ-17a).
 use apiforge_script::{Diagnostic, Document};
 use apiforge_storage::project::{DocumentEntry, FieldRecovery, FileState, TextSelection};
-use std::sync::{Arc, OnceLock};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::{Arc, OnceLock},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnalysisState {
@@ -31,7 +36,7 @@ pub enum Unavailable {
 
 /// One state of a document's history: its exact text and the model read
 /// from it, whose identities and positions an Undo keeps (DIAG-06g).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Step {
     pub text: String,
     pub model: Arc<Document>,
@@ -40,7 +45,7 @@ pub(crate) struct Step {
 /// The document's one linear history. Every settled change of the text is a
 /// step, a change made on the board or typed in Code alike, also one that
 /// changes no block; a layout change is a step with the same text.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct History {
     pub undo: Vec<Step>,
     pub redo: Vec<Step>,
@@ -74,18 +79,18 @@ impl History {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct DocumentSession {
-    pub(crate) entry: DocumentEntry,
+/// One text of the written language with what it is read as: its analysis,
+/// its model and their one history. A document of a project has one beside
+/// what it keeps of its file; a try has nothing else (REQ-17a). Whoever edits
+/// one edits it by the same functions.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditedText {
     /// Changed only through `set_text`, which forgets `text_state`.
     text: String,
     /// The state `text` would have on disk, hashed once per text and kept
     /// because views ask whether a document is dirty several times a frame.
     text_state: OnceLock<FileState>,
     pub(crate) source_version: u64,
-    /// The disk state this session last read or wrote: the save baseline.
-    pub(crate) saved: FileState,
-    pub(crate) unavailable: Option<Unavailable>,
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// Diagnostics the analysis found beyond the ones it keeps.
     pub(crate) omitted_diagnostics: usize,
@@ -94,6 +99,18 @@ pub struct DocumentSession {
     /// The source text `model` describes, when known. Differs from `text` while
     /// the current source is pending or invalid.
     pub(crate) model_source: Option<String>,
+    pub(crate) history: History,
+    /// The exact source version for which comment loss was accepted.
+    pub(crate) comments_accepted: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DocumentSession {
+    pub(crate) entry: DocumentEntry,
+    edited: EditedText,
+    /// The disk state this session last read or wrote: the save baseline.
+    pub(crate) saved: FileState,
+    pub(crate) unavailable: Option<Unavailable>,
     /// Sealed while the model was current, including its original configuration.
     pub(crate) valid_snapshot: Option<apiforge_storage::project::LastValidSnapshot>,
     /// View state kept for recovery: directional selection and field drafts.
@@ -101,21 +118,25 @@ pub struct DocumentSession {
     pub(crate) fields: Vec<FieldRecovery>,
     /// Layout differs from the saved checkpoint while semantics do not.
     pub(crate) layout_dirty: bool,
-    pub(crate) history: History,
     /// The saved file changed or disappeared outside the session while this
     /// document had unsaved work.
     pub(crate) conflict: Option<crate::session::ExternalConflict>,
-    /// The exact source version for which comment loss was accepted.
-    pub(crate) comments_accepted: Option<u64>,
 }
 
-impl DocumentSession {
-    pub fn id(&self) -> &str {
-        &self.entry.document_id
+impl Deref for DocumentSession {
+    type Target = EditedText;
+    fn deref(&self) -> &EditedText {
+        &self.edited
     }
-    pub fn entry(&self) -> &DocumentEntry {
-        &self.entry
+}
+
+impl DerefMut for DocumentSession {
+    fn deref_mut(&mut self) -> &mut EditedText {
+        &mut self.edited
     }
+}
+
+impl EditedText {
     pub fn text(&self) -> &str {
         &self.text
     }
@@ -130,36 +151,8 @@ impl DocumentSession {
     pub fn omitted_diagnostics(&self) -> usize {
         self.omitted_diagnostics
     }
-    /// SHA-256 of the saved bytes this session last read or wrote; `None`
-    /// when the file is missing.
-    pub fn saved_sha256(&self) -> Option<&str> {
-        match &self.saved {
-            FileState::File { sha256, .. } => Some(sha256),
-            _ => None,
-        }
-    }
     pub fn analysis(&self) -> AnalysisState {
         self.analysis
-    }
-    pub fn unavailable(&self) -> Option<Unavailable> {
-        self.unavailable
-    }
-    /// Source differs from the save baseline. Layout-only changes are separate.
-    pub fn is_dirty(&self) -> bool {
-        self.unavailable.is_none() && self.text_state() != &self.saved
-    }
-    pub fn selection(&self) -> &TextSelection {
-        &self.selection
-    }
-    pub fn field_drafts(&self) -> &[FieldRecovery] {
-        &self.fields
-    }
-    /// Unsaved work that local recovery must protect.
-    pub fn needs_recovery(&self) -> bool {
-        self.is_dirty() || self.layout_dirty || !self.fields.is_empty()
-    }
-    pub fn is_layout_dirty(&self) -> bool {
-        self.layout_dirty
     }
     /// The latest valid model, with `model_state` telling whether it is current.
     pub fn model(&self) -> Option<&Document> {
@@ -183,6 +176,71 @@ impl DocumentSession {
             (Some(_), _) => ModelState::LastValid,
         }
     }
+
+    pub(crate) fn new(text: String) -> Self {
+        Self {
+            text,
+            text_state: OnceLock::new(),
+            source_version: 1,
+            diagnostics: Vec::new(),
+            omitted_diagnostics: 0,
+            analysis: AnalysisState::Pending,
+            model: None,
+            model_source: None,
+            history: History::default(),
+            comments_accepted: None,
+        }
+    }
+
+    /// Replaces the text. Callers advance `source_version` as their change
+    /// requires.
+    pub(crate) fn set_text(&mut self, text: String) {
+        self.text = text;
+        self.text_state = OnceLock::new();
+    }
+
+    /// The state the current text has once written.
+    pub(crate) fn text_state(&self) -> &FileState {
+        self.text_state
+            .get_or_init(|| FileState::of(self.text.as_bytes()))
+    }
+}
+
+impl DocumentSession {
+    pub fn id(&self) -> &str {
+        &self.entry.document_id
+    }
+    pub fn entry(&self) -> &DocumentEntry {
+        &self.entry
+    }
+    /// SHA-256 of the saved bytes this session last read or wrote; `None`
+    /// when the file is missing.
+    pub fn saved_sha256(&self) -> Option<&str> {
+        match &self.saved {
+            FileState::File { sha256, .. } => Some(sha256),
+            _ => None,
+        }
+    }
+    pub fn unavailable(&self) -> Option<Unavailable> {
+        self.unavailable
+    }
+    /// Source differs from the save baseline. Layout-only changes are separate.
+    pub fn is_dirty(&self) -> bool {
+        self.unavailable.is_none() && self.text_state() != &self.saved
+    }
+    pub fn selection(&self) -> &TextSelection {
+        &self.selection
+    }
+    pub fn field_drafts(&self) -> &[FieldRecovery] {
+        &self.fields
+    }
+    /// Unsaved work that local recovery must protect.
+    pub fn needs_recovery(&self) -> bool {
+        self.is_dirty() || self.layout_dirty || !self.fields.is_empty()
+    }
+    pub fn is_layout_dirty(&self) -> bool {
+        self.layout_dirty
+    }
     /// Graph mutations are allowed only on a model derived from current source.
     pub fn accepts_model_edits(&self) -> bool {
         self.unavailable.is_none()
@@ -201,32 +259,12 @@ impl DocumentSession {
 }
 
 impl DocumentSession {
-    /// Replaces the text. Callers advance `source_version` as their change
-    /// requires.
-    pub(crate) fn set_text(&mut self, text: String) {
-        self.text = text;
-        self.text_state = OnceLock::new();
-    }
-
-    /// The state the current text has once written.
-    pub(crate) fn text_state(&self) -> &FileState {
-        self.text_state
-            .get_or_init(|| FileState::of(self.text.as_bytes()))
-    }
-
     pub(crate) fn new(entry: DocumentEntry, text: String, saved: FileState) -> Self {
         Self {
             entry,
-            text,
-            text_state: OnceLock::new(),
-            source_version: 1,
+            edited: EditedText::new(text),
             saved,
             unavailable: None,
-            diagnostics: Vec::new(),
-            omitted_diagnostics: 0,
-            analysis: AnalysisState::Pending,
-            model: None,
-            model_source: None,
             valid_snapshot: None,
             selection: TextSelection {
                 anchor: 0,
@@ -234,8 +272,6 @@ impl DocumentSession {
             },
             fields: Vec::new(),
             layout_dirty: false,
-            comments_accepted: None,
-            history: History::default(),
             conflict: None,
         }
     }

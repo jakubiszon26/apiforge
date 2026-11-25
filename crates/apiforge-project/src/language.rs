@@ -57,13 +57,22 @@ pub fn refuse_newer(manifest: &ProjectManifest) -> Result<()> {
 /// The problem of a project at `folder` written in an older language than
 /// this build's: `check` reports it and a run is refused with it.
 pub(crate) fn older(manifest: &ProjectManifest, folder: &Path) -> Option<Error> {
-    (support(manifest.language(), LANGUAGE_VERSION) == Support::Older).then(|| {
-        Error::OlderLanguage {
-            project: manifest.language(),
-            build: LANGUAGE_VERSION,
-            folder: folder.to_owned(),
-        }
-    })
+    is_older(manifest.language()).then(|| older_problem(manifest.language(), folder))
+}
+
+/// Whether a project in `language` is in an older one than this build's.
+pub(crate) fn is_older(language: u32) -> bool {
+    support(language, LANGUAGE_VERSION) == Support::Older
+}
+
+/// What a run of a project at `folder`, in the older `language`, is refused
+/// with.
+pub(crate) fn older_problem(language: u32, folder: &Path) -> Error {
+    Error::OlderLanguage {
+        project: language,
+        build: LANGUAGE_VERSION,
+        folder: folder.to_owned(),
+    }
 }
 
 /// The folder as a command line argument: quoted when it has a space. A

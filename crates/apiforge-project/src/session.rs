@@ -2,12 +2,13 @@ use crate::{
     Error, Result,
     analysis::{self, Analysis, AnalysisInput, AnalysisTicket, Restored, Target},
     context,
-    document::{AnalysisState, DocumentSession, Step, Unavailable},
+    document::{AnalysisState, DocumentSession, EditedText, Step, Unavailable},
     language,
     layout::{FixedPlacer, Placer},
+    tries::TryContext,
 };
 use apiforge_core::format::Project;
-use apiforge_script::Document;
+use apiforge_script::{Diagnostic, Document};
 use apiforge_storage::project::{
     DiagramFile, DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, Holder,
     MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath, ProjectSnapshot,
@@ -477,6 +478,15 @@ impl ProjectSession {
     pub fn language_problem(&self) -> Option<Error> {
         language::older(&self.manifest, self.store.root())
     }
+    /// What a try is read in (REQ-17a): the project as a scenario of it is
+    /// read in, and whether it is in an older language.
+    pub fn try_context(&self) -> TryContext {
+        TryContext::new(
+            self.context.clone(),
+            self.manifest.language(),
+            self.store.root(),
+        )
+    }
     pub fn manifest(&self) -> &ProjectManifest {
         &self.manifest
     }
@@ -571,16 +581,11 @@ impl ProjectSession {
         if document.unavailable.is_some() {
             return Err(Error::ModelLocked);
         }
-        if text.len() > apiforge_storage::project::MAX_SOURCE_BYTES {
-            return Err(Error::SourceTooLarge);
-        }
-        if document.text() == text {
-            return Ok(document.source_version);
-        }
-        document.set_text(text.into());
-        document.source_version += 1;
-        document.analysis = AnalysisState::Pending;
+        let changed = document.take_source(text)?;
         let version = document.source_version;
+        if !changed {
+            return Ok(version);
+        }
         self.emit(
             origin,
             Some(document_id),
@@ -743,33 +748,17 @@ impl ProjectSession {
         }
         let arranged = analysis.restored() == Some(Restored::Arranged);
         let document = &mut self.documents[index];
-        document.diagnostics = analysis.diagnostics;
-        document.omitted_diagnostics = analysis.omitted_diagnostics;
         let version = document.source_version;
         let valid = analysis.model.is_some();
-        match analysis.model {
-            Some((model, _)) => {
-                document.analysis = AnalysisState::Valid;
-                document.model_source = Some(document.text().to_owned());
-                let present = document.history.present.replace(document.text().to_owned());
-                if let (Some(text), Some(previous)) = (present, &document.model)
-                    && text != document.text()
-                {
-                    let model = previous.clone();
-                    document.history.record(Step { text, model });
-                }
-                if document.model.as_deref() != Some(&model) {
-                    document.model = Some(Arc::new(model));
-                    self.emit(
-                        Origin::SESSION,
-                        Some(&analysis.ticket.document_id),
-                        EventKind::ModelChanged {
-                            source_version: version,
-                        },
-                    );
-                }
-            }
-            None => document.analysis = AnalysisState::Invalid,
+        let model = analysis.model.map(|(model, _)| model);
+        if document.install_analysis(analysis.diagnostics, analysis.omitted_diagnostics, model) {
+            self.emit(
+                Origin::SESSION,
+                Some(&analysis.ticket.document_id),
+                EventKind::ModelChanged {
+                    source_version: version,
+                },
+            );
         }
         self.seal_valid(index);
         if valid {
@@ -864,7 +853,7 @@ impl ProjectSession {
     fn apply_edit(
         &mut self,
         document_id: &str,
-        mut model: Document,
+        model: Document,
         origin: Origin,
         written: Written<'_>,
     ) -> Result<()> {
@@ -874,44 +863,44 @@ impl ProjectSession {
             return Err(Error::ModelLocked);
         }
         let target = self.target(&self.documents[index].entry);
-        if analysis::kind(&model) != target.kind {
-            return Err(Error::InvalidModel);
-        }
-        analysis::normalise(&mut model, &target);
-        let previous = self.documents[index]
-            .model
-            .clone()
-            .ok_or(Error::ModelLocked)?;
-        let moved = match written {
-            Written::Moved(moved) => Some(moved),
-            Written::Rebuilt | Written::Placed => None,
+        let read = Reading {
+            target: &target,
+            context: &self.context,
+            placer: self.placer.as_ref(),
         };
-        let model = match written {
-            Written::Rebuilt => kept_chain(&previous, model),
-            Written::Placed => with_start(model),
-            Written::Moved(_) => model,
-        };
-        if *previous == model {
-            return Ok(());
+        if let Some(change) = self.documents[index].apply_edit(&read, model, written)? {
+            self.changed(index, origin, change);
         }
-        // A move that changes no step's place, nor any statement's braces,
-        // changes nothing: the order of the statements is the text's, which
-        // it would leave as it is (DIAG-06d).
-        if moved.is_some()
-            && apiforge_script::semantic(&previous, &self.context)
-                == apiforge_script::semantic(&model, &self.context)
-        {
-            return Ok(());
-        }
-        let text = self.documents[index].text().to_owned();
-        self.install_model(index, model, origin, moved)?;
-        let document = &mut self.documents[index];
-        document.history.record(Step {
-            text,
-            model: previous,
-        });
-        document.history.present = Some(document.text().to_owned());
         Ok(())
+    }
+
+    /// An edit or a step of the history changed a document: what is sealed
+    /// and told of it.
+    fn changed(&mut self, index: usize, origin: Origin, change: Change) {
+        let document = &mut self.documents[index];
+        let document_id = document.entry.document_id.clone();
+        match change {
+            Change::Text => {
+                let version = document.source_version;
+                self.emit(
+                    origin,
+                    Some(&document_id),
+                    EventKind::SourceChanged {
+                        source_version: version,
+                    },
+                );
+            }
+            Change::Layout => document.layout_dirty = true,
+        }
+        self.seal_valid(index);
+        let version = self.documents[index].source_version;
+        self.emit(
+            origin,
+            Some(&document_id),
+            EventKind::ModelChanged {
+                source_version: version,
+            },
+        );
     }
 
     pub fn undo(&mut self, document_id: &str, origin: Origin) -> Result<bool> {
@@ -937,100 +926,204 @@ impl ProjectSession {
         if !self.documents[index].accepts_model_edits() {
             return Err(Error::ModelLocked);
         }
-        let history = &mut self.documents[index].history;
+        let target = self.target(&self.documents[index].entry);
+        let read = Reading {
+            target: &target,
+            context: &self.context,
+            placer: self.placer.as_ref(),
+        };
+        let Some(change) = self.documents[index].step(&read, undo)? else {
+            return Ok(false);
+        };
+        self.changed(index, origin, change);
+        Ok(true)
+    }
+}
+
+/// What a text is read with: the definition it must be, the project it is
+/// read in and the caller's placer.
+pub(crate) struct Reading<'a> {
+    pub target: &'a Target,
+    pub context: &'a Project,
+    pub placer: &'a dyn Placer,
+}
+
+/// What an edit of the model, or a step of the history, changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Change {
+    Text,
+    /// The layout alone: the text is as it was.
+    Layout,
+}
+
+/// What an edit does to one text, whether a document of the session or a try
+/// (REQ-17a) holds it. The holder decides whether it may be edited.
+impl EditedText {
+    /// Takes a text as it was typed, for an analysis to settle; whether it
+    /// differs from the one held.
+    pub(crate) fn take_source(&mut self, text: &str) -> Result<bool> {
+        if text.len() > apiforge_storage::project::MAX_SOURCE_BYTES {
+            return Err(Error::SourceTooLarge);
+        }
+        if self.text() == text {
+            return Ok(false);
+        }
+        self.set_text(text.into());
+        self.source_version += 1;
+        self.analysis = AnalysisState::Pending;
+        Ok(true)
+    }
+
+    /// Settles the text with what its analysis gave; whether the model
+    /// changed.
+    pub(crate) fn install_analysis(
+        &mut self,
+        diagnostics: Vec<Diagnostic>,
+        omitted: usize,
+        model: Option<Document>,
+    ) -> bool {
+        self.diagnostics = diagnostics;
+        self.omitted_diagnostics = omitted;
+        let Some(model) = model else {
+            self.analysis = AnalysisState::Invalid;
+            return false;
+        };
+        self.analysis = AnalysisState::Valid;
+        self.model_source = Some(self.text().to_owned());
+        let present = self.history.present.replace(self.text().to_owned());
+        if let (Some(text), Some(previous)) = (present, &self.model)
+            && text != self.text()
+        {
+            let model = previous.clone();
+            self.history.record(Step { text, model });
+        }
+        let changed = self.model.as_deref() != Some(&model);
+        if changed {
+            self.model = Some(Arc::new(model));
+        }
+        changed
+    }
+
+    /// An edit of the model, written into the text as `written` says: what it
+    /// changed, `None` when nothing. One step of the history.
+    pub(crate) fn apply_edit(
+        &mut self,
+        read: &Reading<'_>,
+        mut model: Document,
+        written: Written<'_>,
+    ) -> Result<Option<Change>> {
+        if analysis::kind(&model) != read.target.kind {
+            return Err(Error::InvalidModel);
+        }
+        analysis::normalise(&mut model, read.target);
+        let previous = self.model.clone().ok_or(Error::ModelLocked)?;
+        let moved = match written {
+            Written::Moved(moved) => Some(moved),
+            Written::Rebuilt | Written::Placed => None,
+        };
+        let model = match written {
+            Written::Rebuilt => kept_chain(&previous, model),
+            Written::Placed => with_start(model),
+            Written::Moved(_) => model,
+        };
+        if *previous == model {
+            return Ok(None);
+        }
+        // A move that changes no step's place, nor any statement's braces,
+        // changes nothing: the order of the statements is the text's, which
+        // it would leave as it is (DIAG-06d).
+        if moved.is_some()
+            && apiforge_script::semantic(&previous, read.context)
+                == apiforge_script::semantic(&model, read.context)
+        {
+            return Ok(None);
+        }
+        let text = self.text().to_owned();
+        let change = self.install_model(read, model, moved)?;
+        self.history.record(Step {
+            text,
+            model: previous,
+        });
+        self.history.present = Some(self.text().to_owned());
+        Ok(Some(change))
+    }
+
+    /// Steps the history back or forward: what changed, `None` when there is
+    /// no step. The holder has settled the text.
+    pub(crate) fn step(&mut self, read: &Reading<'_>, undo: bool) -> Result<Option<Change>> {
+        let current = Step {
+            text: self.text().to_owned(),
+            model: self.model.clone().ok_or(Error::ModelLocked)?,
+        };
+        let history = &mut self.history;
         let Some(step) = (if undo {
             history.undo.pop()
         } else {
             history.redo.pop()
         }) else {
-            return Ok(false);
+            return Ok(None);
         };
-        let document = &self.documents[index];
-        let current = Step {
-            text: document.text().to_owned(),
-            model: document.model.clone().ok_or(Error::ModelLocked)?,
-        };
-        if let Err(error) = self.install_step(index, &step, origin) {
-            let history = &mut self.documents[index].history;
-            if undo {
-                history.undo.push(step);
-            } else {
-                history.redo.push(step);
+        let change = match self.install_step(read, &step) {
+            Ok(change) => change,
+            Err(error) => {
+                let history = &mut self.history;
+                if undo {
+                    history.undo.push(step);
+                } else {
+                    history.redo.push(step);
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
-        let history = &mut self.documents[index].history;
+        };
+        let history = &mut self.history;
         history.generation += 1;
         if undo {
             history.redo.push(current);
         } else {
             history.undo.push(current);
         }
-        Ok(true)
+        Ok(Some(change))
     }
 
     /// Installs a step of the history: its text byte for byte, and the model
     /// read from that text with the step's identities and positions
     /// (KTLO-26). A text that no longer reads as valid in the project's
     /// current context is refused and nothing changes.
-    fn install_step(&mut self, index: usize, step: &Step, origin: Origin) -> Result<()> {
-        let target = self.target(&self.documents[index].entry);
+    fn install_step(&mut self, read: &Reading<'_>, step: &Step) -> Result<Change> {
         let (diagnostics, omitted, model) = analysis::derive_counted(
-            &target,
+            read.target,
             &step.text,
-            &self.context,
+            read.context,
             Some(&step.model),
             None,
-            self.placer.as_ref(),
+            read.placer,
         );
         let (model, _) = model.ok_or(Error::InvalidModel)?;
-        let document = &mut self.documents[index];
-        let document_id = document.entry.document_id.clone();
-        document.model = Some(Arc::new(model));
-        document.model_source = Some(step.text.clone());
-        document.history.present = Some(step.text.clone());
-        document.diagnostics = diagnostics;
-        document.omitted_diagnostics = omitted;
-        if document.text() == step.text {
-            document.layout_dirty = true;
-        } else {
-            document.set_text(step.text.clone());
-            document.source_version += 1;
-            let version = document.source_version;
-            self.emit(
-                origin,
-                Some(&document_id),
-                EventKind::SourceChanged {
-                    source_version: version,
-                },
-            );
+        self.model = Some(Arc::new(model));
+        self.model_source = Some(step.text.clone());
+        self.history.present = Some(step.text.clone());
+        self.diagnostics = diagnostics;
+        self.omitted_diagnostics = omitted;
+        if self.text() == step.text {
+            return Ok(Change::Layout);
         }
-        self.seal_valid(index);
-        let version = self.documents[index].source_version;
-        self.emit(
-            origin,
-            Some(&document_id),
-            EventKind::ModelChanged {
-                source_version: version,
-            },
-        );
-        Ok(())
+        self.set_text(step.text.clone());
+        self.source_version += 1;
+        Ok(Change::Text)
     }
 
     fn install_model(
         &mut self,
-        index: usize,
+        read: &Reading<'_>,
         model: Document,
-        origin: Origin,
         moved: Option<&[String]>,
-    ) -> Result<()> {
-        let context = apiforge_script::LowerContext::folder(&self.context);
+    ) -> Result<Change> {
+        let context = apiforge_script::LowerContext::folder(read.context);
         apiforge_script::validate_document_model(&model, &context)
             .map_err(|_| Error::InvalidModel)?;
-        let document = &self.documents[index];
-        let previous = document.model.as_ref().ok_or(Error::ModelLocked)?;
-        let semantic = apiforge_script::semantic(previous, &self.context)
-            != apiforge_script::semantic(&model, &self.context);
+        let previous = self.model.as_ref().ok_or(Error::ModelLocked)?;
+        let semantic = apiforge_script::semantic(previous, read.context)
+            != apiforge_script::semantic(&model, read.context);
         let (model, written) = if semantic {
             // The edit changes the text of what it changes and nothing else
             // (LAY-34). Only printing the whole file drops comments that
@@ -1038,23 +1131,21 @@ impl ProjectSession {
             // (owner, 2026-11-17).
             let in_place = match moved {
                 Some(moved) => apiforge_script::edit_in_place_moving(
-                    &self.context,
-                    document.text(),
+                    read.context,
+                    self.text(),
                     previous,
                     &model,
                     moved,
                 ),
-                None => {
-                    apiforge_script::edit_in_place(&self.context, document.text(), previous, &model)
-                }
+                None => apiforge_script::edit_in_place(read.context, self.text(), previous, &model),
             };
             let text = match in_place {
                 Some(text) => text,
                 // A move is written line by line or not at all (DIAG-06a).
                 None if moved.is_some() => return Err(Error::MoveNotWritten),
                 None => {
-                    self.require_comment_decision(index)?;
-                    apiforge_script::print_folder_document(&self.context, &model)
+                    self.require_comment_decision()?;
+                    apiforge_script::print_folder_document(read.context, &model)
                         .map_err(|_| Error::Unprintable)?
                 }
             };
@@ -1064,14 +1155,13 @@ impl ProjectSession {
             // checkpoint sealed from the model must describe the source
             // (KTLO-26). What the reading reports is what the text's analysis
             // would (#578): nothing analyses it again after the edit.
-            let target = self.target(&document.entry);
             match analysis::derive_counted(
-                &target,
+                read.target,
                 &text,
-                &self.context,
+                read.context,
                 Some(&model),
                 None,
-                self.placer.as_ref(),
+                read.placer,
             ) {
                 (diagnostics, omitted, Some((read_back, _))) => {
                     (read_back, Some((text, diagnostics, omitted)))
@@ -1081,39 +1171,20 @@ impl ProjectSession {
         } else {
             (model, None)
         };
-        let document_id = document.entry.document_id.clone();
-        let document = &mut self.documents[index];
-        document.model = Some(Arc::new(model));
-        match written {
-            Some((text, diagnostics, omitted)) => {
-                document.model_source = Some(text.clone());
-                document.set_text(text);
-                document.source_version += 1;
-                document.diagnostics = diagnostics;
-                document.omitted_diagnostics = omitted;
-                let version = document.source_version;
-                self.emit(
-                    origin,
-                    Some(&document_id),
-                    EventKind::SourceChanged {
-                        source_version: version,
-                    },
-                );
-            }
-            None => document.layout_dirty = true,
-        }
-        self.seal_valid(index);
-        let version = self.documents[index].source_version;
-        self.emit(
-            origin,
-            Some(&document_id),
-            EventKind::ModelChanged {
-                source_version: version,
-            },
-        );
-        Ok(())
+        self.model = Some(Arc::new(model));
+        let Some((text, diagnostics, omitted)) = written else {
+            return Ok(Change::Layout);
+        };
+        self.model_source = Some(text.clone());
+        self.set_text(text);
+        self.source_version += 1;
+        self.diagnostics = diagnostics;
+        self.omitted_diagnostics = omitted;
+        Ok(Change::Text)
     }
+}
 
+impl ProjectSession {
     /// Changes shared configuration. Every document must be analysed again, and
     /// results computed against the previous configuration become stale.
     pub fn edit_configuration(
@@ -1397,10 +1468,7 @@ impl ProjectSession {
             entity_id: entry.entity_id.clone(),
             revision: working_revision(&self.manifest, entry),
             stored: false,
-            older: (crate::language::support(
-                self.manifest.language(),
-                crate::language::LANGUAGE_VERSION,
-            ) == crate::language::Support::Older)
+            older: language::is_older(self.manifest.language())
                 .then(|| self.store.root().to_owned()),
         }
     }
@@ -1580,7 +1648,7 @@ pub(crate) fn ignore_local_data(store: &ProjectStore) -> Result<Vec<ProjectChang
 
 /// How a board edit says the chain of the written language.
 #[derive(Clone, Copy)]
-enum Written<'a> {
+pub(crate) enum Written<'a> {
     /// The edit changed the graph only: the chain is rebuilt
     /// ([`kept_chain`]).
     Rebuilt,
@@ -1626,7 +1694,7 @@ fn kept_chain(previous: &Document, mut model: Document) -> Document {
 mod tests {
     use super::*;
     use crate::Origin;
-    use apiforge_script::{Diagnostic, FAR_READ, SyntaxTree};
+    use apiforge_script::{FAR_READ, SyntaxTree};
 
     /// Places as [`FixedPlacer`] and warns of far reads as the window does,
     /// after `.0` copies of the first, which fill the list.
