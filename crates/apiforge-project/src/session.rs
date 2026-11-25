@@ -7,8 +7,11 @@ use crate::{
     layout::{FixedPlacer, Placer},
     tries::TryContext,
 };
-use apiforge_core::format::Project;
-use apiforge_script::{Diagnostic, Document};
+use apiforge_core::{
+    ImportError,
+    format::{Graph, Project, ProxySource},
+};
+use apiforge_script::{Diagnostic, Document, Severity};
 use apiforge_storage::project::{
     DiagramFile, DiagramRecord, DocumentEntry, DocumentKey, DocumentKind, FileState, Holder,
     MANIFEST_PATH, ProjectChange, ProjectError, ProjectManifest, ProjectPath, ProjectSnapshot,
@@ -1098,7 +1101,9 @@ impl EditedText {
             None,
             read.placer,
         );
-        let (model, _) = model.ok_or(Error::InvalidModel)?;
+        let Some((model, _)) = model else {
+            return Err(refused_text(&diagnostics));
+        };
         self.model = Some(Arc::new(model));
         self.model_source = Some(step.text.clone());
         self.history.present = Some(step.text.clone());
@@ -1120,7 +1125,7 @@ impl EditedText {
     ) -> Result<Change> {
         let context = apiforge_script::LowerContext::folder(read.context);
         apiforge_script::validate_document_model(&model, &context)
-            .map_err(|_| Error::InvalidModel)?;
+            .map_err(|error| refused_model(&model, read.context, error))?;
         let previous = self.model.as_ref().ok_or(Error::ModelLocked)?;
         let semantic = apiforge_script::semantic(previous, read.context)
             != apiforge_script::semantic(&model, read.context);
@@ -1690,6 +1695,134 @@ fn kept_chain(previous: &Document, mut model: Document) -> Document {
     model
 }
 
+/// The refusal of an edited model (#565): the validation's message, and the
+/// step its path points at. The path itself is never shown.
+fn refused_model(model: &Document, context: &Project, error: ImportError) -> Error {
+    let ImportError::InvalidDocument { path, message } = error else {
+        return Error::EditRefused {
+            reason: error.to_string(),
+            step: None,
+        };
+    };
+    let at = refused_at(model, context, &path);
+    Error::EditRefused {
+        reason: at
+            .and_then(|(board, _)| in_the_windows_words(model, context, board, message))
+            .unwrap_or_else(|| message.to_owned()),
+        step: at
+            .and_then(|(board, rest)| refused_step(board, rest))
+            .map(str::to_owned),
+    }
+}
+
+/// The graph of the edited document a validation path points at, and what
+/// follows it in the path.
+fn refused_at<'a>(
+    model: &'a Document,
+    context: &Project,
+    path: &'a str,
+) -> Option<(&'a Graph, &'a str)> {
+    let path = path.strip_prefix("project.")?;
+    match model {
+        Document::Scenario(scenario) => {
+            let path = path.strip_prefix("scenarios[0].")?;
+            match path.strip_prefix("graph") {
+                Some(rest) => Some((&scenario.graph, rest)),
+                None => Some((&scenario.cleanup, path.strip_prefix("cleanup")?)),
+            }
+        }
+        // Validated after every published revision of the project.
+        Document::Component(component) => {
+            let own = format!("components[{}]", context.components.len());
+            Some((&component.graph, path.strip_prefix(&own)?))
+        }
+    }
+}
+
+/// The handle of the step the rest of a validation path points at, when it
+/// points at one of the graph's nodes.
+fn refused_step<'a>(graph: &'a Graph, rest: &str) -> Option<&'a str> {
+    let (index, _) = rest.strip_prefix(".nodes[")?.split_once(']')?;
+    let node = graph.nodes.get(index.parse::<usize>().ok()?)?;
+    Some(&node.handle)
+}
+
+/// A message of the model check that a gesture of the window can end in and
+/// that speaks of the model, in the words of the window; `None` for the
+/// others, which are said as they are.
+fn in_the_windows_words(
+    model: &Document,
+    context: &Project,
+    board: &Graph,
+    message: &str,
+) -> Option<String> {
+    let (main, cleanup) = match model {
+        Document::Scenario(scenario) => (&scenario.graph, Some(&scenario.cleanup)),
+        Document::Component(component) => (&component.graph, None),
+    };
+    let on_cleanup = cleanup.is_some_and(|cleanup| std::ptr::eq(cleanup, board));
+    Some(match message {
+        "Graph contains a data/control cycle" => {
+            apiforge_core::edit::read_too_early(board, context).unwrap_or_else(|| {
+                "This would create a cycle; the test must have an unambiguous order".to_owned()
+            })
+        }
+        "Start cannot have incoming edges" if on_cleanup => {
+            "The cleanup needs no Start block".to_owned()
+        }
+        "Start cannot have incoming edges" if cleanup.is_none() => {
+            "A component needs no Start block".to_owned()
+        }
+        "Duplicate handle" => {
+            let external = on_cleanup.then_some(main);
+            let mut seen = HashSet::new();
+            let twice = board
+                .nodes
+                .iter()
+                .chain(external.into_iter().flat_map(|main| &main.nodes))
+                .find(|node| !seen.insert(node.handle.as_str()))?;
+            format!("Another block already uses the name `{}`", twice.handle)
+        }
+        "Graph exceeds node, edge or proxy limit" => {
+            "A board holds at most 200 blocks, 1000 order lines and 400 placed values".to_owned()
+        }
+        "Proxy source is not a variable of this graph" => {
+            let shown = board.proxies.iter().find_map(|proxy| {
+                let ProxySource::Variable { node_id } = &proxy.source else {
+                    return None;
+                };
+                board
+                    .nodes
+                    .iter()
+                    .find(|node| &node.id == node_id && !node.is_variable())
+            })?;
+            format!("The board shows `{}` as a variable", shown.handle)
+        }
+        "Invalid or non-canonical field path" | "Invalid or non-canonical argument path" => {
+            "A field path is not valid".to_owned()
+        }
+        "Reference source or output does not exist" => "A value it reads does not exist".to_owned(),
+        "Binding exceeds nesting or item limit" => {
+            "A value is nested too deep or holds too many items".to_owned()
+        }
+        "Text exceeds 100000 UTF-16 units" => "A text is longer than 100000 characters".to_owned(),
+        "Cyclic request arguments" => "The request's arguments read each other".to_owned(),
+        _ => return None,
+    })
+}
+
+/// The refusal of a text that no longer makes a valid definition (#565): its
+/// first error, in the words of the text's check.
+fn refused_text(diagnostics: &[Diagnostic]) -> Error {
+    diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == Severity::Error)
+        .map_or(Error::InvalidModel, |diagnostic| Error::EditRefused {
+            reason: diagnostic.message.clone(),
+            step: None,
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1850,5 +1983,335 @@ mod tests {
             .unwrap();
         assert_eq!(session.document(&id).unwrap().omitted_diagnostics(), 3);
         assert_eq!(reported(&session, &id), fresh(&session, &id));
+    }
+
+    /// The text and the model the session holds, with what it reports.
+    fn held(session: &ProjectSession, id: &str) -> (String, Document, (Vec<Diagnostic>, usize)) {
+        let document = session.document(id).unwrap();
+        (
+            document.text().to_owned(),
+            document.model().unwrap().clone(),
+            reported(session, id),
+        )
+    }
+
+    /// The sentence and the fields of the refusal of `edit` on a document
+    /// with `source`, which is left as it was.
+    fn refused(
+        kind: DocumentKind,
+        source: &str,
+        edit: impl FnOnce(&mut Document),
+    ) -> (String, String) {
+        let directory = tempfile::tempdir().unwrap();
+        let mut session =
+            ProjectSession::create_with(directory.path(), "S", Arc::new(FixedPlacer)).unwrap();
+        let path = match kind {
+            DocumentKind::Scenario => "scenarios/s.afs",
+            DocumentKind::Component => "components/s.afs",
+        };
+        let id = session.create_document(kind, path, source).unwrap();
+        session.settle(&id).unwrap();
+        if kind == DocumentKind::Component {
+            // Its step is named beside a published revision of its own too.
+            session.publish(&id, Origin::SESSION).unwrap();
+            session.settle(&id).unwrap();
+        }
+        let before = held(&session, &id);
+        let mut model = before.1.clone();
+        edit(&mut model);
+        let error = session
+            .apply_model_edit(&id, model, Origin::SESSION)
+            .unwrap_err();
+        assert_eq!(held(&session, &id), before, "nothing changes");
+        (error.to_string(), format!("{error:?}"))
+    }
+
+    fn main(model: &mut Document) -> &mut apiforge_core::format::Graph {
+        match model {
+            Document::Scenario(scenario) => &mut scenario.graph,
+            Document::Component(component) => &mut component.graph,
+        }
+    }
+
+    const PAY: &str = "scenario \"S\" {\n  begin = start\n  order = GET \"/order\"\n  pay = POST \"/pay\"\n  cleanup {\n    undo = DELETE \"/pay\"\n  }\n}\n";
+
+    /// #565, criterion 1: the sentence, with the step its fault names.
+    #[test]
+    fn a_refused_model_edit_names_its_reason() {
+        let literal = || apiforge_core::format::Binding::literal("x".into());
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                main(model).nodes[2].handle = "order".into();
+            }),
+            (
+                "This edit was not applied: another block already uses the name `order`. Nothing was changed.".to_owned(),
+                "EditRefused { reason: \"Another block already uses the name `order`\", step: None }".to_owned()
+            ),
+            "no step"
+        );
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                main(model).nodes[2].inputs.clear();
+            }),
+            (
+                "This edit was not applied: a request needs a URL (step \"pay\"). Nothing was changed."
+                    .to_owned(),
+                "EditRefused { reason: \"A request needs a URL\", step: Some(\"pay\") }".to_owned()
+            ),
+            "a step"
+        );
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                main(model).nodes[0].inputs.insert("x".into(), literal());
+            })
+            .0,
+            "This edit was not applied: Start cannot have inputs (step \"begin\"). Nothing was changed.",
+            "a kept capital"
+        );
+        // A word written in capitals keeps them, and has no step of its own
+        // when the fault is not a step's.
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                let mut deep = serde_json::Value::Null;
+                for _ in 0..41 {
+                    deep = serde_json::Value::Array(vec![deep]);
+                }
+                let Document::Scenario(scenario) = model else {
+                    panic!("a scenario")
+                };
+                scenario.parameters.insert("deep".into(), deep);
+            })
+            .0,
+            "This edit was not applied: JSON exceeds maximum nesting depth. Nothing was changed."
+        );
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                let Document::Scenario(scenario) = model else {
+                    panic!("a scenario")
+                };
+                scenario.cleanup.nodes[0].inputs.clear();
+            })
+            .0,
+            "This edit was not applied: a request needs a URL (step \"undo\"). Nothing was changed.",
+            "a step of the cleanup"
+        );
+        assert_eq!(
+            refused(
+                DocumentKind::Component,
+                "component fetch \"Fetch\" {\n  first = GET \"/a\"\n  second = GET \"/b\"\n}\n",
+                |model| main(model).nodes[1].inputs.clear()
+            )
+            .0,
+            "This edit was not applied: a request needs a URL (step \"second\"). Nothing was changed.",
+            "a step of a component"
+        );
+    }
+
+    /// #565: the sentences of the model check a gesture of the window can
+    /// end in are said in the window's words.
+    #[test]
+    fn a_refused_model_edit_says_its_reason_in_the_windows_words() {
+        use apiforge_core::format::{Binding, Proxy, ProxySource};
+        use apiforge_core::model::NodeKind;
+        type Edit = fn(&mut Document);
+        let start = |id: &str| {
+            let mut node = apiforge_core::graph::create_node(
+                NodeKind::Start,
+                apiforge_core::format::Position { x: 0.0, y: 0.0 },
+                None,
+            );
+            node.id = id.to_owned();
+            node.handle = "first_of_all".to_owned();
+            node
+        };
+        fn read(node: &str, path: &str) -> Binding {
+            Binding::reference(node, "body", path)
+        }
+        fn id(model: &mut Document, handle: &str) -> String {
+            let nodes = &main(model).nodes;
+            nodes
+                .iter()
+                .find(|n| n.handle == handle)
+                .unwrap()
+                .id
+                .clone()
+        }
+        fn set(model: &mut Document, handle: &str, input: &str, binding: Binding) {
+            let nodes = &mut main(model).nodes;
+            let node = nodes.iter_mut().find(|n| n.handle == handle).unwrap();
+            node.inputs.insert(input.to_owned(), binding);
+        }
+        fn cleanup(model: &mut Document) -> &mut apiforge_core::format::Graph {
+            let Document::Scenario(scenario) = model else {
+                panic!("a scenario")
+            };
+            &mut scenario.cleanup
+        }
+        let scenario: [(&str, Edit); 10] = [
+            (
+                "`order` reads `pay.body.id`, which runs after it",
+                |model| {
+                    let pay = id(model, "pay");
+                    set(model, "order", "url", read(&pay, "id"));
+                },
+            ),
+            (
+                "`pay` reads `pay.body.id`, which comes from its own result",
+                |model| {
+                    let pay = id(model, "pay");
+                    set(model, "pay", "url", read(&pay, "id"));
+                },
+            ),
+            ("a field path is not valid (step \"pay\")", |model| {
+                let order = id(model, "order");
+                set(model, "pay", "url", read(&order, "id."));
+            }),
+            ("a value it reads does not exist (step \"pay\")", |model| {
+                set(model, "pay", "url", read("gone", ""));
+            }),
+            (
+                "a value is nested too deep or holds too many items (step \"pay\")",
+                |model| {
+                    let mut deep = Binding::literal(1.into());
+                    for _ in 0..40 {
+                        deep = Binding::Array { items: vec![deep] };
+                    }
+                    set(model, "pay", "body", deep);
+                },
+            ),
+            (
+                "a text is longer than 100000 characters (step \"pay\")",
+                |model| {
+                    set(
+                        model,
+                        "pay",
+                        "url",
+                        Binding::literal("x".repeat(100_001).into()),
+                    );
+                },
+            ),
+            (
+                "the request's arguments read each other (step \"pay\")",
+                |model| {
+                    for (name, other) in [("a", "b"), ("b", "a")] {
+                        let argument = Binding::Argument {
+                            name: other.to_owned(),
+                            path: String::new(),
+                        };
+                        set(model, "pay", name, argument);
+                    }
+                },
+            ),
+            ("the board shows `order` as a variable", |model| {
+                let node_id = id(model, "order");
+                main(model).proxies.push(Proxy {
+                    id: "proxy".to_owned(),
+                    source: ProxySource::Variable { node_id },
+                    position: apiforge_core::format::Position { x: 0.0, y: 0.0 },
+                });
+            }),
+            (
+                "a board holds at most 200 blocks, 1000 order lines and 400 placed values",
+                |model| {
+                    let mut node = main(model).nodes[1].clone();
+                    for number in 0..200 {
+                        node.id = format!("more-{number}");
+                        node.handle = format!("more_{number}");
+                        main(model).nodes.push(node.clone());
+                    }
+                },
+            ),
+            ("another block already uses the name `pay`", |model| {
+                cleanup(model).nodes[0].handle = "pay".to_owned();
+            }),
+        ];
+        let sentence =
+            |reason: &str| format!("This edit was not applied: {reason}. Nothing was changed.");
+        let (said, expected): (Vec<_>, Vec<_>) = scenario
+            .into_iter()
+            .map(|(reason, edit)| {
+                let said = refused(DocumentKind::Scenario, PAY, edit).0;
+                (said, sentence(reason))
+            })
+            .unzip();
+        assert_eq!(said, expected);
+        assert_eq!(
+            refused(DocumentKind::Scenario, PAY, |model| {
+                cleanup(model).nodes.push(start("new"));
+            })
+            .0,
+            sentence("the cleanup needs no Start block")
+        );
+        assert_eq!(
+            refused(
+                DocumentKind::Component,
+                "component fetch \"Fetch\" {\n  first = GET \"/a\"\n}\n",
+                |model| main(model).nodes.push(start("new"))
+            )
+            .0,
+            sentence("a component needs no Start block")
+        );
+        // Values alone, with no step to name.
+        assert_eq!(
+            refused(
+                DocumentKind::Scenario,
+                "scenario \"S\" {\n  begin = start\n  x = 1 + 1\n  y = x + 1\n}\n",
+                |model| {
+                    let nodes = &mut main(model).nodes;
+                    let y = nodes.iter().find(|n| n.handle == "y").unwrap().id.clone();
+                    let x = nodes.iter_mut().find(|n| n.handle == "x").unwrap();
+                    for binding in x.inputs.values_mut() {
+                        *binding = Binding::reference(&y, "value", "");
+                    }
+                }
+            )
+            .0,
+            sentence("this would create a cycle; the test must have an unambiguous order")
+        );
+    }
+
+    /// #565, criterion 2: a step of the history whose text no longer reads
+    /// as valid is refused with the first error of that text.
+    #[test]
+    fn a_refused_step_names_its_reason() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut session =
+            ProjectSession::create_with(directory.path(), "S", Arc::new(FixedPlacer)).unwrap();
+        session
+            .edit_configuration(
+                |manifest| {
+                    manifest.contracts = vec![apiforge_core::format::Contract {
+                        id: "order".into(),
+                        name: "Order".into(),
+                        sample: serde_json::json!({ "id": 1 }),
+                    }]
+                },
+                Origin::SESSION,
+            )
+            .unwrap();
+        let without = "scenario \"S\" {\n  begin = start\n  a = GET \"/a\"\n}\n";
+        let with = without.replace("\"/a\"", "\"/a\" {\n    contract \"Order\"\n  }");
+        let id = session
+            .create_document(DocumentKind::Scenario, "scenarios/s.afs", &with)
+            .unwrap();
+        session.settle(&id).unwrap();
+        session.edit_source(&id, without, Origin::SESSION).unwrap();
+        session.settle(&id).unwrap();
+        session
+            .edit_configuration(|manifest| manifest.contracts.clear(), Origin::SESSION)
+            .unwrap();
+        session.settle(&id).unwrap();
+        let before = held(&session, &id);
+
+        let error = session.undo(&id, Origin::SESSION).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "This edit was not applied: unknown or ambiguous contract. Nothing was changed."
+        );
+        assert_eq!(
+            format!("{error:?}"),
+            "EditRefused { reason: \"Unknown or ambiguous contract\", step: None }"
+        );
+        assert_eq!(held(&session, &id), before, "nothing changes");
     }
 }

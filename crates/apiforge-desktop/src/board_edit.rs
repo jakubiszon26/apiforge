@@ -556,6 +556,23 @@ impl Board<'_> {
         })
     }
 
+    /// A check or a value taken from the menu of a step in the folder window
+    /// (DIAG-24): it reads `source`, an output of the step, and is written
+    /// right after the step, in its braces.
+    pub fn add_reading(
+        &self,
+        block: Block,
+        position: Position,
+        source: (String, String),
+    ) -> Result<Edit, String> {
+        let step = source.0.clone();
+        let mut added = self.add_node(block, None, position, Some(source))?;
+        if let Some([id]) = added.selection.as_deref() {
+            added.graph = edit::write_after(&added.graph, id, &step);
+        }
+        Ok(added)
+    }
+
     /// *Add step* on the board's bar in the folder window (DIAG-06a): a step
     /// goes directly after the step [`edit::add_step_after`] names for the
     /// selection, in its braces, as one from that step's *Next* does; with
