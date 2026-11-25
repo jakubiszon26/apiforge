@@ -682,6 +682,12 @@ fn title_edit_is_committed_by_a_save_and_a_run() {
     }
 }
 
+/// A title the model check refuses: one unit over the limit of a text. One
+/// with `{{{` is written since LANG-28.
+fn unwritable_title() -> String {
+    "x".repeat(100_001)
+}
+
 /// Finding 6: a title that cannot be written holds the save and the run
 /// back, so that neither takes the old one.
 #[test]
@@ -690,7 +696,7 @@ fn title_that_is_refused_holds_the_save_back() {
     let on_disk = fs::read_to_string(project.path().join(REFUSED)).unwrap();
     let text = source_of(&harness, &id).replace("floor: 2", "floor: 3");
     write_code(&mut harness, &id, &text);
-    type_title(&mut harness, REFUSED_TITLE, "{{{");
+    type_title(&mut harness, REFUSED_TITLE, &unwritable_title());
     press(&mut harness, egui::Modifiers::COMMAND, egui::Key::S);
     assert_eq!(source_of(&harness, &id), text);
     assert!(dirty(&harness, &id), "not saved with the old title");
@@ -705,7 +711,7 @@ fn title_that_is_refused_holds_the_save_back() {
 fn title_that_is_refused_goes_back() {
     let (_project, mut harness, id) = open(REFUSED, WIDE);
     let before = source_of(&harness, &id);
-    type_title(&mut harness, REFUSED_TITLE, "{{{");
+    type_title(&mut harness, REFUSED_TITLE, &unwritable_title());
     click_the_board(&mut harness);
     assert!(!editing(&harness));
     assert!(on_header(&harness, REFUSED_TITLE).is_some());
@@ -876,10 +882,10 @@ fn closing_the_window_waits_for_the_title() {
     // A refused title stops the closing, and the person is told which.
     let (_project, mut harness, id) = open(REFUSED, WIDE);
     let before = source_of(&harness, &id);
-    type_title(&mut harness, REFUSED_TITLE, "Not {{{ written");
+    type_title(&mut harness, REFUSED_TITLE, &unwritable_title());
     assert!(!app(&mut harness).prepare_close());
     let error = app(&mut harness).close_error().expect("the close stops");
-    assert!(error.contains("Not {{{ written"), "{error}");
+    assert!(error.contains(&unwritable_title()), "{error:.200}");
     assert!(!app(&mut harness).persistence.closing);
     app(&mut harness).abort_close(error);
     settle(&mut harness);

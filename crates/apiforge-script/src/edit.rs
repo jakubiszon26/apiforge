@@ -20,7 +20,7 @@
 //! document, is printed whole, as before.
 use crate::{
     ast::*,
-    format::{attribute_rank, head, opening, statements},
+    format::{attribute_rank, head, quote, statements},
     lexer::{Token, TokenKind},
     lower::Document,
     parse,
@@ -297,9 +297,7 @@ impl<'s, 'd> Edit<'s, 'd> {
     fn head(&mut self, file: &'s File, previous: &Document, document: &Document) -> Option<()> {
         let (was, is) = (print::head(previous), print::head(document));
         let brace = self.first(file.range.start, "{")?;
-        if opening(&was.kind) != opening(&is.kind) {
-            self.replace(file.range.start..brace.end, opening(&is.kind));
-        }
+        self.first_line(file, &was.kind, &is.kind)?;
         let indent = file
             .items
             .iter()
@@ -336,6 +334,38 @@ impl<'s, 'd> Edit<'s, 'd> {
                 let range = self.lines((*range).clone());
                 self.replace(range, String::new());
             }
+        }
+        Some(())
+    }
+
+    /// The words of the first line the edit changes, a component's name in
+    /// code and the title; what stands between them and the brace is the
+    /// author's (LANG-28).
+    fn first_line(&mut self, file: &File, was: &FileKind, is: &FileKind) -> Option<()> {
+        let words: Vec<Range<usize>> = self
+            .after(file.range.start)
+            .filter(|token| !matches!(token.kind, TokenKind::Whitespace | TokenKind::Comment))
+            .take(3)
+            .map(|token| token.range.clone())
+            .collect();
+        let (was, is, title) = match (was, is) {
+            (FileKind::Scenario { name: was }, FileKind::Scenario { name: is }) => (was, is, 1),
+            (
+                FileKind::Component {
+                    handle: old,
+                    name: was,
+                },
+                FileKind::Component { handle, name: is },
+            ) => {
+                if old != handle {
+                    self.replace(words.get(1)?.clone(), handle.clone());
+                }
+                (was, is, 2)
+            }
+            _ => return None,
+        };
+        if was != is {
+            self.replace(words.get(title)?.clone(), quote(is));
         }
         Some(())
     }
@@ -1295,6 +1325,83 @@ mod tests {
                 "{note:?}"
             );
         }
+    }
+
+    // LANG-28 ---------------------------------------------------------------
+
+    /// `source` after `change`, as a model edit writes it, checked to read
+    /// back as the changed document.
+    fn changed(source: &str, change: impl FnOnce(&mut Document)) -> String {
+        let project = apiforge_core::demos::shop_project();
+        let lowered = lower(&parse(source), &LowerContext::folder(&project));
+        assert!(!lowered.has_errors(), "{source}\n{:?}", lowered.diagnostics);
+        let previous = lowered.document.unwrap();
+        let mut next = previous.clone();
+        change(&mut next);
+        edit_in_place(&project, source, &previous, &next)
+            .unwrap_or_else(|| panic!("not written into the text:\n{source}"))
+    }
+
+    fn renamed(document: &mut Document, title: &str) {
+        match document {
+            Document::Scenario(scenario) => scenario.name = title.into(),
+            Document::Component(component) => component.name = title.into(),
+        }
+    }
+
+    /// LANG-28, criterion 1: a changed title, or a component's changed name
+    /// in code, replaces those words of the first line and no other byte.
+    #[test]
+    fn a_retitled_file_keeps_what_stands_before_its_brace() {
+        const BODY: &str = " // open\n  begin = start\n  a = GET \"/a\" // kept\n}\n";
+        const EXPORT: &str = " // open\n  export result: number = 1 // kept\n}\n";
+        for between in [
+            " // why\n",
+            " // why { \"A\"\n  // and why\n\n",
+            "  \t",
+            "\r\n",
+            "",
+        ] {
+            let scenario = format!("// top\nscenario \"A\"{between}{{{BODY}");
+            assert_eq!(
+                changed(&scenario, |document| renamed(document, "B { c")),
+                scenario.replacen("scenario \"A\"", "scenario \"B { c\"", 1)
+            );
+
+            // The name in code says `A` too: each is found by its place.
+            let component = format!("// top\ncomponent A \"A\"{between}{{{EXPORT}");
+            let rehandled = |document: &mut Document| {
+                let Document::Component(component) = document else {
+                    panic!("a component")
+                };
+                component.handle = "B".into();
+            };
+            assert_eq!(
+                changed(&component, |document| renamed(document, "C")),
+                component.replacen("component A \"A\"", "component A \"C\"", 1)
+            );
+            assert_eq!(
+                changed(&component, rehandled),
+                component.replacen("component A \"A\"", "component B \"A\"", 1)
+            );
+            assert_eq!(
+                changed(&component, |document| {
+                    rehandled(document);
+                    renamed(document, "C");
+                }),
+                component.replacen("component A \"A\"", "component B \"C\"", 1)
+            );
+        }
+
+        // Comments between the words, and a title spelled another way.
+        let source = format!("component // a \"x\"\n  A // b\n  \"\\u0041\" // c\n{{{EXPORT}");
+        assert_eq!(
+            changed(&source, |document| renamed(document, "C")),
+            source.replacen("\"\\u0041\"", "\"C\"", 1)
+        );
+
+        // The language has no `/* */`: such a text has no model to edit.
+        assert!(parse("scenario \"A\" /* why */ {\n  begin = start\n}\n").has_errors());
     }
 
     // DIAG-06a --------------------------------------------------------------
