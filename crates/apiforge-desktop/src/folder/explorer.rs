@@ -14,6 +14,8 @@ const FILE_NAME_GAP: f32 = 8.0;
 /// The least width a row's file name is cut to; with less room it is left
 /// out rather than cut to a stub (WS-05b).
 const FILE_NAME_MIN_WIDTH: f32 = 40.0;
+/// The widest a row's menu gets for the file name and title above its items.
+const MENU_HEAD_WIDTH: f32 = 280.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RowKind {
@@ -976,6 +978,23 @@ fn first_ascent(galley: &egui::Galley) -> f32 {
         .map_or(0.0, |glyph| glyph.pos.y)
 }
 
+/// The head of a titled row's menu: the file its items act on, as a heading,
+/// and the title under it, each on one line cut at the menu's edge.
+fn menu_head(ui: &mut egui::Ui, file: &str, title: &str) {
+    let name = egui::FontId::new(theme::FONT_BODY, theme::bold_family());
+    let under = egui::FontId::proportional(theme::FONT_LABEL);
+    for (text, font, colour) in [(file, name, theme::TEXT), (title, under, theme::MUTED)] {
+        let mut job = egui::text::LayoutJob::single_section(
+            text.to_owned(),
+            egui::TextFormat::simple(font, colour),
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(MENU_HEAD_WIDTH);
+        let line = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        ui.add(egui::Label::new(line));
+    }
+    ui.add_space(theme::SPACE_SM);
+}
+
 /// Says `line` on hover, under the document's title where it has one.
 pub(super) fn titled_hover(
     response: egui::Response,
@@ -1165,7 +1184,7 @@ fn explorer_row(
     response.context_menu(|ui| {
         widgets::name_menu(ui, &format!("{} menu", row.name()));
         if let Some(title) = &row.title {
-            widgets::hint(ui, title);
+            menu_head(ui, row.name(), title);
         }
         actions.push(Action::Select(row.path.clone()));
         match &row.kind {
