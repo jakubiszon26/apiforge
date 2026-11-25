@@ -60,6 +60,14 @@ pub enum Error {
     ModelLocked,
     #[error("The edited model is not a valid definition for this document.")]
     InvalidModel,
+    /// A change of the board, or a step of the history, that does not make a
+    /// valid definition (#565): the validation's message as it is, and the
+    /// step it is about when it names one. Nothing of it is applied.
+    #[error("{} Nothing was changed.", refusal(reason, step.as_deref()))]
+    EditRefused {
+        reason: String,
+        step: Option<String>,
+    },
     #[error("The model cannot be written as source without semantic loss.")]
     Unprintable,
     /// A move on the board whose statements cannot be moved line by line in
@@ -146,6 +154,37 @@ pub enum Error {
         "{path} changed while the project was being converted; nothing was written. Run the command again."
     )]
     ChangedWhileConverting { path: String },
+}
+
+impl Error {
+    /// The first sentence of a refused edit alone, for text being typed: the
+    /// keys before the refused one are edits already applied (#565).
+    pub fn refusal(&self) -> Option<String> {
+        match self {
+            Self::EditRefused { reason, step } => Some(refusal(reason, step.as_deref())),
+            _ => None,
+        }
+    }
+}
+
+/// The first sentence of [`Error::EditRefused`]: its reason in lower case,
+/// except a first word written in capitals and the block name `Start`, and
+/// without a full stop of its own.
+fn refusal(reason: &str, step: Option<&str>) -> String {
+    let reason = reason.strip_suffix('.').unwrap_or(reason);
+    let word: String = reason.chars().take_while(|c| c.is_alphanumeric()).collect();
+    let capitals = word.chars().count() > 1 && !word.chars().any(char::is_lowercase);
+    let mut letters = reason.chars();
+    let reason = match letters.next() {
+        Some(first) if !capitals && word != "Start" => {
+            first.to_lowercase().chain(letters).collect()
+        }
+        _ => reason.to_owned(),
+    };
+    match step {
+        Some(step) => format!("This edit was not applied: {reason} (step \"{step}\")."),
+        None => format!("This edit was not applied: {reason}."),
+    }
 }
 
 impl From<apiforge_storage::StorageError> for Error {

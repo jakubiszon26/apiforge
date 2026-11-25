@@ -966,7 +966,10 @@ fn publish_failed(
             ErrorCode::CommentsWouldBeLost,
             "Publishing would drop comments that belong to no statement; nothing was published",
         ),
-        Error::InvalidModel | Error::InvalidRevision { .. } | Error::Unprintable => ToolError::new(
+        Error::InvalidModel
+        | Error::EditRefused { .. }
+        | Error::InvalidRevision { .. }
+        | Error::Unprintable => ToolError::new(
             ErrorCode::InvalidText,
             "The component cannot be printed as a valid revision; nothing was published. Check it and publish again",
         ),
