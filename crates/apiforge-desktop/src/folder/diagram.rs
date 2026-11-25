@@ -756,6 +756,16 @@ impl FolderApp {
                     .add_node(block, component, position, source)
                     .map(|edit| board.made_room(edit)),
             ),
+            // Written right after the step it reads (DIAG-24).
+            Command::AddReading {
+                block,
+                position,
+                source,
+            } => Some(
+                board
+                    .add_reading(block, position, source)
+                    .map(|edit| board.made_room(edit)),
+            ),
             // A step dropped on a line of a chain lands there (DIAG-06c).
             Command::AddOnLine {
                 block,
@@ -1393,11 +1403,15 @@ impl FolderApp {
                     let mut next = graph.clone();
                     if let Some(slot) = next.nodes.iter_mut().find(|node| node.id == updated.id) {
                         *slot = *updated;
+                        self.typed = self.ui_context.text_edit_focused();
                         self.apply_edit(document_id, &model, cleanup, Ok(next.into()));
+                        self.typed = false;
                     }
                 }
                 inspector::Action::UpdateGraph(next) => {
-                    self.apply_edit(document_id, &model, cleanup, Ok(next.into()))
+                    self.typed = self.ui_context.text_edit_focused();
+                    self.apply_edit(document_id, &model, cleanup, Ok(next.into()));
+                    self.typed = false;
                 }
                 inspector::Action::EditComponent => self.open_component(graph, &node.id),
                 inspector::Action::ReadDirectly => {

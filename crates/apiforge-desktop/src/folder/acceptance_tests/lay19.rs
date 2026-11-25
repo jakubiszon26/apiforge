@@ -662,6 +662,12 @@ fn lay19_criterion_5_fits_the_box() {
                     settle(&mut harness);
                 }
                 for zoom in [0.6, 1.0] {
+                    if size == WIDE && density == "full" && zoom == 1.0 {
+                        // Collapsed here too: a full card at 100 % is taller
+                        // than the board above them (REP-07c).
+                        harness.get_by_label("Run results").click();
+                        settle(&mut harness);
+                    }
                     for centre in ["checkout", "order", "refund"] {
                         show(&mut harness, centre, zoom);
                         let context = format!("{size:?} {name} {density} {zoom} at {centre}");

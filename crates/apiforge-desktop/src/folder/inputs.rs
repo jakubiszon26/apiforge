@@ -205,6 +205,7 @@ enum Change {
 impl FolderApp {
     /// A model edit of the component in `document_id`.
     pub(super) fn edit_component(&mut self, document_id: &str, next: Component) {
+        self.typed = self.ui_context.text_edit_focused();
         self.component_action(
             document_id,
             publication::Action::Model {
@@ -215,6 +216,7 @@ impl FolderApp {
                 placed: false,
             },
         );
+        self.typed = false;
     }
 
     /// Opens the *New input* form in the Inspector, in place of a selected

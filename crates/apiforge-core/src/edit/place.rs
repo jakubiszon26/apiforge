@@ -374,6 +374,23 @@ fn cycle(graph: &Graph, project: &Project) -> String {
     }
 }
 
+/// The first statement of a graph with a cycle that reads something which
+/// depends on it, as a sentence without its full stop: what it reads runs
+/// after it, stands in its own braces or comes from its own result (#565).
+/// `None` when the cycle holds no step.
+pub fn read_too_early(graph: &Graph, project: &Project) -> Option<String> {
+    let cycle = cycle_at(graph, project, |_| true)?;
+    let reader = cycle.reader.handle.as_str();
+    let why = if cycle.below == Some(reader) {
+        "comes from its own result"
+    } else if cycle.inside {
+        "stands in its own braces"
+    } else {
+        "runs after it"
+    };
+    Some(format!("`{reader}` reads `{}`, which {why}", cycle.value))
+}
+
 /// A statement of a graph with a cycle that reads something which depends
 /// on it.
 pub(super) struct Cycle<'g> {

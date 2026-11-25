@@ -312,6 +312,30 @@ pub fn add_check(graph: &Graph, subject: &str, check: Node) -> Graph {
     next
 }
 
+/// The board with its statement `id` written directly after the step `step`
+/// and the checks and values written with it, in the step's braces: it
+/// follows the branches the step follows (DIAG-24). The same board when
+/// either is not on it.
+pub fn write_after(graph: &Graph, id: &str, step: &str) -> Graph {
+    let mut next = graph.clone();
+    let Some(index) = next.nodes.iter().position(|node| node.id == id) else {
+        return next;
+    };
+    if id == step || !next.nodes.iter().any(|node| node.id == step) {
+        return next;
+    }
+    let statement = next.nodes.remove(index);
+    let at = after_step(&next, step);
+    for edge in &graph.edges {
+        if edge.target == step && edge.branch.is_some() {
+            let edge = order_edge(&next, &edge.source, id, edge.branch);
+            next.edges.push(edge);
+        }
+    }
+    next.nodes.insert(at, statement);
+    next
+}
+
 /// The board after a response assignment, and the variable's identifier.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssignedVariable {
@@ -409,6 +433,63 @@ mod tests {
     use serde_json::json;
 
     const AT: Position = Position { x: 0.0, y: 0.0 };
+
+    /// DIAG-24: a statement is written after a step and the checks and values
+    /// written with it, in the braces the step stands in.
+    #[test]
+    fn a_statement_is_written_after_a_step() {
+        let kinds = [
+            ("start", NodeKind::Start),
+            ("first", NodeKind::Request),
+            ("seen", NodeKind::Assert),
+            ("x", NodeKind::If),
+            ("inside", NodeKind::Request),
+            ("read", NodeKind::Value),
+        ];
+        let graph = Graph {
+            nodes: kinds
+                .map(|(id, kind)| Node {
+                    id: id.into(),
+                    ..node(kind)
+                })
+                .to_vec(),
+            edges: vec![OrderEdge {
+                id: "yes".into(),
+                source: "x".into(),
+                target: "inside".into(),
+                branch: Some(Branch::True),
+            }],
+            proxies: Vec::new(),
+        };
+        let written = |graph: &Graph| -> Vec<String> {
+            graph.nodes.iter().map(|node| node.id.clone()).collect()
+        };
+        let next = write_after(&graph, "read", "first");
+        assert_eq!(
+            written(&next),
+            ["start", "first", "seen", "read", "x", "inside"]
+        );
+        assert_eq!(
+            next.edges, graph.edges,
+            "outside braces it follows no branch"
+        );
+
+        let next = write_after(&graph, "seen", "inside");
+        assert_eq!(
+            written(&next),
+            ["start", "first", "x", "inside", "read", "seen"],
+            "after the value written with the step"
+        );
+        assert!(
+            next.edges.iter().any(|edge| edge.source == "x"
+                && edge.target == "seen"
+                && edge.branch == Some(Branch::True)),
+            "in the braces of the step: {:?}",
+            next.edges
+        );
+        assert_eq!(write_after(&graph, "gone", "first"), graph);
+        assert_eq!(write_after(&graph, "read", "gone"), graph);
+    }
 
     /// UX-34: a second instance of a component a block already shows by its
     /// name is labelled with the next number; the first keeps no label.

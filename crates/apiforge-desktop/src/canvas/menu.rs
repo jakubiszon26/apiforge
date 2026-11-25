@@ -6,8 +6,8 @@ use crate::icons::Icon;
 use crate::{library, theme};
 use apiforge_core::{
     block::Block,
-    format::{Graph, Port, Position, Project},
-    graph::{ORDER_PORT, TRUE_PORT, compatible, output_ports},
+    format::{Graph, Node, Port, Position, Project},
+    graph::{ORDER_PORT, TRUE_PORT, compatible, output_ports, sequence},
     model::NodeKind,
     operator::OperatorGroup,
 };
@@ -55,6 +55,11 @@ pub struct ActionMenu {
     /// Opened on a step of the folder window's board, from its card or its
     /// foot: a step it adds goes directly after that step, unbound (DIAG-22).
     pub after_step: bool,
+    /// Opened on a card of the folder window's board, from the card or its
+    /// foot, that has a place ([`place`], DIAG-24): the menu names the place,
+    /// a step it adds goes right after it, unbound, and the entries stand in
+    /// two groups.
+    pub place: Option<String>,
     /// Opened by the `+` on a line of a chain: a step it adds goes on that
     /// line, after its source by its port (DIAG-06b).
     pub on_line: bool,
@@ -93,6 +98,9 @@ impl Moves {
     }
 }
 
+/// The height of the list of a menu in two groups (DIAG-24).
+const GROUPS: f32 = 288.0;
+
 /// The entry that writes a check of a branch after its `if` (DIAG-06d).
 pub const MOVE_OUT: &str = "Move out of the branch";
 /// The entries that move a step by one in its braces (DIAG-06b).
@@ -130,6 +138,45 @@ pub fn steps_go_after(kind: NodeKind) -> bool {
     apiforge_core::chain::is_step(kind) && !matches!(kind, NodeKind::Start | NodeKind::If)
 }
 
+/// The step that a step taken from the menu of the card `id` follows, its
+/// place (DIAG-24): a step itself; for a check the step it checks, the last
+/// in run order among those its inputs read; for any other data card, and a
+/// check that reads no step, the last step that runs before it. `None` for a
+/// card with no data output other than an `if`, and for a data card before
+/// the first step.
+pub fn place(graph: &Graph, project: &Project, id: &str) -> Option<String> {
+    use apiforge_core::chain::is_step;
+    let node = graph.nodes.iter().find(|node| node.id == id)?;
+    let (_, port) = default_source(graph, project, id)?;
+    if node.kind != NodeKind::If && port.starts_with("__") {
+        return None;
+    }
+    if is_step(node.kind) {
+        return Some(node.id.clone());
+    }
+    let order = sequence(graph);
+    let steps = |before: usize| {
+        order[..before].iter().copied().rev().filter(|id| {
+            graph
+                .nodes
+                .iter()
+                .any(|node| node.id == *id && is_step(node.kind))
+        })
+    };
+    let check = matches!(node.kind, NodeKind::Assert | NodeKind::Condition);
+    let checked = check
+        .then(|| {
+            steps(order.len()).find(|step| {
+                node.inputs
+                    .values()
+                    .any(|binding| binding.references_node(step))
+            })
+        })
+        .flatten();
+    let at = order.iter().position(|id| *id == node.id)?;
+    checked.or_else(|| steps(at).next()).map(str::to_owned)
+}
+
 /// Whether `block` adds a step of a chain, Start excluded.
 fn adds_step(block: Block) -> bool {
     apiforge_core::chain::is_step(block.kind()) && block.kind() != NodeKind::Start
@@ -154,6 +201,7 @@ impl ActionMenu {
             bar: false,
             out_of_branch: None,
             after_step: false,
+            place: None,
             on_line: false,
             moves: None,
         }
@@ -218,6 +266,7 @@ impl ActionMenu {
             .collect();
         // A component put after the step reads nothing of it (DIAG-22).
         let data_source = !self.after_step
+            && self.place.is_none()
             && self
                 .source
                 .as_ref()
@@ -256,10 +305,70 @@ impl ActionMenu {
     /// menu's source.
     fn source_for(&self, block: Block) -> Option<(String, String)> {
         let (node, port) = self.source.clone()?;
-        if self.after_step && adds_step(block) {
-            Some((node, ORDER_PORT.to_owned()))
-        } else {
-            Some((node, port))
+        if !adds_step(block) {
+            return Some((node, port));
+        }
+        match &self.place {
+            Some(place) => Some((place.clone(), ORDER_PORT.to_owned())),
+            None if self.after_step => Some((node, ORDER_PORT.to_owned())),
+            None => Some((node, port)),
+        }
+    }
+
+    /// The command that adds the entry `action`; `source` and `place` are the
+    /// cards of the menu's source and place.
+    fn command(&self, action: &Action, source: Option<&Node>, place: Option<&Node>) -> Command {
+        let step = adds_step(action.block);
+        // Beside the card it follows or reads, where *Add step* puts it too.
+        let position = place.filter(|_| step).or(source).map_or(
+            Position {
+                x: f64::from(self.world.x).round(),
+                y: f64::from(self.world.y).round(),
+            },
+            |node| Position {
+                x: node.position.x + 340.0,
+                y: node.position.y + 20.0,
+            },
+        );
+        let block = action.block;
+        let component = action.component.clone();
+        if self.bar {
+            return Command::AddStep {
+                block,
+                component,
+                position,
+            };
+        }
+        // On the line it was opened on (DIAG-06b), as a step dropped there
+        // lands (DIAG-06c).
+        if let Some(after) = self.source.clone().filter(|_| self.on_line) {
+            return Command::AddOnLine {
+                block,
+                component,
+                position,
+                after,
+            };
+        }
+        // Read from a step's menu: written right after the step (DIAG-24).
+        let of_step = place
+            .zip(source)
+            .is_some_and(|(_, node)| steps_go_after(node.kind));
+        if of_step
+            && !step
+            && block != Block::Export
+            && let Some(source) = self.source.clone()
+        {
+            return Command::AddReading {
+                block,
+                position,
+                source,
+            };
+        }
+        Command::AddNode {
+            block,
+            component,
+            position,
+            source: self.source_for(block),
         }
     }
 
@@ -285,6 +394,12 @@ impl ActionMenu {
             .source
             .as_ref()
             .and_then(|(id, _)| graph.nodes.iter().find(|node| &node.id == id));
+        let place_node = source_node
+            .and(self.place.as_ref())
+            .and_then(|id| graph.nodes.iter().find(|node| &node.id == id));
+        // A click in the open list of *Data from*, or one that closes it, is
+        // not one outside the menu.
+        let list_open = egui::Popup::is_any_open(ctx);
         let actions = self.actions(graph, project, component);
         let area = egui::Area::new(egui::Id::new("board-action-menu"))
             .order(egui::Order::Foreground)
@@ -301,7 +416,7 @@ impl ActionMenu {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.label(
-                                    RichText::new(match source_node {
+                                    RichText::new(match place_node.or(source_node) {
                                         Some(node) => {
                                             format!("AFTER: {}", node.display_name().to_uppercase())
                                         }
@@ -334,27 +449,9 @@ impl ActionMenu {
                             });
                         });
                         if let (Some(node), Some((_, port))) = (source_node, &mut self.source)
-                            && !port.starts_with("__")
+                            && place_node.is_none()
                         {
-                            let outputs = output_ports(node, project);
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("Data from").color(theme::MUTED));
-                                egui::ComboBox::from_id_salt("menu-source-port")
-                                    .selected_text(port.as_str())
-                                    .show_ui(ui, |ui| {
-                                        for output in &outputs {
-                                            ui.selectable_value(
-                                                port,
-                                                output.name.clone(),
-                                                format!(
-                                                    "{} · {}",
-                                                    output.display_name(),
-                                                    output.value_type
-                                                ),
-                                            );
-                                        }
-                                    });
-                            });
+                            data_from(ui, node, port, project);
                         }
                         // First, above the steps the menu adds, where the
                         // menu of a card low on the board still shows it.
@@ -426,8 +523,18 @@ impl ActionMenu {
                             self.focus_search = false;
                         }
                         let query = self.search.to_lowercase();
-                        egui::ScrollArea::vertical()
-                            .max_height(320.0)
+                        let mut list = egui::ScrollArea::vertical().max_height(320.0);
+                        // *Move earlier* and *Move later* above the search
+                        // leave the first entry of the second group in view.
+                        if place_node.is_some() {
+                            list = list.min_scrolled_height(GROUPS);
+                        }
+                        // From the top when the menu opens and as the search
+                        // is typed, wherever an earlier menu was scrolled to.
+                        if opening || search.changed() {
+                            list = list.vertical_scroll_offset(0.0);
+                        }
+                        list
                             .show(ui, |ui| {
                                 let matching: Vec<&Action> = actions
                                     .iter()
@@ -443,45 +550,50 @@ impl ActionMenu {
                                         RichText::new("No matching steps").color(theme::MUTED),
                                     );
                                 }
-                                for action in matching {
-                                    if action_row(ui, action).clicked() {
-                                        let position = source_node.map_or(
-                                            Position {
-                                                x: f64::from(self.world.x).round(),
-                                                y: f64::from(self.world.y).round(),
-                                            },
-                                            |node| Position {
-                                                x: node.position.x + 340.0,
-                                                y: node.position.y + 20.0,
-                                            },
-                                        );
-                                        outcome = Outcome::Add(if self.bar {
-                                            Command::AddStep {
-                                                block: action.block,
-                                                component: action.component.clone(),
-                                                position,
+                                let mut taken = None;
+                                match place_node.zip(source_node) {
+                                    Some((place, card)) => {
+                                        let (steps, rest): (Vec<_>, Vec<_>) = matching
+                                            .into_iter()
+                                            .partition(|action| adds_step(action.block));
+                                        if !steps.is_empty() {
+                                            caption(
+                                                ui,
+                                                "NEXT STEP · RUNS RIGHT AFTER",
+                                                place,
+                                                "",
+                                            );
+                                            taken = rows(ui, &steps);
+                                        }
+                                        if !rest.is_empty() {
+                                            if card.kind == NodeKind::If {
+                                                caption(ui, "IN THE YES BRANCH OF", card, "");
+                                            } else {
+                                                caption(
+                                                    ui,
+                                                    "READ",
+                                                    card,
+                                                    " · A CHECK OR A VALUE OF IT",
+                                                );
                                             }
-                                        } else if let Some(after) =
-                                            self.source.clone().filter(|_| self.on_line)
-                                        {
-                                            // On the line it was opened on
-                                            // (DIAG-06b), as a step dropped
-                                            // there lands (DIAG-06c).
-                                            Command::AddOnLine {
-                                                block: action.block,
-                                                component: action.component.clone(),
-                                                position,
-                                                after,
+                                            // The search takes what is typed
+                                            // after a choice.
+                                            if let Some((_, port)) = &mut self.source
+                                                && data_from(ui, card, port, project)
+                                            {
+                                                search.request_focus();
                                             }
-                                        } else {
-                                            Command::AddNode {
-                                                block: action.block,
-                                                component: action.component.clone(),
-                                                position,
-                                                source: self.source_for(action.block),
-                                            }
-                                        });
+                                            taken = taken.or(rows(ui, &rest));
+                                        }
                                     }
+                                    None => taken = rows(ui, &matching),
+                                }
+                                if let Some(action) = taken {
+                                    outcome = Outcome::Add(self.command(
+                                        action,
+                                        source_node,
+                                        place_node,
+                                    ));
                                 }
                                 if let Some(context) = library.filter(|_| !self.on_line) {
                                     let matches = |text: &str| text.to_lowercase().contains(&query);
@@ -531,7 +643,11 @@ impl ActionMenu {
             outcome = Outcome::Close;
         }
         // Clicking elsewhere closes the menu.
-        if area.response.clicked_elsewhere() && matches!(outcome, Outcome::Open) && !opening {
+        if !list_open
+            && area.response.clicked_elsewhere()
+            && matches!(outcome, Outcome::Open)
+            && !opening
+        {
             let pressed_inside = ctx
                 .input(|input| input.pointer.press_origin())
                 .is_some_and(|origin| area.response.rect.contains(origin));
@@ -541,6 +657,57 @@ impl ActionMenu {
         }
         outcome
     }
+}
+
+/// The caption of a group of the menu of a card (DIAG-24): `before`, the name
+/// of `node` and `after`.
+fn caption(ui: &mut egui::Ui, before: &str, node: &Node, after: &str) {
+    let name = node.display_name().to_uppercase();
+    ui.add_space(8.0);
+    ui.label(
+        RichText::new(format!("{before} {name}{after}"))
+            .size(10.0)
+            .color(theme::MUTED),
+    );
+    ui.add_space(2.0);
+}
+
+/// *Data from*: the output of `node` that what the menu adds reads, or
+/// nothing when `port` is no data output. Whether an output was chosen.
+fn data_from(ui: &mut egui::Ui, node: &Node, port: &mut String, project: &Project) -> bool {
+    if port.starts_with("__") {
+        return false;
+    }
+    let mut chosen = false;
+    let outputs = output_ports(node, project);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Data from").color(theme::MUTED));
+        egui::ComboBox::from_id_salt("menu-source-port")
+            .selected_text(port.as_str())
+            .show_ui(ui, |ui| {
+                for output in &outputs {
+                    chosen |= ui
+                        .selectable_value(
+                            port,
+                            output.name.clone(),
+                            format!("{} · {}", output.display_name(), output.value_type),
+                        )
+                        .clicked();
+                }
+            });
+    });
+    chosen
+}
+
+/// The entries `actions`, and the one clicked.
+fn rows<'a>(ui: &mut egui::Ui, actions: &[&'a Action]) -> Option<&'a Action> {
+    let mut clicked = None;
+    for action in actions {
+        if action_row(ui, action).clicked() {
+            clicked = Some(*action);
+        }
+    }
+    clicked
 }
 
 fn action_row(ui: &mut egui::Ui, action: &Action) -> egui::Response {
