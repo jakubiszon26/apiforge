@@ -522,6 +522,13 @@ impl ActionMenu {
                             search.request_focus();
                             self.focus_search = false;
                         }
+                        // A single-line field gives up the focus on Return.
+                        // Only a plain Return takes a step (UX-43).
+                        let returned = (search.has_focus() || search.lost_focus())
+                            && ui.input(|input| {
+                                input.key_pressed(Key::Enter) && input.modifiers.is_none()
+                            });
+                        let takes_return = returned && !self.search.trim().is_empty();
                         let query = self.search.to_lowercase();
                         let mut list = egui::ScrollArea::vertical().max_height(320.0);
                         // *Move earlier* and *Move later* above the search
@@ -551,11 +558,14 @@ impl ActionMenu {
                                     );
                                 }
                                 let mut taken = None;
+                                // The step drawn first.
+                                let first;
                                 match place_node.zip(source_node) {
                                     Some((place, card)) => {
                                         let (steps, rest): (Vec<_>, Vec<_>) = matching
                                             .into_iter()
                                             .partition(|action| adds_step(action.block));
+                                        first = steps.first().or(rest.first()).copied();
                                         if !steps.is_empty() {
                                             caption(
                                                 ui,
@@ -586,7 +596,14 @@ impl ActionMenu {
                                             taken = taken.or(rows(ui, &rest));
                                         }
                                     }
-                                    None => taken = rows(ui, &matching),
+                                    None => {
+                                        first = matching.first().copied();
+                                        taken = rows(ui, &matching);
+                                    }
+                                }
+                                taken = taken.or(first.filter(|_| takes_return));
+                                if returned && taken.is_none() {
+                                    search.request_focus();
                                 }
                                 if let Some(action) = taken {
                                     outcome = Outcome::Add(self.command(
