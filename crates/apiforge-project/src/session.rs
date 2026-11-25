@@ -1783,4 +1783,42 @@ mod tests {
         assert_eq!(session.document(&id).unwrap().omitted_diagnostics(), 3);
         assert_eq!(reported(&session, &id), fresh(&session, &id));
     }
+
+    /// LANG-28: a title with three braces in a row is written and saved, and
+    /// the comment before the file's brace stays.
+    #[test]
+    fn a_title_with_three_braces_is_applied_and_saved() {
+        const TITLE: &str = "a {{{ b";
+        let directory = tempfile::tempdir().unwrap();
+        let mut session = ProjectSession::create(directory.path(), "S").unwrap();
+        let path = "components/sign-in.afs";
+        let source = "component sign_in \"Sign in\" // why\n{\n  export token: string = \"t\"\n}\n";
+        let id = session
+            .create_document(DocumentKind::Component, path, source)
+            .unwrap();
+        session.settle(&id).unwrap();
+        let mut model = session.document(&id).unwrap().model().unwrap().clone();
+        let Document::Component(component) = &mut model else {
+            panic!("a component")
+        };
+        component.name = TITLE.into();
+        session
+            .apply_model_edit(&id, model, Origin::SESSION)
+            .unwrap();
+        session.save(&id).unwrap();
+
+        let written = source.replace("\"Sign in\"", "\"a {\\{{ b\"");
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join(path)).unwrap(),
+            written
+        );
+        drop(session);
+        let session = ProjectSession::open(directory.path()).unwrap();
+        let document = session.document(&id).unwrap();
+        assert_eq!(document.text(), written);
+        let Some(Document::Component(component)) = document.model() else {
+            panic!("a component")
+        };
+        assert_eq!(component.name, TITLE);
+    }
 }

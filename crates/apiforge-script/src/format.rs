@@ -599,3 +599,56 @@ fn print_expr(expr: &Expr, parent_power: u8) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::format;
+    use crate::{Document, LowerContext, lower, parse, print_folder_document};
+
+    /// LANG-28, criterion 2: a title, a description, a string value and a
+    /// key made of any 1 to 5 of these characters print to a text that reads
+    /// back to the same model, and the formatter writes that text as it is.
+    #[test]
+    fn braces_in_a_text_are_written_so_that_they_read_back() {
+        let project = apiforge_core::demos::shop_project();
+        let read = |source: &str| {
+            let lowered = lower(&parse(source), &LowerContext::folder(&project));
+            assert!(!lowered.has_errors(), "{source}\n{:?}", lowered.diagnostics);
+            let Some(Document::Scenario(scenario)) = lowered.document else {
+                panic!("a scenario")
+            };
+            scenario
+        };
+        let base = read("scenario \"S\" {\n  begin = start\n  a = GET \"/a\"\n}\n");
+        let mut texts = vec![String::new()];
+        let mut failed = vec![];
+        for _ in 0..5 {
+            texts = texts
+                .iter()
+                .flat_map(|text| ['{', '}', '\\', '"'].map(|c| format!("{text}{c}")))
+                .collect();
+            for text in &texts {
+                let mut scenario = base.clone();
+                scenario.name = text.clone();
+                scenario.description = text.clone();
+                scenario
+                    .parameters
+                    .insert("value".into(), text.as_str().into());
+                scenario
+                    .parameters
+                    .insert("keyed".into(), serde_json::json!({ text.as_str(): text }));
+                let document = Document::Scenario(scenario.clone());
+                let Ok(printed) = print_folder_document(&project, &document) else {
+                    failed.push(text.clone());
+                    continue;
+                };
+                let back = read(&printed);
+                assert_eq!(back.name, *text);
+                assert_eq!(back.description, *text);
+                assert_eq!(back.parameters, scenario.parameters);
+                assert_eq!(format(&printed).unwrap(), printed);
+            }
+        }
+        assert_eq!(failed, Vec::<String>::new());
+    }
+}
