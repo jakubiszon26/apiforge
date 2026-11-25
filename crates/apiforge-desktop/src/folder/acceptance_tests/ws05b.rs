@@ -583,28 +583,89 @@ fn row_follows_the_title() {
     assert_eq!(shown(&harness, file)[0], "Not analysed");
 }
 
-/// Criterion 8: the dialogs and the row's menu keep the file name in their
-/// headings and say the title under it; renaming a file leaves its title.
+/// The widest the menu of a row gets.
+const MENU: f32 = 320.0;
+
+/// The file name and the title above the items of the open menu of `file`,
+/// in the order they stand in.
+fn menu_head(harness: &FolderHarness, file: &str) -> Vec<(String, Rect)> {
+    let menu = harness.get_by_label(&format!("{file} menu")).rect();
+    let first = harness
+        .query_by_label("Open")
+        .unwrap_or_else(|| harness.get_by_label("Open as text"))
+        .rect()
+        .top();
+    let mut head: Vec<_> = harness
+        .query_all_by_role(Role::Label)
+        .filter(|node| menu.contains_rect(node.rect()) && node.rect().bottom() <= first)
+        .map(|node| (node.value().unwrap_or_default(), node.rect()))
+        .collect();
+    head.sort_by(|left, right| left.1.top().total_cmp(&right.1.top()));
+    head
+}
+
+fn open_menu(harness: &mut FolderHarness, file: &str) -> Vec<(String, Rect)> {
+    files_row(harness, file).click_secondary();
+    settle(harness);
+    harness.step();
+    menu_head(harness, file)
+}
+
+/// Criterion 8, the row's menu: the file name is its visible heading and the
+/// title the grey line under it, so two scenarios of one title have
+/// different menus; a title of any length keeps the menu's width.
+#[test]
+fn menu_names_the_file() {
+    let said = |head: &[(String, Rect)]| -> Vec<String> {
+        head.iter().map(|(text, _)| text.clone()).collect()
+    };
+    for (file, title) in FILES {
+        let (_project, mut harness, _) = files(DAY, MINIMUM);
+        let head = open_menu(&mut harness, file);
+        assert_eq!(said(&head), [file, title], "the file name, then the title");
+        assert!(head[0].1.bottom() <= head[1].1.top() + 1.0, "{head:?}");
+        let menu = harness.get_by_label(&format!("{file} menu")).rect();
+        assert!(menu.width() <= MENU, "{file}: {menu:?}");
+    }
+    // A row that reads its file name already says it once.
+    let (_project, mut harness, _) = files(DAY, MINIMUM);
+    assert!(open_menu(&mut harness, "loose.afs").is_empty());
+
+    let (_project, mut harness, id) = files(DAY, MINIMUM);
+    let title = "A title of many words ".repeat(6);
+    let title = &title[..125];
+    let name = format!("{}.afs", "a-file-name-of-many-words-".repeat(3));
+    write_code(&mut harness, &id, &scenario(title));
+    app(&mut harness)
+        .relocate(DAY, &format!("scenarios/{name}"))
+        .unwrap();
+    settle(&mut harness);
+    follow_disk(&mut harness);
+    let head = open_menu(&mut harness, &name);
+    let menu = harness.get_by_label(&format!("{name} menu")).rect();
+    assert!(menu.width() <= MENU, "{menu:?}");
+    assert_eq!(said(&head), [name.as_str(), title], "named whole");
+    let mut cut = Vec::new();
+    for clipped in &harness.output().shapes {
+        each_shape(&clipped.shape, &mut |shape| {
+            let Shape::Text(text) = shape else { return };
+            let rect = text.galley.rect.translate(text.pos.to_vec2());
+            if menu.contains_rect(rect) && text.galley.elided {
+                assert_eq!(text.galley.rows.len(), 1, "on one line");
+                cut.push(text.galley.job.text.clone());
+            }
+        });
+    }
+    assert_eq!(cut, [name.as_str(), title], "both end in an ellipsis");
+}
+
+/// Criterion 8: the dialogs keep the file name in their headings and say the
+/// title under it; renaming a file leaves its title.
 #[test]
 fn dialogs_name_the_file() {
     let file = "double-booking.afs";
     let (project, mut harness, id) = files(REFUSED, WIDE);
     let text = source_of(&harness, &id);
-
-    files_row(&harness, file).click_secondary();
-    settle(&mut harness);
-    harness.step();
-    assert!(has_label(&harness, &format!("{file} menu")));
-    let open = harness.get_by_label("Open").rect();
-    assert!(
-        harness
-            .query_all_by_role_and_label(Role::Label, REFUSED_TITLE)
-            .any(|node| node.rect().bottom() <= open.top()
-                && open.top() - node.rect().bottom() < 16.0),
-        "the menu says the title above its items"
-    );
-    harness.key_press(egui::Key::Escape);
-    settle(&mut harness);
 
     for (item, heading) in [
         ("Rename…", format!("Rename {file}")),
