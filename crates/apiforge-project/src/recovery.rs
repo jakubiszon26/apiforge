@@ -94,7 +94,8 @@ impl ProjectSession {
             // The saved text and its model are the step before the draft,
             // which the history now stands at (DIAG-06g).
             let previous = document.model.replace(Arc::new(candidate));
-            let saved = document.history.present.replace(document.text().to_owned());
+            let text = document.text().to_owned();
+            let saved = document.history.present.replace(text);
             if let (Some(text), Some(model)) = (saved, previous) {
                 document.history.record(Step { text, model });
             }

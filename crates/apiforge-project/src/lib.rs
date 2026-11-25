@@ -11,9 +11,10 @@ mod layout;
 mod migration;
 mod prepare;
 mod session;
+mod tries;
 
 pub use analysis::{Analysis, AnalysisInput, AnalysisTicket, Restored};
-pub use document::{AnalysisState, DocumentSession, ModelState, Unavailable};
+pub use document::{AnalysisState, DocumentSession, EditedText, ModelState, Unavailable};
 pub use layout::{FixedPlacer, Placer};
 pub use migration::{
     CATALOGUE_FILE, CatalogueEntry, MigrationError, MigrationOutcome, PROJECTS_DIRECTORY,
@@ -28,6 +29,7 @@ pub use session::{
     SaveOutcome, SessionIdentity, SourceSurvey, StorageCompletion, StorageMode, StorageSnapshot,
     TextFileSession, declaration, rename_handle,
 };
+pub use tries::{Try, TryContext, TrySet};
 
 pub use apiforge_script::Document;
 pub use apiforge_storage::project::{
@@ -48,6 +50,15 @@ pub enum Error {
     AlreadyAProject,
     #[error("No document has this ID.")]
     UnknownDocument,
+    /// No try of the set has this ID (REQ-17a).
+    #[error("No unsaved request has this ID.")]
+    UnknownTry,
+    /// A run of a try that does not check: its first error, in the words of
+    /// the text's check (REQ-17a).
+    #[error("{}", diagnostic.message)]
+    TryDoesNotCheck {
+        diagnostic: Box<apiforge_script::Diagnostic>,
+    },
     #[error("No text file with this path is open.")]
     UnknownTextFile,
     #[error("This file is a registered document; open it as a document.")]
