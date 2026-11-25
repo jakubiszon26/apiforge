@@ -41,10 +41,13 @@ libm = "=0.2.16"
 uuid = { version = "=1.28.0", features = ["v4"] }
 dirs = "=6.0.0"
 tempfile = "=3.27.0"
-# Local wall-clock time for the holder of a project (MCP-07); no other feature.
+# Local wall-clock time for the holder of a project (MCP-07) and the time of a
+# request in the demo API's log (REQ-19); no other feature.
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "std"] }
 # Local demo API: HTTP/1 only, a current-thread runtime and no tracing or macros.
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+# The body trait axum uses; the demo API hands on a body it has read the start of (REQ-19).
+http-body = "=1.1.0"
 # HTTP/1.1 only with rustls; no implicit proxy, cookie or decompression behaviour.
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
 tokio = { version = "=1.53.2", default-features = false, features = ["macros", "net", "rt", "rt-multi-thread", "sync", "time"] }

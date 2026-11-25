@@ -6,6 +6,7 @@
 //! addresses and rejects requests addressed to other hosts or sent by foreign web
 //! pages, so a browser cannot be used to reach it through DNS rebinding.
 
+mod request_log;
 mod store;
 
 use axum::{
@@ -28,6 +29,7 @@ use std::{
 use store::{CartError, Line, Store};
 use tokio::{net::TcpListener, sync::oneshot};
 
+pub use request_log::RequestLog;
 pub use store::{CART_TTL, MAX_CARTS, MAX_ITEMS};
 
 /// Port the demo projects expect the API on.
@@ -63,6 +65,14 @@ pub fn router() -> Router {
 pub async fn serve(listener: TcpListener) -> io::Result<()> {
     ensure_loopback(listener.local_addr()?)?;
     axum::serve(listener, router()).await
+}
+
+/// [`serve`], with every request it received written to the log.
+pub async fn serve_logged(listener: TcpListener, log: RequestLog) -> io::Result<()> {
+    ensure_loopback(listener.local_addr()?)?;
+    // Outermost, so that a request the guard turns away is written too.
+    let router = router().layer(middleware::from_fn_with_state(log, request_log::record));
+    axum::serve(listener, router).await
 }
 
 /// A demo server running on a background thread. Dropping the handle stops it.

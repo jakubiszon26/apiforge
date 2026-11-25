@@ -84,7 +84,7 @@ builds (`cargo run`) and `apiforge.exe` remain console programs.
 The demo projects send requests to `http://127.0.0.1:4318/demo`:
 
 ```bash
-cargo run -p apiforge-demo-api --locked [-- --port 4400]
+cargo run -p apiforge-demo-api --locked [-- --port 4400 --request-log requests.jsonl]
 ```
 
 It serves `GET /demo/shop/products/{id}` (products 123 and 124), `POST /demo/shop/carts`,
@@ -93,6 +93,13 @@ It serves `GET /demo/shop/products/{id}` (products 123 and 124), `POST /demo/sho
 each expiring after an hour with at most 100 item lines. The server listens on loopback
 only and rejects foreign hosts and origins. Tests can run it in-process with
 `apiforge_demo_api::spawn(addr)`; dropping the handle stops it.
+
+`--request-log <file>` appends one JSON line per request received, those the API turns
+away included: `time` (RFC 3339), `method`, `path` with its query, `status`, the sorted
+names of the `headers`, `client` (the value of `X-Client`, when sent) and `body` (when it
+is sent as `application/json`, parses and is at most 64 KiB). No other header value is
+written. A file that cannot be opened stops the start; a write that fails is said once on
+stderr and never fails a request.
 
 ## Verification
 
