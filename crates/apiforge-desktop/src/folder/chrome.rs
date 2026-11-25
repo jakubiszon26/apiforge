@@ -320,6 +320,7 @@ impl FolderApp {
                 if let Some(document) = session.document(&key) {
                     return Some(TabFace {
                         path: document.entry().path.as_str().to_owned(),
+                        title: explorer::listed_title(document),
                         unsaved: document.needs_recovery(),
                         invalid: document.analysis() == AnalysisState::Invalid,
                         conflict: document.conflict().is_some(),
@@ -329,6 +330,7 @@ impl FolderApp {
                 let file = session.text_file(key.strip_prefix(TEXT_TAB)?)?;
                 Some(TabFace {
                     path: file.path().to_owned(),
+                    title: None,
                     unsaved: file.needs_recovery(),
                     invalid: false,
                     conflict: file.conflict().is_some(),
@@ -975,6 +977,8 @@ impl TabText {
 pub(super) struct TabFace {
     key: String,
     path: String,
+    /// Said on hover, above the path (WS-05b).
+    title: Option<String>,
     unsaved: bool,
     invalid: bool,
     conflict: bool,
@@ -1098,7 +1102,7 @@ fn tab_face(
     } else {
         tab.path.clone()
     };
-    let response = response.on_hover_text(&hover);
+    let response = explorer::titled_hover(response, tab.title.as_deref(), &hover);
     let close = close.on_hover_text(format!("Close {} (Ctrl+W)", file_name(&tab.path)));
     if close.clicked() {
         return Some(true);

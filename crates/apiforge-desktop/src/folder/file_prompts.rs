@@ -254,11 +254,13 @@ impl FolderApp {
         mut name: String,
         mut error: Option<String>,
     ) -> Option<Prompt> {
+        let title = self.title_at(&path);
         let (mut confirm, mut cancel) = (false, false);
         let response =
             dialogs::centered_modal(egui::Id::new("folder-rename"), context).show(context, |ui| {
                 ui.set_width(420.0);
                 ui.heading(format!("Rename {}", file_name(&path)));
+                title_line(ui, title.as_deref());
                 widgets::hint(
                     ui,
                     "Renaming a file keeps the document's identity and does not rename \
@@ -331,11 +333,13 @@ impl FolderApp {
                     }),
             )
             .collect();
+        let title = self.title_at(&path);
         let (mut confirm, mut cancel) = (false, false);
         let response =
             dialogs::centered_modal(egui::Id::new("folder-move"), context).show(context, |ui| {
                 ui.set_width(420.0);
                 ui.heading(format!("Move {}", file_name(&path)));
+                title_line(ui, title.as_deref());
                 widgets::field_label(ui, "Into folder");
                 let target = egui::ComboBox::from_id_salt("folder-move-target")
                     .width(ui.available_width())
@@ -486,6 +490,10 @@ impl FolderApp {
             .map(|path| path.as_str().to_owned())
             .collect();
         let folders = preview.directories().len();
+        let title = match paths.as_slice() {
+            [path] => self.title_at(path),
+            _ => None,
+        };
         let (mut confirm, mut cancel) = (false, false);
         let response =
             dialogs::centered_modal(egui::Id::new("folder-delete"), context).show(context, |ui| {
@@ -494,6 +502,7 @@ impl FolderApp {
                     [path] => format!("Delete {}?", file_name(path)),
                     _ => format!("Delete {} items?", paths.len()),
                 });
+                title_line(ui, title.as_deref());
                 ui.add_space(theme::SPACE_SM);
                 ui.label(
                     "Deleted items move to this project's local trash and can be restored \
@@ -878,6 +887,14 @@ impl FolderApp {
             &snapshot.path,
             &snapshot.text,
         );
+    }
+}
+
+/// The document's title under a dialog's heading, which names its file
+/// (WS-05b).
+fn title_line(ui: &mut egui::Ui, title: Option<&str>) {
+    if let Some(title) = title {
+        widgets::hint(ui, title);
     }
 }
 

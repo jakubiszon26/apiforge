@@ -1550,7 +1550,7 @@ const TITLE_FIELD: &str = "Title";
 
 /// The title as the header shows it, on one line; none while the code has
 /// none.
-fn shown_title(model: &Document) -> Option<String> {
+pub(super) fn shown_title(model: &Document) -> Option<String> {
     let title = match model {
         Document::Scenario(scenario) => &scenario.name,
         Document::Component(component) => &component.name,
