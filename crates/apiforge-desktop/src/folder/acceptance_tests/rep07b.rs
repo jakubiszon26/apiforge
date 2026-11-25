@@ -98,13 +98,13 @@ fn choose_check(harness: &mut FolderHarness, handle: &str) {
     settle(harness);
 }
 
-/// Where the selected step's details start: the left of their first tab.
+/// Where the selected step's details start: right of the list's edge. A
+/// check with nothing in its tabs has none (REP-07c).
 fn details(harness: &FolderHarness) -> f32 {
     harness
-        .query_all_by_label_contains("Outputs  ")
-        .map(|node| node.rect().left())
-        .next()
-        .expect("the step's details show their Outputs tab")
+        .get_by_label(crate::report::RESIZE_LIST)
+        .rect()
+        .right()
 }
 
 /// Whether the details show a text labelled exactly `text`.

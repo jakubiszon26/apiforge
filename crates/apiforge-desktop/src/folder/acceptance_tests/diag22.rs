@@ -18,7 +18,7 @@ use std::collections::HashMap;
 const SCENARIO: &str = "scenarios/booking-day.afs";
 
 /// The open *Add step* menu on screen.
-fn popup(harness: &FolderHarness) -> Rect {
+pub(super) fn popup(harness: &FolderHarness) -> Rect {
     harness
         .ctx
         .memory(|memory| memory.area_rect(egui::Id::new("board-action-menu")))
@@ -27,7 +27,7 @@ fn popup(harness: &FolderHarness) -> Rect {
 
 /// Types `label` into the open menu's *Find an action…* and clicks the entry
 /// of that name; returns the block it added.
-fn take(harness: &mut FolderHarness, id: &str, label: &str) -> Node {
+pub(super) fn take(harness: &mut FolderHarness, id: &str, label: &str) -> Node {
     assert!(board(harness, id).debug_menu_open(), "the menu is open");
     let before = graph(harness, id);
     harness.event(egui::Event::Text(label.to_owned()));
@@ -60,7 +60,7 @@ fn from_menu(harness: &mut FolderHarness, id: &str, handle: &str, label: &str) -
     take(harness, id, label)
 }
 
-fn headed(harness: &FolderHarness, handle: &str) {
+pub(super) fn headed(harness: &FolderHarness, handle: &str) {
     let heading = format!("AFTER: {}", handle.to_uppercase());
     assert!(
         harness.query_by_label(&heading).is_some(),
@@ -70,7 +70,7 @@ fn headed(harness: &FolderHarness, handle: &str) {
 }
 
 /// Selects `handles` and opens *Add step* on the board's bar.
-fn bar(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
+pub(super) fn bar(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
     let model = graph(harness, id);
     let ids = handles.iter().map(|handle| id_of(&model, handle)).collect();
     app(harness).selections.insert(id.to_owned(), ids);
@@ -82,7 +82,7 @@ fn bar(harness: &mut FolderHarness, id: &str, handles: &[&str]) {
 }
 
 /// Turns *Compact cards* off and tidies the board.
-fn full(harness: &mut FolderHarness) {
+pub(super) fn full(harness: &mut FolderHarness) {
     app(harness).switch_density(crate::canvas::CardDensity::Full);
     settle(harness);
     choose(harness, "Tidy up");
@@ -91,7 +91,7 @@ fn full(harness: &mut FolderHarness) {
 
 /// Opens the menu of *Add a connected step* at the foot of `handle`'s card,
 /// which only the full card has.
-fn foot(harness: &mut FolderHarness, id: &str, handle: &str) {
+pub(super) fn foot(harness: &mut FolderHarness, id: &str, handle: &str) {
     full(harness);
     show(harness, id, &[handle]);
     let button = centre(harness, &format!("Add a step connected to {handle}"));
@@ -146,7 +146,7 @@ fn put_after(
 }
 
 /// The text of the statement `handle`, to its closing brace when it has one.
-fn statement(text: &str, handle: &str) -> String {
+pub(super) fn statement(text: &str, handle: &str) -> String {
     let from = line_of(text, &format!("{handle} = "));
     let lines: Vec<&str> = text.lines().skip(from).collect();
     let close = format!("{}}}", " ".repeat(indent(text, handle)));
@@ -157,7 +157,7 @@ fn statement(text: &str, handle: &str) -> String {
     lines[..end].join("\n")
 }
 
-fn places(graph: &Graph) -> HashMap<String, (f64, f64)> {
+pub(super) fn places(graph: &Graph) -> HashMap<String, (f64, f64)> {
     graph
         .nodes
         .iter()
@@ -280,12 +280,12 @@ const SIGN_OUT: &str = "component sign_out \"Sign out\" {
 }
 ";
 
-const COMPONENTS: [&str; 2] = ["Sign in", "Sign out"];
+pub(super) const COMPONENTS: [&str; 2] = ["Sign in", "Sign out"];
 
 /// The SHA-256 of [`SIGN_OUT`].
 const SIGN_OUT_HASH: &str = "9d3786773c94c56ec2674b9549970d70e5e44cc13285d35c6d6a9f4db5d727df";
 
-fn with_sign_out() -> (tempfile::TempDir, FolderHarness, String) {
+pub(super) fn with_sign_out() -> (tempfile::TempDir, FolderHarness, String) {
     rooms(SCENARIO, |root| {
         let revisions = root.join(".apiforge/revisions/sign-out");
         fs::create_dir_all(&revisions).unwrap();
@@ -321,7 +321,7 @@ fn with_sign_out() -> (tempfile::TempDir, FolderHarness, String) {
 
 /// Which of `COMPONENTS` the open menu lists when *Sign* is searched for,
 /// those its scrolling list holds below the view among them.
-fn offered(harness: &mut FolderHarness) -> Vec<&'static str> {
+pub(super) fn offered(harness: &mut FolderHarness) -> Vec<&'static str> {
     harness.event(egui::Event::Text("Sign".to_owned()));
     harness.step();
     harness.step();
@@ -357,14 +357,15 @@ fn diag22_criterion_3_every_component_is_offered() {
 // Criterion 4 ----------------------------------------------------------------
 
 /// `text` with `statement` written before the line `line`.
-fn written_before(text: &str, line: &str, statement: &str) -> String {
+pub(super) fn written_before(text: &str, line: &str, statement: &str) -> String {
     assert_eq!(text.matches(line).count(), 1, "one line {line}");
     text.replace(line, &format!("{statement}{line}"))
 }
 
-/// Pinned to what `main` wrote before this ticket.
+/// They read the step as before, and since DIAG-24 (#620) are written right
+/// after it.
 #[test]
-fn diag22_criterion_4_a_check_and_a_value_keep_their_binding() {
+fn diag22_criterion_4_a_check_and_a_value_are_written_after_the_step() {
     for (label, statement) in [
         ("Comparison", "  check = assert profile.body == null\n"),
         ("Value", "  value = profile.body\n"),
@@ -376,7 +377,11 @@ fn diag22_criterion_4_a_check_and_a_value_keep_their_binding() {
         from_menu(&mut harness, &id, "profile", label);
         assert_eq!(
             passes(&harness, &id),
-            written_before(&before, "  cleanup {\n", statement),
+            written_before(
+                &before,
+                "  team = GET \"/teams/{{profile.body.team}}\" {\n",
+                statement
+            ),
             "{label}"
         );
     }
@@ -384,45 +389,24 @@ fn diag22_criterion_4_a_check_and_a_value_keep_their_binding() {
 
 // Criterion 5 ----------------------------------------------------------------
 
-/// Pinned to what `main` wrote before this ticket.
+/// Pinned to what `main` wrote before this ticket; since DIAG-24 (#620) a
+/// step from the menu of an `if` goes after its closing brace.
 #[test]
 fn diag22_criterion_5_start_and_if_unchanged() {
     let request = "  request = GET \"/endpoint\" {\n    timeout 10s\n  }\n";
-    let nested = "    request = GET \"/endpoint\" {\n      timeout 10s\n    }\n";
-    for (handle, line, statement) in [
-        ("begin", "  token = sign_in@1(user: \"tester\")\n", request),
-        ("booked", "  } else {\n", nested),
+    for (handle, line) in [
+        ("begin", "  token = sign_in@1(user: \"tester\")\n"),
+        ("booked", "  cleanup {\n"),
     ] {
         let (_project, mut harness, id) = booking_day();
         let before = source_of(&harness, &id);
         from_menu(&mut harness, &id, handle, "HTTP request");
         assert_eq!(
             passes(&harness, &id),
-            written_before(&before, line, statement),
+            written_before(&before, line, request),
             "{handle}"
         );
     }
-}
-
-/// A check is no step: a request from its menu reads it, as before.
-#[test]
-fn diag22_criterion_5_a_checks_menu_unchanged() {
-    let (_project, mut harness, id) = booking_day();
-    app(&mut harness).debug_draw_checks();
-    settle(&mut harness);
-    choose(&mut harness, "Tidy up");
-    settle(&mut harness);
-    let before = source_of(&harness, &id);
-    from_menu(&mut harness, &id, "big_enough", "HTTP request");
-    assert_eq!(
-        passes(&harness, &id),
-        written_before(
-            &before,
-            "  cleanup {\n",
-            "  @config({ method: \"GET\", timeoutMs: 10000.0 })\n  request = GET \"/endpoint\" {\n    \
-             body big_enough.value\n    timeout 10s\n  }\n"
-        )
-    );
 }
 
 // Design review -------------------------------------------------------------
