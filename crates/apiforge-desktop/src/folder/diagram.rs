@@ -75,7 +75,12 @@ impl FolderApp {
         let cleanup = self.cleanup(document_id);
         // The document's header shares the board's header row (KTLO-12): Split
         // leaves the file name and kind to the tab strip beside the code.
+        let title = shown_title(&model);
         let header = Header {
+            title: title
+                .as_deref()
+                .filter(|_| self.workbench.mode == Mode::Diagram),
+            path: &snapshot.path,
             name: (self.workbench.mode == Mode::Diagram)
                 .then(|| (file_name(&snapshot.path), kind_label(snapshot.kind))),
             tabs: matches!(*model, Document::Scenario(_)),
@@ -84,12 +89,17 @@ impl FolderApp {
         // save or a publication holds the board for a moment, and the
         // analysis a publication starts checks code that did not change:
         // neither puts a notice above the board (UX-25).
-        let rechecking = snapshot.analysis == AnalysisState::Pending
-            && snapshot.model_describes_text
-            && !snapshot.held
-            && snapshot.conflict.is_none()
-            && snapshot.unavailable.is_none();
-        if !snapshot.editable && !snapshot.paused && !snapshot.busy && !rechecking {
+        let held_briefly = held_briefly(&snapshot);
+        // Taken for the frame; another document's waits, and keeps the field
+        // of this one from opening over it.
+        let mut title_edit = self.title_edit.take_if(|edit| edit.document == document_id);
+        if header.title.is_none()
+            && let Some(edit) = title_edit.as_mut()
+        {
+            edit.left = true;
+        }
+        let title_editable = snapshot.editable && self.title_edit.is_none();
+        if !snapshot.editable && !snapshot.paused && !held_briefly {
             let text = read_only_reason(&snapshot);
             egui::Frame::new()
                 .fill(theme::ACCENT_SOFT)
@@ -252,15 +262,33 @@ impl FolderApp {
                     shared: &shared,
                     moves: true,
                 };
-                let fit = header.fit(ui, canvas.header_room(ui, &input));
+                let draft = title_edit
+                    .as_ref()
+                    .filter(|edit| !edit.left)
+                    .map(|edit| edit.draft.as_str());
+                let fit = header.fit(ui, canvas.header_room(ui, &input), draft);
                 input.header_leading = Some(egui::vec2(fit.width, theme::CONTROL_HEIGHT));
                 let row = canvas.leading_rect(ui, &input);
                 // Drawn before the board, so the keyboard reaches the header
                 // first and then the board's toolbar on the same row.
-                header.show(ui.ctx(), ui.id(), row, &fit, &mut chosen);
+                header.show(
+                    ui.ctx(),
+                    ui.id(),
+                    row,
+                    &fit,
+                    &mut chosen,
+                    &mut TitleField {
+                        document: document_id,
+                        editable: title_editable,
+                        edit: &mut title_edit,
+                    },
+                );
                 canvas.show(ui, &input)
             })
             .inner;
+        if title_edit.is_some() {
+            self.title_edit = title_edit;
+        }
         if chosen != cleanup {
             if let Some(tab) = self.workbench.tab_mut(document_id) {
                 tab.cleanup = chosen;
@@ -271,6 +299,11 @@ impl FolderApp {
         for command in commands {
             self.board_command(document_id, &model, cleanup, snapshot.editable, command);
         }
+        // After the commands, which edit the model this frame drew.
+        if self.title_edit.as_ref().is_some_and(|edit| edit.left) {
+            // Told, or waiting: nothing here depends on it.
+            let _ = self.commit_title();
+        }
         // What Back restores beside the board lasts as long as Back.
         if !self
             .canvases
@@ -279,6 +312,129 @@ impl FolderApp {
         {
             self.jump_views.remove(document_id);
         }
+    }
+
+    /// Whether a title typed in the header's field is still to be written, in
+    /// `document` or in any.
+    pub(super) fn title_typed(&self, document: Option<&str>) -> bool {
+        self.title_edit.as_ref().is_some_and(|edit| {
+            edit.written().is_some() && document.is_none_or(|id| id == edit.document)
+        })
+    }
+
+    /// Closes the header's field and writes the title typed in it: when the
+    /// field is left, and before anything that takes the title or gives up
+    /// the project.
+    pub(super) fn commit_title(&mut self) -> TitleCommit {
+        let commit = self.write_title();
+        if commit == TitleCommit::Refused {
+            self.after_title.clear();
+        }
+        if commit == TitleCommit::Wait || !self.after_title.is_empty() {
+            self.ui_context
+                .request_repaint_after(Duration::from_millis(16));
+        }
+        commit
+    }
+
+    fn write_title(&mut self) -> TitleCommit {
+        let Some(mut edit) = self.title_edit.take() else {
+            return TitleCommit::Done;
+        };
+        let Some(written) = edit.written() else {
+            return TitleCommit::Done;
+        };
+        let refused = |reason: &str| format!("The title “{written}” was not written. {reason}");
+        let Some(snapshot) = self.snapshot(&edit.document) else {
+            self.notify(refused("Its file is no longer in the project."), true);
+            return TitleCommit::Refused;
+        };
+        if !snapshot.editable {
+            if takes_edits_soon(&snapshot) {
+                edit.left = true;
+                self.title_edit = Some(edit);
+                return TitleCommit::Wait;
+            }
+            self.notify(refused(read_only_reason(&snapshot)), true);
+            return TitleCommit::Refused;
+        }
+        self.rename_document(&edit.document, written.clone());
+        let done = self
+            .shared_model(&edit.document)
+            .is_some_and(|model| shown_title(&model) == Some(written));
+        // A refused edit says why itself, or asks.
+        if done {
+            TitleCommit::Done
+        } else {
+            TitleCommit::Refused
+        }
+    }
+
+    /// Whether `then` may go on now, the title typed written first. While the
+    /// board takes no edit for a moment `then` is kept, and done once the
+    /// title is written; a refused title ends it.
+    pub(super) fn after_title(&mut self, then: AfterTitle) -> bool {
+        match self.commit_title() {
+            TitleCommit::Done => true,
+            TitleCommit::Refused => false,
+            TitleCommit::Wait => {
+                if !self.after_title.contains(&then) {
+                    self.after_title.push(then);
+                }
+                false
+            }
+        }
+    }
+
+    /// Writes the title of a field that was left: the keyboard went elsewhere
+    /// while the board took no edit, or the field is not drawn, in another
+    /// view, for another document or under maximised run results. Then does
+    /// what waited for the title.
+    pub(super) fn tend_title_edit(&mut self, active: Option<&str>) {
+        let drawn = self.workbench.mode == Mode::Diagram && !self.report_maximised(active);
+        let leave = self.title_edit.as_ref().is_some_and(|edit| {
+            edit.left
+                || !drawn
+                || active != Some(edit.document.as_str())
+                || self
+                    .snapshot(&edit.document)
+                    .is_none_or(|board| !board.editable && !takes_edits_soon(&board))
+        });
+        if leave && self.commit_title() == TitleCommit::Wait {
+            return;
+        }
+        let waited = std::mem::take(&mut self.after_title);
+        for then in waited {
+            match then {
+                AfterTitle::Save(id) => self.save_or_notify(&id),
+                AfterTitle::SaveAll => self.save_all(),
+                AfterTitle::Run { id, live } => self.request_run(&id, live),
+                AfterTitle::Publish(id) => self.publish_component(&id),
+                AfterTitle::CloseTab(id) => self.request_close_tab(&id),
+            }
+        }
+    }
+
+    /// Writes `title` as the document's title, as one model edit (WS-05a).
+    fn rename_document(&mut self, document_id: &str, title: String) {
+        let Some(model) = self.shared_model(document_id) else {
+            return;
+        };
+        let mut next = Document::clone(&model);
+        match &mut next {
+            Document::Scenario(scenario) => scenario.name = title,
+            Document::Component(component) => component.name = title,
+        }
+        self.component_action(
+            document_id,
+            publication::Action::Model {
+                next: Box::new(next),
+                selection: None,
+                check: None,
+                moved: Vec::new(),
+                placed: false,
+            },
+        );
     }
 
     /// The values of `model` worth a variable, from the cache while the
@@ -1387,18 +1543,128 @@ fn read_only_reason(snapshot: &Snapshot) -> &'static str {
 
 const NAME_MIN_WIDTH: f32 = 80.0;
 
+/// Between the frame of the title's field and its text.
+const TITLE_MARGIN: egui::Margin = egui::Margin::symmetric(4, 2);
+
+/// Room for the caret after the last letter.
+const TITLE_CARET: f32 = 2.0;
+
+/// The accessible name of the field that edits the title.
+const TITLE_FIELD: &str = "Title";
+
+/// The title as the header shows it, on one line; none while the code has
+/// none.
+fn shown_title(model: &Document) -> Option<String> {
+    let title = match model {
+        Document::Scenario(scenario) => &scenario.name,
+        Document::Component(component) => &component.name,
+    };
+    (!title.trim().is_empty()).then(|| one_line(title))
+}
+
+fn one_line(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+/// Whether the board takes no edit for a moment only: a save, a publication,
+/// or the analysis of code that did not change.
+fn held_briefly(snapshot: &Snapshot) -> bool {
+    let rechecking = snapshot.analysis == AnalysisState::Pending
+        && snapshot.model_describes_text
+        && !snapshot.held
+        && snapshot.conflict.is_none()
+        && snapshot.unavailable.is_none();
+    !snapshot.paused && (snapshot.busy || rechecking)
+}
+
+/// Whether the board takes edits again by itself: a storage job ends, or the
+/// code is analysed. A title typed waits for it.
+fn takes_edits_soon(snapshot: &Snapshot) -> bool {
+    !snapshot.paused
+        && !snapshot.held
+        && snapshot.conflict.is_none()
+        && snapshot.unavailable.is_none()
+        && (snapshot.busy || snapshot.analysis == AnalysisState::Pending)
+}
+
+/// What became of the title typed in the header's field (WS-05a).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub(super) enum TitleCommit {
+    /// It is written, or there was none.
+    Done,
+    /// It cannot be written, of which the person is told: the title is the
+    /// one before.
+    Refused,
+    /// The board takes no edit for a moment. What needs the title waits.
+    Wait,
+}
+
+/// What waits for a title to be written (WS-05a).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum AfterTitle {
+    Save(String),
+    SaveAll,
+    Run { id: String, live: bool },
+    Publish(String),
+    CloseTab(String),
+}
+
+/// The title being edited in the header (WS-05a). It is written when the
+/// field is left, before a save and before a run; Escape drops it.
+pub(super) struct TitleEdit {
+    document: String,
+    /// The title as it was shown when the field opened.
+    title: String,
+    draft: String,
+    /// The field takes the keyboard, with the title selected, when it is
+    /// next drawn.
+    opening: bool,
+    /// The field was left and is no longer drawn: the title is written as
+    /// soon as the board takes an edit.
+    left: bool,
+}
+
+impl TitleEdit {
+    /// What the field writes; never the title it opened on, nor an empty one.
+    pub(super) fn written(&self) -> Option<String> {
+        let written = one_line(&self.draft);
+        (written != self.title && !written.trim().is_empty()).then_some(written)
+    }
+}
+
+/// The document whose title the header shows and the edit of it, if one is
+/// open.
+struct TitleField<'a> {
+    document: &'a str,
+    editable: bool,
+    edit: &'a mut Option<TitleEdit>,
+}
+
 /// The document's part of the board's header row (KTLO-12): in Diagram the
-/// file name and kind, then Main / Cleanup for a scenario; in Split only
-/// Main / Cleanup, since the tab strip beside the code names the file.
+/// title (WS-05a), the file name and the kind, then Main / Cleanup for a
+/// scenario; in Split only Main / Cleanup, since the tab strip beside the
+/// code names the file.
 struct Header<'a> {
+    title: Option<&'a str>,
+    /// The document's path in the project, on the title's hover.
+    path: &'a str,
     name: Option<(&'a str, &'static str)>,
     tabs: bool,
 }
 
 /// What of the header fits, and its width.
 struct HeaderFit {
+    /// The width of the title, or of the file name where there is no title.
     name_width: f32,
+    /// The file name after the title, whole.
+    file: bool,
     kind: bool,
+    /// Left free before Main and Cleanup, which stay in place while the
+    /// title is edited.
+    free: f32,
     width: f32,
 }
 
@@ -1410,22 +1676,35 @@ impl Header<'_> {
             .x
     }
 
-    /// The width the header takes when nothing of it is given up.
+    fn bold() -> egui::FontId {
+        egui::FontId::new(theme::FONT_BODY, theme::bold_family())
+    }
+
+    /// The width the header takes with its file name and kind in full, which
+    /// *Component settings* gives its label up for. The title gives way
+    /// before the label does.
     fn full_width(&self, ui: &egui::Ui) -> f32 {
-        self.fit(
+        Header {
+            title: None,
+            ..*self
+        }
+        .fit(
             ui,
             canvas::HeaderRoom {
                 alone: f32::INFINITY,
                 with_summary: f32::INFINITY,
             },
+            None,
         )
         .width
     }
 
-    /// Gives up, as the row narrows, first the kind, then the name's full
-    /// width (its full text stays on hover), then the steps summary, which the
-    /// board leaves out once the header takes its room.
-    fn fit(&self, ui: &egui::Ui, room: canvas::HeaderRoom) -> HeaderFit {
+    /// Gives up, as the row narrows, first the kind, then the file name after
+    /// the title, then the full width of the title or, where there is none,
+    /// of the file name (its full text stays on hover), then the steps
+    /// summary, which the board leaves out once the header takes its room.
+    /// While the title is edited, `draft` is the text in its field.
+    fn fit(&self, ui: &egui::Ui, room: canvas::HeaderRoom, draft: Option<&str>) -> HeaderFit {
         let gap = ui.spacing().item_spacing.x;
         let tabs = if self.tabs {
             widgets::tab_value_width(ui, "Main") + gap + widgets::tab_value_width(ui, "Cleanup")
@@ -1435,40 +1714,79 @@ impl Header<'_> {
         let Some((name, kind)) = self.name else {
             return HeaderFit {
                 name_width: 0.0,
+                file: false,
                 kind: false,
+                free: 0.0,
                 width: tabs,
             };
         };
-        let full = Self::text_width(
-            ui,
-            name,
-            egui::FontId::new(theme::FONT_BODY, theme::bold_family()),
-        );
-        let kind_width =
-            gap + Self::text_width(ui, kind, egui::FontId::proportional(theme::FONT_LABEL));
+        let mut full = Self::text_width(ui, self.title.unwrap_or(name), Self::bold());
+        // The field opens as wide as the title, its frame and the caret.
+        let field = |text: f32| (text + TITLE_MARGIN.sum().x + TITLE_CARET).max(NAME_MIN_WIDTH);
+        if draft.is_some() {
+            full = field(full);
+        }
+        let label = egui::FontId::proportional(theme::FONT_LABEL);
+        let file_width = match self.title {
+            Some(_) => gap + Self::text_width(ui, name, label.clone()),
+            None => 0.0,
+        };
+        let kind_width = gap + Self::text_width(ui, kind, label);
         let fixed = if self.tabs {
             gap + theme::SPACE_LG + tabs
         } else {
             0.0
         };
         // A point to spare keeps rounding from pushing the summary out.
-        let (name_width, kind) = if full + kind_width + fixed <= room.with_summary {
-            (full, true)
-        } else if full + fixed <= room.with_summary {
-            (full, false)
-        } else if room.with_summary - fixed - 1.0 >= NAME_MIN_WIDTH {
-            (room.with_summary - fixed - 1.0, false)
-        } else {
-            (
-                (room.alone - fixed - 1.0).clamp(NAME_MIN_WIDTH.min(full), full),
-                false,
-            )
+        let (name_width, file, kind) =
+            if full + file_width + kind_width + fixed <= room.with_summary {
+                (full, true, true)
+            } else if full + file_width + fixed <= room.with_summary {
+                (full, true, false)
+            } else if full + fixed <= room.with_summary {
+                (full, false, false)
+            } else if room.with_summary - fixed - 1.0 >= NAME_MIN_WIDTH {
+                (room.with_summary - fixed - 1.0, false, false)
+            } else {
+                (
+                    (room.alone - fixed - 1.0).clamp(NAME_MIN_WIDTH.min(full), full),
+                    false,
+                    false,
+                )
+            };
+        let used = |name: f32, file: bool, kind: bool| {
+            name + if file { file_width } else { 0.0 } + if kind { kind_width } else { 0.0 }
         };
-        HeaderFit {
+        let mut fit = HeaderFit {
             name_width,
+            file: file && self.title.is_some(),
             kind,
-            width: name_width + if kind { kind_width } else { 0.0 } + fixed,
+            free: 0.0,
+            width: used(name_width, file, kind) + fixed,
+        };
+        // The field grows with its text: over the kind and the file name of a
+        // scenario, whose Main and Cleanup stay where the opened field put
+        // them, or to the room of a component's row.
+        if let Some(draft) = draft {
+            let wanted = field(Self::text_width(ui, draft, Self::bold())).max(name_width);
+            let held = fit.width - fixed;
+            let most = if self.tabs {
+                held
+            } else {
+                room.with_summary.max(held)
+            };
+            fit.kind = kind && used(wanted, file, true) <= most;
+            fit.file = fit.file && used(wanted, true, fit.kind) <= most;
+            fit.kind &= fit.file;
+            fit.name_width = wanted.min(most);
+            let taken = used(fit.name_width, fit.file, fit.kind);
+            if self.tabs {
+                fit.free = (held - taken).max(0.0);
+            } else {
+                fit.width = taken;
+            }
         }
+        fit
     }
 
     /// Draws the header into `row`, the left of the board's header row.
@@ -1479,6 +1797,7 @@ impl Header<'_> {
         row: egui::Rect,
         fit: &HeaderFit,
         cleanup: &mut bool,
+        field: &mut TitleField<'_>,
     ) {
         egui::Area::new(id.with("board-document-header"))
             .fixed_pos(row.left_center())
@@ -1489,20 +1808,20 @@ impl Header<'_> {
                     if let Some((name, kind)) = self.name {
                         ui.scope(|ui| {
                             ui.set_max_width(fit.name_width);
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(name)
-                                        .size(theme::FONT_BODY)
-                                        .family(theme::bold_family()),
-                                )
-                                .truncate(),
-                            );
+                            if let Some(title) = self.title {
+                                self.title(ui, title, fit.name_width, field);
+                            } else {
+                                ui.add(Self::bold_label(name));
+                            }
                         });
+                        if fit.file {
+                            widgets::hint(ui, name);
+                        }
                         if fit.kind {
                             widgets::hint(ui, kind);
                         }
                         if self.tabs {
-                            ui.add_space(theme::SPACE_LG);
+                            ui.add_space(theme::SPACE_LG + fit.free);
                         }
                     }
                     if self.tabs {
@@ -1511,6 +1830,98 @@ impl Header<'_> {
                     }
                 });
             });
+    }
+
+    fn bold_label(text: &str) -> egui::Label {
+        egui::Label::new(
+            RichText::new(text)
+                .size(theme::FONT_BODY)
+                .family(theme::bold_family()),
+        )
+        .truncate()
+    }
+
+    /// The title, which a double click makes a field on an editable board.
+    fn title(&self, ui: &mut egui::Ui, title: &str, width: f32, field: &mut TitleField<'_>) {
+        let id = egui::Id::new(("document-title", field.document));
+        if let Some(edit) = field.edit.as_mut().filter(|edit| !edit.left) {
+            if edit.opening {
+                // Before the field is drawn, so that it takes this frame's keys.
+                let end = egui::text::CCursor::new(edit.draft.chars().count());
+                let mut state = egui::text_edit::TextEditState::default();
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::two(
+                        egui::text::CCursor::default(),
+                        end,
+                    )));
+                state.store(ui.ctx(), id);
+                ui.memory_mut(|memory| memory.request_focus(id));
+            } else if !ui.memory(|memory| memory.has_focus(id)) {
+                // Another field took the keyboard before this one was drawn.
+                edit.left = true;
+            }
+        }
+        if let Some(edit) = field.edit.as_mut().filter(|edit| !edit.left) {
+            edit.opening = false;
+            // Escape leaves the field and is not the board's: the field keeps
+            // the key from egui, which would take the focus before anything
+            // is drawn, and nothing after it sees the key.
+            let escape =
+                ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut edit.draft)
+                    .id(id)
+                    .font(Self::bold())
+                    .margin(TITLE_MARGIN)
+                    .desired_width(width),
+            );
+            let response = widgets::named(response, TITLE_FIELD);
+            ui.memory_mut(|memory| {
+                memory.set_focus_lock_filter(
+                    id,
+                    egui::EventFilter {
+                        escape: true,
+                        ..code::FIELD_KEYS
+                    },
+                );
+            });
+            if escape {
+                response.surrender_focus();
+                *field.edit = None;
+            } else if !response.has_focus() {
+                // Left, by Return too: written at the end of the frame, or
+                // once the board takes an edit.
+                edit.left = true;
+            }
+            return;
+        }
+        let label = Self::bold_label(title)
+            .selectable(false)
+            .show_tooltip_when_elided(false);
+        let response = if field.editable {
+            // Not a stop of the keyboard: a double click is the only way in.
+            ui.add(label.sense(egui::Sense::CLICK))
+                .on_hover_cursor(egui::CursorIcon::Text)
+        } else {
+            ui.add(label)
+        };
+        if response
+            .on_hover_ui(|ui| {
+                ui.label(title);
+                ui.label(self.path);
+            })
+            .double_clicked()
+        {
+            *field.edit = Some(TitleEdit {
+                document: field.document.to_owned(),
+                title: title.to_owned(),
+                draft: title.to_owned(),
+                opening: true,
+                left: false,
+            });
+            ui.ctx().request_repaint();
+        }
     }
 }
 
