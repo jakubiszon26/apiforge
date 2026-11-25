@@ -2,7 +2,8 @@
 //! (ADR 0013); see docs/tickets/KTLO-12.md. Criterion 5, the accessibility
 //! audit, is `stage_ii_screens_and_dialogs_name_every_control`, which audits
 //! Diagram and Split at both window sizes. Criterion 6 is the design review
-//! and the QA report.
+//! and the QA report. Since WS-05a (docs/tickets/WS-05a.md) the row's name in
+//! bold is the document's title, and the file name follows it.
 use super::*;
 use crate::testing::{
     FolderHarness, MINIMUM, WIDE, assert_disjoint, assert_within_window, folder, folder_harness,
@@ -11,7 +12,9 @@ use crate::testing::{
 use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 
-/// The demo scenario's file name and kind, as the Diagram header shows them.
+/// The demo scenario's title, file name and kind, as the Diagram header shows
+/// them.
+const TITLE: &str = "Promotion and cart price";
 const NAME: &str = "promotion-and-cart-price.afs";
 const KIND: &str = "Scenario";
 /// The board's tool buttons after Add step: *Checks* sits between them
@@ -128,9 +131,9 @@ fn one_row_lies_between_the_tab_strip_and_the_board() {
             let main = rect(&harness, "Main");
             let mut row = common_row(&harness);
             if mode == "Diagram" {
-                let name = row_label(&harness, NAME)
-                    .unwrap_or_else(|| panic!("{context}: the file name is on the row of Main"));
-                row.push((NAME.to_owned(), name));
+                let title = row_label(&harness, TITLE)
+                    .unwrap_or_else(|| panic!("{context}: the title is on the row of Main"));
+                row.push((TITLE.to_owned(), title));
             }
             for (label, at) in &row {
                 assert!(
@@ -151,13 +154,17 @@ fn one_row_lies_between_the_tab_strip_and_the_board() {
     }
 }
 
-/// Criterion 2: Diagram shows file name, kind, Main, Cleanup, steps summary,
+/// Criterion 2: Diagram shows title, file name, kind, Main, Cleanup, steps summary,
 /// Add step and the tools, left to right; Split shows Main, Cleanup, then the
-/// same right-hand group, with no file name or kind on the row.
+/// same right-hand group, with no title, file name or kind on the row.
 #[test]
 fn the_row_shows_its_parts_left_to_right() {
     let (_project, diagram) = open(WIDE, "Diagram");
     let mut order = vec![
+        (
+            TITLE.to_owned(),
+            row_label(&diagram, TITLE).expect("Diagram shows the title on the row"),
+        ),
         (
             NAME.to_owned(),
             row_label(&diagram, NAME).expect("Diagram shows the file name on the row"),
@@ -179,8 +186,10 @@ fn the_row_shows_its_parts_left_to_right() {
 
     let (_project, split) = open(WIDE, "Split");
     assert!(
-        row_label(&split, NAME).is_none() && row_label(&split, KIND).is_none(),
-        "Split leaves the file name and kind to the tab strip"
+        [TITLE, NAME, KIND]
+            .iter()
+            .all(|part| row_label(&split, part).is_none()),
+        "Split leaves the title, file name and kind to the tab strip"
     );
     let mut order = common_row(&split);
     let summary_at = summary(&split).expect("Split at 1600 px shows the steps summary");
@@ -301,31 +310,32 @@ fn tab_runs_from_the_name_through_main_and_cleanup_to_add_step_and_the_tools() {
 }
 
 /// Criterion 4: at 960 × 540 nothing on the row overlaps or is clipped, in
-/// Diagram with the block library open and in Split. Diagram keeps every
-/// part since the summary reads only `N steps` (LANG-13, owner 2026-11-20);
-/// Split drops the steps summary.
+/// Diagram with the block library open and in Split. Diagram keeps the title
+/// whole and, since the summary reads only `N steps` (LANG-13, owner
+/// 2026-11-20), the steps summary; the kind and the file name give way to
+/// the title (WS-05a). Split drops the steps summary.
 #[test]
 fn at_the_minimum_window_the_row_fits_without_overlap() {
     let (_project, wide) = open(WIDE, "Diagram");
-    let full_name = row_label(&wide, NAME).unwrap().width();
+    let full_title = row_label(&wide, TITLE).unwrap().width();
 
     let (_project, diagram) = open(MINIMUM, "Diagram");
     assert!(
         diagram.query_by_label("Search blocks").is_some(),
         "the block library is open"
     );
-    let name = row_label(&diagram, NAME).expect("the file name stays on the row");
+    let title = row_label(&diagram, TITLE).expect("the title stays on the row");
     assert!(
-        name.width() >= full_name - 0.5,
-        "the file name is not shortened at 960 px: {} of {full_name}",
-        name.width()
+        title.width() >= full_title - 0.5,
+        "the title is not shortened at 960 px: {} of {full_title}",
+        title.width()
     );
     assert!(
-        row_label(&diagram, KIND).is_some(),
-        "the kind stays at 960 px"
+        row_label(&diagram, KIND).is_none() && row_label(&diagram, NAME).is_none(),
+        "the kind and the file name give way at 960 px"
     );
     let summary_at = summary(&diagram).expect("the steps summary still fits at 960 px");
-    let mut row = vec![(NAME.to_owned(), name)];
+    let mut row = vec![(TITLE.to_owned(), title)];
     let mut common = common_row(&diagram);
     common.insert(2, ("steps summary".to_owned(), summary_at));
     row.extend(common);
@@ -349,38 +359,46 @@ fn at_the_minimum_window_the_row_fits_without_overlap() {
 }
 
 /// How much of the Diagram row has been given up: 0 nothing, 1 the kind,
-/// 2 the full file name as well, 3 the steps summary as well.
-fn given_up(harness: &FolderHarness, full_name: f32, width: f32) -> u8 {
+/// 2 the file name as well, 3 the full title as well, 4 the steps summary as
+/// well.
+fn given_up(harness: &FolderHarness, full_title: f32, width: f32) -> u8 {
     let kind = row_label(harness, KIND).is_some();
-    let name = row_label(harness, NAME)
-        .unwrap_or_else(|| panic!("the file name stays on the row at {width} px"));
-    let shortened = name.width() < full_name - 0.5;
+    let name = row_label(harness, NAME).is_some();
+    let title = row_label(harness, TITLE)
+        .unwrap_or_else(|| panic!("the title stays on the row at {width} px"));
+    let shortened = title.width() < full_title - 0.5;
     let summary = summary(harness).is_some();
     assert!(
-        !(kind && (shortened || !summary)),
+        !(kind && (!name || shortened || !summary)),
         "at {width} px the kind is dropped before anything else"
     );
-    match (kind, shortened, summary) {
-        (true, false, true) => 0,
-        (false, false, true) => 1,
-        (false, true, true) => 2,
-        _ => 3,
+    assert!(
+        !(name && (shortened || !summary)),
+        "at {width} px the file name is dropped before the title is shortened"
+    );
+    match (kind, name, shortened, summary) {
+        (true, true, false, true) => 0,
+        (false, true, false, true) => 1,
+        (false, false, false, true) => 2,
+        (false, false, true, true) => 3,
+        _ => 4,
     }
 }
 
-/// Criterion 4: as the board narrows, Diagram drops the kind first, then
-/// shortens the name (its full text on hover), then drops the steps summary.
+/// Criterion 4: as the board narrows, Diagram drops the kind first, then the
+/// file name (WS-05a), then shortens the title (its full text on hover), then
+/// drops the steps summary.
 #[test]
 fn a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summary() {
     let (_project, wide) = open(WIDE, "Diagram");
-    let full_name = row_label(&wide, NAME).unwrap().width();
+    let full_title = row_label(&wide, TITLE).unwrap().width();
     let mut previous = 0;
     // Each width opens a window; a sample keeps the suite's other timing
     // tests from being starved of CPU while still covering every transition.
-    for width in [1600, 1360, 1120, 1040, 960, 920, 880, 840, 800, 760] {
+    for width in [1600, 1360, 1140, 1120, 1040, 960, 920, 880, 840, 800, 760] {
         let width = width as f32;
         let (_project, harness) = open(egui::vec2(width, 800.0), "Diagram");
-        let level = given_up(&harness, full_name, width);
+        let level = given_up(&harness, full_title, width);
         assert!(
             level >= previous,
             "at {width} px the row gives up less ({level}) than wider ({previous})"
@@ -388,9 +406,9 @@ fn a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summar
         previous = level;
         let expected = match width as u32 {
             1600 => Some(0),
-            960 => Some(0),
-            880 => Some(2),
-            760 => Some(3),
+            960 => Some(2),
+            840 => Some(3),
+            760 => Some(4),
             _ => None,
         };
         if let Some(expected) = expected {
@@ -398,16 +416,16 @@ fn a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summar
         }
     }
 
-    // The harness that is hovered shortens the name itself (KTLO-33, flake 3).
-    let (_project, mut narrow) = open(egui::vec2(880.0, 800.0), "Diagram");
+    // The harness that is hovered shortens the title itself (KTLO-33, flake 3).
+    let (_project, mut narrow) = open(egui::vec2(840.0, 800.0), "Diagram");
     crate::testing::quiesce(&mut narrow);
     assert_eq!(
-        given_up(&narrow, full_name, 880.0),
-        2,
-        "the hovered window shortens the name"
+        given_up(&narrow, full_title, 840.0),
+        3,
+        "the hovered window shortens the title"
     );
-    let name = narrow
-        .query_all_by_role_and_label(Role::Label, NAME)
+    let titles = narrow
+        .query_all_by_role_and_label(Role::Label, TITLE)
         .count();
     assert!(
         crate::testing::hover_until(
@@ -415,15 +433,15 @@ fn a_narrowing_diagram_row_drops_the_kind_then_shortens_the_name_then_the_summar
             |harness| {
                 let main = rect(harness, "Main");
                 harness
-                    .query_all_by_role_and_label(Role::Label, NAME)
+                    .query_all_by_role_and_label(Role::Label, TITLE)
                     .map(|node| node.rect())
                     .find(|found| on_row(main, *found))
             },
             |harness| harness
-                .query_all_by_role_and_label(Role::Label, NAME)
+                .query_all_by_role_and_label(Role::Label, TITLE)
                 .count()
-                > name,
+                > titles,
         ),
-        "hovering the shortened name shows its full text"
+        "hovering the shortened title shows its full text"
     );
 }
