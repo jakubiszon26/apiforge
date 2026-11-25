@@ -29,7 +29,7 @@ pub struct Line {
     pub under: Option<usize>,
 }
 
-fn is_check(kind: NodeKind) -> bool {
+pub(super) fn is_check(kind: NodeKind) -> bool {
     matches!(kind, NodeKind::Assert | NodeKind::Condition)
 }
 

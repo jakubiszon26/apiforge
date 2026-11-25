@@ -142,8 +142,8 @@ fn diag03_each_check_card_states_its_requirement() {
     assert!(
         harness
             .query_by_label_contains("The comparison failed.")
-            .is_some(),
-        "a failed check keeps its message"
+            .is_none(),
+        "the box and the status say a failed comparison (REP-07c)"
     );
 }
 
