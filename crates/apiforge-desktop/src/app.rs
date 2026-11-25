@@ -2428,6 +2428,7 @@ impl App {
                 scenario: None,
                 shared: &[],
                 moves: false,
+                storage_band: 0.0,
             };
             self.canvas.show(ui, &input)
         };
