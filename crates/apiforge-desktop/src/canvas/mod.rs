@@ -562,6 +562,7 @@ pub struct Canvas {
     /// The last frame's focus where it lies now on screen, after a change of
     /// the board that kept the camera; `None` after one that fitted it. A
     /// change pans the selected card only for what it newly hides (#324).
+    /// Without the storage band.
     previous_focus: Option<Rect>,
     /// The window's size and arrangement in the last frame: only their
     /// change fits the board again (UX-18).
@@ -1856,6 +1857,10 @@ impl Canvas {
             extents.extend(readers::bounds(tags, counts));
         }
 
+        // The camera pans from the board's corner, which the band moves: what
+        // places the camera from here on does so in this frame's board.
+        let last_band = std::mem::replace(&mut self.storage_band, input.storage_band);
+        self.camera.pan.y += last_band - self.storage_band;
         let pasted = std::mem::take(&mut self.pasted_pending);
         if let Some(group) = cards
             .iter()
@@ -1887,13 +1892,13 @@ impl Canvas {
         let board_changed = self.place_camera(
             viewport,
             overlays.focus,
-            input.storage_band,
+            last_band,
             rearranged,
             shapes(&cards, &chips, &extents),
         );
         self.keep_selection_in_view(
             viewport,
-            overlays.focus,
+            without_band(overlays.focus, self.storage_band),
             input.selection,
             &cards,
             board_changed,
@@ -3434,13 +3439,11 @@ impl Canvas {
         &mut self,
         viewport: Rect,
         focus: Rect,
-        storage_band: f32,
+        last_band: f32,
         rearranged: bool,
         shapes: Shapes<'_>,
     ) -> bool {
-        // The camera pans from the board's corner, which the band moves.
-        let last_band = std::mem::replace(&mut self.storage_band, storage_band);
-        self.camera.pan.y += last_band - storage_band;
+        let storage_band = self.storage_band;
         if self.fit_pending || (self.last_size == Vec2::ZERO && !self.camera_moved_by_user) {
             self.fit(viewport, focus, shapes);
             return false;
@@ -3488,7 +3491,9 @@ impl Canvas {
     /// partly outside stays so, and the storage band coming and going leaves
     /// the camera where it was (MCP-08a, #324). A card larger than the focus
     /// shows its top left corner. Nothing pans while a drag is under way:
-    /// the card stays under the pointer.
+    /// the card stays under the pointer. `focus` is the board's without the
+    /// storage band, as [`Self::previous_focus`] is: a card the band covers
+    /// is in view once the band has gone.
     fn keep_selection_in_view(
         &mut self,
         viewport: Rect,

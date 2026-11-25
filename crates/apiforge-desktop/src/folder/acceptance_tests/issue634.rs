@@ -177,11 +177,10 @@ fn a_paste_in_the_frame_the_band_comes_or_goes_is_centred() {
     }
 }
 
-/// A panel beside the board resized under the band pans nothing for the
-/// selected card, whose top the person left above the focus: the panel hides
-/// nothing of it.
-#[test]
-fn a_panel_resized_under_the_band_leaves_the_selected_card() {
+/// How far the selected card, its top left 10 px above the board's focus,
+/// moves on screen when the library beside the board folds, under the storage
+/// band or without it.
+fn moved_by_the_library(band: Option<&'static str>) -> egui::Vec2 {
     let (_project, mut harness) = window(WIDE);
     app(&mut harness).review_open(SCENARIO, None);
     settle(&mut harness);
@@ -191,14 +190,11 @@ fn a_panel_resized_under_the_band_leaves_the_selected_card() {
         .selections
         .insert(id.clone(), vec![step.clone()]);
     quiesce(&mut harness);
-    app(&mut harness).storage.forced_label = Some(BAND);
+    choose(&mut harness, "Zoom in");
+    app(&mut harness).storage.forced_label = band;
     harness.run_steps(4);
     let focus = canvas(&harness).debug_focus();
-    let (x, y, zoom) = canvas(&harness).camera().unwrap_or_else(|| {
-        harness.get_by_label("Zoom in").click();
-        harness.run_steps(4);
-        canvas(&harness).camera().expect("the person zoomed")
-    });
+    let (x, y, zoom) = canvas(&harness).camera().expect("the person zoomed");
     let card = canvas(&harness).debug_card_rect(&step).unwrap();
     let to = egui::vec2(
         focus.center().x - card.center().x,
@@ -220,11 +216,21 @@ fn a_panel_resized_under_the_band_leaves_the_selected_card() {
     harness.get_by_label("Collapse block library").click();
     harness.run_steps(6);
     assert_ne!(canvas(&harness).debug_viewport(), viewport, "the panel");
-    assert_eq!(folder(&harness).debug_storage_band(), Some(BAND));
-    let after = canvas(&harness).debug_card_rect(&step).unwrap();
+    assert_eq!(folder(&harness).debug_storage_band(), band);
+    canvas(&harness).debug_card_rect(&step).unwrap().min - before.min
+}
+
+/// A panel beside the board resized under the band moves the selected card,
+/// whose top the person left above the focus, no more than without the band:
+/// the 2 px the board's header settles by.
+#[test]
+fn a_panel_resized_under_the_band_leaves_the_selected_card() {
+    let without = moved_by_the_library(None);
+    assert!(without.length() < 2.5, "without the band: {without:?}");
+    let under = moved_by_the_library(Some(BAND));
     assert!(
-        (after.min - before.min).length() < 1.0,
-        "{before:?} {after:?}"
+        under.length() < without.length() + 0.5,
+        "under the band {under:?}, without it {without:?}"
     );
 }
 
