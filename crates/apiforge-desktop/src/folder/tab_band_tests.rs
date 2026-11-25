@@ -5,7 +5,7 @@
 //! `the_window_with_no_file_open_names_every_control` in
 //! `accessibility_tests.rs`.
 use super::*;
-use crate::testing::{FolderHarness, MINIMUM, WIDE, folder, folder_harness, settle};
+use crate::testing::{FolderHarness, MINIMUM, WIDE, files_row, folder, folder_harness, settle};
 use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use std::fs;
@@ -251,7 +251,7 @@ fn opening_a_file_from_the_project_files_brings_the_band_back() {
         let project = shop();
         let mut harness = open(&project, size, "Code");
         close_every_tab(&mut harness);
-        harness.get_by_role_and_label(Role::Button, NAME).click();
+        files_row(&harness, NAME).click();
         settle(&mut harness);
         assert_eq!(folder(&harness).workbench.tabs().len(), 1, "one tab opens");
         for mode in MODES {

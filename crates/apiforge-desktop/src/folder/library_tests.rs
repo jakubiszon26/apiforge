@@ -6,7 +6,7 @@
 use super::project_interaction_tests::type_into;
 use super::*;
 use crate::testing::{
-    FolderHarness, MINIMUM, WIDE, assert_within_window, folder, folder_harness, settle,
+    FolderHarness, MINIMUM, WIDE, assert_within_window, files_row, folder, folder_harness, settle,
 };
 use apiforge_core::{
     graph::{VALUE_INPUT, create_operator_node},
@@ -896,12 +896,7 @@ fn explorer_labels(harness: &FolderHarness) -> Vec<String> {
 /// Clicks the explorer row named `name` (a tab or the board header may carry
 /// the same name).
 fn click_row(harness: &mut FolderHarness, name: &str) {
-    let tree = harness.get_by_label("Project files").rect();
-    harness
-        .query_all_by_label(name)
-        .find(|node| tree.contains(node.rect().center()))
-        .unwrap_or_else(|| panic!("no explorer row {name:?}"))
-        .click();
+    files_row(harness, name).click();
     settle(harness);
 }
 
@@ -1237,11 +1232,7 @@ fn ktlo11_the_selection_follows_the_tab_strip_on_files() {
             Some(SCENARIO),
             "{context}: the explorer selects the active file"
         );
-        let tree = harness.get_by_label("Project files").rect();
-        let row = harness
-            .query_all_by_label(scenario)
-            .find(|node| tree.contains(node.rect().center()))
-            .expect("the scenario's row");
+        let row = files_row(&harness, scenario);
         assert_eq!(
             row.accesskit_node().toggled(),
             Some(egui::accesskit::Toggled::True),

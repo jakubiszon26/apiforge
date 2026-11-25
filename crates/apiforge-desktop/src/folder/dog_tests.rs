@@ -11,8 +11,8 @@
 use super::project_interaction_tests::{app, choose};
 use super::*;
 use crate::testing::{
-    FolderHarness, MINIMUM, WIDE, assert_disjoint, assert_within_window, folder, folder_harness,
-    settle, settles, shop_project,
+    FolderHarness, MINIMUM, WIDE, assert_disjoint, assert_within_window, files_row, folder,
+    folder_harness, settle, settles, shop_project,
 };
 use egui_kittest::kittest::Queryable;
 use std::path::Path;
@@ -99,7 +99,8 @@ fn closing_the_last_tab_shows_the_drawing_and_opening_a_file_hides_it() {
         // The document list is the way back to the file, and it is in Code.
         harness.get_by_label("Code").click();
         settle(&mut harness);
-        choose(&mut harness, TAB);
+        files_row(&harness, TAB).click();
+        settle(&mut harness);
         harness.get_by_label(mode).click();
         settle(&mut harness);
         assert_eq!(

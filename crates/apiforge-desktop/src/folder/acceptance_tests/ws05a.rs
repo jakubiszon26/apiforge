@@ -65,7 +65,7 @@ pub(super) fn rooms() -> tempfile::TempDir {
     directory
 }
 
-fn id_at(harness: &FolderHarness, path: &str) -> String {
+pub(super) fn id_at(harness: &FolderHarness, path: &str) -> String {
     folder(harness)
         .session
         .as_ref()
@@ -78,7 +78,7 @@ fn id_at(harness: &FolderHarness, path: &str) -> String {
         .to_owned()
 }
 
-fn open_at(root: &std::path::Path, path: &str, size: Vec2) -> (FolderHarness, String) {
+pub(super) fn open_at(root: &std::path::Path, path: &str, size: Vec2) -> (FolderHarness, String) {
     let mut harness = crate::testing::folder_harness_in(root, size, Mode::Diagram);
     app(&mut harness).review_open(path, None);
     settle(&mut harness);
@@ -93,7 +93,7 @@ fn open(path: &str, size: Vec2) -> (tempfile::TempDir, FolderHarness, String) {
 }
 
 /// The text label with exactly `text` on the board's header row.
-fn on_header(harness: &FolderHarness, text: &str) -> Option<Rect> {
+pub(super) fn on_header(harness: &FolderHarness, text: &str) -> Option<Rect> {
     let row = harness.get_by_label("Add step").rect();
     let board = harness.get_by_label("Diagram board").rect();
     harness
@@ -108,7 +108,7 @@ fn editing(harness: &FolderHarness) -> bool {
     harness.query_by_label(FIELD).is_some()
 }
 
-fn double_click(harness: &mut FolderHarness, title: &str) {
+pub(super) fn double_click(harness: &mut FolderHarness, title: &str) {
     // Past the clicks before it, which would make it a third click.
     harness.run_steps(12);
     let at = on_header(harness, title)
@@ -137,7 +137,7 @@ fn press(harness: &mut FolderHarness, modifiers: egui::Modifiers, key: egui::Key
 }
 
 /// The field opened on `title` and `text` typed over the selected title.
-fn type_title(harness: &mut FolderHarness, title: &str, text: &str) {
+pub(super) fn type_title(harness: &mut FolderHarness, title: &str, text: &str) {
     open_field(harness, title);
     if text.is_empty() {
         harness.key_press(egui::Key::Backspace);
@@ -157,7 +157,7 @@ fn type_title(harness: &mut FolderHarness, title: &str, text: &str) {
     );
 }
 
-fn enter(harness: &mut FolderHarness) {
+pub(super) fn enter(harness: &mut FolderHarness) {
     press(harness, egui::Modifiers::NONE, egui::Key::Enter);
 }
 
@@ -184,7 +184,7 @@ fn title_of(harness: &FolderHarness, id: &str) -> String {
 
 /// `text` typed in place of the document's code, as the Code view does, and
 /// analysed; not saved.
-fn write_code(harness: &mut FolderHarness, id: &str, text: &str) {
+pub(super) fn write_code(harness: &mut FolderHarness, id: &str, text: &str) {
     let session = app(harness).session.as_mut().unwrap();
     session.edit_source(id, text, CODE).unwrap();
     session.settle(id).unwrap();
@@ -193,7 +193,7 @@ fn write_code(harness: &mut FolderHarness, id: &str, text: &str) {
 }
 
 /// `text` with an error: the last valid version stays on the board.
-fn broken(text: &str) -> String {
+pub(super) fn broken(text: &str) -> String {
     text.replace("assert first.status == 201", "assert first.status ==")
 }
 

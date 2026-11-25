@@ -1,5 +1,6 @@
 use super::*;
 use crate::buffers::APPLY_DELAY;
+use crate::testing::{FolderHarness, WIDE, files_row, folder, folder_harness_in};
 
 #[path = "acceptance_tests.rs"]
 mod acceptance_tests;
@@ -1309,56 +1310,6 @@ fn painted(
     texts
 }
 
-/// The centre of a painted explorer row, which is left of the code area.
-fn row_at(app: &mut FolderApp, context: &egui::Context, name: &str) -> egui::Pos2 {
-    fn find(app: &mut FolderApp, context: &egui::Context, name: &str) -> Option<egui::Pos2> {
-        fn collect(
-            shape: &egui::epaint::Shape,
-            clip: egui::Rect,
-            out: &mut Vec<(String, egui::Rect, egui::Rect)>,
-        ) {
-            match shape {
-                egui::epaint::Shape::Vec(shapes) => {
-                    for shape in shapes {
-                        collect(shape, clip, out);
-                    }
-                }
-                egui::epaint::Shape::Text(text) => out.push((
-                    text.galley.job.text.clone(),
-                    text.galley.rect.translate(text.pos.to_vec2()),
-                    clip,
-                )),
-                _ => {}
-            }
-        }
-        let mut output = context.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1600.0, 1000.0),
-                )),
-                ..Default::default()
-            },
-            |ui| app.ui(ui),
-        );
-        output.textures_delta.clear();
-        let mut texts = Vec::new();
-        for shape in &output.shapes {
-            collect(&shape.shape, shape.clip_rect, &mut texts);
-        }
-        texts
-            .into_iter()
-            .find(|(text, rect, clip)| {
-                text == name
-                    && rect.center().x < 230.0
-                    && rect.center().y > 90.0
-                    && clip.contains(rect.center())
-            })
-            .map(|(_, rect, _)| rect.center())
-    }
-    find(app, context, name).unwrap_or_else(|| panic!("no visible explorer row {name}"))
-}
-
 /// Shows the explorer in `mode`: Code's own panel, or the *Files* tab of the
 /// panel beside the board in Diagram (KTLO-11), chosen by a click.
 fn show_explorer(app: &mut FolderApp, context: &egui::Context, mode: Mode) {
@@ -1405,53 +1356,79 @@ fn ktlo11_one_click_on_files_opens_a_file_and_the_project_row_is_its_own_destina
     explorer_clicks(Mode::Diagram);
 }
 
-fn explorer_clicks(mode: Mode) {
+/// The shop's folder window with a text file beside it, listing its files in
+/// `mode`.
+fn listed(mode: Mode) -> (tempfile::TempDir, FolderHarness) {
     let directory = shop();
     std::fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
-    let (context, mut app) = open(directory.path());
-    watch(&mut app, &context);
-    show_explorer(&mut app, &context, mode);
-    let scenario = document(&app, SCENARIO);
-    let component = document(&app, COMPONENT);
-    // Another document is active to begin with.
-    app.workbench.open(&component);
-    frame(&mut app, &context, vec![]);
-    app.workbench.expanded.insert("scenarios".into());
-    frame(&mut app, &context, vec![]);
+    let mut harness = folder_harness_in(directory.path(), WIDE, mode);
+    if mode == Mode::Diagram {
+        project_interaction_tests::choose(&mut harness, "Files");
+    }
+    (directory, harness)
+}
 
-    let at = row_at(&mut app, &context, file_name(SCENARIO));
-    click(&mut app, &context, at);
+fn click_row(harness: &mut FolderHarness, file: &str) {
+    files_row(harness, file).click();
+    crate::testing::settle(harness);
+}
+
+fn explorer_clicks(mode: Mode) {
+    let (_directory, mut harness) = listed(mode);
+    let scenario = document(folder(&harness), SCENARIO);
+    let component = document(folder(&harness), COMPONENT);
+    let active = |harness: &FolderHarness| {
+        let app = folder(harness);
+        app.workbench.active().map(str::to_owned)
+    };
+    // Another document is active to begin with.
+    let app = harness.state_mut().as_mut().unwrap();
+    app.workbench.open(&component);
+    app.workbench.expanded.insert("scenarios".into());
+    crate::testing::settle(&mut harness);
+
+    click_row(&mut harness, file_name(SCENARIO));
     assert_eq!(
-        app.workbench.active(),
-        Some(scenario.as_str()),
+        active(&harness).as_ref(),
+        Some(&scenario),
         "one click must open the file it selects"
     );
     // Clicking it again keeps one tab for it.
-    let tabs = app.workbench.tabs().len();
-    click(&mut app, &context, at);
-    assert_eq!(app.workbench.tabs().len(), tabs);
-    assert_eq!(app.workbench.active(), Some(scenario.as_str()));
+    let tabs = folder(&harness).workbench.tabs().len();
+    click_row(&mut harness, file_name(SCENARIO));
+    assert_eq!(folder(&harness).workbench.tabs().len(), tabs);
+    assert_eq!(active(&harness).as_ref(), Some(&scenario));
 
     // The project itself is a row, and new items go into it.
-    let root = row_at(&mut app, &context, "Demo shop");
-    click(&mut app, &context, root);
+    click_row(&mut harness, "Demo shop");
+    let app = folder(&harness);
     assert_eq!(app.explorer.selected.as_deref(), Some(""));
     let rows = app.explorer_rows();
     let selected = rows.iter().find(|row| row.path.is_empty()).unwrap();
     assert_eq!(explorer::folder_of(Some(selected)), "");
     assert!(!selected.portable, "the project is not renamed or deleted");
     // Selecting the project does not hide its tree; its chevron folds it.
-    assert!(app.explorer_rows().len() > 1);
-    let chevron = egui::pos2(19.0, root.y);
-    click(&mut app, &context, chevron);
+    assert!(rows.len() > 1);
+    let row = files_row(&harness, "Demo shop").rect();
+    let chevron = row.left_center() + egui::vec2(11.0, 0.0);
+    for folded in [true, false] {
+        harness.hover_at(chevron);
+        harness.step();
+        harness.drag_at(chevron);
+        harness.step();
+        harness.drop_at(chevron);
+        crate::testing::settle(&mut harness);
+        assert_eq!(
+            folder(&harness).explorer_rows().len() == 1,
+            folded,
+            "the chevron folds the project and unfolds it"
+        );
+    }
     assert_eq!(
-        app.explorer_rows().len(),
-        1,
-        "the chevron folds the project"
+        folder(&harness).workbench.mode,
+        mode,
+        "the explorer keeps the mode"
     );
-    click(&mut app, &context, chevron);
-    assert!(app.explorer_rows().len() > 1);
-    assert_eq!(app.workbench.mode, mode, "the explorer keeps the mode");
 }
 
 #[test]
@@ -1466,36 +1443,33 @@ fn ktlo11_the_keyboard_on_files_reaches_the_project_row_and_opens_a_text_file() 
 }
 
 fn explorer_project_row(mode: Mode) {
-    let directory = shop();
-    std::fs::write(directory.path().join("README.md"), "# Shop\n").unwrap();
-    let (context, mut app) = open(directory.path());
-    watch(&mut app, &context);
-    show_explorer(&mut app, &context, mode);
-    let at = row_at(&mut app, &context, "README.md");
-    click(&mut app, &context, at);
+    let (_directory, mut harness) = listed(mode);
+    click_row(&mut harness, "README.md");
     assert_eq!(
-        app.workbench.active(),
+        folder(&harness).workbench.active(),
         Some(text_tab("README.md").as_str()),
         "a project text file opens in its own tab"
     );
     // Up from the first file reaches the project row, which folds with Left.
-    context.memory_mut(|memory| memory.request_focus(egui::Id::new("folder-explorer")));
-    frame(&mut app, &context, vec![]);
+    harness
+        .ctx
+        .memory_mut(|memory| memory.request_focus(egui::Id::new("folder-explorer")));
+    harness.step();
     for _ in 0..12 {
-        frame(&mut app, &context, vec![key(Key::ArrowUp, Modifiers::NONE)]);
+        harness.key_press(Key::ArrowUp);
+        harness.step();
     }
-    assert_eq!(app.explorer.selected.as_deref(), Some(""));
-    frame(
-        &mut app,
-        &context,
-        vec![key(Key::ArrowLeft, Modifiers::NONE)],
+    assert_eq!(folder(&harness).explorer.selected.as_deref(), Some(""));
+    harness.key_press(Key::ArrowLeft);
+    crate::testing::settle(&mut harness);
+    assert_eq!(
+        folder(&harness).explorer_rows().len(),
+        1,
+        "Left folds the project"
     );
-    assert_eq!(app.explorer_rows().len(), 1, "Left folds the project");
-    frame(
-        &mut app,
-        &context,
-        vec![key(Key::ArrowRight, Modifiers::NONE)],
-    );
+    harness.key_press(Key::ArrowRight);
+    crate::testing::settle(&mut harness);
+    let app = folder(&harness);
     assert!(app.explorer_rows().len() > 1);
     assert_eq!(app.workbench.mode, mode, "the explorer keeps the mode");
 }
