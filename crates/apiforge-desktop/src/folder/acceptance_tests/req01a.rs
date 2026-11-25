@@ -1933,3 +1933,41 @@ fn review_req01a() {
         shot(&mut harness, &format!("req01a-long-title-steps-{at}"));
     }
 }
+
+/// MOCK (REQ-01f): *Failed* is on in Run results and a passed check is
+/// clicked in Steps: Today and options A, B and C.
+#[test]
+#[ignore = "design review capture; run with tools/gui/review.sh"]
+fn review_req01f() {
+    use crate::report::MOCK;
+    use std::sync::atomic::Ordering::Relaxed;
+    let board = egui::vec2(960.0, 760.0);
+    for (mode, at) in [(0, "today"), (1, "a"), (2, "b"), (3, "c")] {
+        for (size, width) in [(board, "board"), (MINIMUM, "960"), (WIDE, "1600")] {
+            MOCK.store(mode, Relaxed);
+            let (_project, mut harness, id) = labels(size, &failing());
+            let (main, _, _) = graphs(&harness, &id);
+            steps(&mut harness);
+            choose(&mut harness, "Run simulation");
+            finish_run(&mut harness);
+            harness.get_by_label("Failed 1").click();
+            settle(&mut harness);
+            // The check `status == 403` of *No token*, as a click on its
+            // line in Steps selects it.
+            let check = node(&main, "no_token_status").id.clone();
+            if size == board {
+                let name = buttons(&harness, |name| name.contains(" · no_token_status of "))
+                    .remove(0)
+                    .name;
+                choose(&mut harness, &name);
+                assert_eq!(folder(&harness).selections[&id], [check]);
+            } else {
+                app(&mut harness).selections.insert(id.clone(), vec![check]);
+                settle(&mut harness);
+            }
+            harness.run_steps(4);
+            capture(&mut harness, &format!("req01f-{at}-{width}"), None);
+        }
+    }
+    MOCK.store(0, Relaxed);
+}

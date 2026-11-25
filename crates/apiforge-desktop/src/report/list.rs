@@ -457,6 +457,8 @@ pub(super) struct RowView<'a> {
     /// The step did not run: it took no time.
     pub ran: bool,
     pub first: bool,
+    /// MOCK (REQ-01f) B: 1 the request of the guest row, 2 the guest row.
+    pub guest: u8,
 }
 
 /// What a click on a row asks for.
@@ -608,7 +610,7 @@ pub(super) fn draw(ui: &mut Ui, view: &RowView<'_>) -> Drawn {
     });
     let failed_check =
         view.shape == Shape::Check && matches!(step.status, StepStatus::Failed | StepStatus::Error);
-    let painter = ui.painter().clone();
+    let mut painter = ui.painter().clone();
     if active {
         painter.rect_filled(rect, 6.0, theme::ACCENT_SOFT);
     } else if failed_check {
@@ -623,6 +625,10 @@ pub(super) fn draw(ui: &mut Ui, view: &RowView<'_>) -> Drawn {
             Stroke::new(1.5, theme::ACCENT),
             egui::StrokeKind::Inside,
         );
+    }
+    // MOCK (REQ-01f) B: a guest of the filter is greyed.
+    if view.guest != 0 {
+        painter.set_opacity(0.5);
     }
     let left = rect.left() + indent;
     let badge_x = left + NUMBER_WIDTH + FOLD_WIDTH + 10.0;
@@ -667,6 +673,7 @@ pub(super) fn draw(ui: &mut Ui, view: &RowView<'_>) -> Drawn {
         right -= 10.0;
     }
     let tail: Option<(String, Color32)> = match view.shape {
+        _ if view.guest == 2 => Some(("passed · shown while selected".to_owned(), theme::TEXT)),
         Shape::Check if failed_check => Some((actual_text(step), theme::DANGER)),
         Shape::Check | Shape::Lone if step.status != StepStatus::Passed || !view.ran => {
             Some((view.words.clone(), theme::MUTED))
@@ -696,7 +703,11 @@ pub(super) fn draw(ui: &mut Ui, view: &RowView<'_>) -> Drawn {
             egui::FontId::proportional(11.0),
             colour,
         );
-        job.wrap.max_width = (room / 3.0).max(24.0);
+        job.wrap.max_width = if view.guest == 2 {
+            room * 0.62
+        } else {
+            (room / 3.0).max(24.0)
+        };
         job.wrap.max_rows = 1;
         job.wrap.break_anywhere = true;
         job.wrap.overflow_character = Some('…');

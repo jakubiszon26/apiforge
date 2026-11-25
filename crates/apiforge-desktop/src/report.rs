@@ -26,6 +26,12 @@ mod comparison;
 mod detail;
 mod list;
 pub use list::Line;
+
+/// MOCK (REQ-01f, mock branch only): what Run results do when a row that
+/// *Failed* leaves out is selected outside them. 0 today, 1 A (*Failed*
+/// gives way to *All*), 2 B (the row is a guest of the filter), 3 C (the
+/// details say why, with *Show all*).
+pub static MOCK: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 #[cfg(test)]
 pub use list::arrange;
 /// How a check's row is marked, and a URL's path, for *Steps* (REQ-01a).
@@ -1139,6 +1145,25 @@ impl ReportPanel {
         if failed == 0 {
             self.failed_only = false;
         }
+        // MOCK (REQ-01f): the row selected outside that *Failed* leaves out.
+        let mock = MOCK.load(std::sync::atomic::Ordering::Relaxed);
+        let outside = if mock != 0 && self.failed_only && !self.hid {
+            let view = self.view(&rows, ends);
+            resolve_selected(
+                &rows,
+                self.selected_key.as_deref(),
+                context.selected_node_id,
+            )
+            .and_then(|row| rows.iter().position(|other| other.key == row.key))
+            .filter(|index| !view.kept[*index])
+        } else {
+            None
+        };
+        if mock == 1 && outside.is_some() {
+            // A: *Failed* gives way.
+            self.failed_only = false;
+            self.in_view = None;
+        }
         let heads: Vec<String> = self
             .arranged
             .lines
@@ -1182,7 +1207,37 @@ impl ReportPanel {
         }
         ui.add_space(4.0);
 
-        let view = self.view(&rows, ends);
+        let mut view = self.view(&rows, ends);
+        if mock == 2
+            && let Some(index) = outside
+        {
+            // B: the row is listed in its place, with its request.
+            let head = view
+                .lines
+                .iter()
+                .find(|line| line.row == index)
+                .and_then(|line| line.under);
+            for row in std::iter::once(index).chain(head) {
+                if !view.kept[row] {
+                    view.kept[row] = true;
+                    view.guest[row] = if row == index { 2 } else { 1 };
+                }
+            }
+            view.fold(&rows, &self.folded);
+        }
+        // C: nothing is marked, and the details say why.
+        let why = outside.filter(|_| mock == 3).map(|index| {
+            let head = self
+                .arranged
+                .lines
+                .iter()
+                .find(|line| line.row == index)
+                .and_then(|line| line.under);
+            (
+                self.arranged.entries[index].predicate.clone(),
+                rows[head.unwrap_or(index)].step.display_name().to_owned(),
+            )
+        });
         let mut selected = resolve_selected(
             &rows,
             self.selected_key.as_deref(),
@@ -1191,6 +1246,7 @@ impl ReportPanel {
         // A row the list does not show is never the selection: the step it
         // is listed under is, or else the nearest row shown (REP-07c).
         if let Some(hidden) = selected
+            && why.is_none()
             && let Some(target) = view.stands_for(&rows, &hidden.key)
         {
             let row = &rows[target];
@@ -1205,6 +1261,9 @@ impl ReportPanel {
             }
         }
         self.hid = false;
+        if why.is_some() {
+            selected = None;
+        }
         let selected = selected.cloned();
         // The rows of a run that just ended stand where they stay.
         let going = run.status == RunStatus::Running;
@@ -1259,6 +1318,12 @@ impl ReportPanel {
                         .id_salt("report-step-details")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
+                            if let Some((predicate, name)) = &why {
+                                if mock_why(ui, predicate.as_deref(), name) {
+                                    controls.chosen = Some(Chosen::All);
+                                }
+                                return;
+                            }
                             let requirement = selected
                                 .as_ref()
                                 .and_then(|row| Requirement::of(context.graphs?.node(row)?));
@@ -1413,6 +1478,7 @@ impl ReportPanel {
             lines: lines.clone(),
             checks,
             kept,
+            guest: vec![0; rows.len()],
             shown: Vec::new(),
         };
         view.fold(rows, &self.folded);
@@ -1536,6 +1602,7 @@ impl ReportPanel {
                         words: row.words(ends),
                         ran: row.step.cause.is_none(),
                         first: index == 0,
+                        guest: view.guest[line.row],
                     };
                     let drawn = list::draw(ui, &drawing);
                     // Selected by the application, it comes into view once;
@@ -2250,6 +2317,8 @@ struct View {
     checks: Vec<(usize, usize)>,
     /// The rows *Failed* keeps.
     kept: Vec<bool>,
+    /// MOCK (REQ-01f) B: 1 the request of the guest row, 2 the guest row.
+    guest: Vec<u8>,
     /// The lines shown, in order.
     shown: Vec<Line>,
 }
@@ -2295,6 +2364,33 @@ impl View {
                 })
             })
     }
+}
+
+/// MOCK (REQ-01f) C: why the selected step has no row and no details, and
+/// *Show all*. True when the button is clicked.
+fn mock_why(ui: &mut Ui, predicate: Option<&str>, name: &str) -> bool {
+    use egui::text::{LayoutJob, TextFormat};
+    let plain = TextFormat::simple(egui::FontId::proportional(12.5), theme::TEXT);
+    let bold = TextFormat::simple(egui::FontId::new(12.5, theme::bold_family()), theme::TEXT);
+    let mut job = LayoutJob::default();
+    if let Some(predicate) = predicate {
+        job.append(
+            predicate,
+            0.0,
+            TextFormat::simple(egui::FontId::monospace(11.5), theme::TEXT),
+        );
+        job.append(" of ", 0.0, plain.clone());
+    }
+    job.append(name, 0.0, bold.clone());
+    job.append(" passed and is not listed under ", 0.0, plain.clone());
+    job.append("Failed", 0.0, bold);
+    job.append(".", 0.0, plain);
+    job.wrap.max_width = ui.available_width();
+    ui.add_space(6.0);
+    ui.label(job);
+    ui.add_space(6.0);
+    ui.button("Show all")
+        .clicked()
 }
 
 /// The list's controls above the run: *All | Failed* and *Collapse
