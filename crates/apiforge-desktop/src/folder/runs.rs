@@ -932,7 +932,27 @@ impl FolderApp {
                     &assignment.name,
                     assignment.target_id.as_deref(),
                 ) {
-                    Ok(assigned) => {
+                    Ok(mut assigned) => {
+                        // Main and its cleanup share one namespace of handles
+                        // (DIAG-17): a new variable's is free on both boards.
+                        if assignment.target_id.is_none()
+                            && let Some(sibling) = sibling_of(&model, cleanup)
+                            && let Some(variable) = assigned
+                                .graph
+                                .nodes
+                                .iter_mut()
+                                .find(|node| node.id == assigned.variable_id)
+                        {
+                            let base = apiforge_core::handle::handle_base(&assignment.name);
+                            let board = &graph_of(&model, cleanup).nodes;
+                            variable.handle =
+                                apiforge_core::handle::unique_handle(&base, |handle| {
+                                    board
+                                        .iter()
+                                        .chain(&sibling.nodes)
+                                        .any(|node| node.handle == handle)
+                                });
+                        }
                         self.apply_edit(
                             &id,
                             &model,
