@@ -7,7 +7,7 @@
 //! no diagram and offers *Show code*, which shows it in Code.
 use super::ux31::window;
 use super::*;
-use crate::testing::{MINIMUM, capture};
+use crate::testing::{MINIMUM, capture, files_row};
 
 const MANIFEST: &str = "apiforge.project.json";
 const SCENARIO: &str = "scenarios/promotion-and-cart-price.afs";
@@ -20,12 +20,7 @@ const FILE_ACTIONS: [&str; 4] = ["Open as text", "Rename…", "Move to…", "Del
 
 /// The Explorer row named `name`, clicked with `button`.
 fn click_row(harness: &mut FolderHarness, name: &str, button: egui::PointerButton) {
-    let tree = harness.get_by_label("Project files").rect();
-    harness
-        .query_all_by_label(name)
-        .find(|node| tree.contains(node.rect().center()))
-        .unwrap_or_else(|| panic!("no explorer row {name:?}"))
-        .click_button(button);
+    files_row(harness, name).click_button(button);
     settle(harness);
 }
 

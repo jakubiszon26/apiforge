@@ -9,6 +9,13 @@ use std::collections::{BTreeSet, HashSet};
 
 const ROW_HEIGHT: f32 = 24.0;
 const INDENT: f32 = 14.0;
+/// Between a row's title and its file name.
+const FILE_NAME_GAP: f32 = 8.0;
+/// The least width a row's file name is cut to; with less room it is left
+/// out rather than cut to a stub (WS-05b).
+const FILE_NAME_MIN_WIDTH: f32 = 40.0;
+/// The widest a row's menu gets for the file name and title above its items.
+const MENU_HEAD_WIDTH: f32 = 280.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RowKind {
@@ -37,13 +44,23 @@ pub struct Row {
     pub portable: bool,
     /// A registered document whose file is not on disk.
     pub missing: bool,
+    /// What a registered scenario or component is called (WS-05b).
+    pub title: Option<String>,
 }
 
 impl Row {
+    /// The file's name, which file operations act on.
     pub fn name(&self) -> &str {
         match &self.kind {
             RowKind::Root { name } => name,
             _ => file_name(&self.path),
+        }
+    }
+    /// The row's accessible name: what it reads, then the file it stands for.
+    fn accessible_name(&self) -> String {
+        match &self.title {
+            Some(title) => format!("{title}, {}", self.name()),
+            None => self.name().to_owned(),
         }
     }
     /// A real directory: the subject of renames, moves and deletion.
@@ -99,6 +116,16 @@ pub struct Registered {
     /// The session found no file for it. A document that a bounded scan left
     /// out is not missing.
     pub missing: bool,
+    pub title: Option<String>,
+}
+
+/// The title *Files*, the tabs and the file dialogs show of a document: the
+/// one of its last valid code. A document without one, or without its file,
+/// is shown by its file name.
+pub(super) fn listed_title(document: &apiforge_project::DocumentSession) -> Option<String> {
+    (document.unavailable() != Some(Unavailable::Missing))
+        .then(|| diagram::shown_title(document.shared_model()?))
+        .flatten()
 }
 
 /// Every row of the tree, in explorer order, before folding. The first row is
@@ -148,6 +175,7 @@ pub fn tree(scan: Option<&TreeScan>, documents: &[Registered], name: &str) -> Ve
         },
         portable: false,
         missing: false,
+        title: None,
     })
     .chain(entries.into_iter().map(|entry| {
         let document = documents
@@ -169,6 +197,7 @@ pub fn tree(scan: Option<&TreeScan>, documents: &[Registered], name: &str) -> Ve
             path: entry.path,
             kind,
             portable: entry.portable,
+            title: document.and_then(|document| document.title.clone()),
         }
     }))
     .collect()
@@ -258,6 +287,7 @@ impl FolderApp {
                 path: document.entry().path.as_str().to_owned(),
                 kind: document.entry().kind,
                 missing: document.unavailable() == Some(Unavailable::Missing),
+                title: listed_title(document),
             })
             .collect();
         visible(
@@ -269,6 +299,16 @@ impl FolderApp {
             &self.workbench.expanded,
             self.explorer.root_collapsed,
         )
+    }
+
+    /// The title of the document at `path`, as its row reads it.
+    pub(super) fn title_at(&self, path: &str) -> Option<String> {
+        self.session
+            .as_ref()?
+            .documents()
+            .iter()
+            .find(|document| document.entry().path.as_str() == path)
+            .and_then(listed_title)
     }
 
     /// Selects and reveals the active document when another one becomes active.
@@ -929,6 +969,47 @@ pub(super) struct RowFace<'a> {
     focused: bool,
 }
 
+/// From the top of a galley to the line its first row's letters stand on.
+fn first_ascent(galley: &egui::Galley) -> f32 {
+    galley
+        .rows
+        .first()
+        .and_then(|row| row.glyphs.first())
+        .map_or(0.0, |glyph| glyph.pos.y)
+}
+
+/// The head of a titled row's menu: the file its items act on, as a heading,
+/// and the title under it, each on one line cut at the menu's edge.
+fn menu_head(ui: &mut egui::Ui, file: &str, title: &str) {
+    let name = egui::FontId::new(theme::FONT_BODY, theme::bold_family());
+    let under = egui::FontId::proportional(theme::FONT_LABEL);
+    for (text, font, colour) in [(file, name, theme::TEXT), (title, under, theme::MUTED)] {
+        let mut job = egui::text::LayoutJob::single_section(
+            text.to_owned(),
+            egui::TextFormat::simple(font, colour),
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(MENU_HEAD_WIDTH);
+        let line = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        ui.add(egui::Label::new(line));
+    }
+    ui.add_space(theme::SPACE_SM);
+}
+
+/// Says `line` on hover, under the document's title where it has one.
+pub(super) fn titled_hover(
+    response: egui::Response,
+    title: Option<&str>,
+    line: &str,
+) -> egui::Response {
+    response.on_hover_ui(|ui| {
+        ui.set_max_width(ui.spacing().tooltip_width);
+        if let Some(title) = title {
+            ui.label(title);
+        }
+        ui.label(line);
+    })
+}
+
 fn explorer_row(
     ui: &mut egui::Ui,
     row: &Row,
@@ -957,7 +1038,7 @@ fn explorer_row(
             },
             true,
             selected,
-            row.name(),
+            row.accessible_name(),
         )
     });
     if row.is_folder() {
@@ -965,14 +1046,18 @@ fn explorer_row(
             node.set_expanded(expanded);
         });
     }
-    let response = response.on_hover_text(match (&row.kind, row.missing) {
-        (RowKind::Root { .. }, _) => "The project folder".to_owned(),
-        (_, true) => format!("{} — missing from the folder", row.path),
-        (RowKind::Source, _) => format!("{} — not registered in this project", row.path),
-        (RowKind::Link, _) => format!("{} — a link; not followed", row.path),
-        _ if row.is_manifest() => format!("{} — the project file, kept by API Forge", row.path),
-        _ => row.path.clone(),
-    });
+    let response = titled_hover(
+        response,
+        row.title.as_deref(),
+        &match (&row.kind, row.missing) {
+            (RowKind::Root { .. }, _) => "The project folder".to_owned(),
+            (_, true) => format!("{} — missing from the folder", row.path),
+            (RowKind::Source, _) => format!("{} — not registered in this project", row.path),
+            (RowKind::Link, _) => format!("{} — a link; not followed", row.path),
+            _ if row.is_manifest() => format!("{} — the project file, kept by API Forge", row.path),
+            _ => row.path.clone(),
+        },
+    );
     let painter = ui.painter_at(rect);
     let drop_target = row.is_folder()
         && response
@@ -1024,19 +1109,33 @@ fn explorer_row(
         _ => theme::MUTED,
     };
     let badge_width = if status.is_some() { 16.0 } else { 0.0 };
-    let mut job = egui::text::LayoutJob::single_section(
-        row.name().to_owned(),
-        egui::TextFormat::simple(egui::FontId::proportional(theme::FONT_BODY), text_colour),
-    );
-    job.wrap = egui::text::TextWrapping::truncate_at_width(
-        (rect.right() - x - badge_width - 6.0).max(0.0),
-    );
-    let galley = painter.layout_job(job);
-    painter.galley(
-        egui::pos2(x, rect.center().y - galley.size().y / 2.0),
-        galley,
+    let end = rect.right() - badge_width - 6.0;
+    let layout = |text: &str, size: f32, colour: egui::Color32, room: f32| {
+        let mut job = egui::text::LayoutJob::single_section(
+            text.to_owned(),
+            egui::TextFormat::simple(egui::FontId::proportional(size), colour),
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
+        painter.layout_job(job)
+    };
+    let label = layout(
+        row.title.as_deref().unwrap_or(row.name()),
+        theme::FONT_BODY,
         text_colour,
+        end - x,
     );
+    // The file name takes only what the title leaves of the row.
+    let name_x = x + label.size().x + FILE_NAME_GAP;
+    let file_name = (row.title.is_some() && !label.elided)
+        .then(|| layout(row.name(), theme::FONT_LABEL, theme::MUTED, end - name_x))
+        .filter(|name| !name.elided || name.size().x >= FILE_NAME_MIN_WIDTH);
+    // Both stand on one line of text, as in a paragraph.
+    let top = rect.center().y - label.size().y / 2.0;
+    if let Some(name) = file_name {
+        let top = top + first_ascent(&label) - first_ascent(&name);
+        painter.galley(egui::pos2(name_x, top), name, theme::MUTED);
+    }
+    painter.galley(egui::pos2(x, top), label, text_colour);
     if let Some(status) = status {
         let centre = egui::pos2(rect.right() - 10.0, rect.center().y);
         match status {
@@ -1084,6 +1183,9 @@ fn explorer_row(
     }
     response.context_menu(|ui| {
         widgets::name_menu(ui, &format!("{} menu", row.name()));
+        if let Some(title) = &row.title {
+            menu_head(ui, row.name(), title);
+        }
         actions.push(Action::Select(row.path.clone()));
         match &row.kind {
             RowKind::Document { id, .. } if ui.button("Open").clicked() => {
@@ -1213,12 +1315,14 @@ mod tests {
                 path: "flows/main.afs".into(),
                 kind: DocumentKind::Scenario,
                 missing: false,
+                title: Some("Main".into()),
             },
             Registered {
                 id: "gone".into(),
                 path: "lost/gone.afs".into(),
                 kind: DocumentKind::Component,
                 missing: true,
+                title: None,
             },
             // Left out of a bounded scan, but present.
             Registered {
@@ -1226,6 +1330,7 @@ mod tests {
                 path: "deep/far.afs".into(),
                 kind: DocumentKind::Scenario,
                 missing: false,
+                title: Some("Main".into()),
             },
         ];
         let rows = tree(Some(&scan), &documents, "Shop");
@@ -1252,6 +1357,9 @@ mod tests {
         assert_eq!(rows[4].kind, RowKind::Source);
         assert!(matches!(&rows[5].kind, RowKind::Document { id, .. } if id == "main"));
         assert_eq!(rows[8].kind, RowKind::File);
+        assert_eq!(rows[5].name(), "main.afs", "the file, not the title");
+        assert_eq!(rows[5].accessible_name(), "Main, main.afs");
+        assert_eq!(rows[7].accessible_name(), "gone.afs");
 
         let folded = visible(rows.clone(), &BTreeSet::new(), false);
         assert_eq!(

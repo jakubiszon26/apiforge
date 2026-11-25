@@ -1442,9 +1442,8 @@ mod mcp08a {
             &mut harness,
             Instant::now(),
             "the new document",
-            // The explorer's row, named exactly by the file: the bar's
-            // last change names the file too, inside a longer text.
-            |harness| harness.query_by_label("added-by-agent.afs").is_some(),
+            // The row: the bar's last change names the file too.
+            |harness| crate::testing::query_files_row(harness, "added-by-agent.afs").is_some(),
         );
         assert!(taken <= FOLLOW, "listed after {taken:?}");
         assert!(
@@ -6814,7 +6813,8 @@ mod mcp16 {
         );
 
         // A file activated in the explorer; the agent goes on meanwhile.
-        choose(&mut harness, "active-promotion.afs");
+        crate::testing::files_row(&harness, "active-promotion.afs").click();
+        settle(&mut harness);
         assert_eq!(active(&harness).as_deref(), Some(promotion.as_str()));
         assert!(!pressed(&harness), "the explorer unpins");
         agent_notes(&mut harness, &mut server, PRODUCT, "Changed by the agent.");

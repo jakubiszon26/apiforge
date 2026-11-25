@@ -7,7 +7,7 @@
 use super::ux31::{by_path, window};
 use super::*;
 use crate::folder::tests::project_interaction_tests::reveal;
-use crate::testing::{MINIMUM, capture};
+use crate::testing::{MINIMUM, capture, files_row};
 
 const CHECKOUT: &str = "components/checkout-flow.afs";
 const CHECKOUT_NAME: &str = "Checkout flow";
@@ -143,12 +143,7 @@ fn ux22_criteria_1_2_add_step_leaves_out_the_component_being_edited() {
 
 /// Clicks the Explorer row named `name`.
 fn click_row(harness: &mut FolderHarness, name: &str) {
-    let tree = harness.get_by_label("Project files").rect();
-    harness
-        .query_all_by_label(name)
-        .find(|node| tree.contains(node.rect().center()))
-        .unwrap_or_else(|| panic!("no explorer row {name:?}"))
-        .click();
+    files_row(harness, name).click();
     settle(harness);
 }
 

@@ -4,7 +4,8 @@ use crate::app::{App, Source, default_workspace};
 use crate::folder::{FolderApp, Mode};
 use eframe::egui;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::Node;
+use egui_kittest::kittest::{NodeT, Queryable};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -188,6 +189,27 @@ pub fn managed_harness(data: &Path, size: egui::Vec2) -> FolderHarness {
     *harness.state_mut() = Some(app);
     settle(&mut harness);
     harness
+}
+
+/// The row of *Files* that stands for `file`, a file or folder name: a row
+/// that reads a title is named by it and then, after a comma, by its file
+/// (WS-05b), so the end of the accessible name is matched.
+pub fn query_files_row<'h>(harness: &'h FolderHarness, file: &str) -> Option<Node<'h>> {
+    let tree = harness.get_by_label("Project files").rect();
+    harness
+        .query_all_by_role(egui::accesskit::Role::Button)
+        .find(|node| {
+            let name = node.accesskit_node().label().unwrap_or_default();
+            name.strip_suffix(file)
+                .is_some_and(|title| title.is_empty() || title.ends_with(", "))
+                && tree.contains(node.rect().center())
+        })
+}
+
+/// The same row, which must be listed. Every test that looks for a row by its
+/// file goes through this.
+pub fn files_row<'h>(harness: &'h FolderHarness, file: &str) -> Node<'h> {
+    query_files_row(harness, file).unwrap_or_else(|| panic!("no row of Files for {file:?}"))
 }
 
 pub fn folder(harness: &FolderHarness) -> &FolderApp {
@@ -419,7 +441,6 @@ pub fn field_row(harness: &FolderHarness, field: &str) -> f32 {
 /// Chooses `‹field› == ‹value›` in the open menu *Add a check* of `field`
 /// (DIAG-08, DIAG-19). The pointer then leaves for the header's empty top margin.
 pub fn choose_equals(harness: &mut FolderHarness, field: &str) {
-    use egui_kittest::kittest::NodeT;
     harness
         .query_all_by_label_contains(" == ")
         .find(|item| {
@@ -758,7 +779,6 @@ mod review {
     #[test]
     #[ignore = "design review capture; run with tools/gui/review.sh"]
     fn review_ux01_two_checks() {
-        use egui_kittest::kittest::NodeT;
         fn click(harness: &mut FolderHarness, label: &str) {
             harness.get_by_label(label).scroll_to_me();
             settle(harness);
@@ -833,12 +853,7 @@ mod review {
             settle(harness);
         }
         fn explorer_row(harness: &mut FolderHarness, name: &str) {
-            let tree = harness.get_by_label("Project files").rect();
-            harness
-                .query_all_by_label(name)
-                .find(|node| tree.contains(node.rect().center()))
-                .unwrap_or_else(|| panic!("no explorer row {name:?}"))
-                .click();
+            super::files_row(harness, name).click();
             settle(harness);
         }
         for (size, suffix) in [(MINIMUM, "960x540"), (WIDE, "1600x1000")] {
