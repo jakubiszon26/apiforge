@@ -14,7 +14,12 @@ pub const MINIMUM: egui::Vec2 = egui::vec2(960.0, 540.0);
 /// The default window of the native application.
 pub const WIDE: egui::Vec2 = egui::vec2(1600.0, 1000.0);
 
-const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long [`settle`] waits before it calls the window stuck: both this
+/// much time, for work in the background, and this many frames, for what the
+/// window does a frame at a time. On a loaded machine a frame takes several
+/// times as long, and time alone would leave the window a dozen of them.
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(60);
+const SETTLE_FRAMES: u64 = 300;
 
 /// The synthetic legacy workspaces of the migration tests (KTLO-03).
 #[path = "../../apiforge-project/tests/support/legacy_workspace.rs"]
@@ -215,24 +220,55 @@ pub fn folder(harness: &FolderHarness) -> &FolderApp {
 /// requesting immediate repaints. Background work runs in real time, so this
 /// waits for it.
 pub fn settle(harness: &mut FolderHarness) {
-    assert!(settles(harness), "the folder window did not settle");
+    assert!(
+        settles(harness),
+        "the folder window did not settle: {}",
+        folder(harness).debug_in_flight()
+    );
 }
 
 /// Whether the folder window settles as [`settle`] waits for it to, within the
-/// same time. A window that asks to be drawn again every frame never does.
+/// same bounds. A window that asks to be drawn again every frame never does.
+///
+/// The folder is checked for outside changes once a second, following a
+/// check's answer takes three frames, and for the last quarter of a second
+/// before a check the window asks for every next frame, the harness counting
+/// a frame as that long. When a few frames take a second, no frame is at
+/// rest and the window would never settle. So while it settles only the first
+/// check the clock brings due is made (#634); one asked for after a file
+/// operation always is.
 pub fn settles(harness: &mut FolderHarness) -> bool {
+    let settled = settles_within(harness);
+    settling(harness, false);
+    settled
+}
+
+fn settling(harness: &mut FolderHarness, settling: bool) {
+    let app = harness.state_mut().as_mut().expect("the folder window");
+    app.debug_settling(settling);
+}
+
+fn settles_within(harness: &mut FolderHarness) -> bool {
     let deadline = Instant::now() + SETTLE_TIMEOUT;
+    let mut frames = 0;
     loop {
-        if folder(harness).is_analysed()
-            && harness.try_run().is_ok()
-            && folder(harness).is_analysed()
-        {
-            return true;
+        // Every time: the window may have opened another project.
+        settling(harness, true);
+        if folder(harness).is_analysed() {
+            let run = harness.try_run();
+            if run.is_ok() && folder(harness).is_analysed() {
+                return true;
+            }
+            frames += match run {
+                Ok(steps) => steps,
+                Err(error) => error.max_steps,
+            };
         }
-        if Instant::now() >= deadline {
+        if frames >= SETTLE_FRAMES && Instant::now() >= deadline {
             return false;
         }
         harness.step();
+        frames += 1;
         std::thread::sleep(Duration::from_millis(1));
     }
 }

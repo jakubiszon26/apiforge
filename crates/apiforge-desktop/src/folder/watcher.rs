@@ -53,6 +53,10 @@ pub struct Watcher {
     /// When each check started, for tests of when the window reads.
     #[cfg(test)]
     pub started: Vec<Instant>,
+    /// While a test settles the window: how many checks may have started
+    /// before one is made only when asked for ([`Self::settling`]).
+    #[cfg(test)]
+    settling: Option<usize>,
 }
 
 impl Watcher {
@@ -73,7 +77,17 @@ impl Watcher {
             held_until: None,
             #[cfg(test)]
             started: Vec::new(),
+            #[cfg(test)]
+            settling: None,
         }
+    }
+
+    /// While `settling`, the clock brings one more check due and no other: a
+    /// test's settling ends however long its frames take. A check asked for
+    /// by [`Self::rescan`] is made all the same.
+    #[cfg(test)]
+    pub fn settling(&mut self, settling: bool) {
+        self.settling = settling.then(|| self.settling.unwrap_or(self.started.len() + 1));
     }
 
     /// Checks every `interval` from now on instead of once a second: a test
@@ -185,6 +199,10 @@ impl Watcher {
             self.held_until = None;
         }
         let due = self.due.unwrap_or(now);
+        #[cfg(test)]
+        if self.due.is_some() && self.settling.is_some_and(|most| self.started.len() >= most) {
+            return (outcome, POLL_INTERVAL);
+        }
         if self.running || now < due {
             return (
                 outcome,
