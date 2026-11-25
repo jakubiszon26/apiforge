@@ -2498,6 +2498,16 @@ impl App {
                     self.with_board(|board| board.add_node(block, component, position, source));
                 self.apply_edit(result);
             }
+            // The legacy window's menu does not send it; it adds as any other.
+            Command::AddReading {
+                block,
+                position,
+                source,
+            } => {
+                let result =
+                    self.with_board(|board| board.add_node(block, None, position, Some(source)));
+                self.apply_edit(result);
+            }
             // The legacy window marks no line; it adds as the Library does.
             Command::AddOnLine {
                 block,
@@ -3528,6 +3538,87 @@ mod tests {
                 .all(|edge| edge.source != cart || edge.target != added.id),
             "and not ordered after it"
         );
+    }
+
+    /// DIAG-24, criterion 9: in the single-file window the menu of a step, a
+    /// value and a check is headed by its card, has no captions and adds as
+    /// before: what it adds reads the card and is written last.
+    #[test]
+    fn a_cards_menu_is_unchanged_in_the_single_file_window() {
+        use egui_kittest::kittest::Queryable;
+        let text = "scenario \"Order\" {\n  begin = start\n  cart = POST \"/carts\" {\n    \
+                    sample 201 { total: 1 }\n  }\n  total = cart.body.total\n  \
+                    paid = assert cart.body.total == 1\n  pay = POST \"/pay\" {\n    \
+                    sample 200 { ok: true }\n  }\n}\n";
+        for (card, port) in [("cart", "body"), ("total", "value"), ("paid", "value")] {
+            for (entry, input) in [("HTTP request", "body"), ("Value", "value")] {
+                let mut harness = crate::testing::workspace_harness(egui::vec2(1600.0, 1000.0));
+                let app = harness.state_mut().as_mut().unwrap();
+                app.buffers
+                    .typed(&app.code_context(), text.into(), Instant::now());
+                app.settle_code();
+                assert!(!app.document_locked());
+                let before = app.editor.graph().clone();
+                let id = before
+                    .nodes
+                    .iter()
+                    .find(|node| node.handle == card)
+                    .unwrap()
+                    .id
+                    .clone();
+                harness.run();
+                let app = harness.state_mut().as_mut().unwrap();
+                app.canvas.debug_show(&id, 1.0);
+                harness.run();
+                let canvas = &harness.state().as_ref().unwrap().canvas;
+                let at = canvas.debug_card_rect(&id).expect("drawn").center();
+                harness.hover_at(at);
+                harness.step();
+                for pressed in [true, false] {
+                    harness.event(egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Secondary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                    harness.step();
+                }
+                harness.run();
+                harness.get_by_label(&format!("AFTER: {}", card.to_uppercase()));
+                for part in ["RUNS RIGHT AFTER", "A CHECK OR A VALUE OF IT"] {
+                    assert!(harness.query_by_label_contains(part).is_none(), "{card}");
+                }
+                let search = harness.get_by_label("Find an action").rect();
+                let from = harness.get_by_label("Data from").rect();
+                assert!(from.bottom() < search.top(), "{card}: above the search");
+                let menu = harness
+                    .ctx
+                    .memory(|memory| memory.area_rect(egui::Id::new("board-action-menu")))
+                    .expect("the menu is drawn");
+                harness
+                    .query_all_by_label(entry)
+                    .find(|node| menu.contains_rect(node.rect()))
+                    .unwrap_or_else(|| panic!("{card}'s menu offers {entry}"))
+                    .click();
+                harness.run();
+
+                let graph = harness.state().as_ref().unwrap().editor.graph();
+                let added = graph.nodes.last().unwrap();
+                assert!(
+                    before.nodes.iter().all(|node| node.id != added.id),
+                    "{entry} of {card} is written last"
+                );
+                assert_eq!(
+                    added.inputs.get(input),
+                    Some(&Binding::reference(&id, port, "")),
+                    "{entry} reads {card}"
+                );
+                assert!(
+                    graph.edges.iter().all(|edge| edge.target != added.id),
+                    "{entry} of {card} is not ordered"
+                );
+            }
+        }
     }
 
     #[test]
