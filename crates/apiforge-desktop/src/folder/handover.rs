@@ -682,6 +682,14 @@ impl FolderApp {
             self.refuse(link, "the window is closing");
             return;
         }
+        // A title typed in the board's header is unsaved work, and written
+        // before the person is asked or the project is let go (WS-05a).
+        if self.commit_title() != diagram::TitleCommit::Done {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
         // With unsaved work the person decides (MCP-08c): an answer given
         // to an agent's request that stopped waiting is the next agent
         // request's, once; a command is always asked itself (MCP-15).
