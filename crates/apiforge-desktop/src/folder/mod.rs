@@ -339,6 +339,9 @@ pub struct FolderApp {
     /// context are the same: deriving it reads every block and sample.
     completion_names: Option<CompletionNames>,
     canvases: HashMap<String, Canvas>,
+    /// The height this frame's storage indicator adds above the board, whose
+    /// camera it leaves as it is; 0 while the indicator is not shown.
+    storage_band: f32,
     /// The model each board's notice after a delete was written for
     /// (DIAG-06b): its *Undo* undoes the delete only while the document is
     /// still at it, and any other edit ends the notice.
@@ -602,6 +605,7 @@ impl FolderApp {
             caret_statement: None,
             completion_names: None,
             canvases: HashMap::new(),
+            storage_band: 0.0,
             notice_models: HashMap::new(),
             checks_here: checks_here::ChecksHere::default(),
             cleanup_reference: None,
@@ -811,6 +815,25 @@ impl FolderApp {
     #[cfg(test)]
     pub(crate) fn is_analysed(&self) -> bool {
         self.is_settled() && !self.analyser.is_busy()
+    }
+
+    /// Whether a test is settling the window ([`Watcher::settling`]).
+    #[cfg(test)]
+    pub(crate) fn debug_settling(&mut self, settling: bool) {
+        self.watcher.settling(settling);
+    }
+
+    /// What keeps the window from settling, for a test's message.
+    #[cfg(test)]
+    pub(crate) fn debug_in_flight(&self) -> String {
+        format!(
+            "storage {} (shown as {:?}), opening {}, analysis {}, a redraw asked for by {:?}",
+            self.storage.is_busy(),
+            self.storage.label(),
+            self.opening,
+            self.analyser.is_busy(),
+            self.ui_context.repaint_causes()
+        )
     }
 
     pub(crate) fn new_canvas(&self) -> Canvas {
@@ -1236,6 +1259,7 @@ impl FolderApp {
             });
         // With no file open and no notice due the band takes no height at all,
         // so the central area meets the app header (KTLO-24).
+        self.storage_band = 0.0;
         if !self.workbench.tabs().is_empty() || self.has_notices() {
             egui::Panel::top("folder-tabs")
                 .frame(
