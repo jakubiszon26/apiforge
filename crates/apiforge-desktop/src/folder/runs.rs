@@ -208,9 +208,11 @@ impl FolderApp {
     }
 
     /// Escape returns maximised run results to their height; the board, which
-    /// has its own uses of Escape, is not drawn meanwhile.
+    /// has its own uses of Escape, is not drawn meanwhile. An open popup takes
+    /// the key first (UX-43).
     pub(super) fn restore_report_on_escape(&mut self, context: &egui::Context) {
         if self.runs.panel.is_maximised()
+            && !egui::Popup::is_any_open(context)
             && context.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape))
         {
             self.runs.panel.restore();
