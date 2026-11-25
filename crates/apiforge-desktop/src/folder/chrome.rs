@@ -460,10 +460,12 @@ impl FolderApp {
     /// due and must change with them.
     pub(super) fn notices(&mut self, ui: &mut egui::Ui) {
         if let Some(label) = self.storage_indicator() {
+            let top = ui.cursor().top();
             ui.horizontal(|ui| {
                 ui.spinner();
                 widgets::hint(ui, label);
             });
+            self.storage_band = ui.cursor().top() - top;
         }
         let Some(session) = self.session.as_ref() else {
             return;

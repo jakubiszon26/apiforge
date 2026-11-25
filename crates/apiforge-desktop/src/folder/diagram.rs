@@ -223,6 +223,7 @@ impl FolderApp {
         let library = (!library_in_view)
             .then(|| library_context(&project, document_id, &model, cleanup, snapshot.editable));
         let mode = self.workbench.mode;
+        let storage_band = self.storage_band;
         let canvas = self.canvases.get_mut(document_id).expect("inserted above");
         // An edit that is not the delete, made anywhere, ends its notice
         // (DIAG-06b).
@@ -275,6 +276,7 @@ impl FolderApp {
                     scenario: Some(scenario_of(&model)),
                     shared: &shared,
                     moves: true,
+                    storage_band,
                 };
                 let mut field = TitleField {
                     document: document_id,
