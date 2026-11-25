@@ -51,12 +51,12 @@ const STATUS: &str = "status == 201";
 
 const CHECK: &str = "Add a check";
 const RESULTS_CHECK: &str = "Check";
-const MENU: &str = "Add a check menu";
+pub(super) const MENU: &str = "Add a check menu";
 /// The mark alone, where the results take no check (review round).
-const CHECKS_OF_FIELD: &str = "Checks of this field";
+pub(super) const CHECKS_OF_FIELD: &str = "Checks of this field";
 
 /// `text` as the demo shop's scenario, on its board at `size`, never run.
-fn opened(size: egui::Vec2, text: &str) -> (tempfile::TempDir, FolderHarness, String) {
+pub(super) fn opened(size: egui::Vec2, text: &str) -> (tempfile::TempDir, FolderHarness, String) {
     let project = crate::testing::shop_project();
     fs::write(project.path().join(SCENARIO), text).unwrap();
     opened_in(project, size)
@@ -74,7 +74,7 @@ fn opened_in(
 }
 
 /// A simulation of the scenario, finished: `paid_true` fails.
-fn run(harness: &mut FolderHarness) -> RunResult {
+pub(super) fn run(harness: &mut FolderHarness) -> RunResult {
     choose(harness, "Run simulation");
     finish_run(harness)
 }
@@ -123,7 +123,7 @@ fn edge(harness: &FolderHarness) -> f32 {
 }
 
 /// The name `field` on its row right of `left`.
-fn name_right_of(harness: &FolderHarness, field: &str, left: f32) -> egui::Rect {
+pub(super) fn name_right_of(harness: &FolderHarness, field: &str, left: f32) -> egui::Rect {
     harness
         .query_all_by_label(field)
         .map(|node| node.rect())
@@ -132,7 +132,7 @@ fn name_right_of(harness: &FolderHarness, field: &str, left: f32) -> egui::Rect 
 }
 
 /// The widget labelled `label` on the row whose name is at `row`.
-fn on_row<'a>(
+pub(super) fn on_row<'a>(
     harness: &'a FolderHarness,
     row: egui::Rect,
     label: &'a str,
@@ -447,7 +447,7 @@ fn diag12_criterion_4_the_menu_lists_the_checks_first() {
 }
 
 /// Run results, maximised, on the step `step`.
-fn results_on(harness: &mut FolderHarness, step: &str) {
+pub(super) fn results_on(harness: &mut FolderHarness, step: &str) {
     if harness.query_by_label("Maximise run results").is_some() {
         choose(harness, "Maximise run results");
     }
@@ -475,7 +475,7 @@ fn results_on(harness: &mut FolderHarness, step: &str) {
 }
 
 /// Where the selected step's details start: the left of its first tab.
-fn details(harness: &FolderHarness) -> f32 {
+pub(super) fn details(harness: &FolderHarness) -> f32 {
     harness
         .query_all_by_label_contains("Outputs  ")
         .map(|node| node.rect().left())
