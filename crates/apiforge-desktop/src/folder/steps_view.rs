@@ -57,16 +57,17 @@ impl FolderApp {
         rows
     }
 
-    /// The header and the list of `document_id`, in place of its board.
+    /// The header and the list of `field`'s document, in place of its board.
     pub(super) fn steps_area(
         &mut self,
         ui: &mut egui::Ui,
-        document_id: &str,
         header: &diagram::Header<'_>,
+        field: &mut diagram::TitleField<'_>,
         model: &Arc<Document>,
     ) {
+        let document_id = field.document;
         let rows = self.step_rows(model);
-        Self::steps_header(ui, header, &rows.summary());
+        Self::steps_header(ui, header, field, &rows.summary());
         // Back from the board, which marked the step it folds the check into:
         // the mark of the list is where it was.
         if let Some((check, Some(step))) = self.steps.marks.get(document_id).cloned() {
@@ -218,8 +219,13 @@ impl FolderApp {
         }
     }
 
-    /// The header of *Steps*: the board's own name and kind, and the summary.
-    fn steps_header(ui: &mut egui::Ui, header: &diagram::Header<'_>, summary: &str) {
+    /// The header of *Steps*: the board's own title, name and kind, and the summary.
+    fn steps_header(
+        ui: &mut egui::Ui,
+        header: &diagram::Header<'_>,
+        field: &mut diagram::TitleField<'_>,
+        summary: &str,
+    ) {
         let (band, _) = ui.allocate_exact_size(
             egui::vec2(
                 ui.available_width(),
@@ -249,8 +255,9 @@ impl FolderApp {
                 alone,
                 with_summary,
             },
+            field.draft(),
         );
-        header.show(ui.ctx(), ui.id(), row, &fit, &mut false);
+        header.show(ui.ctx(), ui.id(), row, &fit, &mut false, field);
         if fit.width <= with_summary {
             let place = egui::Rect::from_min_size(
                 egui::pos2(

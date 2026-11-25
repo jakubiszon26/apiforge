@@ -399,12 +399,14 @@ fn req01a_criterion_1_the_choice_is_kept_with_the_projects_view() {
 /// with a step selected or not, at every width; a long title never meets it.
 #[test]
 fn req01a_criterion_1_the_switch_stands_at_the_right_of_the_tabs() {
-    // A file name of sixty characters stands for the title of WS-05a.
+    // A title and a file name of sixty characters (WS-05a shows both).
+    let long_title = "A parcel label is refused without a token and over 30 kg now";
+    assert_eq!(long_title.chars().count(), 60);
+    let text = labels_text().replacen("Label validation", long_title, 1);
     let name = "a-parcel-label-is-refused-without-a-token-and-over-30-kg.afs";
     assert_eq!(name.chars().count(), 60);
     for size in [MINIMUM, egui::vec2(1280.0, 800.0), WIDE] {
-        let (_project, mut harness, id) =
-            opened(size, &format!("scenarios/{name}"), &labels_text());
+        let (_project, mut harness, id) = opened(size, &format!("scenarios/{name}"), &text);
         let places = |harness: &FolderHarness| {
             [STEPS, CANVAS].map(|words| harness.get_by_label(words).rect())
         };
@@ -423,10 +425,9 @@ fn req01a_criterion_1_the_switch_stands_at_the_right_of_the_tabs() {
         );
         let title = |harness: &FolderHarness| {
             harness
-                .query_all_by_role_and_label(egui::accesskit::Role::Label, name)
-                .map(|found| found.rect())
-                .max_by(|a, b| a.top().total_cmp(&b.top()))
-                .expect("the header names the file")
+                .query_by_role_and_label(egui::accesskit::Role::Label, long_title)
+                .expect("the header reads the title")
+                .rect()
         };
         let mut all = vec![STEPS, CANVAS];
         all.extend(["Main", "Cleanup", "Add step", "Tidy up", "Board view"]);
