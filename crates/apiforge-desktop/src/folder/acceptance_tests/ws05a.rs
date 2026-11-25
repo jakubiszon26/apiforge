@@ -733,6 +733,17 @@ fn typed_on_a_waiting_board() -> (tempfile::TempDir, FolderHarness, String, Stri
     (project, harness, id, after)
 }
 
+/// The save waits for the title and the file is as it was. Another storage
+/// job, unsaved work being protected, may be under way on a slow machine.
+fn assert_waits(harness: &FolderHarness, project: &tempfile::TempDir, after: &str) {
+    assert_eq!(folder(harness).after_title.len(), 1, "not saved yet");
+    assert_ne!(
+        fs::read_to_string(project.path().join(REFUSED)).unwrap(),
+        after,
+        "not saved yet"
+    );
+}
+
 fn analysed(harness: &mut FolderHarness, id: &str) {
     let session = app(harness).session.as_mut().unwrap();
     let _ = session.settle(id);
@@ -747,7 +758,7 @@ fn analysed(harness: &mut FolderHarness, id: &str) {
 fn a_waiting_title_holds_what_takes_it() {
     let (project, mut harness, id, after) = typed_on_a_waiting_board();
     app(&mut harness).save_active();
-    assert!(!app(&mut harness).storage.is_busy(), "not saved yet");
+    assert_waits(&harness, &project, &after);
     analysed(&mut harness, &id);
     assert_eq!(
         fs::read_to_string(project.path().join(REFUSED)).unwrap(),
@@ -758,7 +769,7 @@ fn a_waiting_title_holds_what_takes_it() {
 
     let (project, mut harness, id, after) = typed_on_a_waiting_board();
     app(&mut harness).save_all();
-    assert!(!app(&mut harness).storage.is_busy(), "not saved yet");
+    assert_waits(&harness, &project, &after);
     analysed(&mut harness, &id);
     assert_eq!(
         fs::read_to_string(project.path().join(REFUSED)).unwrap(),
@@ -807,7 +818,7 @@ fn publish_takes_the_title_typed() {
             let text = text.replacen("New. ", "Newer. ", 1);
             session.edit_source(&id, &text, CODE).unwrap();
             app(&mut harness).publish_component(&id);
-            assert!(!app(&mut harness).storage.is_busy(), "not published yet");
+            assert_eq!(folder(&harness).after_title.len(), 1, "not published yet");
             analysed(&mut harness, &id);
         } else {
             click_on(&mut harness, "Publish");
