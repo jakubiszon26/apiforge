@@ -20,7 +20,7 @@
 //! document, is printed whole, as before.
 use crate::{
     ast::*,
-    format::{attribute_rank, head, opening, statements},
+    format::{attribute_rank, head, quote, statements},
     lexer::{Token, TokenKind},
     lower::Document,
     parse,
@@ -297,9 +297,7 @@ impl<'s, 'd> Edit<'s, 'd> {
     fn head(&mut self, file: &'s File, previous: &Document, document: &Document) -> Option<()> {
         let (was, is) = (print::head(previous), print::head(document));
         let brace = self.first(file.range.start, "{")?;
-        if opening(&was.kind) != opening(&is.kind) {
-            self.replace(file.range.start..brace.end, opening(&is.kind));
-        }
+        self.first_line(file, &was.kind, &is.kind)?;
         let indent = file
             .items
             .iter()
@@ -336,6 +334,38 @@ impl<'s, 'd> Edit<'s, 'd> {
                 let range = self.lines((*range).clone());
                 self.replace(range, String::new());
             }
+        }
+        Some(())
+    }
+
+    /// The words of the first line the edit changes, a component's name in
+    /// code and the title; what stands between them and the brace is the
+    /// author's (LANG-28).
+    fn first_line(&mut self, file: &File, was: &FileKind, is: &FileKind) -> Option<()> {
+        let words: Vec<Range<usize>> = self
+            .after(file.range.start)
+            .filter(|token| !matches!(token.kind, TokenKind::Whitespace | TokenKind::Comment))
+            .take(3)
+            .map(|token| token.range.clone())
+            .collect();
+        let (was, is, title) = match (was, is) {
+            (FileKind::Scenario { name: was }, FileKind::Scenario { name: is }) => (was, is, 1),
+            (
+                FileKind::Component {
+                    handle: old,
+                    name: was,
+                },
+                FileKind::Component { handle, name: is },
+            ) => {
+                if old != handle {
+                    self.replace(words.get(1)?.clone(), handle.clone());
+                }
+                (was, is, 2)
+            }
+            _ => return None,
+        };
+        if was != is {
+            self.replace(words.get(title)?.clone(), quote(is));
         }
         Some(())
     }

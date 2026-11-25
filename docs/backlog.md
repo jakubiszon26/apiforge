@@ -519,6 +519,9 @@ are in [sprints/lang.md](sprints/lang.md); the issues carry `sprint:lang`.
   scenario. Candidates for the owner: LANG-26 [#593](https://github.com/jakubiszon26/apiforge/issues/593) an export always
   readable by name, LANG-27 [#594](https://github.com/jakubiszon26/apiforge/issues/594) a warning for a check written far
   from its step.
+- Reported while WS-05a was implemented: LANG-28 [#628](https://github.com/jakubiszon26/apiforge/issues/628), writing a
+  file's first line keeps a comment before its brace, and a title with `{{{`
+  can be written; S · 10, taken 2026-11-24, awaiting acceptance.
 
 ## Release 0.2.1: the owner's findings on v0.2.0-rc.1 (closed)
 

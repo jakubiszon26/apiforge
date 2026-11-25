@@ -26,10 +26,15 @@ pub fn format_tree(tree: &SyntaxTree) -> Result<String, Vec<Diagnostic>> {
     Ok(formatted)
 }
 
+/// `text` as the language writes it. A `{{` is escaped so that it reads back
+/// as text, in pairs from the end of a run of braces: what is left of an odd
+/// run stands before the first `\{{`, where it opens nothing, and not after
+/// the last, where it would.
 pub(crate) fn quote(text: &str) -> String {
-    serde_json::to_string(text)
-        .expect("strings serialize")
-        .replace("{{", "\\{{")
+    let text = serde_json::to_string(text).expect("strings serialize");
+    let mut pieces: Vec<&str> = text.rsplit("{{").collect();
+    pieces.reverse();
+    pieces.join("\\{{")
 }
 
 fn key(name: &str) -> String {
@@ -66,7 +71,7 @@ pub(crate) fn print_file_with(file: &File, checks: Checks) -> String {
 }
 
 /// The first line of a file, up to its opening brace.
-pub(crate) fn opening(kind: &FileKind) -> String {
+fn opening(kind: &FileKind) -> String {
     match kind {
         FileKind::Scenario { name } => format!("scenario {} {{", quote(name)),
         FileKind::Component { handle, name } => format!("component {handle} {} {{", quote(name)),
